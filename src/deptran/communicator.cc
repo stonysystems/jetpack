@@ -374,12 +374,32 @@ std::shared_ptr<QuorumEvent> Communicator::SendReelect(){
 void Communicator::BroadcastDispatch(
     shared_ptr<vector<shared_ptr<TxPieceData>>> sp_vec_piece,
     Coordinator* coo,
-    const function<void(int, TxnOutput&)> & callback) {
+    const function<void(int, TxnOutput&)> & callback,
+    std::shared_ptr<TpcBatchCommand> batch_cmd) {
 
   Log_debug("Do a dispatch on client worker");
-  cmdid_t cmd_id = sp_vec_piece->at(0)->root_id_;
-  verify(!sp_vec_piece->empty());
-  auto par_id = sp_vec_piece->at(0)->PartitionId();
+  cmdid_t cmd_id = 0;
+  parid_t par_id = 0;
+  std::shared_ptr<VecPieceData> sp_vpd = nullptr;
+  bool using_batch = (batch_cmd != nullptr);
+
+  if (using_batch) {
+    verify(!batch_cmd->cmds_.empty());
+    auto first_cmd = batch_cmd->cmds_.front();
+    verify(first_cmd && first_cmd->cmd_);
+    auto first_vec = dynamic_pointer_cast<VecPieceData>(first_cmd->cmd_);
+    verify(first_vec && first_vec->sp_vec_piece_data_ && !first_vec->sp_vec_piece_data_->empty());
+    cmd_id = first_vec->sp_vec_piece_data_->at(0)->root_id_;
+    par_id = first_vec->sp_vec_piece_data_->at(0)->PartitionId();
+  } else {
+    verify(sp_vec_piece && !sp_vec_piece->empty());
+    cmd_id = sp_vec_piece->at(0)->root_id_;
+    par_id = sp_vec_piece->at(0)->PartitionId();
+    sp_vpd = std::make_shared<VecPieceData>();
+    sp_vpd->sp_vec_piece_data_ = sp_vec_piece;
+    // Record Time
+    sp_vpd->time_sent_from_client_ = SimpleRWCommand::GetCurrentMsTime();
+  }
   
   rrr::FutureAttr fuattr;
   fuattr.callback =
@@ -424,13 +444,12 @@ void Communicator::BroadcastDispatch(
   Log_debug("send dispatch to site %ld, par %d",
             pair_leader_proxy.first, par_id);
   auto proxy = pair_leader_proxy.second;
-  shared_ptr<VecPieceData> sp_vpd(new VecPieceData);
-  sp_vpd->sp_vec_piece_data_ = sp_vec_piece;
-
-  // Record Time
-  sp_vpd->time_sent_from_client_ = SimpleRWCommand::GetCurrentMsTime();
-
-  MarshallDeputy md(sp_vpd); // ????
+  MarshallDeputy md;
+  if (using_batch) {
+    md.SetMarshallable(batch_cmd);
+  } else {
+    md.SetMarshallable(sp_vpd);
+  }
 
 	DepId di;
 	di.str = "dep";

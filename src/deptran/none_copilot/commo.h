@@ -21,7 +21,8 @@ public:
 
     void BroadcastDispatch(shared_ptr<vector<shared_ptr<SimpleCommand>>> vec_piece_data,
                            Coordinator *coo,
-                           const std::function<void(int res, TxnOutput &)> &callback) override;
+                           const std::function<void(int res, TxnOutput &)> &callback,
+                           std::shared_ptr<TpcBatchCommand> batch_cmd = nullptr) override;
 
 };
     

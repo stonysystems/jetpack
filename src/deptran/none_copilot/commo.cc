@@ -39,7 +39,8 @@ CommunicatorNoneCopilot::PilotProxyForPartition(parid_t par_id) const {
 
 void CommunicatorNoneCopilot::BroadcastDispatch(shared_ptr<vector<shared_ptr<SimpleCommand>>> sp_vec_piece,
                                                 Coordinator *coo,
-                                                const std::function<void(int res, TxnOutput &)> &callback) {
+                                                const std::function<void(int res, TxnOutput &)> &callback,
+                                                std::shared_ptr<TpcBatchCommand> batch_cmd) {
   WAN_WAIT
   cmdid_t cmd_id = sp_vec_piece->at(0)->root_id_;
   verify(!sp_vec_piece->empty());

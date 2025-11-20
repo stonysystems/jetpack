@@ -31,6 +31,7 @@ class Coordinator;
 class ClassicProxy;
 class ClientControlProxy;
 class TxLogServer;
+class TpcBatchCommand;
 
 typedef std::pair<siteid_t, ClassicProxy*> SiteProxyPair;
 typedef std::pair<siteid_t, ClientControlProxy*> ClientSiteProxyPair;
@@ -424,7 +425,8 @@ class Communicator {
                  std::function<void(Future *fu)> &callback);
   virtual void BroadcastDispatch(shared_ptr<vector<shared_ptr<SimpleCommand>>> vec_piece_data,
                          Coordinator *coo,
-                         const std::function<void(int res, TxnOutput &)> &) ;
+                         const std::function<void(int res, TxnOutput &)> &,
+                         std::shared_ptr<TpcBatchCommand> batch_cmd = nullptr) ;
   virtual void SyncBroadcastDispatch(shared_ptr<vector<shared_ptr<SimpleCommand>>> vec_piece_data,
                          Coordinator *coo,
                          const std::function<void(int res, TxnOutput &)> &) ;

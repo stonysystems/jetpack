@@ -107,7 +107,7 @@ void CoordinatorRaft::AppendEntries() {
     while (this->svr_->commitIndex < index) {
       Reactor::CreateSpEvent<TimeoutEvent>(1000)->Wait();
       if (this->svr_->currentTerm != term) {
-        Log_info("Term changed during AppendEntries: expected %lu, got %lu. Leader changed.", 
+        Log_debug("Term changed during AppendEntries: expected %lu, got %lu. Leader changed.", 
                  term, this->svr_->currentTerm);
         // The command may or may not be committed by the new leader
         // Mark as not committed and let higher layers retry

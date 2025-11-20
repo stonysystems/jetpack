@@ -21,6 +21,24 @@
 
 namespace janus {
 
+namespace {
+
+static cmdid_t ExtractCmdIdFromVecPiece(const std::shared_ptr<Marshallable>& cmd) {
+  if (!cmd) {
+    return 0;
+  }
+  if (cmd->kind_ == MarshallDeputy::CMD_VEC_PIECE) {
+    auto vec_piece_data = std::dynamic_pointer_cast<VecPieceData>(cmd);
+    if (vec_piece_data && vec_piece_data->sp_vec_piece_data_ &&
+        !vec_piece_data->sp_vec_piece_data_->empty()) {
+      return vec_piece_data->sp_vec_piece_data_->at(0)->root_id_;
+    }
+  }
+  return 0;
+}
+
+}  // namespace
+
 ClassicServiceImpl::ClassicServiceImpl(TxLogServer* sched,
                                        rrr::PollMgr* poll_mgr,
                                        ServerControlServiceImpl* scsi) : scsi_(
@@ -74,7 +92,23 @@ void ClassicServiceImpl::Dispatch(const i64& cmd_id,
 #endif
 
 #ifdef FULL_LOG_DEBUG
-  Log_info("[Jetpack] cmd<%d, %d> entered ClassicServiceImpl::Dispatch", SimpleRWCommand::GetCmdID(md.sp_data_).first, SimpleRWCommand::GetCmdID(md.sp_data_).second);
+  if (md.sp_data_ && md.sp_data_->kind_ == MarshallDeputy::CMD_TPC_BATCH) {
+    auto batch = std::dynamic_pointer_cast<TpcBatchCommand>(md.sp_data_);
+    if (batch && !batch->cmds_.empty()) {
+      auto first_cmd = batch->cmds_.front();
+      auto first_id = SimpleRWCommand::GetCmdID(first_cmd);
+      Log_info("[Jetpack] batch cmd<%d, %d> size=%zu entered ClassicServiceImpl::Dispatch",
+               first_id.first,
+               first_id.second,
+               batch->Size());
+    } else {
+      Log_info("[Jetpack] empty batch entered ClassicServiceImpl::Dispatch");
+    }
+  } else {
+    Log_info("[Jetpack] cmd<%d, %d> entered ClassicServiceImpl::Dispatch",
+             SimpleRWCommand::GetCmdID(md.sp_data_).first,
+             SimpleRWCommand::GetCmdID(md.sp_data_).second);
+  }
 #endif
 
 #ifdef COPILOT_TIME_DEBUG
@@ -99,27 +133,61 @@ void ClassicServiceImpl::Dispatch(const i64& cmd_id,
   piece_count_tid_.insert(header.tid);
 #endif
   shared_ptr<Marshallable> sp = md.sp_data_;
+  std::shared_ptr<ViewData> latest_view;
+
+  auto dispatch_single_command =
+      [&](cmdid_t single_cmd_id, const shared_ptr<Marshallable>& single_cmd) -> int {
+        if (!single_cmd) {
+          return REJECT;
+        }
 #ifndef ZERO_OVERHEAD
-  dtxn_sched()->OriginalPathUnexecutedCmdConflictPlaceHolder(sp);
+        dtxn_sched()->OriginalPathUnexecutedCmdConflictPlaceHolder(single_cmd);
 #endif
-  
-  // Check if this is a recovery command
-  bool is_recovery = false;
-  if (sp && sp->kind_ == MarshallDeputy::CMD_VEC_PIECE) {
-    auto vec_piece_data = dynamic_pointer_cast<VecPieceData>(sp);
-    if (vec_piece_data && vec_piece_data->is_recovery_command_) {
-      is_recovery = true;
+        std::shared_ptr<ViewData> single_view;
+        int single_res = dtxn_sched()->Dispatch(single_cmd_id, single_cmd, *output, single_view);
+        if (single_view) {
+          latest_view = single_view;
+        }
+        return single_res;
+      };
+
+  int overall_res = SUCCESS;
+  if (sp && sp->kind_ == MarshallDeputy::CMD_TPC_BATCH) {
+    auto batch_cmd = std::dynamic_pointer_cast<TpcBatchCommand>(sp);
+    if (!batch_cmd || batch_cmd->cmds_.empty()) {
+      overall_res = REJECT;
+    } else {
+      for (auto& commit_cmd : batch_cmd->cmds_) {
+        if (!commit_cmd || !commit_cmd->cmd_) {
+          continue;
+        }
+        cmdid_t derived_cmd_id = commit_cmd->tx_id_;
+        if (derived_cmd_id == 0) {
+          derived_cmd_id = ExtractCmdIdFromVecPiece(commit_cmd->cmd_);
+        }
+        if (derived_cmd_id == 0) {
+          Log_error("[JETPACK-RECOVERY] Unable to determine cmd_id for batched command");
+          overall_res = REJECT;
+          break;
+        }
+        overall_res = dispatch_single_command(derived_cmd_id, commit_cmd->cmd_);
+        if (overall_res != SUCCESS) {
+          break;
+        }
+      }
     }
-  }
-  
-  std::shared_ptr<ViewData> view;
-  *res = dtxn_sched()->Dispatch(cmd_id, sp, *output, view);
-  
-  // Set the view data in the output parameter
-  if (view) {
-    view_data->SetMarshallable(view);
   } else {
-    // Initialize with empty view data if not set
+    cmdid_t derived_cmd_id = ExtractCmdIdFromVecPiece(sp);
+    if (derived_cmd_id == 0) {
+      derived_cmd_id = cmd_id;
+    }
+    overall_res = dispatch_single_command(derived_cmd_id, sp);
+  }
+
+  *res = overall_res;
+  if (latest_view) {
+    view_data->SetMarshallable(latest_view);
+  } else {
     view_data->SetMarshallable(std::make_shared<ViewData>());
   }
   

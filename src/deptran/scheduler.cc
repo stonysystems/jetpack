@@ -940,7 +940,9 @@ void TxLogServer::JetpackCommit(int commit_sid, int commit_set_size) {
 }
 
 void TxLogServer::JetpackResubmit(int sid, int set_size) {
-  Log_info("[JETPACK-RECOVERY] Step 7: Starting resubmit process for sid=%d with %d commands", sid, set_size);
+  const int batch_size = std::max(1, Config::GetConfig()->GetJetpackRecoveryBatchSize());
+  Log_info("[JETPACK-RECOVERY] Step 7: Starting resubmit process for sid=%d with %d commands (batch_size=%d)",
+           sid, set_size, batch_size);
   
   // Create an event to track all recovery dispatches
   shared_ptr<IntEvent> recovery_event = nullptr;
@@ -950,6 +952,23 @@ void TxLogServer::JetpackResubmit(int sid, int set_size) {
     //          recovery_event->target_, recovery_event->value_, recovery_event.get());
   }
   
+  std::vector<std::shared_ptr<TpcCommitCommand>> batch_buffer;
+  batch_buffer.reserve(batch_size);
+  int resubmitted = 0;
+  auto flush_batch = [&]() {
+    if (batch_buffer.empty()) {
+      return;
+    }
+    size_t batch_count = batch_buffer.size();
+    DispatchRecoveredBatch(batch_buffer, recovery_event);
+    resubmitted += batch_count;
+    if ((resubmitted % 100) == 0 || resubmitted == set_size) {
+      Log_info("[JETPACK-RECOVERY] Step 7: Resubmitted %d/%d commands for sid=%d",
+               resubmitted, set_size, sid);
+    }
+    batch_buffer.clear();
+  };
+
   // For committed (sid, set_size) pair, ensure all positions exist locally
   for (int rid = 0; rid < set_size; rid++) {
     auto cmd = rec_set_.get(sid, rid);
@@ -984,22 +1003,34 @@ void TxLogServer::JetpackResubmit(int sid, int set_size) {
     
     // Resubmit command via broadcast dispatch to find leader
     verify(cmd != nullptr); // Command must exist after pull attempt
-    
-#ifdef JETPACK_RECOVERY_DEBUG
-    Log_info("[JETPACK-RECOVERY] Resubmitting command for sid=%d, rid=%d via broadcast dispatch", sid, rid);
-#endif
-    
-    // Use the new dispatch method that will find the leader
-    DispatchRecoveredCommand(cmd, recovery_event);
-    if (((rid + 1) % 100) == 0 || rid + 1 == set_size) {
-      Log_info("[JETPACK-RECOVERY] Step 7: Resubmitted %d/%d commands for sid=%d",
-               rid + 1, set_size, sid);
+    std::shared_ptr<TpcCommitCommand> commit_cmd = nullptr;
+    if (cmd->kind_ == MarshallDeputy::CMD_TPC_COMMIT) {
+      commit_cmd = std::dynamic_pointer_cast<TpcCommitCommand>(cmd);
+      verify(commit_cmd != nullptr);
+      batch_buffer.push_back(commit_cmd);
+    } else if (cmd->kind_ == MarshallDeputy::CMD_VEC_PIECE) {
+      auto vec_cmd = std::dynamic_pointer_cast<VecPieceData>(cmd);
+      verify(vec_cmd != nullptr);
+      auto wrapper = std::make_shared<TpcCommitCommand>();
+      wrapper->cmd_ = vec_cmd;
+      batch_buffer.push_back(wrapper);
+    } else {
+      verify(0);
+      Log_error("[JETPACK-RECOVERY] Unsupported recovered command kind=%d at sid=%d rid=%d", cmd->kind_, sid, rid);
+      continue;
     }
-    
 #ifdef JETPACK_RECOVERY_DEBUG
-    Log_info("[JETPACK-RECOVERY] Command dispatched for sid=%d, rid=%d", sid, rid);
+    Log_info("[JETPACK-RECOVERY] Buffered command for sid=%d, rid=%d (batch_size=%zu)", sid, rid, batch_buffer.size());
 #endif
+    if (batch_buffer.size() >= static_cast<size_t>(batch_size)) {
+#ifdef JETPACK_RECOVERY_DEBUG
+      Log_info("[JETPACK-RECOVERY] Flushing recovery batch ending at rid=%d (size=%zu)", rid, batch_buffer.size());
+#endif
+      flush_batch();
+    }
   }
+
+  flush_batch();
   
   // Wait for all recovery dispatches to complete
   if (recovery_event && recovery_event->target_ > 0) {
@@ -1023,122 +1054,130 @@ void TxLogServer::JetpackResubmit(int sid, int set_size) {
   Log_info("[JETPACK-RECOVERY] FinishRecovery broadcast completed, fast path restored");
 }
 
+void TxLogServer::DispatchRecoveredBatch(
+    const std::vector<std::shared_ptr<TpcCommitCommand>>& batch,
+    shared_ptr<IntEvent> recovery_event) {
+  if (batch.empty()) {
+    return;
+  }
+  auto batch_cmd = std::make_shared<TpcBatchCommand>();
+  auto cmds = batch;
+  batch_cmd->AddCmds(cmds);
+#ifdef JETPACK_RECOVERY_DEBUG
+  Log_info("[JETPACK-RECOVERY] Dispatching recovered batch of %zu commands", batch.size());
+#endif
+  DispatchRecoveredCommand(batch_cmd, recovery_event);
+}
+
 void TxLogServer::DispatchRecoveredCommand(shared_ptr<Marshallable> cmd, shared_ptr<IntEvent> recovery_event) {
-  // Determine if this is tx_sched or rep_sched
+  if (!cmd) {
+    return;
+  }
+
+  std::shared_ptr<TpcBatchCommand> batch_cmd_override = nullptr;
+  int completion_weight = 1;
+  shared_ptr<Marshallable> inner_cmd = cmd;
+
+  if (cmd->kind_ == MarshallDeputy::CMD_TPC_BATCH) {
+    batch_cmd_override = std::dynamic_pointer_cast<TpcBatchCommand>(cmd);
+    if (!batch_cmd_override || batch_cmd_override->Size() == 0) {
+      Log_error("[JETPACK-RECOVERY] Empty TpcBatchCommand during dispatch");
+      return;
+    }
+    auto first_cmd = batch_cmd_override->cmds_.front();
+    if (!first_cmd || !first_cmd->cmd_) {
+      Log_error("[JETPACK-RECOVERY] Batch command missing inner command");
+      return;
+    }
+    inner_cmd = first_cmd->cmd_;
+    completion_weight = static_cast<int>(batch_cmd_override->Size());
+    for (auto& single_cmd : batch_cmd_override->cmds_) {
+      if (!single_cmd || !single_cmd->cmd_) {
+        continue;
+      }
+      auto single_vec = dynamic_pointer_cast<VecPieceData>(single_cmd->cmd_);
+      if (single_vec) {
+        single_vec->is_recovery_command_ = true;
+      }
+    }
+  } else if (cmd->kind_ == MarshallDeputy::CMD_TPC_COMMIT) {
+    auto tpc_cmd = dynamic_pointer_cast<TpcCommitCommand>(cmd);
+    if (tpc_cmd && tpc_cmd->cmd_) {
+      inner_cmd = tpc_cmd->cmd_;
+    }
+  }
+
   const char* sched_type = "UNKNOWN";
   if (rep_sched_ && this == rep_sched_) {
     sched_type = "REP_SCHED";
   } else if (!rep_sched_ || rep_sched_ != this) {
     sched_type = "TX_SCHED";
   }
-  
-  // Log_info("[JETPACK-RECOVERY] DispatchRecoveredCommand called on %s TxLogServer %p (site_id=%d)", 
-  //          sched_type, this, site_id_);
+
 #ifdef JETPACK_RECOVERY_DEBUG
-  Log_info("[JETPACK-RECOVERY] Dispatching recovered command, kind=%d", cmd->kind_);
+  Log_info("[JETPACK-RECOVERY] Dispatching recovered command, kind=%d batch=%s size=%d",
+           cmd->kind_,
+           batch_cmd_override ? "YES" : "NO",
+           batch_cmd_override ? batch_cmd_override->Size() : 1);
 #endif
-  
-  // Extract the inner command if this is a TpcCommitCommand
-  shared_ptr<Marshallable> inner_cmd = cmd;
-  if (cmd->kind_ == MarshallDeputy::CMD_TPC_COMMIT) {
-    auto tpc_cmd = dynamic_pointer_cast<TpcCommitCommand>(cmd);
-    if (tpc_cmd && tpc_cmd->cmd_) {
-      inner_cmd = tpc_cmd->cmd_;
-#ifdef JETPACK_RECOVERY_DEBUG
-      Log_info("[JETPACK-RECOVERY] Extracted inner command from TpcCommitCommand, inner kind=%d", inner_cmd->kind_);
-#endif
-    }
-  }
-  
-  // Check if the inner command is VecPieceData
+
   if (inner_cmd->kind_ == MarshallDeputy::CMD_VEC_PIECE) {
     auto vec_piece_data = dynamic_pointer_cast<VecPieceData>(inner_cmd);
     if (vec_piece_data && vec_piece_data->sp_vec_piece_data_) {
-      // Mark this as a recovery command
       vec_piece_data->is_recovery_command_ = true;
 
-#ifdef JETPACK_RECOVERY_DEBUG
-      Log_info("[JETPACK-RECOVERY] Dispatching VecPieceData with %zu pieces", 
-               vec_piece_data->sp_vec_piece_data_->size());
-#endif
-      
-      // Get the partition ID and command ID from the pieces
       auto par_id = vec_piece_data->sp_vec_piece_data_->at(0)->PartitionId();
       auto cmd_id = vec_piece_data->sp_vec_piece_data_->at(0)->root_id_;
-      
-      // The communicator's view should already be updated from OnJetpackBeginRecovery
-      // Double-check that we have the right view
+
       auto comm = commo();
-      // Log_info("[JETPACK-RECOVERY] Using communicator %p (loc_id=%d) for recovery dispatch", 
-      //          comm, comm->loc_id_);
-      auto current_leader = comm->GetLeaderForPartition(par_id);
-      // Log_info("[JETPACK-RECOVERY] Dispatching to partition %d, current leader is %d", 
-      //          par_id, current_leader);
-      // auto view_snapshot = comm->GetPartitionView(par_id);
-      // Log_info("[JETPACK-RECOVERY] Resubmit dispatch partition %d targeting leader locale %d view=%s", 
-      //          par_id, current_leader, view_snapshot.ToString().c_str());
-      
-      // Create a temporary coordinator for dispatching
-      // Using a special coordinator ID for recovery operations
-      auto coo = std::make_unique<CoordinatorClassic>(999999, // special ID for recovery
-                                                       Config::GetConfig()->benchmark_, 
-                                                       nullptr, 
+
+      auto coo = std::make_unique<CoordinatorClassic>(999999,
+                                                       Config::GetConfig()->benchmark_,
+                                                       nullptr,
                                                        0);
       coo->loc_id_ = site_id_;
       coo->par_id_ = partition_id_;
-      
-      // Set up callback to handle dispatch response
-      auto callback = [this, par_id, recovery_event, cmd_id](int res, TxnOutput& output) {
+
+      auto callback = [this, par_id, recovery_event, cmd_id, completion_weight](int res, TxnOutput& output) {
 #ifdef JETPACK_RECOVERY_DEBUG
-      Log_info("[JETPACK-RECOVERY] Dispatch callback received, res=%d (sid=%d rid=%d target=%d, current=%d)",
-               res, sid, rid, recovery_event ? recovery_event->target_ : -1,
-               recovery_event ? recovery_event->value_ : -1);
+        Log_info("[JETPACK-RECOVERY] Dispatch callback received, res=%d (target=%d current=%d weight=%d)",
+                 res,
+                 recovery_event ? recovery_event->target_ : -1,
+                 recovery_event ? recovery_event->value_ : -1,
+                 completion_weight);
 #endif
         if (res == WRONG_LEADER) {
-          // This shouldn't happen if we updated the view correctly during BeginRecovery
-          Log_error("[JETPACK-RECOVERY] Received WRONG_LEADER during recovery dispatch for partition %d. "
-                    "This indicates the view was not properly updated during BeginRecovery.", par_id);
-          // The BroadcastDispatch callback should have already updated the view
-        } else if (res == SUCCESS) {
-          // Log_info("[JETPACK-RECOVERY] Command successfully dispatched during recovery");
+          Log_error("[JETPACK-RECOVERY] Received WRONG_LEADER during recovery dispatch for partition %d.", par_id);
         } else if (res == REJECT) {
           Log_info("[JETPACK-RECOVERY] Command rejected during recovery dispatch (expected if tx already processed)");
-        } else {
+        } else if (res != SUCCESS) {
           Log_warn("[JETPACK-RECOVERY] Dispatch failed with result: %d", res);
         }
-        
-        // Signal that this recovery dispatch is complete
+
         if (recovery_event) {
           int old_value = recovery_event->value_;
-          // Log_info("[JETPACK-RECOVERY-EVENT] About to increment recovery_event: current value=%d, target=%d, partition=%d, res=%d", 
-          //          old_value, recovery_event->target_, par_id, res);
-          // Log_info("[JETPACK-RECOVERY-EVENT] This increment is happening in BroadcastDispatch callback (dispatch ACK received)");
-          recovery_event->Set(old_value + 1);
-          if (recovery_event->value_ % 100 == 0 || recovery_event->IsReady())
-            Log_info("[JETPACK-RECOVERY-EVENT] After increment: new value=%d, target=%d. Event ready=%s", 
-                    recovery_event->value_, recovery_event->target_, 
-                    recovery_event->IsReady() ? "YES" : "NO");
+          recovery_event->Set(old_value + completion_weight);
+          if (recovery_event->value_ % 100 == 0 || recovery_event->IsReady()) {
+            Log_info("[JETPACK-RECOVERY-EVENT] After increment: new value=%d, target=%d. Event ready=%s",
+                     recovery_event->value_,
+                     recovery_event->target_,
+                     recovery_event->IsReady() ? "YES" : "NO");
+          }
         }
       };
-      
-      // Use BroadcastDispatch to send to the leader
-      // Log_info("[JETPACK-RECOVERY] DispatchRecoveredCommand sending cmd_id=0x%llx to partition %d (leader locale %d, sched=%s, target=%d)",
-      //          (unsigned long long)cmd_id, par_id, current_leader, sched_type, recovery_event ? recovery_event->target_ : -1);
-      comm->BroadcastDispatch(vec_piece_data->sp_vec_piece_data_, coo.get(), callback);
-      
+
+      if (batch_cmd_override) {
+        comm->BroadcastDispatch(nullptr, coo.get(), callback, batch_cmd_override);
+      } else {
+        comm->BroadcastDispatch(vec_piece_data->sp_vec_piece_data_, coo.get(), callback);
+      }
 #ifdef JETPACK_RECOVERY_DEBUG
       Log_info("[JETPACK-RECOVERY] Command dispatched through communicator to leader");
 #endif
     } else {
-#ifdef JETPACK_RECOVERY_DEBUG
-      Log_info("[JETPACK-RECOVERY] WARNING: Inner command is not VecPieceData, cannot dispatch");
-#endif
       Log_error("[JETPACK-RECOVERY] DispatchRecoveredCommand failed: inner command kind=%d (expected VecPieceData)", inner_cmd->kind_);
     }
   } else {
-#ifdef JETPACK_RECOVERY_DEBUG
-    Log_info("[JETPACK-RECOVERY] WARNING: Command kind %d not supported for dispatch", inner_cmd->kind_);
-#endif
     Log_error("[JETPACK-RECOVERY] DispatchRecoveredCommand unsupported command kind=%d", inner_cmd->kind_);
   }
 }
