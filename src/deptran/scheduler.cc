@@ -940,7 +940,8 @@ void TxLogServer::JetpackCommit(int commit_sid, int commit_set_size) {
 }
 
 void TxLogServer::JetpackResubmit(int sid, int set_size) {
-  const int batch_size = std::max(1, Config::GetConfig()->GetJetpackRecoveryBatchSize());
+  // const int batch_size = std::max(1, Config::GetConfig()->GetJetpackRecoveryBatchSize());
+  const int batch_size = 1;
   Log_info("[JETPACK-RECOVERY] Step 7: Starting resubmit process for sid=%d with %d commands (batch_size=%d)",
            sid, set_size, batch_size);
   
