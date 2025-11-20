@@ -5,6 +5,7 @@
 #include "../scheduler.h"
 #include "../classic/tpc_command.h"
 #include "commo.h"
+#include <unordered_map>
 
 namespace janus {
 class Command;
@@ -75,7 +76,8 @@ class RaftServer : public TxLogServer {
 	bool RequestVote() ;
 
 	void Setup();
-	void HeartbeatLoop() ;
+	void HeartbeatLoop(siteid_t follower_site_id);
+  std::shared_ptr<IntEvent> CreateReplicationEvent(siteid_t follower_site_id);
   RaftCommo* commo() {
     return (RaftCommo*) commo_;
   }
@@ -144,7 +146,8 @@ class RaftServer : public TxLogServer {
 
   void resetTimer(const char* reason = "unspecified") {
     const char* why = reason ? reason : "unspecified";
-    // Log_info("[RAFT_TIMER] server %d reset election timer (%s)", site_id_, why);
+    // Log_info("[RAFT_TIMER] server %d reset election timer (%s) failover=%d is_leader=%d",
+    //          site_id_, why, failover_, IsLeader());
     last_heartbeat_time_ = Time::now();
     // Log_info("!!!!!!! if (failover_)");
     if (failover_) {
@@ -158,6 +161,7 @@ class RaftServer : public TxLogServer {
     return RandomGenerator::rand_double(0.4, 0.7) ;
   }
  public:
+  void NotifyReplicationEvents();
   slotid_t min_active_slot_ = 1; // anything before (lt) this slot is freed
   slotid_t max_executed_slot_ = 0;
   slotid_t max_committed_slot_ = 0;
@@ -176,9 +180,9 @@ class RaftServer : public TxLogServer {
   map<slotid_t, shared_ptr<RaftData>> raft_logs_{};
 //  vector<shared_ptr<RaftData>> raft_logs_{};
 
-  // For looping_ control usage, once ready_for_replication_ is ready (set to 1), a specific coroutine will do replication
+  // Ready signals per follower for replication coroutines.
   std::recursive_mutex ready_for_replication_mtx_{};
-  shared_ptr<IntEvent> ready_for_replication_;
+  std::unordered_map<siteid_t, shared_ptr<IntEvent>> ready_for_replication_;
 
   void StartElectionTimer() ;
 

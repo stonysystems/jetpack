@@ -98,11 +98,7 @@ void CoordinatorRaft::AppendEntries() {
     uint64_t index, term;
     bool ok = this->svr_->Start(cmd_, &index, &term); // slot_id_, curr_ballot_);
     verify(ok);
-    {
-      // std::lock_guard<std::recursive_mutex> lock(svr_->ready_for_replication_mtx_);
-      if (svr_->ready_for_replication_)
-        svr_->ready_for_replication_->Set(1);
-    }
+    svr_->NotifyReplicationEvents();
 
     while (this->svr_->commitIndex < index) {
       Reactor::CreateSpEvent<TimeoutEvent>(1000)->Wait();
