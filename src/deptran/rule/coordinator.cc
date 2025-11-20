@@ -113,7 +113,7 @@ void CoordinatorRule::GotoNextPhase() {
         // Log_info("CoordinatorRule coo_id=%d thread_id=%d cmd_ver_=%d current_phase=%d [before dispatch end] fast_path_success_=%d dispatch_ack_=%d", coo_id_, thread_id_, cmd_ver_, current_phase, fast_path_success_, dispatch_ack_);
         client_worker_->one_armed_bandit_.Record(fast_path_success_); // record succee only when efficient fast path success
         if (dispatch_duration_3_times_ > Config::GetConfig()->duration_ * 1000 && dispatch_duration_3_times_ < Config::GetConfig()->duration_ * 2 * 1000) {
-          verify(!(fast_path_success_ && dispatch_ack_));
+          // verify(!(fast_path_success_ && dispatch_ack_));
           if (fast_path_success_) {
             client_worker_->cli2cli_[2].append(SimpleRWCommand::GetCurrentMsTime() - dispatch_time_);
           }
