@@ -194,6 +194,7 @@ void TxLogServer::get_prepare_log(i64 txn_id,
 }
 
 TxLogServer::TxLogServer() : mtx_() {
+  witness_.set_owner(this);
   mdb_txn_mgr_ = make_shared<mdb::TxnMgrUnsafe>();
   if (Config::GetConfig()->do_logging()) {
     auto path = Config::GetConfig()->log_path();
@@ -527,6 +528,12 @@ shared_ptr<Marshallable> RevoveryCandidates::cmd_to_recover() {
 }
 
 bool Witness::push_back(const shared_ptr<Marshallable>& cmd) {
+  if (owner_ && owner_->jetpack_status_ == TxLogServer::JetpackStatus::RECOVERY) {
+#ifdef JETPACK_RECOVERY_DEBUG
+    Log_info("[JETPACK-DEBUG] Witness::push_back rejected because Jetpack is recovering");
+#endif
+    return false;
+  }
   SimpleRWCommand parsed_cmd = SimpleRWCommand(cmd);
   key_t key = parsed_cmd.key_;
   uint64_t cmd_id = SimpleRWCommand::CombineInt32(parsed_cmd.cmd_id_.first, parsed_cmd.cmd_id_.second);
@@ -619,6 +626,10 @@ bool Witness::has_appeared(const shared_ptr<Marshallable>& cmd) {
     }
     return all_has_appeared;
   }
+}
+
+void Witness::set_owner(TxLogServer* owner) {
+  owner_ = owner;
 }
 
 void Witness::set_belongs_to_leader(bool belongs_to_leader) {

@@ -15,6 +15,8 @@
 
 namespace janus {
 
+class TxLogServer;
+
 struct UniqueCmdID {
   int32_t client_id_;
   int32_t cmd_id_;
@@ -184,6 +186,7 @@ class Witness {
     }
   };
   bool belongs_to_leader_{false}; // i.e. This server can propose value // discard
+  TxLogServer* owner_{nullptr};
   int witness_size_ = 0;
   Distribution witness_size_distribution_;
 
@@ -206,6 +209,7 @@ class Witness {
   int remove(const shared_ptr<Marshallable>& cmd);
   // return whether all cmds appeared before
   bool has_appeared(const shared_ptr<Marshallable>& cmd);
+  void set_owner(TxLogServer* owner);
   void set_belongs_to_leader(bool belongs_to_leader); // discard
   // return 50pct, 90pct, 99pct, ave of the witness_size_distribution_
   std::vector<double> witness_size_distribution();
