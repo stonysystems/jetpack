@@ -29,55 +29,60 @@ bool CoordinatorRaft::IsFPGALeader() {
 void CoordinatorRaft::Submit(shared_ptr<Marshallable>& cmd,
                                    const function<void()>& func,
                                    const function<void()>& exe_callback) {
-  if (!IsLeader()) {
-    // verify(0);
+  auto reject_as_wrong_leader = [&](const char* reason_tag) {
     auto config = Config::GetConfig();
     auto& site = config->SiteById(svr_->site_id_);
-    Log_info("[WRONG_LEADER] Submit to server %d (loc_id %d) which is not leader (currentTerm=%lu, commitIndex=%lu, lastLogIndex=%lu)",
-             svr_->site_id_, loc_id_, svr_->currentTerm, svr_->commitIndex, svr_->lastLogIndex);
-    Log_info("[WRONG_LEADER] Server %d site info: host=%s locale_id=%d partition=%d", svr_->site_id_, site.host.c_str(), site.locale_id, site.partition_id_);
-    
-    // Handle WRONG_LEADER case
+    Log_info("[WRONG_LEADER] %s (server %d loc_id %d term=%lu commitIndex=%lu lastLogIndex=%lu)",
+             reason_tag,
+             svr_->site_id_,
+             loc_id_,
+             svr_->currentTerm,
+             svr_->commitIndex,
+             svr_->lastLogIndex);
+    Log_info("[WRONG_LEADER] Server %d site info: host=%s locale_id=%d partition=%d",
+             svr_->site_id_,
+             site.host.c_str(),
+             site.locale_id,
+             site.partition_id_);
+
     if (cmd->kind_ == MarshallDeputy::CMD_TPC_COMMIT) {
       auto tpc_cmd = dynamic_pointer_cast<TpcCommitCommand>(cmd);
       if (tpc_cmd) {
-        // Set WRONG_LEADER error code
         tpc_cmd->ret_ = WRONG_LEADER;
-        
-        // Get current view from TxLogServer (parent class)
-        // The new_view_ contains the most recent view information
         View current_view = svr_->new_view_;
-        
-        Log_info("[WRONG_LEADER] Server %d retrieving view: %s", 
+        Log_info("[WRONG_LEADER] Server %d retrieving view: %s",
                  svr_->site_id_, current_view.ToString().c_str());
-        
-        // If view is empty or stale, use current server state to construct view
         if (current_view.IsEmpty()) {
-          // For Raft, we need to determine who the current leader is
-          // This might need to be tracked separately or obtained from Raft state
           int n_replicas = Config::GetConfig()->GetPartitionSize(par_id_);
-          current_view = View(n_replicas, 
-                            -1,  // Unknown leader for now
-                            svr_->currentTerm);
-          Log_info("[WRONG_LEADER] View was empty, created new view with unknown leader: %s", 
+          current_view = View(n_replicas, -1, svr_->currentTerm);
+          Log_info("[WRONG_LEADER] View was empty, created new view with unknown leader: %s",
                    current_view.ToString().c_str());
         }
-        
-        // Attach view data to the command for propagation back to client
         tpc_cmd->sp_view_data_ = std::make_shared<ViewData>(current_view, par_id_);
-        Log_info("[WRONG_LEADER] Attached view data to response for partition %d: %s", 
+        Log_info("[WRONG_LEADER] Attached view data to response for partition %d: %s",
                  par_id_, tpc_cmd->sp_view_data_->ToString().c_str());
       }
     }
-    
-    // Still call the callback to signal completion, but with error status
+
     func();
-    svr_->app_next_(*cmd); // [Jetpack] Even wrong leader, need a reply to call callback function to update view to avoid wrong leader again next time.
+    svr_->app_next_(*cmd);
+  };
+
+  if (!IsLeader()) {
+    reject_as_wrong_leader("Submit to server that is not leader");
     return;
-  } else {
-    // Log_info("[YYYYY] Submit to loc_id %d, which is leader. Command kind=%d, is_recovery=%d", 
-    //          loc_id_, cmd ? cmd->kind_ : -1, SimpleRWCommand(cmd).IsRecoveryCommand());
   }
+
+  if (svr_->jetpack_status_ == TxLogServer::JetpackStatus::RECOVERY) {
+    Log_info("[JETPACK-RECOVERY] Server %d rejecting Submit because Jetpack is in RECOVERY",
+             svr_->site_id_);
+    reject_as_wrong_leader("Jetpack recovery in progress");
+    return;
+  }
+  // else {
+  //   Log_info("[YYYYY] Submit to loc_id %d, which is leader. Command kind=%d, is_recovery=%d", 
+  //            loc_id_, cmd ? cmd->kind_ : -1, SimpleRWCommand(cmd).IsRecoveryCommand());
+  // }
 	std::lock_guard<std::recursive_mutex> lock(mtx_);
 
   verify(!in_submission_);
