@@ -335,16 +335,22 @@ int SchedulerClassic::CommitReplicated(TpcCommitCommand& tpc_commit_cmd) {
     DoAbort(*sp_tx);
   } else if (commit_or_abort == WRONG_LEADER) {
     // Handle WRONG_LEADER case - don't commit or abort, just return the error
+#ifdef JETPACK_WRONG_LEADER_DEBUG
     Log_info("[WRONG_LEADER] Scheduler received WRONG_LEADER for tx_id: %lu", tx_id);
+#endif
     sp_tx->aborted_ = true;  // Mark as aborted to clean up resources
     // The view information is in tpc_commit_cmd.sp_view_data_
     // It will be propagated to client through the coordinator
     if (tpc_commit_cmd.sp_view_data_) {
+#ifdef JETPACK_WRONG_LEADER_DEBUG
       Log_info("[WRONG_LEADER] View data available in scheduler: %s", 
                tpc_commit_cmd.sp_view_data_->ToString().c_str());
+#endif
       sp_tx->sp_view_data_ = tpc_commit_cmd.sp_view_data_;
     } else {
+#ifdef JETPACK_WRONG_LEADER_DEBUG
       Log_info("[WRONG_LEADER] No view data available in scheduler for tx_id: %lu", tx_id);
+#endif
     }
   } else {
     verify(0);

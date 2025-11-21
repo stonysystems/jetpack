@@ -355,16 +355,20 @@ void CoordinatorClassic::DispatchAck(phase_t phase,
     GotoNextPhase();
     return;
   } else if (res == WRONG_LEADER) {
+#ifdef JETPACK_WRONG_LEADER_DEBUG
     Log_info("[WRONG_LEADER] DispatchAck received WRONG_LEADER for tx_id: %lu", txn->id_);
+#endif
     aborted_ = true;
     txn->commit_.store(false);
     txn->reply_.res_ = WRONG_LEADER;
     // For None mode, we need to check if we can get view data from the transaction
     // The view data should have been set by the scheduler
+#ifdef JETPACK_WRONG_LEADER_DEBUG
     if (txn->reply_.sp_view_data_) {
       Log_info("[WRONG_LEADER] DispatchAck has view data: %s", 
                txn->reply_.sp_view_data_->ToString().c_str());
     }
+#endif
     GotoNextPhase();
     return;
   }
@@ -550,16 +554,20 @@ void CoordinatorClassic::Commit() {
       aborted_ = true;
     } else if(cmd->reply_.res_ == WRONG_LEADER) {
       // Handle WRONG_LEADER response
+#ifdef JETPACK_WRONG_LEADER_DEBUG
       Log_info("[WRONG_LEADER] Coordinator received WRONG_LEADER in Commit phase for tx_id: %lu", tx_data().id_);
+#endif
       aborted_ = true;  // Mark as aborted to clean up
       // The view data should be attached to the TpcCommitCommand by the Raft coordinator
       // It will be propagated to the client through the TxReply
+#ifdef JETPACK_WRONG_LEADER_DEBUG
       if (cmd->reply_.sp_view_data_) {
         Log_info("[WRONG_LEADER] View data attached to reply: %s", 
                  cmd->reply_.sp_view_data_->ToString().c_str());
       } else {
         Log_info("[WRONG_LEADER] No view data attached to reply for tx_id: %lu", tx_data().id_);
       }
+#endif
     } else {
       committed_ = true;
     }
@@ -694,11 +702,13 @@ void CoordinatorClassic::End() {
     // Check if this was actually a WRONG_LEADER case
     if (tx_data->reply_.res_ == WRONG_LEADER) {
       // Keep WRONG_LEADER status (already set in Commit phase)
+#ifdef JETPACK_WRONG_LEADER_DEBUG
       Log_info("[WRONG_LEADER] Maintaining WRONG_LEADER status in End() for tx_id: %lu", tx_data->id_);
       if (tx_data->reply_.sp_view_data_) {
         Log_info("[WRONG_LEADER] View data will be sent to client: %s", 
                  tx_data->reply_.sp_view_data_->ToString().c_str());
       }
+#endif
     } else {
       tx_data->reply_.res_ = REJECT;
     }

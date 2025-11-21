@@ -1706,8 +1706,11 @@ void Communicator::UpdatePartitionView(parid_t partition_id, const std::shared_p
   auto it = partition_views_.find(partition_id);
   if (it != partition_views_.end()) {
     const View& prev_view = it->second;
-    Log_info("[VIEW_DEBUG] partition %d view update %s -> %s", partition_id,
-             prev_view.ToString().c_str(), view.ToString().c_str());
+    bool changed = prev_view.view_id_ != view.view_id_ || prev_view.timestamp_ != view.timestamp_;
+    if (changed) {
+      Log_info("[VIEW_DEBUG] partition %d view update %s -> %s", partition_id,
+               prev_view.ToString().c_str(), view.ToString().c_str());
+    }
   } else {
     Log_info("[VIEW_DEBUG] partition %d initial view %s", partition_id, view.ToString().c_str());
   }

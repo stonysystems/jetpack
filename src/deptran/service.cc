@@ -362,7 +362,9 @@ void ClassicServiceImpl::Commit(const rrr::i64& tid,
     
     if (ret == WRONG_LEADER) {
       *res = WRONG_LEADER;
+#ifdef JETPACK_WRONG_LEADER_DEBUG
       Log_info("[WRONG_LEADER] ServiceImpl::Commit returning WRONG_LEADER for tx_id: %lu", tid);
+#endif
       // Get view data from the transaction or command
       auto sp_tx = dynamic_pointer_cast<TxClassic>(sched->GetTx(tid));
       if (sp_tx && sp_tx->cmd_) {

@@ -31,36 +31,42 @@ void CoordinatorRaft::Submit(shared_ptr<Marshallable>& cmd,
                                    const function<void()>& exe_callback) {
   auto reject_as_wrong_leader = [&](const char* reason_tag) {
     auto config = Config::GetConfig();
-    auto& site = config->SiteById(svr_->site_id_);
-    Log_info("[WRONG_LEADER] %s (server %d loc_id %d term=%lu commitIndex=%lu lastLogIndex=%lu)",
+#ifdef JETPACK_WRONG_LEADER_DEBUG
+    const auto& site = config->SiteById(svr_->site_id_);
+    Log_info("[WRONG_LEADER] %s | server=%d loc=%d partition=%d term=%lu commitIndex=%lu lastLogIndex=%lu host=%s locale=%d",
              reason_tag,
              svr_->site_id_,
              loc_id_,
+             site.partition_id_,
              svr_->currentTerm,
              svr_->commitIndex,
-             svr_->lastLogIndex);
-    Log_info("[WRONG_LEADER] Server %d site info: host=%s locale_id=%d partition=%d",
-             svr_->site_id_,
+             svr_->lastLogIndex,
              site.host.c_str(),
-             site.locale_id,
-             site.partition_id_);
+             site.locale_id);
+#endif
 
     if (cmd->kind_ == MarshallDeputy::CMD_TPC_COMMIT) {
       auto tpc_cmd = dynamic_pointer_cast<TpcCommitCommand>(cmd);
       if (tpc_cmd) {
         tpc_cmd->ret_ = WRONG_LEADER;
         View current_view = svr_->new_view_;
-        Log_info("[WRONG_LEADER] Server %d retrieving view: %s",
+#ifdef JETPACK_WRONG_LEADER_DEBUG
+        Log_info("[WRONG_LEADER] Server %d using view: %s",
                  svr_->site_id_, current_view.ToString().c_str());
+#endif
         if (current_view.IsEmpty()) {
-          int n_replicas = Config::GetConfig()->GetPartitionSize(par_id_);
+          int n_replicas = config->GetPartitionSize(par_id_);
           current_view = View(n_replicas, -1, svr_->currentTerm);
-          Log_info("[WRONG_LEADER] View was empty, created new view with unknown leader: %s",
+#ifdef JETPACK_WRONG_LEADER_DEBUG
+          Log_info("[WRONG_LEADER] Constructed placeholder view: %s",
                    current_view.ToString().c_str());
+#endif
         }
         tpc_cmd->sp_view_data_ = std::make_shared<ViewData>(current_view, par_id_);
-        Log_info("[WRONG_LEADER] Attached view data to response for partition %d: %s",
+#ifdef JETPACK_WRONG_LEADER_DEBUG
+        Log_info("[WRONG_LEADER] Attached view data for partition %d: %s",
                  par_id_, tpc_cmd->sp_view_data_->ToString().c_str());
+#endif
       }
     }
 
@@ -74,8 +80,10 @@ void CoordinatorRaft::Submit(shared_ptr<Marshallable>& cmd,
   }
 
   if (svr_->jetpack_status_ == TxLogServer::JetpackStatus::RECOVERY) {
+#ifdef JETPACK_WRONG_LEADER_DEBUG
     Log_info("[JETPACK-RECOVERY] Server %d rejecting Submit because Jetpack is in RECOVERY",
              svr_->site_id_);
+#endif
     reject_as_wrong_leader("Jetpack recovery in progress");
     return;
   }
