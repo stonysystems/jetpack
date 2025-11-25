@@ -514,6 +514,11 @@ void RaftServer::HeartbeatLoop(siteid_t follower_site_id) {
     }
 #endif
 
+    // if (!cmd) {
+    //   Log_info("[RAFT_HEARTBEAT] site %d (loc %d) -> follower %d send heartbeat AppendEntries prevIdx=%lu prevTerm=%lu commitIdx=%lu nextIdx=%lu",
+    //            site_id_, loc_id_, follower_site_id, prevLogIndex, prevLogTerm, commitIndex, it->second);
+    // }
+
     uint64_t ret_status = false;
     uint64_t ret_term = 0;
     uint64_t ret_last_log_index = 0;
@@ -763,12 +768,15 @@ void RaftServer::StartElectionTimer() {
   Coroutine::CreateRun([&]() {
     Log_debug("start timer for election") ;
     double duration = randDuration() ;
+    auto check_interval = HEARTBEAT_INTERVAL / 2;
+    auto election_timeout = RandomGenerator::rand((frame_->site_info_->locale_id + 1) * 5 * HEARTBEAT_INTERVAL,
+                                                  (frame_->site_info_->locale_id + 1) * 10 * HEARTBEAT_INTERVAL);
     while(!stop_) {
-      Coroutine::Sleep(RandomGenerator::rand((frame_->site_info_->locale_id + 1) * 5*HEARTBEAT_INTERVAL,(frame_->site_info_->locale_id + 1) *10*HEARTBEAT_INTERVAL));
+      Coroutine::Sleep(check_interval);
       auto time_now = Time::now();
       auto time_elapsed = time_now - last_heartbeat_time_;
       // Log_info("sleeped for %d ms bar %d ms", time_now - last_heartbeat_time_, 10 * HEARTBEAT_INTERVAL);
-      if (!paused_ && !IsLeader() && (time_now - last_heartbeat_time_ > 500 * HEARTBEAT_INTERVAL)) {
+      if (!paused_ && !IsLeader() && (time_now - last_heartbeat_time_ > election_timeout)) {
         Log_info("[RAFT_TIMEOUT] server %d election timeout triggered (elapsed=%ldus, last_hb=%ld)",
                  site_id_, time_elapsed, last_heartbeat_time_);
         Log_debug("site %d start election, time_elapsed: %d, last vote for: %d", 
@@ -784,6 +792,8 @@ void RaftServer::StartElectionTimer() {
           Coroutine::Sleep(wait_int_);
           if(stop_) return ;
         }
+        election_timeout = RandomGenerator::rand((frame_->site_info_->locale_id + 1) * 5 * HEARTBEAT_INTERVAL,
+                                                 (frame_->site_info_->locale_id + 1) * 10 * HEARTBEAT_INTERVAL);
       }
     } 
   });
