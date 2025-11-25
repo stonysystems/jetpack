@@ -885,9 +885,11 @@ void ClassicServiceImpl::JetpackPullRecSetIns(const epoch_t& jepoch,
                                               MarshallDeputy* reply_new_view,
                                               MarshallDeputy* cmd, 
                                               rrr::DeferredReply* defer) {
-  cmd->SetMarshallable(std::make_shared<TpcCommitCommand>());
+  cmd->SetMarshallable(std::make_shared<TpcEmptyCommand>());
   shared_ptr<Marshallable> sp_ret_cmd = dynamic_pointer_cast<Marshallable>(cmd->sp_data_);
   dtxn_sched()->OnJetpackPullRecSetIns(jepoch, oepoch, sid, rid, ok, reply_jepoch, reply_oepoch, reply_old_view, reply_new_view, sp_ret_cmd);
+  cmd->sp_data_ = sp_ret_cmd;
+  cmd->kind_ = sp_ret_cmd ? sp_ret_cmd->kind_ : MarshallDeputy::UNKNOWN;
   defer->reply();
 }
 

@@ -657,7 +657,7 @@ class TxLogServer {
                               epoch_t* reply_oepoch,
                               MarshallDeputy* reply_old_view,
                               MarshallDeputy* reply_new_view,
-                              shared_ptr<Marshallable> cmd);
+                              shared_ptr<Marshallable>& cmd);
   
   void OnJetpackFinishRecovery(const epoch_t& oepoch);
 

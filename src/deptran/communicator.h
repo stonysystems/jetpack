@@ -303,7 +303,8 @@ class JetpackPullRecSetInsQuorumEvent: public QuorumEvent {
     if (y) {
       VoteYes();
       // Store the recovered command if we get one
-      if (!recovered_cmd_ && cmd.sp_data_) {
+      bool has_real_cmd = cmd.sp_data_ && cmd.kind_ != MarshallDeputy::CMD_TPC_EMPTY;
+      if (has_real_cmd && (!recovered_cmd_ || recovered_cmd_->kind_ == MarshallDeputy::CMD_TPC_EMPTY)) {
         recovered_cmd_ = cmd.sp_data_;
       }
     } else {

@@ -990,9 +990,9 @@ void TxLogServer::JetpackResubmit(int sid, int set_size) {
 #endif
       // Pull missing command from other replicas
       auto pull_e = commo()->JetpackBroadcastPullRecSetIns(partition_id_, site_id_, jepoch_, oepoch_, sid, rid);
-      Log_info("[JETPACK-RECOVERY] Waiting for PullRecSetIns sid=%d rid=%d (site=%d)", sid, rid, site_id_);
+      // Log_info("[JETPACK-RECOVERY] Waiting for PullRecSetIns sid=%d rid=%d (site=%d)", sid, rid, site_id_);
       pull_e->Wait();
-      Log_info("[JETPACK-RECOVERY] PullRecSetIns completed sid=%d rid=%d (site=%d) success=%d", sid, rid, site_id_, pull_e->Yes());
+      // Log_info("[JETPACK-RECOVERY] PullRecSetIns completed sid=%d rid=%d (site=%d) success=%d", sid, rid, site_id_, pull_e->Yes());
       if (pull_e->Yes()) {
         cmd = pull_e->GetRecoveredCmd();
         if (cmd) {
@@ -1014,7 +1014,14 @@ void TxLogServer::JetpackResubmit(int sid, int set_size) {
     }
     
     // Resubmit command via broadcast dispatch to find leader
-    verify(cmd != nullptr); // Command must exist after pull attempt
+    if (!cmd) {
+      // Log_warn("[JETPACK-RECOVERY] No command recovered for sid=%d, rid=%d; skipping resubmit", sid, rid);
+      continue;
+    }
+    if (cmd->kind_ == MarshallDeputy::CMD_TPC_EMPTY) {
+      // Log_warn("[JETPACK-RECOVERY] Received empty command placeholder for sid=%d, rid=%d; skipping resubmit", sid, rid);
+      continue;
+    }
     std::shared_ptr<TpcCommitCommand> commit_cmd = nullptr;
     if (cmd->kind_ == MarshallDeputy::CMD_TPC_COMMIT) {
       commit_cmd = std::dynamic_pointer_cast<TpcCommitCommand>(cmd);
@@ -1483,7 +1490,7 @@ void TxLogServer::OnJetpackPullRecSetIns(const epoch_t& jepoch,
                                          epoch_t* reply_oepoch,
                                          MarshallDeputy* reply_old_view,
                                          MarshallDeputy* reply_new_view,
-                                         shared_ptr<Marshallable> cmd) {
+                                         shared_ptr<Marshallable>& cmd) {
   // Initialize MarshallDeputy objects with ViewData objects
   reply_old_view->SetMarshallable(std::make_shared<ViewData>(rep_sched_->old_view_));
   reply_new_view->SetMarshallable(std::make_shared<ViewData>(rep_sched_->new_view_));
@@ -1492,11 +1499,17 @@ void TxLogServer::OnJetpackPullRecSetIns(const epoch_t& jepoch,
     *ok = 1;
     *reply_jepoch = rep_sched_->jepoch_;
     *reply_oepoch = rep_sched_->oepoch_;
-    cmd = rep_sched_->rec_set_.get(sid, rid);
+    auto rec_cmd = rep_sched_->rec_set_.get(sid, rid);
+    if (!rec_cmd) {
+      rec_cmd = std::make_shared<TpcEmptyCommand>();
+    }
+    cmd = rec_cmd;
   } else {
     *ok = 0;
     *reply_jepoch = rep_sched_->jepoch_;
     *reply_oepoch = rep_sched_->oepoch_;
+    // Return an empty command when epochs are stale to keep caller state predictable
+    cmd = std::make_shared<TpcEmptyCommand>();
   }
 }
 
