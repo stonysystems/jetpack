@@ -72,10 +72,17 @@ class RaftServer : public TxLogServer {
   bool heartbeat_ = true;
   bool heartbeat_setup_ = false;
 	enum { STOPPED, RUNNING } status_;
+  std::shared_ptr<IntEvent> jetpack_recovery_event_{nullptr};
+  std::recursive_mutex jetpack_recovery_event_mtx_;
+  int jetpack_recovery_pending_{0};
+  bool jetpack_recovery_loop_started_{false};
   
 	bool RequestVote() ;
 
 	void Setup();
+  void StartJetpackRecoveryLoop();
+  void JetpackRecoveryLoop();
+  void TriggerJetpackRecovery(const char* reason);
 	void HeartbeatLoop(siteid_t follower_site_id);
   std::shared_ptr<IntEvent> CreateReplicationEvent(siteid_t follower_site_id);
   RaftCommo* commo() {
@@ -146,8 +153,8 @@ class RaftServer : public TxLogServer {
 
   void resetTimer(const char* reason = "unspecified") {
     const char* why = reason ? reason : "unspecified";
-    // Log_info("[RAFT_TIMER] server %d reset election timer (%s) failover=%d is_leader=%d",
-    //          site_id_, why, failover_, IsLeader());
+    // Log_info("[RAFT_TIMER] server %d (loc %d) reset election timer (%s) failover=%d is_leader=%d",
+    //          site_id_, loc_id_, why, failover_, IsLeader());
     last_heartbeat_time_ = Time::now();
     // Log_info("!!!!!!! if (failover_)");
     if (failover_) {

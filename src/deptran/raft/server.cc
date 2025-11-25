@@ -96,6 +96,7 @@ void RaftServer::Setup() {
       });
     }
   }
+  StartJetpackRecoveryLoop();
   // Election timer will be started in Start() method when first command is submitted
 }
 
@@ -130,6 +131,80 @@ void RaftServer::Disconnect(const bool disconnect) {
 
 bool RaftServer::IsDisconnected() {
   return disconnected_;
+}
+
+void RaftServer::StartJetpackRecoveryLoop() {
+#ifndef RAFT_TEST_CORO
+  if (jetpack_recovery_loop_started_) {
+    return;
+  }
+  jetpack_recovery_loop_started_ = true;
+  {
+    std::lock_guard<std::recursive_mutex> lock(jetpack_recovery_event_mtx_);
+    jetpack_recovery_event_ = Reactor::CreateSpEvent<IntEvent>();
+  }
+  Coroutine::CreateRun([this]() {
+    this->JetpackRecoveryLoop();
+  });
+#endif
+}
+
+void RaftServer::TriggerJetpackRecovery(const char* reason) {
+#ifndef RAFT_TEST_CORO
+	StartJetpackRecoveryLoop();
+	const char* why = reason ? reason : "unspecified";
+	std::shared_ptr<IntEvent> ev;
+	{
+		std::lock_guard<std::recursive_mutex> lock(jetpack_recovery_event_mtx_);
+		if (!jetpack_recovery_event_) {
+			jetpack_recovery_event_ = Reactor::CreateSpEvent<IntEvent>();
+		}
+		jetpack_recovery_pending_ = 1; // we only need a single run per trigger burst
+		ev = jetpack_recovery_event_;
+	}
+	Log_info("[JETPACK_RECOVERY] site %d (loc %d) trigger (%s) pending=%d",
+					 site_id_, loc_id_, why, jetpack_recovery_pending_);
+	ev->Set(1);
+#endif
+}
+
+void RaftServer::JetpackRecoveryLoop() {
+#ifndef RAFT_TEST_CORO
+	while (!stop_) {
+		// If we already have pending triggers, skip waiting.
+		int pending = 0;
+		std::shared_ptr<IntEvent> ev;
+		{
+			std::lock_guard<std::recursive_mutex> lock(jetpack_recovery_event_mtx_);
+			if (!jetpack_recovery_event_) {
+				jetpack_recovery_event_ = Reactor::CreateSpEvent<IntEvent>();
+			}
+			ev = jetpack_recovery_event_;
+			pending = jetpack_recovery_pending_ > 0 ? 1 : 0;
+			jetpack_recovery_pending_ = 0;
+		}
+		if (pending == 0) {
+			ev->Wait();
+			if (stop_) break;
+			{
+				std::lock_guard<std::recursive_mutex> lock(jetpack_recovery_event_mtx_);
+				pending = jetpack_recovery_pending_ > 0 ? 1 : 0;
+				jetpack_recovery_pending_ = 0;
+			}
+			// If we were woken without a trigger, still avoid spurious runs.
+		}
+		if (stop_) break;
+		if (pending > 0) {
+			Log_info("[JETPACK_RECOVERY] site %d (loc %d) running recovery", site_id_, loc_id_);
+			JetpackRecoveryEntry();
+		}
+		// Re-arm the event for the next trigger.
+		{
+			std::lock_guard<std::recursive_mutex> lock(jetpack_recovery_event_mtx_);
+			jetpack_recovery_event_ = Reactor::CreateSpEvent<IntEvent>();
+		}
+	}
+#endif
 }
 
 // void RaftServer::setIsLeader(bool isLeader) {
@@ -278,7 +353,7 @@ void RaftServer::setIsLeader(bool isLeader) {
       }
       
 #ifndef RAFT_TEST_CORO
-      JetpackRecoveryEntry();
+      TriggerJetpackRecovery("setIsLeader transition to leader");
 #endif
     }
   } else if (become_new_follower) {
@@ -510,6 +585,9 @@ RaftServer::~RaftServer() {
 	}
   
   stop_ = true ;
+  // if (jetpack_recovery_event_) {
+  //   jetpack_recovery_event_->Set(1);
+  // }
   Log_info("site par %d, loc %d: prepare %d, accept %d, commit %d", 
       partition_id_, loc_id_, n_prepare_, n_accept_, n_commit_);
 }
@@ -588,7 +666,7 @@ bool RaftServer::RequestVote() {
 #ifdef RAFT_TEST_CORO
       // Skip JetpackRecovery in test environment to avoid RPC handler issues
 #else
-      JetpackRecoveryEntry(); // Trigger Jetpack recovery on new leader election
+      TriggerJetpackRecovery("won election");
 #endif
   		req_voting_ = false ;
 			return true;
