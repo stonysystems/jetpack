@@ -160,6 +160,36 @@ class RaftServer : public TxLogServer {
                              MarshallDeputy* reply_old_view,
                              MarshallDeputy* reply_new_view,
                              shared_ptr<KeyCmdBatchData>& batch) override;
+  void OnJetpackBeginRecovery(const MarshallDeputy& old_view,
+                              const MarshallDeputy& new_view,
+                              const epoch_t& new_view_id) override;
+  void OnJetpackPrepare(const epoch_t& jepoch,
+                        const epoch_t& oepoch,
+                        const ballot_t& max_seen_ballot,
+                        bool_t* ok,
+                        epoch_t* reply_jepoch,
+                        epoch_t* reply_oepoch,
+                        MarshallDeputy* reply_old_view,
+                        MarshallDeputy* reply_new_view,
+                        ballot_t* reply_max_seen_ballot,
+                        ballot_t* accepted_ballot,
+                        int32_t* replied_sid,
+                        int32_t* replied_set_size) override;
+  void OnJetpackAccept(const epoch_t& jepoch,
+                       const epoch_t& oepoch,
+                       const ballot_t& max_seen_ballot,
+                       const int32_t& sid,
+                       const int32_t& set_size,
+                       bool_t* ok,
+                       epoch_t* reply_jepoch,
+                       epoch_t* reply_oepoch,
+                       MarshallDeputy* reply_old_view,
+                       MarshallDeputy* reply_new_view,
+                       ballot_t* reply_max_seen_ballot) override;
+  void OnJetpackCommit(const epoch_t& jepoch,
+                       const epoch_t& oepoch,
+                       const int32_t& sid,
+                       const int32_t& set_size) override;
 
   void resetTimer(const char* reason = "unspecified") {
     const char* why = reason ? reason : "unspecified";

@@ -87,6 +87,63 @@ void RaftServer::OnJetpackPullRecovery(const MarshallDeputy& old_view,
   }
 }
 
+void RaftServer::OnJetpackBeginRecovery(const MarshallDeputy& old_view,
+                                        const MarshallDeputy& new_view,
+                                        const epoch_t& new_view_id) {
+  TxLogServer::OnJetpackBeginRecovery(old_view, new_view, new_view_id);
+  if (!IsLeader()) {
+    resetTimer("JetpackBeginRecovery RPC");
+  }
+}
+
+void RaftServer::OnJetpackPrepare(const epoch_t& jepoch,
+                                  const epoch_t& oepoch,
+                                  const ballot_t& max_seen_ballot,
+                                  bool_t* ok,
+                                  epoch_t* reply_jepoch,
+                                  epoch_t* reply_oepoch,
+                                  MarshallDeputy* reply_old_view,
+                                  MarshallDeputy* reply_new_view,
+                                  ballot_t* reply_max_seen_ballot,
+                                  ballot_t* accepted_ballot,
+                                  int32_t* replied_sid,
+                                  int32_t* replied_set_size) {
+  TxLogServer::OnJetpackPrepare(jepoch, oepoch, max_seen_ballot, ok, reply_jepoch,
+                                reply_oepoch, reply_old_view, reply_new_view, reply_max_seen_ballot,
+                                accepted_ballot, replied_sid, replied_set_size);
+  if (!IsLeader()) {
+    resetTimer("JetpackPrepare RPC");
+  }
+}
+
+void RaftServer::OnJetpackAccept(const epoch_t& jepoch,
+                                 const epoch_t& oepoch,
+                                 const ballot_t& max_seen_ballot,
+                                 const int32_t& sid,
+                                 const int32_t& set_size,
+                                 bool_t* ok,
+                                 epoch_t* reply_jepoch,
+                                 epoch_t* reply_oepoch,
+                                 MarshallDeputy* reply_old_view,
+                                 MarshallDeputy* reply_new_view,
+                                 ballot_t* reply_max_seen_ballot) {
+  TxLogServer::OnJetpackAccept(jepoch, oepoch, max_seen_ballot, sid, set_size, ok,
+                               reply_jepoch, reply_oepoch, reply_old_view, reply_new_view, reply_max_seen_ballot);
+  if (!IsLeader()) {
+    resetTimer("JetpackAccept RPC");
+  }
+}
+
+void RaftServer::OnJetpackCommit(const epoch_t& jepoch,
+                                 const epoch_t& oepoch,
+                                 const int32_t& sid,
+                                 const int32_t& set_size) {
+  TxLogServer::OnJetpackCommit(jepoch, oepoch, sid, set_size);
+  if (!IsLeader()) {
+    resetTimer("JetpackCommit RPC");
+  }
+}
+
 void RaftServer::Setup() {
 
   if (heartbeat_) {
@@ -886,7 +943,10 @@ void RaftServer::OnAppendEntries(const slotid_t slot_id,
 
   if (term_ok && index_ok && prev_term_ok) {
       Log_debug("refresh timer on appendentry");
-      resetTimer("AppendEntries received");
+      if (cmd != nullptr)
+        resetTimer("AppendEntries with cmd received");
+      else
+        resetTimer("AppendEntries heartbeat received");
       if (leaderCurrentTerm > this->currentTerm) {
           auto prev_term = currentTerm;
           currentTerm = leaderCurrentTerm;

@@ -600,9 +600,9 @@ class TxLogServer {
                                      MarshallDeputy* reply_old_view,
                                      MarshallDeputy* reply_new_view,
                                      shared_ptr<KeyCmdBatchData>& batch);
-  void OnJetpackBeginRecovery(const MarshallDeputy& old_view,
-                              const MarshallDeputy& new_view, 
-                              const epoch_t& new_view_id);
+  virtual void OnJetpackBeginRecovery(const MarshallDeputy& old_view,
+                                      const MarshallDeputy& new_view, 
+                                      const epoch_t& new_view_id);
   
   void OnJetpackPullIdSet(const epoch_t& jepoch,
                           const epoch_t& oepoch,
@@ -629,35 +629,35 @@ class TxLogServer {
                           const int32_t& rid, 
                           shared_ptr<KeyCmdBatchData>& batch);
   
-  void OnJetpackPrepare(const epoch_t& jepoch, 
-                        const epoch_t& oepoch, 
-                        const ballot_t& max_seen_ballot, 
-                        bool_t* ok, 
-                        epoch_t* reply_jepoch,
-                        epoch_t* reply_oepoch,
-                        MarshallDeputy* reply_old_view,
-                        MarshallDeputy* reply_new_view,
-                        ballot_t* reply_max_seen_ballot,
-                        ballot_t* accepted_ballot, 
-                        int32_t* replied_sid, 
-                        int32_t* replied_set_size);
+  virtual void OnJetpackPrepare(const epoch_t& jepoch, 
+                                const epoch_t& oepoch, 
+                                const ballot_t& max_seen_ballot, 
+                                bool_t* ok, 
+                                epoch_t* reply_jepoch,
+                                epoch_t* reply_oepoch,
+                                MarshallDeputy* reply_old_view,
+                                MarshallDeputy* reply_new_view,
+                                ballot_t* reply_max_seen_ballot,
+                                ballot_t* accepted_ballot, 
+                                int32_t* replied_sid, 
+                                int32_t* replied_set_size);
   
-  void OnJetpackAccept(const epoch_t& jepoch, 
-                       const epoch_t& oepoch, 
-                       const ballot_t& max_seen_ballot, 
-                       const int32_t& sid, 
-                       const int32_t& set_size,
-                       bool_t* ok,
-                       epoch_t* reply_jepoch,
-                       epoch_t* reply_oepoch,
-                       MarshallDeputy* reply_old_view,
-                       MarshallDeputy* reply_new_view,
-                       ballot_t* reply_max_seen_ballot);
+  virtual void OnJetpackAccept(const epoch_t& jepoch, 
+                               const epoch_t& oepoch, 
+                               const ballot_t& max_seen_ballot, 
+                               const int32_t& sid, 
+                               const int32_t& set_size,
+                               bool_t* ok,
+                               epoch_t* reply_jepoch,
+                               epoch_t* reply_oepoch,
+                               MarshallDeputy* reply_old_view,
+                               MarshallDeputy* reply_new_view,
+                               ballot_t* reply_max_seen_ballot);
   
-  void OnJetpackCommit(const epoch_t& jepoch, 
-                       const epoch_t& oepoch, 
-                       const int32_t& sid, 
-                       const int32_t& set_size);
+  virtual void OnJetpackCommit(const epoch_t& jepoch, 
+                               const epoch_t& oepoch, 
+                               const int32_t& sid, 
+                               const int32_t& set_size);
   
   void OnJetpackPullRecSetIns(const epoch_t& jepoch,
                               const epoch_t& oepoch, 
