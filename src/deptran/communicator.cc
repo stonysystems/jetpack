@@ -1705,22 +1705,16 @@ void Communicator::UpdatePartitionView(parid_t partition_id, const std::shared_p
   // Check if we have an existing view
   auto it = partition_views_.find(partition_id);
   if (it != partition_views_.end()) {
-    const View& prev_view = it->second;
-    bool changed = prev_view.view_id_ != view.view_id_ || prev_view.timestamp_ != view.timestamp_;
-    if (changed) {
-      Log_info("[VIEW_DEBUG] partition %d view update %s -> %s", partition_id,
-               prev_view.ToString().c_str(), view.ToString().c_str());
-    }
-  } else {
-    Log_info("[VIEW_DEBUG] partition %d initial view %s", partition_id, view.ToString().c_str());
-  }
-  if (it != partition_views_.end()) {
-    // Only update if the new view is newer
-    if (view.timestamp_ > it->second.timestamp_) {
+    // Only update if the new view has a higher view_id
+    if (view.view_id_ > it->second.view_id_) {
       partition_views_[partition_id] = view;
+    } else {
+      // Log_info("[VIEW_DEBUG] partition %d ignoring stale view_id=%d (current=%d)",
+      //          partition_id, view.view_id_, it->second.view_id_);
     }
   } else {
     // First view for this partition
+    Log_info("[VIEW_DEBUG] partition %d initial view %s", partition_id, view.ToString().c_str());
     partition_views_[partition_id] = view;
   }
   
