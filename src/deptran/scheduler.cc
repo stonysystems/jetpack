@@ -899,7 +899,7 @@ void TxLogServer::JetpackCommit(int commit_sid, int commit_set_size) {
   
   // Commit cannot fail - it's just notification after successful Accept
   auto e = commo()->JetpackBroadcastCommit(partition_id_, site_id_, jepoch_, oepoch_, commit_sid, commit_set_size);
-  e->Wait(); // Wait for at least 1 response (quorum size can be 1)
+  // e->Wait(); // Wait for at least 1 response (quorum size can be 1)
   
 #ifdef JETPACK_RECOVERY_DEBUG
   Log_info("[JETPACK-RECOVERY] Commit sent for sid=%d, set_size=%d, proceeding to resubmit", commit_sid, commit_set_size);
