@@ -213,6 +213,7 @@ class Witness {
   void set_belongs_to_leader(bool belongs_to_leader); // discard
   // return 50pct, 90pct, 99pct, ave of the witness_size_distribution_
   std::vector<double> witness_size_distribution();
+  int size() const { return witness_size_; }
   /* Recover related begin */
   bool has_cmd_to_recover(key_t key) {
     return candidates_[key].has_cmd_to_recover();
@@ -589,6 +590,16 @@ class TxLogServer {
                               std::shared_ptr<IntEvent> recovery_event = nullptr);
   void DispatchRecoveredCommand(shared_ptr<Marshallable> cmd, shared_ptr<IntEvent> recovery_event = nullptr);
   
+  virtual void OnJetpackPullRecovery(const MarshallDeputy& old_view,
+                                     const MarshallDeputy& new_view,
+                                     const epoch_t& jepoch,
+                                     const epoch_t& oepoch,
+                                     bool_t* ok,
+                                     epoch_t* reply_jepoch,
+                                     epoch_t* reply_oepoch,
+                                     MarshallDeputy* reply_old_view,
+                                     MarshallDeputy* reply_new_view,
+                                     shared_ptr<KeyCmdBatchData>& batch);
   void OnJetpackBeginRecovery(const MarshallDeputy& old_view,
                               const MarshallDeputy& new_view, 
                               const epoch_t& new_view_id);

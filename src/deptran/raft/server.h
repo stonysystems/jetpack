@@ -150,6 +150,16 @@ class RaftServer : public TxLogServer {
                         MarshallDeputy* reply_old_view,
                         MarshallDeputy* reply_new_view,
                         shared_ptr<KeyCmdBatchData>& batch) override;
+  void OnJetpackPullRecovery(const MarshallDeputy& old_view,
+                             const MarshallDeputy& new_view,
+                             const epoch_t& jepoch,
+                             const epoch_t& oepoch,
+                             bool_t* ok,
+                             epoch_t* reply_jepoch,
+                             epoch_t* reply_oepoch,
+                             MarshallDeputy* reply_old_view,
+                             MarshallDeputy* reply_new_view,
+                             shared_ptr<KeyCmdBatchData>& batch) override;
 
   void resetTimer(const char* reason = "unspecified") {
     const char* why = reason ? reason : "unspecified";

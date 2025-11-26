@@ -697,11 +697,9 @@ void TxLogServer::JetpackRecoveryEntry() {
   jetpack_recovery_start_time_ = std::chrono::steady_clock::now();
   Log_info("[JETPACK-RECOVERY] ===== STARTING JETPACK RECOVERY ======");
   Log_info("[JETPACK-RECOVERY] Leader: site_id=%d, jepoch=%d, oepoch=%d", site_id_, jepoch_, oepoch_);
+  jetpack_status_ = TxLogServer::JetpackStatus::RECOVERY;
   
-  // Step 1: Begin recovery - broadcast to all replicas in old_view
-  JetpackBeginRecovery();
-  
-  // Step 2: Pull ID sets and recover commands, then proceed with consensus
+  // Combined recovery RPC: updates views and pulls commands
   JetpackRecovery();
   
   auto recovery_end_time = std::chrono::steady_clock::now();
@@ -728,102 +726,61 @@ void TxLogServer::JetpackBeginRecovery() {
 }
 
 void TxLogServer::JetpackRecovery() {
-  Log_info("[JETPACK-RECOVERY] Step 2: Broadcasting PullIdSet to collect command IDs");
-  
-  // Step 1: Broadcast PullIdSet and collect f+1 PullIdSetAck replies
-  auto id_set_e = commo()->JetpackBroadcastPullIdSet(partition_id_, site_id_, jepoch_, oepoch_);
-  id_set_e->Wait();
-  
-  if (!id_set_e->Yes()) {
-    Log_info("[JETPACK-RECOVERY] PullIdSet FAILED: got %d/%d responses", id_set_e->n_voted_yes_, id_set_e->n_total_);
-    // Update local jepoch, oepoch from the responses
-    if (id_set_e->max_jepoch_ > jepoch_) {
+  Log_info("[JETPACK-RECOVERY] Broadcasting combined PullRecovery to partition %d", partition_id_);
+
+  const auto pull_start = std::chrono::steady_clock::now();
+  auto recovery_e = commo()->JetpackBroadcastPullRecovery(partition_id_, site_id_, old_view_, new_view_, jepoch_, oepoch_);
+  recovery_e->Wait();
+  auto pull_wait_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+      std::chrono::steady_clock::now() - pull_start).count();
+
+  if (!recovery_e->Yes()) {
+    Log_info("[JETPACK-RECOVERY] PullRecovery FAILED: got %d/%d responses wait=%lldms",
+             recovery_e->n_voted_yes_, recovery_e->n_total_, (long long) pull_wait_ms);
+    if (recovery_e->max_jepoch_ > jepoch_) {
 #ifdef JETPACK_RECOVERY_DEBUG
-      Log_info("[JETPACK-RECOVERY] Updating jepoch from %d to %d", jepoch_, id_set_e->max_jepoch_);
+      Log_info("[JETPACK-RECOVERY] Updating jepoch from %d to %d", jepoch_, recovery_e->max_jepoch_);
 #endif
-      jepoch_ = id_set_e->max_jepoch_;
-      witness_.reset(); // Reset witness when jepoch increases
+      jepoch_ = recovery_e->max_jepoch_;
+      witness_.reset();
     }
-    if (id_set_e->max_oepoch_ > oepoch_) {
+    if (recovery_e->max_oepoch_ > oepoch_) {
 #ifdef JETPACK_RECOVERY_DEBUG
-      Log_info("[JETPACK-RECOVERY] Updating oepoch from %d to %d", oepoch_, id_set_e->max_oepoch_);
+      Log_info("[JETPACK-RECOVERY] Updating oepoch from %d to %d", oepoch_, recovery_e->max_oepoch_);
 #endif
-      oepoch_ = id_set_e->max_oepoch_;
-      // TODO: Update old_view_ and new_view_ from responses
+      oepoch_ = recovery_e->max_oepoch_;
     }
     return;
   }
-  
-  Log_info("[JETPACK-RECOVERY] PullIdSet SUCCESS: got %d/%d responses", id_set_e->n_voted_yes_, id_set_e->n_total_);
-  
-  // Make union of all key_set with largest jepoch
-  shared_ptr<vector<key_t>> key_set = id_set_e->GetMergedKeys();
-  
-  // Step 2: Create unique sid (combine replica id and increasing number)
+
+  auto recovered_entries = recovery_e->GetRecoveredCommands();
+  Log_info("[JETPACK-RECOVERY] PullRecovery SUCCESS: recovered %zu keys wait=%lldms",
+           recovered_entries.size(), (long long) pull_wait_ms);
+
   sid = ((sid_cnt_++) << 8) | loc_id_;
   rid = 0;
-  
-  Log_info("[JETPACK-RECOVERY] Step 3: Processing %zu keys for sid=%d", key_set->size(), sid);
-  const auto step3_start_time = std::chrono::steady_clock::now();
-  const int batch_size = std::max(1, Config::GetConfig()->GetJetpackRecoveryBatchSize());
-  size_t processed = 0;
-  while (processed < key_set->size()) {
-    size_t batch_end = std::min(key_set->size(), processed + static_cast<size_t>(batch_size));
-    std::vector<key_t> batch_keys(key_set->begin() + processed, key_set->begin() + batch_end);
-    Log_info("[JETPACK-RECOVERY] Step 3: PullCmd batch [%zu, %zu) (size=%zu/%zu)",
-             processed, batch_end, batch_keys.size(), key_set->size());
 
-    auto pull_start = std::chrono::steady_clock::now();
-    auto pulled_cmd_e = commo()->JetpackBroadcastPullCmd(partition_id_, site_id_, batch_keys, jepoch_, oepoch_);
-    pulled_cmd_e->Wait();
-    auto pull_wait_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-        std::chrono::steady_clock::now() - pull_start).count();
-
-    if (!pulled_cmd_e->Yes()) {
-      Log_info("[JETPACK-RECOVERY] PullCmd batch FAILED: got %d/%d responses wait=%lldms",
-               pulled_cmd_e->n_voted_yes_, pulled_cmd_e->n_total_, (long long) pull_wait_ms);
-      if (pulled_cmd_e->max_jepoch_ > jepoch_) {
-        jepoch_ = pulled_cmd_e->max_jepoch_;
-        witness_.reset();
-      }
-      if (pulled_cmd_e->max_oepoch_ > oepoch_) {
-        oepoch_ = pulled_cmd_e->max_oepoch_;
-      }
-      processed = batch_end;
-      continue;
-    }
-
-    auto recovered_entries = pulled_cmd_e->GetRecoveredCommands();
-    Log_info("[JETPACK-RECOVERY] PullCmd batch SUCCESS: recovered %zu/%zu keys wait=%lldms",
-             recovered_entries.size(), batch_keys.size(), (long long) pull_wait_ms);
-
-    if (!recovered_entries.empty()) {
-      auto record_start = std::chrono::steady_clock::now();
-      auto record_e = commo()->JetpackBroadcastRecordCmd(partition_id_, site_id_, jepoch_, oepoch_, sid, rid, recovered_entries);
-      if (record_e) {
-        record_e->Wait();
-        auto record_wait_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-            std::chrono::steady_clock::now() - record_start).count();
-        if (record_e->Yes()) {
-          rid += recovered_entries.size();
-          Log_info("[JETPACK-RECOVERY] RecordCmd batch SUCCESS: recorded=%zu new_rid=%d wait=%lldms",
-                   recovered_entries.size(), rid, (long long) record_wait_ms);
-        } else {
-          Log_info("[JETPACK-RECOVERY] RecordCmd batch FAILED: got %d/%d responses wait=%lldms",
-                   record_e->n_voted_yes_, record_e->n_total_, (long long) record_wait_ms);
-        }
+  if (!recovered_entries.empty()) {
+    auto record_start = std::chrono::steady_clock::now();
+    auto record_e = commo()->JetpackBroadcastRecordCmd(partition_id_, site_id_, jepoch_, oepoch_, sid, rid, recovered_entries);
+    if (record_e) {
+      record_e->Wait();
+      auto record_wait_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+          std::chrono::steady_clock::now() - record_start).count();
+      if (record_e->Yes()) {
+        rid += recovered_entries.size();
+        Log_info("[JETPACK-RECOVERY] RecordCmd SUCCESS: recorded=%zu new_rid=%d wait=%lldms",
+                 recovered_entries.size(), rid, (long long) record_wait_ms);
+      } else {
+        Log_info("[JETPACK-RECOVERY] RecordCmd FAILED: got %d/%d responses wait=%lldms",
+                 record_e->n_voted_yes_, record_e->n_total_, (long long) record_wait_ms);
       }
     }
-
-    processed = batch_end;
+  } else {
+    Log_info("[JETPACK-RECOVERY] No commands to record for sid=%d", sid);
   }
 
-  auto step3_duration_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-      std::chrono::steady_clock::now() - step3_start_time).count();
-  Log_info("[JETPACK-RECOVERY] Step 3 completed for sid=%d: processed=%zu keys, recorded=%d cmds, duration=%lldms",
-           sid, key_set->size(), rid, (long long) step3_duration_ms);
-  
-  // Step 3: Use Paxos-like procedure to make consensus on sid and set_size
+  // Use Paxos-like procedure to make consensus on sid and set_size
   JetpackPrepare(sid, rid);
   
 }
@@ -1200,6 +1157,50 @@ void TxLogServer::DispatchRecoveredCommand(shared_ptr<Marshallable> cmd, shared_
     }
   } else {
     Log_error("[JETPACK-RECOVERY] DispatchRecoveredCommand unsupported command kind=%d", inner_cmd->kind_);
+  }
+}
+
+void TxLogServer::OnJetpackPullRecovery(const MarshallDeputy& old_view,
+                                        const MarshallDeputy& new_view,
+                                        const epoch_t& jepoch,
+                                        const epoch_t& oepoch,
+                                        bool_t* ok,
+                                        epoch_t* reply_jepoch,
+                                        epoch_t* reply_oepoch,
+                                        MarshallDeputy* reply_old_view,
+                                        MarshallDeputy* reply_new_view,
+                                        shared_ptr<KeyCmdBatchData>& batch) {
+  if (!reply_old_view || !reply_new_view || !batch) {
+    if (ok) {
+      *ok = 0;
+    }
+    return;
+  }
+
+  OnJetpackBeginRecovery(old_view, new_view, oepoch);
+  reply_old_view->SetMarshallable(std::make_shared<ViewData>(rep_sched_->old_view_));
+  reply_new_view->SetMarshallable(std::make_shared<ViewData>(rep_sched_->new_view_));
+
+  if (jepoch >= rep_sched_->jepoch_ && oepoch >= rep_sched_->oepoch_) {
+    rep_sched_->jetpack_status_ = TxLogServer::JetpackStatus::RECOVERY;
+    *ok = 1;
+    *reply_jepoch = rep_sched_->jepoch_;
+    *reply_oepoch = rep_sched_->oepoch_;
+    Log_info("[JETPACK-RECOVERY] PullRecovery witness candidates size=%zu witness_size=%d",
+             rep_sched_->witness_.candidates_.size(), rep_sched_->witness_.size());
+    for (const auto& kv : rep_sched_->witness_.candidates_) {
+      key_t key = kv.first;
+      if (rep_sched_->witness_.has_cmd_to_recover(key)) {
+        auto cmd = rep_sched_->witness_.cmd_to_recover(key);
+        if (cmd) {
+          batch->AddEntry(key, cmd);
+        }
+      }
+    }
+  } else {
+    *ok = 0;
+    *reply_jepoch = rep_sched_->jepoch_;
+    *reply_oepoch = rep_sched_->oepoch_;
   }
 }
 

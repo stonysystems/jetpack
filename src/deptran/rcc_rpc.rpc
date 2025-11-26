@@ -344,6 +344,17 @@ abstract service Classic {
                              MarshallDeputy new_view, 
                              epoch_t new_view_id);
 
+  defer JetpackPullRecovery(MarshallDeputy old_view,
+                            MarshallDeputy new_view,
+                            epoch_t jepoch,
+                            epoch_t oepoch |
+                            bool_t ok,
+                            epoch_t reply_jepoch,
+                            epoch_t reply_oepoch,
+                            MarshallDeputy reply_old_view,
+                            MarshallDeputy reply_new_view,
+                            MarshallDeputy cmd_batch);
+
   defer JetpackPullIdSet(epoch_t jepoch,
                          epoch_t oepoch |
                          bool_t ok,

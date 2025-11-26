@@ -781,6 +781,23 @@ void ClassicServiceImpl::JetpackBeginRecovery(const MarshallDeputy& old_view,
   defer->reply();
 }
 
+void ClassicServiceImpl::JetpackPullRecovery(const MarshallDeputy& old_view,
+                                             const MarshallDeputy& new_view,
+                                             const epoch_t& jepoch,
+                                             const epoch_t& oepoch,
+                                             bool_t* ok,
+                                             epoch_t* reply_jepoch,
+                                             epoch_t* reply_oepoch,
+                                             MarshallDeputy* reply_old_view,
+                                             MarshallDeputy* reply_new_view,
+                                             MarshallDeputy* cmd_batch,
+                                             rrr::DeferredReply* defer) {
+  auto batch_result = std::make_shared<KeyCmdBatchData>();
+  dtxn_sched()->OnJetpackPullRecovery(old_view, new_view, jepoch, oepoch, ok, reply_jepoch, reply_oepoch, reply_old_view, reply_new_view, batch_result);
+  cmd_batch->SetMarshallable(batch_result);
+  defer->reply();
+}
+
 void ClassicServiceImpl::JetpackPullIdSet(const epoch_t& jepoch,
                                           const epoch_t& oepoch,
                                           bool_t* ok, 

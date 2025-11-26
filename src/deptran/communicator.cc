@@ -1376,6 +1376,42 @@ shared_ptr<QuorumEvent> Communicator::JetpackBroadcastBeginRecovery(parid_t par_
   return e;
 }
 
+shared_ptr<JetpackPullRecoveryQuorumEvent> Communicator::JetpackBroadcastPullRecovery(parid_t par_id, locid_t loc_id,
+                                                                                  const View& old_view,
+                                                                                  const View& new_view,
+                                                                                  epoch_t jepoch,
+                                                                                  epoch_t oepoch) {
+  int n = Config::GetConfig()->GetPartitionSize(par_id);
+  auto e = Reactor::CreateSpEvent<JetpackPullRecoveryQuorumEvent>(n, n/2+1);
+  auto proxies = rpc_par_proxies_[par_id];
+  vector<Future*> fus;
+	WAN_WAIT;
+
+  MarshallDeputy old_view_deputy, new_view_deputy;
+  old_view_deputy.SetMarshallable(std::make_shared<ViewData>(old_view));
+  new_view_deputy.SetMarshallable(std::make_shared<ViewData>(new_view));
+
+  for (auto& p : proxies) {
+    auto proxy = (ClassicProxy*) p.second;
+    FutureAttr fuattr;
+    fuattr.callback = [e](Future* fu) {
+      if (fu->get_error_code() != 0) {
+        Log_info("Get a error message in reply");
+        return;
+      }
+      bool_t ok;
+      epoch_t reply_jepoch, reply_oepoch;
+      MarshallDeputy reply_old_view, reply_new_view, cmd_batch;
+      fu->get_reply() >> ok >> reply_jepoch >> reply_oepoch >> reply_old_view >> reply_new_view >> cmd_batch;
+      e->FeedResponse(ok, reply_jepoch, reply_oepoch, cmd_batch);
+    };
+    auto fu = proxy->async_JetpackPullRecovery(old_view_deputy, new_view_deputy, jepoch, oepoch, fuattr);
+    fus.push_back(fu);
+  }
+
+  return e;
+}
+
 shared_ptr<JetpackPullIdSetQuorumEvent> Communicator::JetpackBroadcastPullIdSet(parid_t par_id, locid_t loc_id,
                                                                            epoch_t jepoch, epoch_t oepoch) {
   int n = Config::GetConfig()->GetPartitionSize(par_id);

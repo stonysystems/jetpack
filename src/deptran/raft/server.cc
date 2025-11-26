@@ -57,8 +57,8 @@ void RaftServer::OnJetpackPullCmd(const epoch_t& jepoch,
                                    epoch_t* reply_jepoch,
                                    epoch_t* reply_oepoch,
                                    MarshallDeputy* reply_old_view,
-                                   MarshallDeputy* reply_new_view,
-                                   shared_ptr<KeyCmdBatchData>& batch) {
+                                    MarshallDeputy* reply_new_view,
+                                    shared_ptr<KeyCmdBatchData>& batch) {
   TxLogServer::OnJetpackPullCmd(jepoch, oepoch, keys, ok, reply_jepoch, reply_oepoch,
                                 reply_old_view, reply_new_view, batch);
   if (!IsLeader()) {
@@ -67,6 +67,23 @@ void RaftServer::OnJetpackPullCmd(const epoch_t& jepoch,
     // Log_info("[RAFT_TIMER] server %d reset election timer due to JetpackPullCmd (keys=%zu)",
     //          site_id_, keys.size());
 #endif
+  }
+}
+
+void RaftServer::OnJetpackPullRecovery(const MarshallDeputy& old_view,
+                                       const MarshallDeputy& new_view,
+                                       const epoch_t& jepoch,
+                                       const epoch_t& oepoch,
+                                       bool_t* ok,
+                                       epoch_t* reply_jepoch,
+                                       epoch_t* reply_oepoch,
+                                       MarshallDeputy* reply_old_view,
+                                       MarshallDeputy* reply_new_view,
+                                       shared_ptr<KeyCmdBatchData>& batch) {
+  TxLogServer::OnJetpackPullRecovery(old_view, new_view, jepoch, oepoch, ok,
+                                     reply_jepoch, reply_oepoch, reply_old_view, reply_new_view, batch);
+  if (!IsLeader()) {
+    resetTimer("JetpackPullRecovery RPC");
   }
 }
 

@@ -141,6 +141,72 @@ class JetpackPullIdSetQuorumEvent: public QuorumEvent {
   }
 };
 
+class JetpackPullRecoveryQuorumEvent: public QuorumEvent {
+ public:
+  JetpackPullRecoveryQuorumEvent(int n_total, int quorum)
+      : QuorumEvent(n_total, quorum) {
+    int f = (n_total_ - 1) / 2;
+    majority_threshold_ = (f + 2 + 1) / 2;
+  }
+
+  void FeedResponse(bool y, epoch_t jepoch, epoch_t oepoch, const MarshallDeputy& batch_md) {
+    if (y) {
+      VoteYes();
+      auto batch = std::dynamic_pointer_cast<KeyCmdBatchData>(batch_md.sp_data_);
+      if (batch) {
+        for (size_t i = 0; i < batch->Size(); i++) {
+          auto cmd = batch->GetCommand(i);
+          if (!cmd) {
+            continue;
+          }
+          auto& state = key_states_[batch->GetKey(i)];
+          uint64_t cmd_id = SimpleRWCommand::GetCombinedCmdID(cmd);
+          int count = ++state.cmd_counts_[cmd_id];
+          if (count > state.max_count) {
+            state.max_count = count;
+            state.max_cmd = cmd;
+          }
+        }
+      }
+    } else {
+      VoteNo();
+      if (jepoch > max_jepoch_) {
+        max_jepoch_ = jepoch;
+      }
+      if (oepoch > max_oepoch_) {
+        max_oepoch_ = oepoch;
+      }
+    }
+  }
+
+  std::vector<std::pair<key_t, shared_ptr<Marshallable>>> GetRecoveredCommands() const {
+    std::vector<std::pair<key_t, shared_ptr<Marshallable>>> result;
+    result.reserve(key_states_.size());
+    for (const auto& kv : key_states_) {
+      const auto& state = kv.second;
+      if (state.max_cmd && state.max_count >= majority_threshold_) {
+        result.emplace_back(kv.first, state.max_cmd);
+      }
+    }
+    std::sort(result.begin(), result.end(),
+              [](const auto& a, const auto& b) { return a.first < b.first; });
+    return result;
+  }
+
+  epoch_t max_jepoch_ = -1;
+  epoch_t max_oepoch_ = -1;
+
+ private:
+  struct KeyState {
+    std::unordered_map<uint64_t, int> cmd_counts_;
+    int max_count = 0;
+    shared_ptr<Marshallable> max_cmd = nullptr;
+  };
+
+  std::unordered_map<key_t, KeyState> key_states_{};
+  int majority_threshold_{0};
+};
+
 class JetpackPullCmdQuorumEvent: public QuorumEvent {
  public:
   JetpackPullCmdQuorumEvent(int n_total, int quorum, const std::vector<key_t>& keys)
@@ -497,6 +563,11 @@ class Communicator {
                                                        const View& old_view, 
                                                        const View& new_view, 
                                                        epoch_t new_view_id);
+  shared_ptr<JetpackPullRecoveryQuorumEvent> JetpackBroadcastPullRecovery(parid_t par_id, locid_t loc_id,
+                                                                          const View& old_view,
+                                                                          const View& new_view,
+                                                                          epoch_t jepoch,
+                                                                          epoch_t oepoch);
   shared_ptr<JetpackPullIdSetQuorumEvent> JetpackBroadcastPullIdSet(parid_t par_id, locid_t loc_id,
                                                                    epoch_t jepoch, epoch_t oepoch);
   shared_ptr<JetpackPullCmdQuorumEvent> JetpackBroadcastPullCmd(parid_t par_id, locid_t loc_id, 

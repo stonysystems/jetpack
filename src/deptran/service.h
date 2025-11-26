@@ -289,6 +289,18 @@ class ClassicServiceImpl : public ClassicService {
                             const MarshallDeputy& new_view, 
                             const epoch_t& new_view_id, 
                             rrr::DeferredReply* defer) override;
+
+  void JetpackPullRecovery(const MarshallDeputy& old_view,
+                           const MarshallDeputy& new_view,
+                           const epoch_t& jepoch,
+                           const epoch_t& oepoch,
+                           bool_t* ok,
+                           epoch_t* reply_jepoch,
+                           epoch_t* reply_oepoch,
+                           MarshallDeputy* reply_old_view,
+                           MarshallDeputy* reply_new_view,
+                           MarshallDeputy* cmd_batch,
+                           rrr::DeferredReply* defer) override;
   
   void JetpackPullIdSet(const epoch_t& jepoch,
                         const epoch_t& oepoch,
