@@ -11,12 +11,24 @@
 #include "rcc_rpc.h"
 #include <typeinfo>
 #include "RW_command.h"
+#include "misc/marshal.hpp"
 
 namespace janus {
 
 // Static member definitions
 std::map<parid_t, View> Communicator::partition_views_;
 std::mutex Communicator::partition_views_mutex_;
+
+namespace {
+size_t GetKeyCmdBatchSize(const std::shared_ptr<KeyCmdBatchData>& batch) {
+  if (!batch) {
+    return 0;
+  }
+  rrr::Marshal m;
+  batch->ToMarshal(m);
+  return m.content_size();
+}
+} // namespace
 
 /************************RULE begin*********************************/
 
@@ -1403,6 +1415,9 @@ shared_ptr<JetpackPullRecoveryQuorumEvent> Communicator::JetpackBroadcastPullRec
       epoch_t reply_jepoch, reply_oepoch;
       MarshallDeputy reply_old_view, reply_new_view, cmd_batch;
       fu->get_reply() >> ok >> reply_jepoch >> reply_oepoch >> reply_old_view >> reply_new_view >> cmd_batch;
+      auto batch = std::dynamic_pointer_cast<KeyCmdBatchData>(cmd_batch.sp_data_);
+      Log_info("[JETPACK-RECOVERY] PullRecovery response ok=%d entries=%zu size_bytes=%zu",
+               ok, batch ? batch->Size() : 0, GetKeyCmdBatchSize(batch));
       e->FeedResponse(ok, reply_jepoch, reply_oepoch, cmd_batch);
     };
     auto fu = proxy->async_JetpackPullRecovery(old_view_deputy, new_view_deputy, jepoch, oepoch, fuattr);
@@ -1541,6 +1556,8 @@ shared_ptr<QuorumEvent> Communicator::JetpackBroadcastRecordCmd(parid_t par_id, 
   for (const auto& entry : cmds) {
     batch_data->AddEntry(entry.first, entry.second);
   }
+  Log_info("[JETPACK-RECOVERY] RecordCmd batch entries=%zu size_bytes=%zu sid=%d rid=%d",
+           batch_data->Size(), GetKeyCmdBatchSize(batch_data), sid, rid);
   MarshallDeputy cmd_deputy;
   cmd_deputy.SetMarshallable(batch_data);
   
