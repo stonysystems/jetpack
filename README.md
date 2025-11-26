@@ -53,3 +53,20 @@ e.g.
 ```
 python3 results_processor.py 2023-10-10-03:38:03
 ```
+
+## Failure simulation structure
+
+- svr_workers_g[idx].Pause() ;
+  - rep_sched_->Pause();
+    - commo_->Pause();
+      - for (auto it = rpc_clients_.begin(); it != rpc_clients_.end(); it++) {
+      - it->second->pause();
+      - }
+        - void Client::pause() {
+        - paused_ = true;
+        - }
+  - svr_poll_mgr_->pause();
+    - for (int idx = 0; idx < n_threads_; idx++) {
+    - poll_threads_[idx].pause();
+    - }
+      - void pause() { pause_flag_ = true; }
