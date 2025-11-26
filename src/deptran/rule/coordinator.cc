@@ -37,6 +37,10 @@ void CoordinatorRule::GotoNextPhase() {
   int n_phase = 3;
   int current_phase = phase_ % n_phase;
   int phase_cp;
+  auto txn = static_cast<TxData*>(cmd_);
+  bool latency_window = dispatch_duration_3_times_ > Config::GetConfig()->duration_ * 1000 &&
+                              dispatch_duration_3_times_ < Config::GetConfig()->duration_ * 2 * 1000;
+  bool skip_latency = latency_window && (txn->reply_.res_ == WRONG_LEADER || aborted_);
   switch (phase_++ % n_phase) {
     case Phase::INIT_END:
       dispatch_time_ = SimpleRWCommand::GetCurrentMsTime();
@@ -112,7 +116,12 @@ void CoordinatorRule::GotoNextPhase() {
         verify(phase_ % n_phase == Phase::INIT_END);
         // Log_info("CoordinatorRule coo_id=%d thread_id=%d cmd_ver_=%d current_phase=%d [before dispatch end] fast_path_success_=%d dispatch_ack_=%d", coo_id_, thread_id_, cmd_ver_, current_phase, fast_path_success_, dispatch_ack_);
         client_worker_->one_armed_bandit_.Record(fast_path_success_); // record succee only when efficient fast path success
-        if (dispatch_duration_3_times_ > Config::GetConfig()->duration_ * 1000 && dispatch_duration_3_times_ < Config::GetConfig()->duration_ * 2 * 1000) {
+        // if (skip_latency) {
+        //   Log_info("[CLIENT-LATENCY] Skip cli2cli logging due to %s (res=%d, aborted=%d)",
+        //            txn->reply_.res_ == WRONG_LEADER ? "WRONG_LEADER" : "ABORTED",
+        //            txn->reply_.res_, aborted_);
+        // }
+        if (latency_window && !skip_latency) {
           // verify(!(fast_path_success_ && dispatch_ack_));
           if (fast_path_success_) {
             client_worker_->cli2cli_[2].append(SimpleRWCommand::GetCurrentMsTime() - dispatch_time_);
@@ -122,7 +131,7 @@ void CoordinatorRule::GotoNextPhase() {
           }
           client_worker_->cli2cli_[5].append(SimpleRWCommand::GetCurrentMsTime() - dispatch_time_);
         }
-        if (!fast_path_success_)
+        if (!fast_path_success_ && !skip_latency)
           client_worker_->cli2cli_[8+cmd_is_write_].append(SimpleRWCommand::GetCurrentMsTime() - dispatch_time_);
         client_worker_->commit_time_.push_back(std::make_pair(dispatch_time_ - created_time_, SimpleRWCommand::GetCurrentMsTime() - dispatch_time_));
         End();
@@ -136,11 +145,18 @@ void CoordinatorRule::GotoNextPhase() {
       committed_ = true;
       verify(phase_ % n_phase == Phase::INIT_END);
       // Log_info("CoordinatorRule coo_id=%d thread_id=%d cmd_ver_=%d current_phase=%d [before WAITING_ORIGIN end]", coo_id_, thread_id_, cmd_ver_, current_phase);
-      if (dispatch_duration_3_times_ > Config::GetConfig()->duration_ * 1000 && dispatch_duration_3_times_ < Config::GetConfig()->duration_ * 2 * 1000) {
+      // if (skip_latency) {
+      //   Log_info("[CLIENT-LATENCY] Skip cli2cli logging due to %s (res=%d, aborted=%d)",
+      //            txn->reply_.res_ == WRONG_LEADER ? "WRONG_LEADER" : "ABORTED",
+      //            txn->reply_.res_, aborted_);
+      // }
+      if (latency_window && !skip_latency) {
         client_worker_->cli2cli_[4].append(SimpleRWCommand::GetCurrentMsTime() - dispatch_time_);
         client_worker_->cli2cli_[5].append(SimpleRWCommand::GetCurrentMsTime() - dispatch_time_);
       }
-      client_worker_->cli2cli_[8+cmd_is_write_].append(SimpleRWCommand::GetCurrentMsTime() - dispatch_time_);
+      if (!skip_latency) {
+        client_worker_->cli2cli_[8+cmd_is_write_].append(SimpleRWCommand::GetCurrentMsTime() - dispatch_time_);
+      }
       client_worker_->commit_time_.push_back(std::make_pair(dispatch_time_ - created_time_, SimpleRWCommand::GetCurrentMsTime() - dispatch_time_));
       // Log_info("End");
       End();
@@ -187,14 +203,24 @@ void CoordinatorRule::BroadcastRuleSpeculativeExecute(int phase) {
 #ifdef MONGODB_DEBUG
   Log_info("%.2f BroadcastRuleSpeculativeExecute after wait <%d, %d>", SimpleRWCommand::GetMsTimeElaps(), SimpleRWCommand::GetCmdID(sp_vpd_).first, SimpleRWCommand::GetCmdID(sp_vpd_).second);
 #endif
-  if (dispatch_duration_3_times_ > Config::GetConfig()->duration_ * 1000 && dispatch_duration_3_times_ < Config::GetConfig()->duration_ * 2 * 1000) {
+  bool latency_window = dispatch_duration_3_times_ > Config::GetConfig()->duration_ * 1000 &&
+                        dispatch_duration_3_times_ < Config::GetConfig()->duration_ * 2 * 1000;
+  bool skip_latency = latency_window && (txn->reply_.res_ == WRONG_LEADER || aborted_);
+  // if (skip_latency) {
+  //   Log_info("[CLIENT-LATENCY] Skip cli2cli logging due to %s (res=%d, aborted=%d)",
+  //            txn->reply_.res_ == WRONG_LEADER ? "WRONG_LEADER" : "ABORTED",
+  //            txn->reply_.res_, aborted_);
+  // }
+  if (latency_window && !skip_latency) {
     client_worker_->cli2cli_[0].append(SimpleRWCommand::GetCurrentMsTime() - dispatch_time_);
   }
   if (e->Yes()) {
     fast_path_success_ = true;
-    if (dispatch_duration_3_times_ > Config::GetConfig()->duration_ * 1000 && dispatch_duration_3_times_ < Config::GetConfig()->duration_ * 2 * 1000)
+    if (latency_window && !skip_latency)
       client_worker_->cli2cli_[1].append(SimpleRWCommand::GetCurrentMsTime() - dispatch_time_);
-    client_worker_->cli2cli_[6+cmd_is_write_].append(SimpleRWCommand::GetCurrentMsTime() - dispatch_time_);
+    if (!skip_latency) {
+      client_worker_->cli2cli_[6+cmd_is_write_].append(SimpleRWCommand::GetCurrentMsTime() - dispatch_time_);
+    }
   } else if (e->No() || e->timeouted_) {
     fast_path_success_ = false;
   } else {

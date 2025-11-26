@@ -14,6 +14,9 @@ void CoordinatorNone::GotoNextPhase() {
   // Log_info("Enter GotoNextPhase CoroutineID %d %d phase_ = %d", Coroutine::CurrentCoroutine()->id, Coroutine::CurrentCoroutine()->global_id, phase_);
   int n_phase = 2;
   // int judgement_phase = phase_;
+  bool latency_window = dispatch_duration_3_times_ > Config::GetConfig()->duration_ * 1000 &&
+                            dispatch_duration_3_times_ < Config::GetConfig()->duration_ * 2 * 1000;
+  bool skip_latency = latency_window && aborted_;
   switch (phase_++ % n_phase) {
     case Phase::INIT_END:
       // Log_info("Enter switch CoroutineID %d %d phase_ = %d", Coroutine::CurrentCoroutine()->id, Coroutine::CurrentCoroutine()->global_id, phase_);
@@ -26,7 +29,10 @@ void CoordinatorNone::GotoNextPhase() {
       // Log_info("Enter switch CoroutineID %d %d phase_ = %d", Coroutine::CurrentCoroutine()->id, Coroutine::CurrentCoroutine()->global_id, phase_);
       committed_ = true;
       verify(phase_ % n_phase == Phase::INIT_END);
-      if (dispatch_duration_3_times_ > Config::GetConfig()->duration_ * 1000 && dispatch_duration_3_times_ < Config::GetConfig()->duration_ * 2 * 1000) {
+      // if (skip_latency) {
+      //   Log_info("[CLIENT-LATENCY] Skip cli2cli logging due to ABORTED (aborted=%d)", aborted_);
+      // }
+      if (latency_window && !skip_latency) {
         client_worker_->cli2cli_[3].append(SimpleRWCommand::GetCurrentMsTime() - dispatch_time_);
         client_worker_->cli2cli_[4].append(SimpleRWCommand::GetCurrentMsTime() - dispatch_time_);
         client_worker_->cli2cli_[5].append(SimpleRWCommand::GetCurrentMsTime() - dispatch_time_);
