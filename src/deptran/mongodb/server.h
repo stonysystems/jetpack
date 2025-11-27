@@ -6,14 +6,20 @@
 #include "../mongodb_kv_table_handler.h"
 #include "../mongodb_connection_thread_pool.h"
 #include "../communicator.h"
+#include "../frame.h"
+#include "../../rrr/reactor/event.h"
 #include <cstdlib>
+
+#ifdef JETPACK_MONGODB_RECOVERY_V2
+#include "../../../jm_file_signal.h"
+#endif
 
 namespace janus {
 
 class MongodbServer : public TxLogServer {
   
 #ifdef AWS
-  const int mongodb_connection_ = 2000; // maximum connection maybe limited by ulimit, increase ulimit may solve connection limit problem. 2000 is designed for 0.66s latency 3000 clients open loop
+  const int mongodb_connection_ = 80; // maximum connection maybe limited by ulimit, increase ulimit may solve connection limit problem. 2000 is designed for 0.66s latency 3000 clients open loop
 #endif
 #ifndef AWS
   const int mongodb_connection_ = 80; // seems maximum connextion between 95 * 5 and 100 * 5 at local
@@ -55,35 +61,67 @@ class MongodbServer : public TxLogServer {
 
   void Setup() override { 
     SimpleRWCommand::SetZeroTime();
-#ifdef JETPACK_MONGODB_RECOVERY
-    // Determine Mongo URI: prefer env override, else co-located host, else loopback.
-    if (frame_ && frame_->site_info_) {
-      std::string host;
-      if (!frame_->site_info_->host.empty()) {
-        host = frame_->site_info_->host;
-      } else if (!frame_->site_info_->proc_name.empty()) {
-        host = frame_->site_info_->proc_name;
-      } else if (!frame_->site_info_->name.empty()) {
-        host = frame_->site_info_->name;
+#ifdef JETPACK_MONGODB_RECOVERY_V2
+    // Determine Mongo URI: build replica set list from config for this partition.
+    auto cfg = Config::GetConfig();
+    auto hosts = cfg->GetReplicaHosts(partition_id_);
+    if (!hosts.empty()) {
+      std::ostringstream oss;
+      oss << "mongodb://";
+      for (size_t i = 0; i < hosts.size(); ++i) {
+        if (i > 0) oss << ",";
+        // force MongoDB default port for now
+        auto pos = hosts[i].find(':');
+        if (pos != std::string::npos) {
+          oss << hosts[i].substr(0, pos) << ":27017";
+        } else {
+          oss << hosts[i] << ":27017";
+        }
       }
-      if (!host.empty()) {
-        mongo_uri_ = "mongodb://" + host + ":27017";
-      }
+      mongo_uri_ = oss.str();
     }
-    const char* env_uri = std::getenv("JM_MONGODB_URI");
-    if (env_uri && *env_uri) {
-      mongo_uri_ = env_uri;
-    }
+    Log_info("mongo_uri_:%s", mongo_uri_.c_str());
     mongodb_ = make_shared<MongodbConnectionThreadPool>(mongodb_connection_, mongo_uri_);
 #else
     // Default legacy behavior: only leader connects using the legacy fixed URI.
     mongo_uri_ = kMongoDbUri;
+    Log_info("mongo_uri_:%s, loc_id_:%d, mongodb_connection_:%d", mongo_uri_.c_str(), loc_id_, mongodb_connection_);
     mongodb_ = make_shared<MongodbConnectionThreadPool>(loc_id_ == 0 ? mongodb_connection_ : 0, mongo_uri_);
 #endif
     // Coroutine::CreateRun([&]() { 
     //   ExecutionHandler(this, mongodb_); 
     // });
     // execution_thread = std::thread(ExecutionHandler, this, std::ref(mongodb_));
+
+#ifdef JETPACK_MONGODB_RECOVERY_V2
+	  // Coroutine-based waiter for MongoDB signal with periodic timeout.
+	  Coroutine::CreateRun([this]() {
+	    std::string host;
+	    if (frame_ && frame_->site_info_) {
+	      auto* si = frame_->site_info_;
+	      if (!si->host.empty()) {
+	        host = si->host;
+	      } else if (!si->proc_name.empty()) {
+	        host = si->proc_name;
+	      } else if (!si->name.empty()) {
+        host = si->name;
+      }
+    }
+    Log_info("[MONGODB-FAILOVER] Waiting for mongo signal on JM_Jetpack_%s", host.c_str());
+	    while (true) {
+	      if (jm_signal::exists_key("mongo", "recovery_finish", host)) {
+	        Log_info("[MONGODB-FAILOVER] Received mongo signal on JM_Jetpack_%s", host.c_str());
+	        if (rep_sched_) {
+	          rep_sched_->JetpackRecoveryEntry();
+	        }
+	        break;
+	      }
+	      auto sp_e = Reactor::CreateSpEvent<TimeoutEvent>(10 * 1000); // 10ms
+	      sp_e->Wait();
+	    }
+	  });
+#endif
+
   }
   bool IsLeader() override {
     return loc_id_ == 0;

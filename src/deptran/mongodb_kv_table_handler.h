@@ -10,11 +10,16 @@
 
 namespace janus {
 
+#if defined(JETPACK_MONGODB_RECOVERY) || defined(JETPACK_MONGODB_RECOVERY_V2)
+// Use local loopback in recovery mode to avoid changing legacy defaults.
+constexpr char kMongoDbUri[] = "mongodb://127.0.0.1:27017";
+#else
 #ifdef AWS
 constexpr char kMongoDbUri[] = "mongodb://184.72.49.232:27017";
 #endif
 #ifndef AWS
 constexpr char kMongoDbUri[] = "mongodb://130.245.173.103:27017";
+#endif
 #endif
 
 constexpr char kDatabaseName[] = "JetPack";

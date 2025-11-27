@@ -526,6 +526,19 @@ std::string Config::site2host_name(std::string& sitename) {
   }
 }
 
+std::vector<std::string> Config::GetReplicaHosts(parid_t par_id) {
+  std::vector<std::string> hosts;
+  if (par_id < replica_groups_.size()) {
+    for (auto* s : replica_groups_[par_id].replicas) {
+      if (s) {
+        std::string h = s->host.empty() ? s->name : s->host;
+        hosts.push_back(h + ":" + std::to_string(s->port));
+      }
+    }
+  }
+  return hosts;
+}
+
 
 void Config::LoadModeYML(YAML::Node config) {
   auto mode_str = config["cc"].as<string>();

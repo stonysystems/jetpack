@@ -1041,9 +1041,7 @@ void TxLogServer::JetpackResubmit(int sid, int set_size) {
         host = frame_->site_info_->name;
       }
     }
-    if (host.empty()) {
-      host = "localhost";
-    }
+    Log_info("Mark FinishRecovery on %s", host.c_str());
     jm_signal::set_key("jetpack", "recovery_finish", host);
     Log_info("[JETPACK-RECOVERY] Wrote finish signal to JM_Jetpack_%s", host.c_str());
   } catch (const std::exception& ex) {

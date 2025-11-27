@@ -174,4 +174,6 @@ namespace janus {
 // Keep disabled by default so it does not affect other paths unless explicitly opted in.
 // #define JETPACK_MONGODB_RECOVERY
 
+// #define JETPACK_MONGODB_RECOVERY_V2
+
 } // namespace janus

@@ -29,20 +29,25 @@ bool* volatile failover_triggers;
 volatile bool failover_server_quit = false;
 volatile locid_t failover_server_idx;
 volatile double total_throughput = 0;
-#ifdef JETPACK_MONGODB_RECOVERY
+#ifdef JETPACK_MONGODB_RECOVERY_V2
 static void KillMongodbPrimary() {
-  // Default to first replica on the standard MongoDB port; override with env if needed.
-  const char* kill_cmd = std::getenv("JETPACK_MONGODB_KILL_CMD");
-  if (kill_cmd == nullptr) {
-    kill_cmd = "pkill -f \"mongod.*27017\"";
+  // Kill only the local mongod bound to this host on the default port.
+  std::string host = "127.0.0.1";
+  if (!svr_workers_g.empty() && svr_workers_g[0].site_info_) {
+    if (!svr_workers_g[0].site_info_->host.empty()) {
+      host = svr_workers_g[0].site_info_->host;
+    } else if (!svr_workers_g[0].site_info_->proc_name.empty()) {
+      host = svr_workers_g[0].site_info_->proc_name;
+    } else if (!svr_workers_g[0].site_info_->name.empty()) {
+      host = svr_workers_g[0].site_info_->name;
+    }
   }
-  Log_info("[MONGODB-FAILOVER] Executing primary kill: %s", kill_cmd);
-  int rc = std::system(kill_cmd);
-  if (rc != 0) {
-    Log_warn("[MONGODB-FAILOVER] Kill command returned rc=%d", rc);
-  } else {
-    Log_info("[MONGODB-FAILOVER] Kill command succeeded");
-  }
+  const int mongo_port = 27017;
+  // pkill -f "mongod.*--port 27017.*--bind_ip 127.0.0.1"
+  std::string kill_cmd = "pkill -f \"mongod.*--port " + std::to_string(mongo_port) +
+                         ".*--bind_ip " + host + "\"";
+  Log_info("[MONGODB-FAILOVER] Executing primary kill: %s", kill_cmd.c_str());
+  std::system(kill_cmd.c_str());
 }
 #endif
 // All the following statistics only count mid 1/3 duration
@@ -394,7 +399,7 @@ void server_failover_co(bool random, bool leader, int srv_idx)
         // client_workers_g[0]->Pause(idx) ;
         // Log_info("@@@@@@@@@@@@@@@@@@@@@@@@ client_workers_g paused");
         svr_workers_g[idx].Pause() ;
-#ifdef JETPACK_MONGODB_RECOVERY
+#ifdef JETPACK_MONGODB_RECOVERY_V2
         KillMongodbPrimary();
 #endif
         Log_info("@@@@@@@@@@@@@@@@@@@@@@@@ svr_workers_g %d paused", idx);

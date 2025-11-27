@@ -31,6 +31,7 @@ class Config {
   void init_hostsmap(const char *hostspath);
   std::string site2host_addr(std::string &name);
   std::string site2host_name(std::string &addr);
+  std::vector<std::string> GetReplicaHosts(parid_t par_id);
 
   bool heart_beat_;
   // configuration for trial controller.
