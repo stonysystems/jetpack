@@ -61,11 +61,15 @@ mongod --replSet rsTest --port 27017 \
   --logpath /var/log/mongodb/rs1/mongod.log \
   --fork
 
+sleep 1
+
 mongod --replSet rsTest --port 27017 \
   --bind_ip 127.0.0.2 \
   --dbpath /data/rs2 \
   --logpath /var/log/mongodb/rs2/mongod.log \
   --fork
+
+sleep 1
 
 mongod --replSet rsTest --port 27017 \
   --bind_ip 127.0.0.3 \
@@ -73,17 +77,23 @@ mongod --replSet rsTest --port 27017 \
   --logpath /var/log/mongodb/rs3/mongod.log \
   --fork
 
+sleep 1
+
 mongod --replSet rsTest --port 27017 \
   --bind_ip 127.0.0.4 \
   --dbpath /data/rs4 \
   --logpath /var/log/mongodb/rs4/mongod.log \
   --fork
 
+sleep 1
+
 mongod --replSet rsTest --port 27017 \
   --bind_ip 127.0.0.5 \
   --dbpath /data/rs5 \
   --logpath /var/log/mongodb/rs5/mongod.log \
   --fork
+
+sleep 1
 
 ps aux | grep '[m]ongod'
 
@@ -92,17 +102,18 @@ mongosh --host 127.0.0.1 --port 27017
 rs.initiate({
   _id: "rsTest",
   members: [
-    { _id: 0, host: "127.0.0.1:27017", priority: 1 },
-    { _id: 1, host: "127.0.0.2:27017", priority: 0 },
+    { _id: 0, host: "127.0.0.1:27017", priority: 2 },
+    { _id: 1, host: "127.0.0.2:27017", priority: 1 },
     { _id: 2, host: "127.0.0.3:27017", priority: 0 },
     { _id: 3, host: "127.0.0.4:27017", priority: 0 },
     { _id: 4, host: "127.0.0.5:27017", priority: 0 }
   ]
 })
 
+# # Reconfig priority
 # cfg = rs.conf()
-# cfg.members[0].priority = 1 
-# cfg.members[1].priority = 0
+# cfg.members[0].priority = 2 
+# cfg.members[1].priority = 1
 # cfg.members[2].priority = 0
 # cfg.members[3].priority = 0
 # cfg.members[4].priority = 0
@@ -113,6 +124,6 @@ rs.status()
 db.adminCommand({getDefaultRWConcern: 1})
 
 # kill
-pkill -f 'mongod --replSet rsTest'   # blunt but works for this test setup
+pkill -f 'mongod --replSet rsTest' || ps aux | grep '[m]ongod' 
 
 ```

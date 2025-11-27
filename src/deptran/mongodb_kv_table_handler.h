@@ -10,7 +10,7 @@
 
 namespace janus {
 
-#if defined(JETPACK_MONGODB_RECOVERY) || defined(JETPACK_MONGODB_RECOVERY_V2)
+#if defined(JETPACK_MONGODB_RECOVERY) 
 // Use local loopback in recovery mode to avoid changing legacy defaults.
 constexpr char kMongoDbUri[] = "mongodb://127.0.0.1:27017";
 #else

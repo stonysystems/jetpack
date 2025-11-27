@@ -10,7 +10,7 @@
 #include "../../rrr/reactor/event.h"
 #include <cstdlib>
 
-#ifdef JETPACK_MONGODB_RECOVERY_V2
+#ifdef JETPACK_MONGODB_RECOVERY
 #include "../../../jm_file_signal.h"
 #endif
 
@@ -61,7 +61,7 @@ class MongodbServer : public TxLogServer {
 
   void Setup() override { 
     SimpleRWCommand::SetZeroTime();
-#ifdef JETPACK_MONGODB_RECOVERY_V2
+#ifdef JETPACK_MONGODB_RECOVERY
     // Determine Mongo URI: build replica set list from config for this partition.
     auto cfg = Config::GetConfig();
     auto hosts = cfg->GetReplicaHosts(partition_id_);
@@ -93,7 +93,7 @@ class MongodbServer : public TxLogServer {
     // });
     // execution_thread = std::thread(ExecutionHandler, this, std::ref(mongodb_));
 
-#ifdef JETPACK_MONGODB_RECOVERY_V2
+#ifdef JETPACK_MONGODB_RECOVERY
 	  // Coroutine-based waiter for MongoDB signal with periodic timeout.
 	  Coroutine::CreateRun([this]() {
 	    std::string host;
@@ -109,13 +109,11 @@ class MongodbServer : public TxLogServer {
     }
     Log_info("[MONGODB-FAILOVER] Waiting for mongo signal on JM_Jetpack_%s", host.c_str());
 	    while (true) {
-	      if (jm_signal::exists_key("mongo", "recovery_finish", host)) {
-	        Log_info("[MONGODB-FAILOVER] Received mongo signal on JM_Jetpack_%s", host.c_str());
-	        if (rep_sched_) {
-	          rep_sched_->JetpackRecoveryEntry();
-	        }
-	        break;
-	      }
+      if (jm_signal::exists_key("mongo", "primary_elected", host)) {
+        Log_info("[MONGODB-FAILOVER] Received mongo signal on JM_Jetpack_%s", host.c_str());
+        JetpackRecoveryEntry();
+        break;
+      }
 	      auto sp_e = Reactor::CreateSpEvent<TimeoutEvent>(10 * 1000); // 10ms
 	      sp_e->Wait();
 	    }

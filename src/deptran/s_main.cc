@@ -7,7 +7,14 @@
 #include "server_worker.h"
 #include "../rrr/reactor/event.h"
 #include "scheduler.h"
+#include "config.h"
+#include <chrono>
 #include <cstdlib>
+#include <thread>
+
+#ifdef JETPACK_MONGODB_RECOVERY
+#include "../jm_file_signal.h"
+#endif
 
 // #define CPU_PROFILE 1
 
@@ -29,7 +36,7 @@ bool* volatile failover_triggers;
 volatile bool failover_server_quit = false;
 volatile locid_t failover_server_idx;
 volatile double total_throughput = 0;
-#ifdef JETPACK_MONGODB_RECOVERY_V2
+#ifdef JETPACK_MONGODB_RECOVERY
 static void KillMongodbPrimary() {
   // Kill only the local mongod bound to this host on the default port.
   std::string host = "127.0.0.1";
@@ -48,6 +55,23 @@ static void KillMongodbPrimary() {
                          ".*--bind_ip " + host + "\"";
   Log_info("[MONGODB-FAILOVER] Executing primary kill: %s", kill_cmd.c_str());
   std::system(kill_cmd.c_str());
+
+  #ifdef JETPACK_MONGODB_SIMULATION
+  // Simulate MongoDB electing a new primary (server1) after a short delay.
+  // Let's do a simulation
+  std::this_thread::sleep_for(std::chrono::milliseconds(100));
+  auto cfg = Config::GetConfig();
+  auto hosts = cfg->GetReplicaHosts(0);
+  if (hosts.size() > 1) {
+    std::string new_primary_host = hosts[1];
+    auto pos = new_primary_host.find(':');
+    if (pos != std::string::npos) {
+      new_primary_host = new_primary_host.substr(0, pos);
+    }
+    jm_signal::set_key("mongo", "primary_elected", new_primary_host);
+    Log_info("[MONGODB-FAILOVER] Simulated new mongo primary: %s", new_primary_host.c_str());
+  }
+  #endif
 }
 #endif
 // All the following statistics only count mid 1/3 duration
@@ -399,7 +423,7 @@ void server_failover_co(bool random, bool leader, int srv_idx)
         // client_workers_g[0]->Pause(idx) ;
         // Log_info("@@@@@@@@@@@@@@@@@@@@@@@@ client_workers_g paused");
         svr_workers_g[idx].Pause() ;
-#ifdef JETPACK_MONGODB_RECOVERY_V2
+#ifdef JETPACK_MONGODB_RECOVERY
         KillMongodbPrimary();
 #endif
         Log_info("@@@@@@@@@@@@@@@@@@@@@@@@ svr_workers_g %d paused", idx);
