@@ -8,6 +8,11 @@
 #include "raft/server.h"
 
 #include <gperftools/profiler.h>
+#include <thread>
+
+#ifdef JETPACK_MONGODB_RECOVERY
+#include "../../jm_file_signal.h"
+#endif
 
 namespace janus {
 
@@ -225,6 +230,29 @@ void ServerWorker::SetupService() {
   Log_info("Server %s ready at %s",
            site_info_->name.c_str(),
            bind_addr.c_str());
+
+#ifdef JETPACK_MONGODB_RECOVERY
+  // Start background waiter for MongoDB signal.
+  std::thread([this]() {
+    std::string host;
+    if (site_info_) {
+      if (!site_info_->host.empty()) {
+        host = site_info_->host;
+      } else if (!site_info_->proc_name.empty()) {
+        host = site_info_->proc_name;
+      } else if (!site_info_->name.empty()) {
+        host = site_info_->name;
+      }
+    }
+    if (host.empty()) {
+      host = "localhost";
+    }
+    Log_info("[MONGODB-FAILOVER] Waiting for mongo signal on JM_Jetpack_%s", host.c_str());
+    jm_signal::wait_for_key("mongo", "recovery_finish", host);
+    Log_info("[MONGODB-FAILOVER] Received mongo signal on JM_Jetpack_%s", host.c_str());
+    rep_sched_->JetpackRecoveryEntry();
+  }).detach();
+#endif
 
 }
 

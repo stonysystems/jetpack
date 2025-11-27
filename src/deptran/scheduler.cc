@@ -18,6 +18,11 @@
 
 #include <algorithm>
 #include <gperftools/profiler.h>
+#include <cstdlib>
+
+#ifdef JETPACK_MONGODB_RECOVERY
+#include "../../jm_file_signal.h"
+#endif
 
 namespace janus {
 
@@ -1024,6 +1029,28 @@ void TxLogServer::JetpackResubmit(int sid, int set_size) {
   Log_info("[JETPACK-RECOVERY] Step 8: Broadcasting FinishRecovery to complete recovery");
   
   // Finally, broadcast FinishRecovery to update jepoch and make fast path available
+#ifdef JETPACK_MONGODB_RECOVERY
+  try {
+    std::string host;
+    if (frame_ && frame_->site_info_) {
+      if (!frame_->site_info_->host.empty()) {
+        host = frame_->site_info_->host;
+      } else if (!frame_->site_info_->proc_name.empty()) {
+        host = frame_->site_info_->proc_name;
+      } else if (!frame_->site_info_->name.empty()) {
+        host = frame_->site_info_->name;
+      }
+    }
+    if (host.empty()) {
+      host = "localhost";
+    }
+    jm_signal::set_key("jetpack", "recovery_finish", host);
+    Log_info("[JETPACK-RECOVERY] Wrote finish signal to JM_Jetpack_%s", host.c_str());
+  } catch (const std::exception& ex) {
+    Log_warn("[JETPACK-RECOVERY] Failed to write finish signal: %s", ex.what());
+  }
+#endif
+  
   auto e = commo()->JetpackBroadcastFinishRecovery(partition_id_, site_id_, oepoch_);
   e->Wait();
   

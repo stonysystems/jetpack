@@ -13,7 +13,6 @@ namespace janus {
 #ifdef AWS
 constexpr char kMongoDbUri[] = "mongodb://184.72.49.232:27017";
 #endif
-
 #ifndef AWS
 constexpr char kMongoDbUri[] = "mongodb://130.245.173.103:27017";
 #endif
@@ -23,13 +22,15 @@ constexpr char kCollectionName[] = "KVTable";
 
 class MongodbKVTableHandler {
  private:
+  std::string uri_str_;
   mongocxx::uri uri;
   mongocxx::client client;
   mongocxx::database db;
   mongocxx::collection collection;
  public:
-  MongodbKVTableHandler()
-    : uri(mongocxx::uri(kMongoDbUri)),
+  explicit MongodbKVTableHandler(const std::string& uri_str = kMongoDbUri)
+    : uri_str_(uri_str),
+      uri(mongocxx::uri(uri_str_)),
       client(mongocxx::client(uri)),
       db(client[kDatabaseName]),
       collection(db[kCollectionName]) {

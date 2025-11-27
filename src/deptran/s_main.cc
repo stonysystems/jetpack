@@ -7,6 +7,7 @@
 #include "server_worker.h"
 #include "../rrr/reactor/event.h"
 #include "scheduler.h"
+#include <cstdlib>
 
 // #define CPU_PROFILE 1
 
@@ -28,6 +29,22 @@ bool* volatile failover_triggers;
 volatile bool failover_server_quit = false;
 volatile locid_t failover_server_idx;
 volatile double total_throughput = 0;
+#ifdef JETPACK_MONGODB_RECOVERY
+static void KillMongodbPrimary() {
+  // Default to first replica on the standard MongoDB port; override with env if needed.
+  const char* kill_cmd = std::getenv("JETPACK_MONGODB_KILL_CMD");
+  if (kill_cmd == nullptr) {
+    kill_cmd = "pkill -f \"mongod.*27017\"";
+  }
+  Log_info("[MONGODB-FAILOVER] Executing primary kill: %s", kill_cmd);
+  int rc = std::system(kill_cmd);
+  if (rc != 0) {
+    Log_warn("[MONGODB-FAILOVER] Kill command returned rc=%d", rc);
+  } else {
+    Log_info("[MONGODB-FAILOVER] Kill command succeeded");
+  }
+}
+#endif
 // All the following statistics only count mid 1/3 duration
 // 2 \subseteq 1 \subseteq 0, 4 \subseteq 3, 5 = 2 \cup 4, 2 \cap 4 = \emptyset
 // 0: all fast path attempts (even fail or slower than original path), 1 RTT
@@ -377,6 +394,9 @@ void server_failover_co(bool random, bool leader, int srv_idx)
         // client_workers_g[0]->Pause(idx) ;
         // Log_info("@@@@@@@@@@@@@@@@@@@@@@@@ client_workers_g paused");
         svr_workers_g[idx].Pause() ;
+#ifdef JETPACK_MONGODB_RECOVERY
+        KillMongodbPrimary();
+#endif
         Log_info("@@@@@@@@@@@@@@@@@@@@@@@@ svr_workers_g %d paused", idx);
         for (int i = 0; i < client_workers_g.size() ; ++i)
         {

@@ -6,6 +6,7 @@
 #include "../mongodb_kv_table_handler.h"
 #include "../mongodb_connection_thread_pool.h"
 #include "../communicator.h"
+#include <cstdlib>
 
 namespace janus {
 
@@ -17,6 +18,7 @@ class MongodbServer : public TxLogServer {
 #ifndef AWS
   const int mongodb_connection_ = 80; // seems maximum connextion between 95 * 5 and 100 * 5 at local
 #endif
+  std::string mongo_uri_{kMongoDbUri};
   shared_ptr<MongodbConnectionThreadPool> mongodb_;
   std::thread execution_thread;
 
@@ -51,9 +53,33 @@ class MongodbServer : public TxLogServer {
 
  public:
 
-  void Setup() override {
+  void Setup() override { 
     SimpleRWCommand::SetZeroTime();
-    mongodb_ = make_shared<MongodbConnectionThreadPool>(loc_id_ == 0 ? mongodb_connection_ : 0);
+#ifdef JETPACK_MONGODB_RECOVERY
+    // Determine Mongo URI: prefer env override, else co-located host, else loopback.
+    if (frame_ && frame_->site_info_) {
+      std::string host;
+      if (!frame_->site_info_->host.empty()) {
+        host = frame_->site_info_->host;
+      } else if (!frame_->site_info_->proc_name.empty()) {
+        host = frame_->site_info_->proc_name;
+      } else if (!frame_->site_info_->name.empty()) {
+        host = frame_->site_info_->name;
+      }
+      if (!host.empty()) {
+        mongo_uri_ = "mongodb://" + host + ":27017";
+      }
+    }
+    const char* env_uri = std::getenv("JM_MONGODB_URI");
+    if (env_uri && *env_uri) {
+      mongo_uri_ = env_uri;
+    }
+    mongodb_ = make_shared<MongodbConnectionThreadPool>(mongodb_connection_, mongo_uri_);
+#else
+    // Default legacy behavior: only leader connects using the legacy fixed URI.
+    mongo_uri_ = kMongoDbUri;
+    mongodb_ = make_shared<MongodbConnectionThreadPool>(loc_id_ == 0 ? mongodb_connection_ : 0, mongo_uri_);
+#endif
     // Coroutine::CreateRun([&]() { 
     //   ExecutionHandler(this, mongodb_); 
     // });

@@ -40,6 +40,7 @@ class MongodbConnectionThreadPool {
 
   int thread_num_;
   int round_robin_ = 0;
+  std::string uri_;
 
   std::vector<std::thread> threads_;
   std::vector<std::shared_ptr<MongodbKVTableHandler>> mongodb_handlers_{10000};
@@ -84,18 +85,21 @@ class MongodbConnectionThreadPool {
     }
   }
 
-  void static createHandlers(int i, std::vector<std::shared_ptr<janus::MongodbKVTableHandler>>& handlers) {
-    handlers[i] = std::make_shared<janus::MongodbKVTableHandler>();
+  void static createHandlers(int i,
+                             const std::string uri,
+                             std::vector<std::shared_ptr<janus::MongodbKVTableHandler>>& handlers) {
+    handlers[i] = std::make_shared<janus::MongodbKVTableHandler>(uri);
   }
 
-  MongodbConnectionThreadPool(int thread_num) : thread_num_(thread_num) {
+  MongodbConnectionThreadPool(int thread_num, const std::string& uri)
+      : thread_num_(thread_num), uri_(uri) {
     for (int i = 0; i < thread_num; i++) {
       request_queues_.push_back(std::make_shared<CommandQueue>());
       durations_.push_back(std::make_shared<Distribution>());
     }
     std::vector<std::thread> create_connection_threads;
     for (int i = 0; i < thread_num; i++) {
-      create_connection_threads.emplace_back(createHandlers, i, std::ref(mongodb_handlers_));
+      create_connection_threads.emplace_back(createHandlers, i, uri_, std::ref(mongodb_handlers_));
     }
     for (auto& t : create_connection_threads) {
       t.join();
