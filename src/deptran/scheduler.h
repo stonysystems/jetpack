@@ -187,7 +187,8 @@ class Witness {
   };
   bool belongs_to_leader_{false}; // i.e. This server can propose value // discard
   TxLogServer* owner_{nullptr};
-  int witness_size_ = 0;
+  int witness_size_ = 0; // number of keys tracked in candidates_
+  int witness_cmd_count_ = 0; // total number of commands tracked
   Distribution witness_size_distribution_;
 
 #ifdef WITNESS_LOG_DEBUG
@@ -214,6 +215,7 @@ class Witness {
   // return 50pct, 90pct, 99pct, ave of the witness_size_distribution_
   std::vector<double> witness_size_distribution();
   int size() const { return witness_size_; }
+  int cmd_size() const { return witness_cmd_count_; }
   /* Recover related begin */
   bool has_cmd_to_recover(key_t key) {
     return candidates_[key].has_cmd_to_recover();

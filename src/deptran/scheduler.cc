@@ -542,39 +542,45 @@ bool Witness::push_back(const shared_ptr<Marshallable>& cmd) {
   SimpleRWCommand parsed_cmd = SimpleRWCommand(cmd);
   key_t key = parsed_cmd.key_;
   uint64_t cmd_id = SimpleRWCommand::CombineInt32(parsed_cmd.cmd_id_.first, parsed_cmd.cmd_id_.second);
+  auto& bucket = candidates_[key];
+  bool was_empty = bucket.size() == 0;
   
 #ifdef JETPACK_RECOVERY_DEBUG
   Log_info("[JETPACK-DEBUG] Witness::push_back called for key=%d, cmd_id=%lu", key, cmd_id);
 #endif
 
 #ifdef READ_NOT_CONFLICT_OPTIMIZATION
-  if (candidates_[key].total_write() == 0) {
+  if (bucket.total_write() == 0) {
 #endif
 #ifndef READ_NOT_CONFLICT_OPTIMIZATION
-  if (candidates_[key].size() == 0) {
+  if (bucket.size() == 0) {
 #endif
     // not exist conflict
     // Log_info("[JETPACK-Witness] candidates_[%d].push_back %lu", key, cmd_id);
-    candidates_[key].push_back(cmd_id, cmd, parsed_cmd.IsWrite());
+    bucket.push_back(cmd_id, cmd, parsed_cmd.IsWrite());
 #ifdef JETPACK_RECOVERY_DEBUG
     Log_info("[JETPACK-DEBUG] Added cmd to candidates[%d], no conflict", key);
 #endif
 #ifdef WITNESS_LOG_DEBUG
     witness_log_.push_back(WitnessLog(0, cmd, 1, witness_size_));
 #endif
-    witness_size_distribution_.mid_time_append(++witness_size_);
+    witness_cmd_count_++;
+    if (was_empty) {
+      witness_size_distribution_.mid_time_append(++witness_size_);
+    }
     return true;
   } else {
     // exist conflict, candidates_[key].size() >= 1
     // Log_info("[JETPACK-Witness] candidates_[%d].push_back %lu", key, cmd_id);
-    candidates_[key].push_back(cmd_id, cmd, parsed_cmd.IsWrite());
+    bucket.push_back(cmd_id, cmd, parsed_cmd.IsWrite());
 #ifdef JETPACK_RECOVERY_DEBUG
     Log_info("[JETPACK-DEBUG] Added cmd to candidates[%d], WITH conflict (size now=%zu)", 
-             key, candidates_[key].size());
+             key, bucket.size());
 #endif
 #ifdef WITNESS_LOG_DEBUG
     witness_log_.push_back(WitnessLog(0, cmd, 0, witness_size_));
 #endif
+    witness_cmd_count_++;
     return false;
   }
 }
@@ -582,11 +588,15 @@ bool Witness::push_back(const shared_ptr<Marshallable>& cmd) {
 int Witness::remove(const shared_ptr<Marshallable>& cmd) {
   if (cmd->kind_ != MarshallDeputy::CMD_TPC_BATCH) {
     SimpleRWCommand parsed_cmd = SimpleRWCommand(cmd);
-    bool removed = candidates_[parsed_cmd.key_].remove(SimpleRWCommand::CombineInt32(parsed_cmd.cmd_id_.first, parsed_cmd.cmd_id_.second));
+    auto& bucket = candidates_[parsed_cmd.key_];
+    size_t before_size = bucket.size();
+    bool removed = bucket.remove(SimpleRWCommand::CombineInt32(parsed_cmd.cmd_id_.first, parsed_cmd.cmd_id_.second));
     if (removed) {
-      witness_size_distribution_.mid_time_append(--witness_size_);
-      // if (candidates_[parsed_cmd.key_].size() == 0)
-      //   candidates_.erase(parsed_cmd.key_);
+      witness_cmd_count_--;
+      if (before_size == 1) {
+        witness_size_distribution_.mid_time_append(--witness_size_);
+        // if (bucket.size() == 0) candidates_.erase(parsed_cmd.key_);
+      }
     }
 #ifdef WITNESS_LOG_DEBUG
     witness_log_.push_back(WitnessLog(1, cmd, removed, witness_size_));
@@ -597,12 +607,16 @@ int Witness::remove(const shared_ptr<Marshallable>& cmd) {
     int total_removed = 0;
     for (auto& c: cmds->cmds_) {
       SimpleRWCommand parsed_cmd = SimpleRWCommand(c);
-      bool removed = candidates_[parsed_cmd.key_].remove(SimpleRWCommand::CombineInt32(parsed_cmd.cmd_id_.first, parsed_cmd.cmd_id_.second));
+      auto& bucket = candidates_[parsed_cmd.key_];
+      size_t before_size = bucket.size();
+      bool removed = bucket.remove(SimpleRWCommand::CombineInt32(parsed_cmd.cmd_id_.first, parsed_cmd.cmd_id_.second));
       if (removed) {
-        witness_size_distribution_.mid_time_append(--witness_size_);
+        witness_cmd_count_--;
+        if (before_size == 1) {
+          witness_size_distribution_.mid_time_append(--witness_size_);
+          // if (bucket.size() == 0) candidates_.erase(parsed_cmd.key_);
+        }
         total_removed++;
-        // if (candidates_[parsed_cmd.key_].size() == 0)
-        //   candidates_.erase(parsed_cmd.key_);
       }
 #ifdef WITNESS_LOG_DEBUG
       witness_log_.push_back(WitnessLog(1, c, removed, witness_size_));
@@ -676,6 +690,7 @@ shared_ptr<VecRecData> Witness::id_set() {
 void Witness::reset() {
   candidates_.clear();
   witness_size_ = 0;
+  witness_cmd_count_ = 0;
   witness_size_distribution_ = Distribution();
   
   // Reset recovery related fields
