@@ -299,7 +299,7 @@ class ClassicServiceImpl : public ClassicService {
                            epoch_t* reply_oepoch,
                            MarshallDeputy* reply_old_view,
                            MarshallDeputy* reply_new_view,
-                           MarshallDeputy* cmd_batch,
+                           MarshallDeputy* id_batch,
                            rrr::DeferredReply* defer) override;
   
   void JetpackPullIdSet(const epoch_t& jepoch,
@@ -326,8 +326,14 @@ class ClassicServiceImpl : public ClassicService {
   void JetpackRecordCmd(const epoch_t& jepoch,
                         const epoch_t& oepoch,
                         const int32_t& sid,
-                        const int32_t& rid,
-                        const MarshallDeputy& cmd_batch, 
+                        const MarshallDeputy& record_id_batch,
+                        const MarshallDeputy& missing_id_batch, 
+                        bool_t* ok,
+                        epoch_t* reply_jepoch,
+                        epoch_t* reply_oepoch,
+                        MarshallDeputy* reply_old_view,
+                        MarshallDeputy* reply_new_view,
+                        MarshallDeputy* cmd_batch, 
                         rrr::DeferredReply* defer) override;
  
   void JetpackPrepare(const epoch_t& jepoch,
@@ -341,14 +347,12 @@ class ClassicServiceImpl : public ClassicService {
                       ballot_t* reply_max_seen_ballot,
                       ballot_t* accepted_ballot,
                       int32_t* replied_sid,
-                      int32_t* replied_set_size,
                       rrr::DeferredReply* defer) override;
  
   void JetpackAccept(const epoch_t& jepoch,
                      const epoch_t& oepoch,
                      const ballot_t& max_seen_ballot,
                      const int32_t& sid,
-                     const int32_t& set_size,
                      bool_t* ok,
                      epoch_t* reply_jepoch,
                      epoch_t* reply_oepoch,
@@ -360,20 +364,7 @@ class ClassicServiceImpl : public ClassicService {
   void JetpackCommit(const epoch_t& jepoch,
                      const epoch_t& oepoch, 
                      const int32_t& sid, 
-                     const int32_t& set_size, 
                      rrr::DeferredReply* defer) override;
- 
-  void JetpackPullRecSetIns(const epoch_t& jepoch,
-                            const epoch_t& oepoch,
-                            const int32_t& sid,
-                            const int32_t& rid,
-                            bool_t* ok,
-                            epoch_t* reply_jepoch,
-                            epoch_t* reply_oepoch,
-                            MarshallDeputy* reply_old_view,
-                            MarshallDeputy* reply_new_view,
-                            MarshallDeputy* cmd,
-                            rrr::DeferredReply* defer) override;
 
   void JetpackFinishRecovery(const epoch_t& oepoch,
                              rrr::DeferredReply* defer) override;

@@ -152,19 +152,16 @@ class JetpackPullRecoveryQuorumEvent: public QuorumEvent {
   void FeedResponse(bool y, epoch_t jepoch, epoch_t oepoch, const MarshallDeputy& batch_md) {
     if (y) {
       VoteYes();
-      auto batch = std::dynamic_pointer_cast<KeyCmdBatchData>(batch_md.sp_data_);
+      auto batch = std::dynamic_pointer_cast<KeyCmdIdBatchData>(batch_md.sp_data_);
       if (batch) {
         for (size_t i = 0; i < batch->Size(); i++) {
-          auto cmd = batch->GetCommand(i);
-          if (!cmd) {
-            continue;
-          }
-          auto& state = key_states_[batch->GetKey(i)];
-          uint64_t cmd_id = SimpleRWCommand::GetCombinedCmdID(cmd);
+          auto key = batch->GetKey(i);
+          auto cmd_id = batch->GetCmdId(i);
+          auto& state = key_states_[key];
           int count = ++state.cmd_counts_[cmd_id];
           if (count > state.max_count) {
             state.max_count = count;
-            state.max_cmd = cmd;
+            state.max_cmd_id = cmd_id;
           }
         }
       }
@@ -179,13 +176,13 @@ class JetpackPullRecoveryQuorumEvent: public QuorumEvent {
     }
   }
 
-  std::vector<std::pair<key_t, shared_ptr<Marshallable>>> GetRecoveredCommands() const {
-    std::vector<std::pair<key_t, shared_ptr<Marshallable>>> result;
+  std::vector<std::pair<key_t, uint64_t>> GetRecoveredKeyIds() const {
+    std::vector<std::pair<key_t, uint64_t>> result;
     result.reserve(key_states_.size());
     for (const auto& kv : key_states_) {
       const auto& state = kv.second;
-      if (state.max_cmd && state.max_count >= majority_threshold_) {
-        result.emplace_back(kv.first, state.max_cmd);
+      if (state.max_cmd_id != static_cast<uint64_t>(-1) && state.max_count >= majority_threshold_) {
+        result.emplace_back(kv.first, state.max_cmd_id);
       }
     }
     std::sort(result.begin(), result.end(),
@@ -200,7 +197,7 @@ class JetpackPullRecoveryQuorumEvent: public QuorumEvent {
   struct KeyState {
     std::unordered_map<uint64_t, int> cmd_counts_;
     int max_count = 0;
-    shared_ptr<Marshallable> max_cmd = nullptr;
+    uint64_t max_cmd_id = static_cast<uint64_t>(-1);
   };
 
   std::unordered_map<key_t, KeyState> key_states_{};
@@ -283,6 +280,47 @@ class JetpackPullCmdQuorumEvent: public QuorumEvent {
   int majority_threshold_{0};
 };
 
+class JetpackRecordCmdQuorumEvent: public QuorumEvent {
+ public:
+  using QuorumEvent::QuorumEvent;
+  epoch_t max_jepoch_ = -1;
+  epoch_t max_oepoch_ = -1;
+  std::unordered_map<key_t, shared_ptr<Marshallable>> recovered_cmds_;
+
+  void FeedResponse(bool y, epoch_t jepoch, epoch_t oepoch, const MarshallDeputy& batch_md) {
+    if (y) {
+      VoteYes();
+      auto batch = std::dynamic_pointer_cast<KeyCmdBatchData>(batch_md.sp_data_);
+      if (batch) {
+        for (size_t i = 0; i < batch->Size(); i++) {
+          key_t key = batch->GetKey(i);
+          auto cmd = batch->GetCommand(i);
+          if (cmd && !recovered_cmds_.count(key)) {
+            recovered_cmds_.emplace(key, cmd);
+          }
+        }
+      }
+    } else {
+      VoteNo();
+      if (jepoch > max_jepoch_) {
+        max_jepoch_ = jepoch;
+      }
+      if (oepoch > max_oepoch_) {
+        max_oepoch_ = oepoch;
+      }
+    }
+  }
+
+  std::vector<std::pair<key_t, shared_ptr<Marshallable>>> GetRecoveredCmds() const {
+    std::vector<std::pair<key_t, shared_ptr<Marshallable>>> res;
+    res.reserve(recovered_cmds_.size());
+    for (const auto& kv : recovered_cmds_) {
+      res.emplace_back(kv.first, kv.second);
+    }
+    return res;
+  }
+};
+
 class JetpackPrepareQuorumEvent: public QuorumEvent {
  public:
   using QuorumEvent::QuorumEvent;
@@ -291,17 +329,15 @@ class JetpackPrepareQuorumEvent: public QuorumEvent {
   ballot_t max_accepted_ballot_ = -1;
   ballot_t max_seen_ballot_ = -1;
   int accepted_sid_ = -1;
-  int accepted_set_size_ = 0;
   bool has_accepted_value_ = false;
   
-  void FeedResponse(bool y, epoch_t jepoch, epoch_t oepoch, ballot_t accepted_ballot, int sid, int set_size, ballot_t max_seen_ballot) {
+  void FeedResponse(bool y, epoch_t jepoch, epoch_t oepoch, ballot_t accepted_ballot, int sid, ballot_t max_seen_ballot) {
     if (y) {
       VoteYes();
       // Track the highest accepted ballot and its value
       if (accepted_ballot > max_accepted_ballot_) {
         max_accepted_ballot_ = accepted_ballot;
         accepted_sid_ = sid;
-        accepted_set_size_ = set_size;
         has_accepted_value_ = true;
       }
     } else {
@@ -327,9 +363,6 @@ class JetpackPrepareQuorumEvent: public QuorumEvent {
     return accepted_sid_;
   }
   
-  int GetSetSize() {
-    return accepted_set_size_;
-  }
 };
 
 class JetpackAcceptQuorumEvent: public QuorumEvent {
@@ -572,22 +605,20 @@ class Communicator {
                                                                    epoch_t jepoch, epoch_t oepoch);
   shared_ptr<JetpackPullCmdQuorumEvent> JetpackBroadcastPullCmd(parid_t par_id, locid_t loc_id, 
                                                                const std::vector<key_t>& keys, epoch_t jepoch, epoch_t oepoch);
-  shared_ptr<QuorumEvent> JetpackBroadcastRecordCmd(parid_t par_id, locid_t loc_id,
-                                                    epoch_t jepoch, epoch_t oepoch, 
-                                                    int sid, int rid, 
-                                                    const std::vector<std::pair<key_t, shared_ptr<Marshallable>>>& cmds);
+  shared_ptr<JetpackRecordCmdQuorumEvent> JetpackBroadcastRecordCmd(parid_t par_id, locid_t loc_id,
+                                                                    epoch_t jepoch, epoch_t oepoch, 
+                                                                    int sid, 
+                                                                    const std::vector<std::pair<key_t, uint64_t>>& record_key_ids,
+                                                                    const std::vector<std::pair<key_t, uint64_t>>& missing_key_ids);
   shared_ptr<JetpackPrepareQuorumEvent> JetpackBroadcastPrepare(parid_t par_id, locid_t loc_id, 
                                                                epoch_t jepoch, epoch_t oepoch, 
                                                                ballot_t max_seen_ballot);
   shared_ptr<JetpackAcceptQuorumEvent> JetpackBroadcastAccept(parid_t par_id, locid_t loc_id, 
                                                             epoch_t jepoch, epoch_t oepoch, 
-                                                            ballot_t max_seen_ballot, int sid, int set_size);
+                                                            ballot_t max_seen_ballot, int sid);
   shared_ptr<QuorumEvent> JetpackBroadcastCommit(parid_t par_id, locid_t loc_id, 
                                                  epoch_t jepoch, epoch_t oepoch, 
-                                                 int sid, int set_size);
-  shared_ptr<JetpackPullRecSetInsQuorumEvent> JetpackBroadcastPullRecSetIns(parid_t par_id, locid_t loc_id, 
-                                                                           epoch_t jepoch, epoch_t oepoch, 
-                                                                           int sid, int rid);
+                                                 int sid);
   shared_ptr<QuorumEvent> JetpackBroadcastFinishRecovery(parid_t par_id, locid_t loc_id, epoch_t oepoch);
   /* Jetpack recovery end */
 };

@@ -1413,12 +1413,11 @@ shared_ptr<JetpackPullRecoveryQuorumEvent> Communicator::JetpackBroadcastPullRec
       }
       bool_t ok;
       epoch_t reply_jepoch, reply_oepoch;
-      MarshallDeputy reply_old_view, reply_new_view, cmd_batch;
-      fu->get_reply() >> ok >> reply_jepoch >> reply_oepoch >> reply_old_view >> reply_new_view >> cmd_batch;
-      auto batch = std::dynamic_pointer_cast<KeyCmdBatchData>(cmd_batch.sp_data_);
-      Log_info("[JETPACK-RECOVERY] PullRecovery response ok=%d entries=%zu size_bytes=%zu",
-               ok, batch ? batch->Size() : 0, GetKeyCmdBatchSize(batch));
-      e->FeedResponse(ok, reply_jepoch, reply_oepoch, cmd_batch);
+      MarshallDeputy reply_old_view, reply_new_view, key_id_batch;
+      fu->get_reply() >> ok >> reply_jepoch >> reply_oepoch >> reply_old_view >> reply_new_view >> key_id_batch;
+      auto batch = std::dynamic_pointer_cast<KeyCmdIdBatchData>(key_id_batch.sp_data_);
+      Log_info("[JETPACK-RECOVERY] PullRecovery response ok=%d entries=%zu", ok, batch ? batch->Size() : 0);
+      e->FeedResponse(ok, reply_jepoch, reply_oepoch, key_id_batch);
     };
     auto fu = proxy->async_JetpackPullRecovery(old_view_deputy, new_view_deputy, jepoch, oepoch, fuattr);
     fus.push_back(fu);
@@ -1539,27 +1538,33 @@ shared_ptr<JetpackPullCmdQuorumEvent> Communicator::JetpackBroadcastPullCmd(pari
   return e;
 }
 
-shared_ptr<QuorumEvent> Communicator::JetpackBroadcastRecordCmd(parid_t par_id, locid_t loc_id,
+shared_ptr<JetpackRecordCmdQuorumEvent> Communicator::JetpackBroadcastRecordCmd(parid_t par_id, locid_t loc_id,
                                                                epoch_t jepoch, epoch_t oepoch, 
-                                                               int sid, int rid, 
-                                                               const std::vector<std::pair<key_t, shared_ptr<Marshallable>>>& cmds) {
-  // Log_info("[JETPACK-DEBUG] JetpackBroadcastRecordCmd called: par_id=%d, loc_id=%d, sid=%d, rid=%d", 
-  //          par_id, loc_id, sid, rid);
+                                                               int sid, 
+                                                               const std::vector<std::pair<key_t, uint64_t>>& record_key_ids,
+                                                               const std::vector<std::pair<key_t, uint64_t>>& missing_key_ids) {
+  // Log_info("[JETPACK-DEBUG] JetpackBroadcastRecordCmd called: par_id=%d, loc_id=%d, sid=%d, , 
+  //          par_id, loc_id, sid);
   
   int n = Config::GetConfig()->GetPartitionSize(par_id);
-  auto e = Reactor::CreateSpEvent<QuorumEvent>(n, n/2+1);
+  auto e = Reactor::CreateSpEvent<JetpackRecordCmdQuorumEvent>(n, n/2+1);
   auto proxies = rpc_par_proxies_[par_id];
   vector<Future*> fus;
 	WAN_WAIT;
   
-  auto batch_data = std::make_shared<KeyCmdBatchData>();
-  for (const auto& entry : cmds) {
-    batch_data->AddEntry(entry.first, entry.second);
+  auto record_batch = std::make_shared<KeyCmdIdBatchData>();
+  for (const auto& entry : record_key_ids) {
+    record_batch->AddEntry(entry.first, entry.second);
   }
-  Log_info("[JETPACK-RECOVERY] RecordCmd batch entries=%zu size_bytes=%zu sid=%d rid=%d",
-           batch_data->Size(), GetKeyCmdBatchSize(batch_data), sid, rid);
-  MarshallDeputy cmd_deputy;
-  cmd_deputy.SetMarshallable(batch_data);
+  auto missing_batch = std::make_shared<KeyCmdIdBatchData>();
+  for (const auto& entry : missing_key_ids) {
+    missing_batch->AddEntry(entry.first, entry.second);
+  }
+  Log_info("[JETPACK-RECOVERY] RecordCmd batch entries=%zu missing=%zu sid=%d",
+           record_batch->Size(), missing_batch->Size(), sid);
+  MarshallDeputy record_md, missing_md;
+  record_md.SetMarshallable(record_batch);
+  missing_md.SetMarshallable(missing_batch);
   
   // Log_info("[JETPACK-DEBUG] Broadcasting RecordCmd to %zu sites, need %d votes", proxies.size(), n/2+1);
   
@@ -1580,11 +1585,14 @@ shared_ptr<QuorumEvent> Communicator::JetpackBroadcastRecordCmd(parid_t par_id, 
         e->VoteNo();  // Vote no on error to prevent hanging
         return;
       }
-      // Log_info("[JETPACK-DEBUG] RecordCmd success from site %d", p.first);
-      e->VoteYes();
+      bool_t ok;
+      epoch_t reply_jepoch, reply_oepoch;
+      MarshallDeputy reply_old_view, reply_new_view, cmd_batch;
+      fu->get_reply() >> ok >> reply_jepoch >> reply_oepoch >> reply_old_view >> reply_new_view >> cmd_batch;
+      e->FeedResponse(ok, reply_jepoch, reply_oepoch, cmd_batch);
     };
     // Log_info("[JETPACK-DEBUG] Sending RecordCmd to site %d", p.first);
-    auto fu = proxy->async_JetpackRecordCmd(jepoch, oepoch, sid, rid, cmd_deputy, fuattr);
+    auto fu = proxy->async_JetpackRecordCmd(jepoch, oepoch, sid, record_md, missing_md, fuattr);
     fus.push_back(fu);
   }
   return e;
@@ -1624,10 +1632,10 @@ shared_ptr<JetpackPrepareQuorumEvent> Communicator::JetpackBroadcastPrepare(pari
       MarshallDeputy reply_old_view, reply_new_view;
       ballot_t reply_max_seen_ballot;
       ballot_t accepted_ballot;
-      int replied_sid, replied_set_size;
+      int replied_sid;
       fu->get_reply() >> ok >> reply_jepoch >> reply_oepoch >> reply_old_view >> reply_new_view 
-                     >> reply_max_seen_ballot >> accepted_ballot >> replied_sid >> replied_set_size;
-      e->FeedResponse(ok, reply_jepoch, reply_oepoch, accepted_ballot, replied_sid, replied_set_size, reply_max_seen_ballot);
+                     >> reply_max_seen_ballot >> accepted_ballot >> replied_sid;
+      e->FeedResponse(ok, reply_jepoch, reply_oepoch, accepted_ballot, replied_sid, reply_max_seen_ballot);
     };
     auto fu = proxy->async_JetpackPrepare(jepoch, oepoch, max_seen_ballot, fuattr);
     fus.push_back(fu);
@@ -1637,7 +1645,7 @@ shared_ptr<JetpackPrepareQuorumEvent> Communicator::JetpackBroadcastPrepare(pari
 
 shared_ptr<JetpackAcceptQuorumEvent> Communicator::JetpackBroadcastAccept(parid_t par_id, locid_t loc_id, 
                                                                           epoch_t jepoch, epoch_t oepoch, 
-                                                                          ballot_t max_seen_ballot, int sid, int set_size) {
+                                                                          ballot_t max_seen_ballot, int sid) {
   int n = Config::GetConfig()->GetPartitionSize(par_id);
   auto e = Reactor::CreateSpEvent<JetpackAcceptQuorumEvent>(n, n/2+1);
   auto proxies = rpc_par_proxies_[par_id];
@@ -1663,13 +1671,13 @@ shared_ptr<JetpackAcceptQuorumEvent> Communicator::JetpackBroadcastAccept(parid_
       fu->get_reply() >> reply_max_seen_ballot;
       e->FeedResponse(ok, reply_jepoch, reply_oepoch, reply_max_seen_ballot);
     };
-    auto fu = proxy->async_JetpackAccept(jepoch, oepoch, max_seen_ballot, sid, set_size, fuattr);
+    auto fu = proxy->async_JetpackAccept(jepoch, oepoch, max_seen_ballot, sid, fuattr);
     fus.push_back(fu);
   }
   return e;
 }
 
-shared_ptr<QuorumEvent> Communicator::JetpackBroadcastCommit(parid_t par_id, locid_t loc_id, epoch_t jepoch, epoch_t oepoch, int sid, int set_size) {
+shared_ptr<QuorumEvent> Communicator::JetpackBroadcastCommit(parid_t par_id, locid_t loc_id, epoch_t jepoch, epoch_t oepoch, int sid) {
   int n = Config::GetConfig()->GetPartitionSize(par_id);
   auto e = Reactor::CreateSpEvent<QuorumEvent>(n, n/2+1);
   auto proxies = rpc_par_proxies_[par_id];
@@ -1685,38 +1693,7 @@ shared_ptr<QuorumEvent> Communicator::JetpackBroadcastCommit(parid_t par_id, loc
       }
       e->VoteYes();
     };
-    auto fu = proxy->async_JetpackCommit(jepoch, oepoch, sid, set_size, fuattr);
-    fus.push_back(fu);
-  }
-  return e;
-}
-
-shared_ptr<JetpackPullRecSetInsQuorumEvent> Communicator::JetpackBroadcastPullRecSetIns(parid_t par_id, locid_t loc_id, epoch_t jepoch, epoch_t oepoch, int sid, int rid) {
-  int n = Config::GetConfig()->GetPartitionSize(par_id);
-  auto e = Reactor::CreateSpEvent<JetpackPullRecSetInsQuorumEvent>(n, n/2+1);
-  auto proxies = rpc_par_proxies_[par_id];
-  vector<Future*> fus;
-	WAN_WAIT;
-  for (auto& p : proxies) {
-    auto proxy = (ClassicProxy*) p.second;
-    FutureAttr fuattr;
-    fuattr.callback = [e](Future* fu) {
-      if (fu->get_error_code() != 0) {
-        Log_info("Get a error message in reply");
-        return;
-      }
-      bool_t ok;
-      epoch_t reply_jepoch, reply_oepoch;
-      MarshallDeputy reply_old_view, reply_new_view, cmd;
-      fu->get_reply() >> ok;
-      fu->get_reply() >> reply_jepoch;
-      fu->get_reply() >> reply_oepoch;
-      fu->get_reply() >> reply_old_view;
-      fu->get_reply() >> reply_new_view;
-      fu->get_reply() >> cmd;
-      e->FeedResponse(ok, reply_jepoch, reply_oepoch, cmd);
-    };
-    auto fu = proxy->async_JetpackPullRecSetIns(jepoch, oepoch, sid, rid, fuattr);
+    auto fu = proxy->async_JetpackCommit(jepoch, oepoch, sid, fuattr);
     fus.push_back(fu);
   }
   return e;

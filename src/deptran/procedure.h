@@ -330,6 +330,57 @@ class KeyCmdBatchData : public Marshallable {
   }
 };
 
+class KeyCmdIdBatchData : public Marshallable {
+ public:
+  std::vector<key_t> keys_;
+  std::vector<uint64_t> cmd_ids_;
+
+  KeyCmdIdBatchData() : Marshallable(MarshallDeputy::CMD_KEY_CMD_ID_BATCH) {}
+
+  void AddEntry(key_t key, uint64_t cmd_id) {
+    keys_.push_back(key);
+    cmd_ids_.push_back(cmd_id);
+  }
+
+  size_t Size() const {
+    verify(keys_.size() == cmd_ids_.size());
+    return keys_.size();
+  }
+
+  key_t GetKey(size_t idx) const {
+    verify(idx < keys_.size());
+    return keys_[idx];
+  }
+
+  uint64_t GetCmdId(size_t idx) const {
+    verify(idx < cmd_ids_.size());
+    return cmd_ids_[idx];
+  }
+
+  Marshal& ToMarshal(Marshal& m) const override {
+    verify(keys_.size() == cmd_ids_.size());
+    int32_t sz = keys_.size();
+    m << sz;
+    for (int32_t i = 0; i < sz; i++) {
+      m << keys_[i];
+      m << cmd_ids_[i];
+    }
+    return m;
+  }
+
+  Marshal& FromMarshal(Marshal& m) override {
+    int32_t sz = 0;
+    m >> sz;
+    keys_.resize(sz);
+    cmd_ids_.resize(sz);
+    for (int32_t i = 0; i < sz; i++) {
+      m >> keys_[i];
+      m >> cmd_ids_[i];
+    }
+    return m;
+  }
+};
+
 /**
  * input ready levels:
  *   1. shard ready

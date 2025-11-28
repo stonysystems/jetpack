@@ -353,7 +353,7 @@ abstract service Classic {
                             epoch_t reply_oepoch,
                             MarshallDeputy reply_old_view,
                             MarshallDeputy reply_new_view,
-                            MarshallDeputy cmd_batch);
+                            MarshallDeputy key_id_batch);
 
   defer JetpackPullIdSet(epoch_t jepoch,
                          epoch_t oepoch |
@@ -377,9 +377,15 @@ abstract service Classic {
   defer JetpackRecordCmd(epoch_t jepoch,
                          epoch_t oepoch,
                          int32_t sid,
-                         int32_t rid,
+                         MarshallDeputy record_id_batch,
+                         MarshallDeputy missing_id_batch |
+                         bool_t ok,
+                         epoch_t reply_jepoch,
+                         epoch_t reply_oepoch,
+                         MarshallDeputy reply_old_view,
+                         MarshallDeputy reply_new_view,
                          MarshallDeputy cmd_batch);
-  
+
   defer JetpackPrepare(epoch_t jepoch,
                        epoch_t oepoch,
                        ballot_t max_seen_ballot |
@@ -390,14 +396,12 @@ abstract service Classic {
                        MarshallDeputy reply_new_view,
                        ballot_t reply_max_seen_ballot,
                        ballot_t accepted_ballot,
-                       int32_t replied_sid,
-                       int32_t replied_set_size);
-  
+                       int32_t replied_sid);
+
   defer JetpackAccept(epoch_t jepoch,
                       epoch_t oepoch,
                       ballot_t max_seen_ballot,
-                      int32_t sid,
-                      int32_t set_size |
+                      int32_t sid |
                       bool_t ok,
                       epoch_t reply_jepoch,
                       epoch_t reply_oepoch,
@@ -407,19 +411,7 @@ abstract service Classic {
 
   defer JetpackCommit(epoch_t jepoch,
                       epoch_t oepoch,
-                      int32_t sid,
-                      int32_t set_size);
-
-  defer JetpackPullRecSetIns(epoch_t jepoch,
-                             epoch_t oepoch,
-                             int32_t sid,
-                             int32_t rid |
-                             bool_t ok,
-                             epoch_t reply_jepoch,
-                             epoch_t reply_oepoch,
-                             MarshallDeputy reply_old_view,
-                             MarshallDeputy reply_new_view,
-                             MarshallDeputy cmd);
+                      int32_t sid);
 
   defer JetpackFinishRecovery(epoch_t oepoch);
 }

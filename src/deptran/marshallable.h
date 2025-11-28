@@ -47,6 +47,7 @@ class MarshallDeputy {
     CMD_REC_VEC = 13,
     CMD_VIEW_DATA = 14,
     CMD_KEY_CMD_BATCH = 15,
+    CMD_KEY_CMD_ID_BATCH = 16,
   };
   /**
    * This should be called by the rpc layer.

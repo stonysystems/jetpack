@@ -31,6 +31,12 @@ static int volatile x4 =
                                      return new KeyCmdBatchData;
                                    });
 
+static int volatile x5 =
+    MarshallDeputy::RegInitializer(MarshallDeputy::CMD_KEY_CMD_ID_BATCH,
+                                   [] () -> Marshallable* {
+                                     return new KeyCmdIdBatchData;
+                                   });
+
 TxWorkspace::TxWorkspace() {
   values_ = std::make_shared<map<int32_t, Value>>();
 }

@@ -159,6 +159,7 @@ class RevoveryCandidates {
   int total_write();
   bool has_cmd_to_recover() const;
   shared_ptr<Marshallable> cmd_to_recover();
+  shared_ptr<Marshallable> get_cmd(uint64_t cmd_id) const;
 };
 
 class Witness {
@@ -198,7 +199,7 @@ class Witness {
   unordered_map<key_t, RevoveryCandidates> candidates_;
   /* Recover related begin */
   ballot_t max_seen_ballot_ = -1, max_accepted_ballot_ = -1;
-  int sid_ = -1, set_size_ = 0;
+  int sid_ = -1;
   bool committed_ = false;
   /* Recover related end */
 
@@ -297,19 +298,38 @@ struct ResponseData {
 };
 
 class RecoverySet {
-  std::unordered_map<int, std::vector<shared_ptr<Marshallable>>> rec_set_;
+  std::unordered_map<int, std::vector<std::pair<key_t, uint64_t>>> rec_set_; // Form locally and distribute
+  // std::unordered_map<int, std::vector<key_t>> matched_key_set_;
+  std::unordered_map<int, std::vector<std::pair<key_t, shared_ptr<Marshallable>>>> missed_key_cmd_set_;
  public:
-  void insert(int sid, int rid, shared_ptr<Marshallable> cmd) {
-    if (rec_set_[sid].size() <= rid) {
-        rec_set_[sid].resize(rid + 1);
-    }
-    rec_set_[sid][rid] = cmd;
+  void set_rec_set(int sid, const std::vector<std::pair<key_t, uint64_t>>& rec_set) {
+    rec_set_[sid] = rec_set;
   }
-  shared_ptr<Marshallable> get(int sid, int rid) {
-    if (rec_set_[sid].size() <= rid) {
-        rec_set_[sid].resize(rid + 1);
-    }
-    return rec_set_[sid][rid];
+  // void set_matched_key_set(int sid, const std::vector<key_t>& matched_key_set) {
+  //   matched_key_set_[sid] = matched_key_set;
+  // }
+  void set_missed_key_cmd_set(int sid, const std::vector<std::pair<key_t, shared_ptr<Marshallable>>>& missed_key_cmd_set) {
+    missed_key_cmd_set_[sid] = missed_key_cmd_set;
+  }
+  void clear(int sid) {
+    rec_set_.erase(sid);
+    // matched_key_set_.erase(sid);
+    missed_key_cmd_set_.erase(sid);
+  }
+  const std::vector<std::pair<key_t, uint64_t>>* get_rec_set(int sid) const {
+    auto it = rec_set_.find(sid);
+    if (it == rec_set_.end()) return nullptr;
+    return &it->second;
+  }
+  // const std::vector<key_t>* get_matched_key_set(int sid) const {
+  //   auto it = matched_key_set_.find(sid);
+  //   if (it == matched_key_set_.end()) return nullptr;
+  //   return &it->second;
+  // }
+  const std::vector<std::pair<key_t, shared_ptr<Marshallable>>>* get_missed_key_cmd_set(int sid) const {
+    auto it = missed_key_cmd_set_.find(sid);
+    if (it == missed_key_cmd_set_.end()) return nullptr;
+    return &it->second;
   }
 };
 
@@ -581,13 +601,13 @@ class TxLogServer {
 
   void JetpackRecovery();
 
-  void JetpackPrepare(int sid, int set_size);
+  void JetpackPrepare(int sid);
 
-  void JetpackAccept(int sid, int set_size);
+  void JetpackAccept(int sid);
 
-  void JetpackCommit(int sid, int set_size);
+  void JetpackCommit(int sid);
 
-  void JetpackResubmit(int sid, int set_size);
+  void JetpackResubmit(int sid);
   void DispatchRecoveredBatch(const std::vector<std::shared_ptr<TpcCommitCommand>>& batch,
                               std::shared_ptr<IntEvent> recovery_event = nullptr);
   void DispatchRecoveredCommand(shared_ptr<Marshallable> cmd, shared_ptr<IntEvent> recovery_event = nullptr);
@@ -601,7 +621,7 @@ class TxLogServer {
                                      epoch_t* reply_oepoch,
                                      MarshallDeputy* reply_old_view,
                                      MarshallDeputy* reply_new_view,
-                                     shared_ptr<KeyCmdBatchData>& batch);
+                                     shared_ptr<KeyCmdIdBatchData>& id_batch);
   virtual void OnJetpackBeginRecovery(const MarshallDeputy& old_view,
                                       const MarshallDeputy& new_view, 
                                       const epoch_t& new_view_id);
@@ -628,8 +648,9 @@ class TxLogServer {
   void OnJetpackRecordCmd(const epoch_t& jepoch, 
                           const epoch_t& oepoch, 
                           const int32_t& sid, 
-                          const int32_t& rid, 
-                          shared_ptr<KeyCmdBatchData>& batch);
+                          shared_ptr<KeyCmdIdBatchData>& id_batch,
+                          shared_ptr<KeyCmdIdBatchData>& missing_batch,
+                          shared_ptr<KeyCmdBatchData>& cmd_batch);
   
   virtual void OnJetpackPrepare(const epoch_t& jepoch, 
                                 const epoch_t& oepoch, 
@@ -641,14 +662,12 @@ class TxLogServer {
                                 MarshallDeputy* reply_new_view,
                                 ballot_t* reply_max_seen_ballot,
                                 ballot_t* accepted_ballot, 
-                                int32_t* replied_sid, 
-                                int32_t* replied_set_size);
+                                int32_t* replied_sid);
   
   virtual void OnJetpackAccept(const epoch_t& jepoch, 
                                const epoch_t& oepoch, 
                                const ballot_t& max_seen_ballot, 
                                const int32_t& sid, 
-                               const int32_t& set_size,
                                bool_t* ok,
                                epoch_t* reply_jepoch,
                                epoch_t* reply_oepoch,
@@ -658,19 +677,7 @@ class TxLogServer {
   
   virtual void OnJetpackCommit(const epoch_t& jepoch, 
                                const epoch_t& oepoch, 
-                               const int32_t& sid, 
-                               const int32_t& set_size);
-  
-  void OnJetpackPullRecSetIns(const epoch_t& jepoch,
-                              const epoch_t& oepoch, 
-                              const int32_t& sid, 
-                              const int32_t& rid, 
-                              bool_t* ok, 
-                              epoch_t* reply_jepoch,
-                              epoch_t* reply_oepoch,
-                              MarshallDeputy* reply_old_view,
-                              MarshallDeputy* reply_new_view,
-                              shared_ptr<Marshallable>& cmd);
+                               const int32_t& sid);
   
   void OnJetpackFinishRecovery(const epoch_t& oepoch);
 
