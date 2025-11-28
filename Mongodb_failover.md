@@ -37,6 +37,37 @@ Add a flag: `JETPACK_MONGODB_RECOVERY`
 
 `TxLogServer::JetpackStatus::RECOVERY`: status
 
+## Install Mongodb compiled
+```
+sudo rm -rf ~/.cache/bazel*
+git clone --branch r8.2.0 --depth 1 https://github.com/mongodb/mongo.git
+
+pip3 install "poetry==1.5.1"
+python3 -m pip install \
+  networkx flask flask-cors lxml eventlet gevent progressbar2 cxxfilt pympler \
+  "pyright==1.1.393" "pymongo==4.12.0" \
+  boto3 botocore jsonschema psutil "memory-profiler" puremagic tabulate \
+  "cheetah3<=3.2.6.post1" packaging regex "setuptools>=58.1.0" "wheel==0.45.0" \
+  PyYAML types-PyYAML requests typing-extensions "typer>=0.12.3" tenacity \
+  click inject GitPython pydantic structlog \
+  passlib pyOpenSSL pyparsing service_identity twisted "zope.interface" ldaptor \
+  "unittest-xml-reporting==3.0.4" jira "requests-oauth<=0.4.1" "PyJWT>=2.9.0" \
+  mypy yamllint types-setuptools types-requests tqdm colorama evergreen-lint ruff \
+  license-expression codeowners textual tree-sitter tree-sitter-cpp pyzstd cffi \
+  cryptography curatorbin PyKMIP kafka-python avro-python3 evergreen-py mock \
+  shrub-py ocspresponder ocspbuilder ecdsa asn1crypto toml filelock numpy \
+  "Werkzeug<=2.3.7" PyGithub urllib3 distro dnspython proxy-protocol pkce \
+  oauthlib requests-oauthlib docker mongomock selenium geckodriver-autoinstaller \
+  retry gdbmongo googleapis-common-protos google-api-python-client \
+  google-auth-oauthlib gcovr opentelemetry-api opentelemetry-sdk \
+  opentelemetry-exporter-otlp-proto-common opentelemetry-exporter-otlp-proto-grpc \
+  timeout-decorator
+
+cd mongo
+python3 buildscripts/install_bazel.py
+bazel build install-dist-test
+```
+
 ## Install Mongodb official
 ```bash
 curl -fsSL https://pgp.mongodb.com/server-7.0.asc | \
@@ -124,6 +155,6 @@ rs.status()
 db.adminCommand({getDefaultRWConcern: 1})
 
 # kill
-pkill -f 'mongod --replSet rsTest' || ps aux | grep '[m]ongod' 
+pkill -f 'mongod --replSet rsTest'
 
 ```

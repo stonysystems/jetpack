@@ -19,7 +19,7 @@ namespace janus {
 class MongodbServer : public TxLogServer {
   
 #ifdef AWS
-  const int mongodb_connection_ = 80; // maximum connection maybe limited by ulimit, increase ulimit may solve connection limit problem. 2000 is designed for 0.66s latency 3000 clients open loop
+  const int mongodb_connection_ = 2000; // maximum connection maybe limited by ulimit, increase ulimit may solve connection limit problem. 2000 is designed for 0.66s latency 3000 clients open loop
 #endif
 #ifndef AWS
   const int mongodb_connection_ = 80; // seems maximum connextion between 95 * 5 and 100 * 5 at local
@@ -95,29 +95,31 @@ class MongodbServer : public TxLogServer {
 
 #ifdef JETPACK_MONGODB_RECOVERY
 	  // Coroutine-based waiter for MongoDB signal with periodic timeout.
-	  Coroutine::CreateRun([this]() {
-	    std::string host;
-	    if (frame_ && frame_->site_info_) {
-	      auto* si = frame_->site_info_;
-	      if (!si->host.empty()) {
-	        host = si->host;
-	      } else if (!si->proc_name.empty()) {
-	        host = si->proc_name;
-	      } else if (!si->name.empty()) {
-        host = si->name;
+    if (loc_id_ != 0) {
+      Coroutine::CreateRun([this]() {
+        std::string host;
+        if (frame_ && frame_->site_info_) {
+          auto* si = frame_->site_info_;
+          if (!si->host.empty()) {
+            host = si->host;
+          } else if (!si->proc_name.empty()) {
+            host = si->proc_name;
+          } else if (!si->name.empty()) {
+          host = si->name;
+        }
       }
+      Log_info("[MONGODB-FAILOVER] Waiting for mongo signal on JM_Jetpack_%s", host.c_str());
+        while (true) {
+        if (jm_signal::exists_key("mongo", "primary_elected", host)) {
+          Log_info("[MONGODB-FAILOVER] Received mongo signal on JM_Jetpack_%s", host.c_str());
+          JetpackRecoveryEntry();
+          break;
+        }
+          auto sp_e = Reactor::CreateSpEvent<TimeoutEvent>(10 * 1000); // 10ms
+          sp_e->Wait();
+        }
+      });
     }
-    Log_info("[MONGODB-FAILOVER] Waiting for mongo signal on JM_Jetpack_%s", host.c_str());
-	    while (true) {
-      if (jm_signal::exists_key("mongo", "primary_elected", host)) {
-        Log_info("[MONGODB-FAILOVER] Received mongo signal on JM_Jetpack_%s", host.c_str());
-        JetpackRecoveryEntry();
-        break;
-      }
-	      auto sp_e = Reactor::CreateSpEvent<TimeoutEvent>(10 * 1000); // 10ms
-	      sp_e->Wait();
-	    }
-	  });
 #endif
 
   }
