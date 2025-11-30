@@ -14,14 +14,29 @@ op="$1"
 
 CMD="uptime"
 case "$op" in
-  uptime) CMD='uptime' ;;
-  mongod) CMD='ps aux | grep mongod' ;;
-  op)     CMD='bash ~/JetPack/op.sh' ;;
-  kill_mongod)   CMD='bash ~/JetPack/kill_mongodb.sh' ;;
+  uptime)      CMD='uptime' ;;
+  mongod)      CMD='ps aux | grep mongod' ;;
+  op)          CMD='bash ~/JetPack/op.sh' ;;
+  kill_mongod) CMD='bash ~/JetPack/kill_mongodb.sh' ;;
 esac
 
-for ip in "${IPS[@]}"; do
-  echo "===== $ip ====="
-  ssh -o BatchMode=yes -o ConnectTimeout=5 "$ip" "$CMD"
-  echo
-done
+if [[ "$op" == "kill_mongod" ]]; then
+  echo "Running kill_mongod in parallel..."
+  for ip in "${IPS[@]}"; do
+    {
+      echo "===== $ip ====="
+      ssh -o BatchMode=yes -o ConnectTimeout=5 "$ip" "$CMD"
+      echo
+    } &
+  done
+
+  wait
+  echo "All kill_mongod jobs finished."
+else
+  # Default: run sequentially
+  for ip in "${IPS[@]}"; do
+    echo "===== $ip ====="
+    ssh -o BatchMode=yes -o ConnectTimeout=5 "$ip" "$CMD"
+    echo
+  done
+fi

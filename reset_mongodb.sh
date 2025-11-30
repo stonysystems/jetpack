@@ -1,3 +1,5 @@
+#!/usr/bin/env bash
+
 bash batch_op.sh kill_mongod
 
 CMD=/home/ubuntu/JetPack/JetPack-Scripts/bin/mongod
@@ -10,13 +12,34 @@ servers=(
   "16.171.74.27"
 )
 
+start_all=$SECONDS
+
 for idx in "${!servers[@]}"; do
   ip="${servers[$idx]}"
   rs_id=$((idx + 1))
   bind_ip="0.0.0.0"
-  ssh "$ip" "mkdir -p /data/rs${rs_id} /var/log/mongodb/rs${rs_id} && $CMD --replSet rsTest --port 27017 --bind_ip ${bind_ip} --dbpath /data/rs${rs_id} --logpath /var/log/mongodb/rs${rs_id}/mongod.log --fork"
-  sleep 1
+
+  (
+    start_one=$SECONDS
+    echo "[$ip] starting mongod for rs${rs_id}..."
+
+    ssh "$ip" "mkdir -p /data/rs${rs_id} /var/log/mongodb/rs${rs_id} && \
+      $CMD --replSet rsTest --port 27017 --bind_ip ${bind_ip} \
+           --dbpath /data/rs${rs_id} \
+           --logpath /var/log/mongodb/rs${rs_id}/mongod.log --fork"
+
+    elapsed_one=$((SECONDS - start_one))
+    echo "[$ip] done in ${elapsed_one}s"
+    sleep 1
+  ) &
 done
+
+# wait for all background jobs (all ssh calls) to finish
+wait
+
+elapsed_all=$((SECONDS - start_all))
+echo "All servers started in ${elapsed_all}s"
+
 
 sleep 1
 
