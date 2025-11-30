@@ -1,17 +1,20 @@
-for i in 1 2 3; do
-  pkill -f 'mongod --replSet rsTest'
-  ps aux | grep '[m]ongod'
-  sleep 3
-done
+bash batch_op.sh kill_mongod
 
-CMD=/home/weihai/JetPack/mongo/bazel-bin/install/bin/mongod
+CMD=/home/ubuntu/JetPack/JetPack-Scripts/bin/mongod
 
-for ip in 127.0.0.1 127.0.0.2 127.0.0.3 127.0.0.4 127.0.0.5; do
-  $CMD --replSet rsTest --port 27017 \
-    --bind_ip $ip \
-    --dbpath /data/rs${ip##*.} \
-    --logpath /var/log/mongodb/rs${ip##*.}/mongod.log \
-    --fork
+servers=(
+  "184.72.49.232"
+  "44.225.32.130"
+  "3.6.253.80"
+  "18.198.73.192"
+  "16.171.74.27"
+)
+
+for idx in "${!servers[@]}"; do
+  ip="${servers[$idx]}"
+  rs_id=$((idx + 1))
+  bind_ip="0.0.0.0"
+  ssh "$ip" "mkdir -p /data/rs${rs_id} /var/log/mongodb/rs${rs_id} && $CMD --replSet rsTest --port 27017 --bind_ip ${bind_ip} --dbpath /data/rs${rs_id} --logpath /var/log/mongodb/rs${rs_id}/mongod.log --fork"
   sleep 1
 done
 
