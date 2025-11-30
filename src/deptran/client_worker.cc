@@ -256,6 +256,14 @@ void ClientWorker::Work() {
       end_time = beg_time + duration * 5 * pow(10, 2);
 #endif 
       while (true) { // start while
+        bool jetpack_first = true;
+        if (jetpack_first) {
+          static std::mt19937 gen(std::random_device{}());           // RNG, seeded once
+          std::uniform_int_distribution<int> dist(0, 1000000); // 0s ~ 1s in µs
+          int delay_us = dist(gen); 
+          Reactor::CreateSpEvent<NeverEvent>()->Wait(delay_us);
+          jetpack_first = false;
+        }
         auto cur_time = Time::now(); // optimize: this call is not scalable.
 #ifndef DB_CHECKSUM
         if (cur_time > end_time) {
@@ -323,7 +331,11 @@ void ClientWorker::Work() {
           verify(ev->status_ != Event::TIMEOUT);
         } else {
           auto sp_event = Reactor::CreateSpEvent<NeverEvent>();
-          Wait_recordplace(sp_event, Wait(pow(10, 6)));
+          static std::mt19937 gen(std::random_device{}());           // RNG, seeded once
+          std::uniform_int_distribution<int> dist(500000, 1500000); // 0.5s ~ 1.5s in µs
+          int delay_us = dist(gen);  // random microseconds in [500000, 1500000]
+          Wait_recordplace(sp_event, Wait(delay_us));
+          // Wait_recordplace(sp_event, Wait(pow(10, 6)));
         }
         Coroutine::CreateRun([this, coo](){
           verify(coo->_inuse_);
