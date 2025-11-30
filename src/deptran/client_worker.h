@@ -79,6 +79,7 @@ class ClientWorker {
   // 8: all original path read attempts 
   // 9: all original path write attempts
   Distribution cli2cli_[10];
+  Distribution dispatch_time_distribution_;
   int go_to_jetpack_fastpath_cnt_ = 0;
   vector<std::pair<double, double>> commit_time_; // <dispatch_time, duration>
   Frequency frequency_;

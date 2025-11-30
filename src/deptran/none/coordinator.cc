@@ -23,6 +23,7 @@ void CoordinatorNone::GotoNextPhase() {
       verify(phase_ % n_phase == Phase::DISPATCH);
       dispatch_time_ = SimpleRWCommand::GetCurrentMsTime();
       dispatch_duration_3_times_ = (dispatch_time_ - clientworker_creation_time_) * 3;
+      client_worker_->dispatch_time_distribution_.append(dispatch_time_ - clientworker_creation_time_);
       DispatchAsync();
       break;
     case Phase::DISPATCH:

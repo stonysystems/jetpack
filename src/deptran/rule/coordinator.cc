@@ -45,6 +45,7 @@ void CoordinatorRule::GotoNextPhase() {
     case Phase::INIT_END:
       dispatch_time_ = SimpleRWCommand::GetCurrentMsTime();
       dispatch_duration_3_times_ = (dispatch_time_ - clientworker_creation_time_) * 3;
+      client_worker_->dispatch_time_distribution_.append(dispatch_time_ - clientworker_creation_time_);
       phase_cp = phase_;
       verify(phase_ % n_phase == Phase::DISPATCHED);
       fast_path_success_ = false;

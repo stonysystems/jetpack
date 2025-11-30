@@ -83,6 +83,7 @@ static void KillMongodbPrimary() {
 // 4: efficient original path attempts (only faster than fast path, or fast path failed), 2 RTTs
 // 5: all efficient attempts (count all faster one) (should equals to category 2 merge category 4)
 Distribution cli2cli[6];
+Distribution dispatch_time_distribution;
 // commit_time for all (default 30s) duration
 vector<std::pair<double, double>> commit_time; // <dispatch_time, duration>
 Frequency frequency;
@@ -274,6 +275,7 @@ void client_shutdown() {
     // client->retrive_statistic();
     for (int i = 0; i < 6; i++)
       cli2cli[i].merge(client->cli2cli_[i]);
+    dispatch_time_distribution.merge(client->dispatch_time_distribution_);
     frequency.merge(client->frequency_);
     commit_time.insert(commit_time.end(), client->commit_time_.begin(), client->commit_time_.end());
 #ifdef LATENCY_DEBUG
@@ -733,6 +735,7 @@ int main(int argc, char *argv[]) {
   Log_info("All-original-path-attempts       statistics %s", cli2cli[3].statistics().c_str());
   Log_info("Efficient-original-path-attempts statistics %s", cli2cli[4].statistics().c_str());
   Log_info("All-efficient-attempts           statistics %s", cli2cli[5].statistics().c_str());
+  Log_info("Dispatch-time                    statistics %s", dispatch_time_distribution.statistics().c_str());
 
   Log_info("All-fast-path-attempts           distribution %s", cli2cli[0].distribution().c_str());
   Log_info("Success-fast-path-attempts       distribution %s", cli2cli[1].distribution().c_str());
@@ -740,6 +743,7 @@ int main(int argc, char *argv[]) {
   Log_info("All-original-path-attempts       distribution %s", cli2cli[3].distribution().c_str());
   Log_info("Efficient-original-path-attempts distribution %s", cli2cli[4].distribution().c_str());
   Log_info("All-efficient-attempts           distribution %s", cli2cli[5].distribution().c_str());
+  Log_info("Dispatch-time                    distribution %s", dispatch_time_distribution.distribution().c_str());
   
   Log_info("Mid throughput is %.2f", cli2cli[5].count() / (Config::GetConfig()->duration_ / 3.0));
   Log_info("Fastpath statistics attempted %d successed %d rate(pct) %.2f efficient_successed %d efficient_rate(pct) %.2f", 
@@ -751,7 +755,7 @@ int main(int argc, char *argv[]) {
   if (!file.is_open()) {
     Log_info("Failed to open file for writing %s", dump_file_name.c_str());
   } else {
-    file << "All-fast-path-attempts" << "," << "Success-fast-path-attempts" << "," << "Efficient-fast-path-attempts" << "," << "All-original-path-attempts" << ","  << "Efficient-original-path-attempts" << ","  << "All-efficient-attempts" << "," << "Start-Time" << "," << "End2End-Latency" << "\n";
+    file << "All-fast-path-attempts" << "," << "Success-fast-path-attempts" << "," << "Efficient-fast-path-attempts" << "," << "All-original-path-attempts" << ","  << "Efficient-original-path-attempts" << ","  << "All-efficient-attempts" << "," << "Start-Time" << "," << "End2End-Latency" << "," << "Dispatch-Time" << "\n";
     size_t max_size = commit_time.size();
     std::sort(commit_time.begin(),
               commit_time.end(),
@@ -761,6 +765,8 @@ int main(int argc, char *argv[]) {
     for (int i = 0; i < 6; i++)
       if (cli2cli[i].count() > max_size)
         max_size = cli2cli[i].count();
+    if (dispatch_time_distribution.count() > max_size)
+      max_size = dispatch_time_distribution.count();
     for (size_t i = 0; i < max_size; ++i) {
         for (int k = 0; k < 6; k++) {
           if (i < cli2cli[k].count())
@@ -771,6 +777,10 @@ int main(int argc, char *argv[]) {
           file << commit_time[i].first;
           file << ",";
           file << commit_time[i].second;
+        }
+        file << ",";
+        if (i < dispatch_time_distribution.count()) {
+          file << dispatch_time_distribution.data_[i];
         }
         file << "\n";
     }
