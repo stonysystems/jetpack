@@ -262,7 +262,7 @@ void ClientWorker::Work() {
         bool jetpack_first = true;
         if (jetpack_first) {
           static std::mt19937 gen(std::random_device{}());           // RNG, seeded once
-          std::uniform_int_distribution<int> dist(0, 1000000); // 0s ~ 1s in µs
+          std::uniform_int_distribution<int> dist(0, 1000000 / n_concurrent_); // n_concurrent_ Coordinators share 0~1s random delay
           int delay_us = dist(gen); 
           Reactor::CreateSpEvent<NeverEvent>()->Wait(delay_us);
           jetpack_first = false;
