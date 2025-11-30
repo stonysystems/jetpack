@@ -23,7 +23,7 @@ struct UniqueCmdID {
 };
 
 class Distribution {
-  double created_time_ = SimpleRWCommand::GetCurrentMsTime();
+  double creation_time_ = SimpleRWCommand::GetCurrentMsTime();
   double recent_100_sum_ = 0;
   // bool pct_lock = false;
  public:
@@ -38,7 +38,7 @@ class Distribution {
   // only append if append_time is in mid 1/3 time (10~20s if duration is 30s)
   void mid_time_append(double x, double append_time) {
     // if (pct_lock) return;
-    double duration_3_times = (append_time - created_time_) * 3;
+    double duration_3_times = (append_time - creation_time_) * 3;
     if (duration_3_times > Config::GetConfig()->duration_ * 1000 && duration_3_times < Config::GetConfig()->duration_ * 2 * 1000)
       data_.push_back(x);
   }
@@ -46,7 +46,7 @@ class Distribution {
   void mid_time_append(double x) {
     // if (pct_lock) return;
     double append_time = SimpleRWCommand::GetCurrentMsTime();
-    double duration_3_times = (append_time - created_time_) * 3;
+    double duration_3_times = (append_time - creation_time_) * 3;
     if (duration_3_times > Config::GetConfig()->duration_ * 1000 && duration_3_times < Config::GetConfig()->duration_ * 2 * 1000)
       data_.push_back(x);
   }

@@ -22,7 +22,7 @@ void CoordinatorNone::GotoNextPhase() {
       // Log_info("Enter switch CoroutineID %d %d phase_ = %d", Coroutine::CurrentCoroutine()->id, Coroutine::CurrentCoroutine()->global_id, phase_);
       verify(phase_ % n_phase == Phase::DISPATCH);
       dispatch_time_ = SimpleRWCommand::GetCurrentMsTime();
-      dispatch_duration_3_times_ = (dispatch_time_ - created_time_) * 3;
+      dispatch_duration_3_times_ = (dispatch_time_ - clientworker_creation_time_) * 3;
       DispatchAsync();
       break;
     case Phase::DISPATCH:
@@ -38,7 +38,7 @@ void CoordinatorNone::GotoNextPhase() {
         client_worker_->cli2cli_[5].append(SimpleRWCommand::GetCurrentMsTime() - dispatch_time_);
       }
       // Log_info("End");
-      client_worker_->commit_time_.push_back(std::make_pair(dispatch_time_ - created_time_, SimpleRWCommand::GetCurrentMsTime() - dispatch_time_));
+      client_worker_->commit_time_.push_back(std::make_pair(dispatch_time_ - clientworker_creation_time_, SimpleRWCommand::GetCurrentMsTime() - dispatch_time_));
       End();
       break;
     default:

@@ -27,6 +27,7 @@ class ClientWorker {
   bool batch_start;
   uint32_t id;
   uint32_t duration;
+  double creation_time_{0};
 	int outbound;
   ClientControlServiceImpl *ccsi{nullptr};
   int32_t n_concurrent_;

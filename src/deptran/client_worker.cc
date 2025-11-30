@@ -3,6 +3,7 @@
 #include "frame.h"
 #include "procedure.h"
 #include "coordinator.h"
+#include "RW_command.h"
 #include "../bench/rw/workload.h"
 #include "benchmark_control_rpc.h"
 
@@ -155,6 +156,7 @@ Coordinator* ClientWorker::CreateFailCtrlCoordinator() {
   coo->commo_ = commo_;
   coo->forward_status_ = forward_requests_to_leader_ ? FORWARD_TO_LEADER : NONE;
   coo->offset_ = offset_id ;
+  coo->clientworker_creation_time_ = creation_time_;
   Log_debug("coordinator %d created at site %d: forward %d",
             coo->coo_id_,
             this->my_site_.id,
@@ -180,6 +182,7 @@ Coordinator* ClientWorker::CreateCoordinator(uint16_t offset_id) {
   coo->forward_status_ = forward_requests_to_leader_ ? FORWARD_TO_LEADER : NONE;
   coo->offset_ = offset_id;
   coo->client_worker_ = this;
+  coo->clientworker_creation_time_ = creation_time_;
   Log_debug("coordinator %d created at site %d: forward %d",
             coo->coo_id_,
             this->my_site_.id,
@@ -709,6 +712,7 @@ ClientWorker::ClientWorker(uint32_t id, Config::SiteInfo& site_info, Config* con
     benchmark(config->benchmark()),
     mode(config->get_mode()),
     duration(config->get_duration()),
+    creation_time_(SimpleRWCommand::GetCurrentMsTime()),
     ccsi(ccsi),
     n_concurrent_(config->get_concurrent_txn()),
     failover_trigger_(failover_trigger),
@@ -758,4 +762,3 @@ void ClientWorker::Resume(locid_t locid) {
 
 
 } // namespace janus
-

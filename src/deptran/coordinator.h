@@ -100,7 +100,8 @@ class Coordinator {
   int cmd_in_client_count = 0;
   /******global unique id end********/
 
-  double created_time_ = SimpleRWCommand::GetCurrentMsTime();
+  // double created_time_ = SimpleRWCommand::GetCurrentMsTime();
+  double clientworker_creation_time_{0};
   
 #ifdef LATENCY_DEBUG
   Distribution client2leader_, client2test_point_, client2leader_send_;
