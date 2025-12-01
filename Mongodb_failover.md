@@ -12,6 +12,8 @@ The critical changes :
 
    `void MongodbHandler(int thread_id)` do the work!
 
+   https://claude.ai/chat/5b3633d1-b13c-4f47-b3e5-367fe50732bb
+
 3. Jetpack → forward requests to the underlying MongoDb
    
    Current implementation has fixed leader, but we should implement a forward semantics
@@ -38,9 +40,14 @@ Add a flag: `JETPACK_MONGODB_RECOVERY`
 `TxLogServer::JetpackStatus::RECOVERY`: status
 
 ## Install Mongodb compiled
-```
+```bash
 sudo rm -rf ~/.cache/bazel*
 git clone --branch r8.2.0 --depth 1 https://github.com/mongodb/mongo.git
+# git clone https://github.com/shenweihai1/mongo.git
+# git checkout jetpack-r8.2.0
+
+# cd JetPack-Scripts
+# bash 09-build_and_test_run_wan.sh -F 
 
 pip3 install "poetry==1.5.1"
 python3 -m pip install \
@@ -86,69 +93,30 @@ sudo mkdir -p /data/rs{1,2,3,4,5}
 sudo mkdir -p /var/log/mongodb/rs{1,2,3,4,5}
 sudo chown -R "$USER":"$USER" /data/rs* /var/log/mongodb/rs*
 
-mongod --replSet rsTest --port 27017 \
-  --bind_ip 127.0.0.1 \
-  --dbpath /data/rs1 \
-  --logpath /var/log/mongodb/rs1/mongod.log \
-  --fork
+# Please update CMD in JetPack/reset_mongodb.sh
 
-sleep 1
-
-mongod --replSet rsTest --port 27017 \
-  --bind_ip 127.0.0.2 \
-  --dbpath /data/rs2 \
-  --logpath /var/log/mongodb/rs2/mongod.log \
-  --fork
-
-sleep 1
-
-mongod --replSet rsTest --port 27017 \
-  --bind_ip 127.0.0.3 \
-  --dbpath /data/rs3 \
-  --logpath /var/log/mongodb/rs3/mongod.log \
-  --fork
-
-sleep 1
-
-mongod --replSet rsTest --port 27017 \
-  --bind_ip 127.0.0.4 \
-  --dbpath /data/rs4 \
-  --logpath /var/log/mongodb/rs4/mongod.log \
-  --fork
-
-sleep 1
-
-mongod --replSet rsTest --port 27017 \
-  --bind_ip 127.0.0.5 \
-  --dbpath /data/rs5 \
-  --logpath /var/log/mongodb/rs5/mongod.log \
-  --fork
-
-sleep 1
+# mongod --replSet rsTest --port 27017 \
+#   --bind_ip 127.0.0.1 \
+#   --dbpath /data/rs1 \
+#   --logpath /var/log/mongodb/rs1/mongod.log \
+#   --fork
 
 ps aux | grep '[m]ongod'
 
 mongosh --host 127.0.0.1 --port 27017
 
-rs.initiate({
+# You have to use it!
+var cfg = {
   _id: "rsTest",
   members: [
-    { _id: 0, host: "127.0.0.1:27017", priority: 2 },
-    { _id: 1, host: "127.0.0.2:27017", priority: 1 },
-    { _id: 2, host: "127.0.0.3:27017", priority: 0 },
-    { _id: 3, host: "127.0.0.4:27017", priority: 0 },
-    { _id: 4, host: "127.0.0.5:27017", priority: 0 }
+    { _id: 0, host: "184.72.49.232:27017", priority: 100 },
+    { _id: 1, host: "44.225.32.130:27017", priority: 50 },
+    { _id: 2, host: "3.6.253.80:27017", priority: 40 },
+    { _id: 3, host: "18.198.73.192:27017", priority: 30 },
+    { _id: 4, host: "16.171.74.27:27017", priority: 20 }
   ]
-})
-
-# # Reconfig priority
-# cfg = rs.conf()
-# cfg.members[0].priority = 2 
-# cfg.members[1].priority = 1
-# cfg.members[2].priority = 0
-# cfg.members[3].priority = 0
-# cfg.members[4].priority = 0
-# rs.reconfig(cfg)
+}
+rs.reconfig(cfg, {force: true});
 
 rs.status()
 
@@ -156,5 +124,8 @@ db.adminCommand({getDefaultRWConcern: 1})
 
 # kill
 pkill -f 'mongod --replSet rsTest'
+
+# python3 -m http.server 8000 --bind 0.0.0.0 
+# wget http://130.245.173.102:8000/mongod_with_debug
 
 ```

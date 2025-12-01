@@ -1,4 +1,6 @@
 .waf*
+./mongo
+./JetPack-Scripts
 /build
 .lock-waf*
 *.pyc
@@ -19,8 +21,9 @@ conf
 tmp_conf*.xml
 benchmark*.log
 .idea
+.bazel-cache
+mongo/*
 *.orig
-docs/
 deptran/mdcc/mdcc_rpc.h
 .python-version
 .ycm_extra_conf.py

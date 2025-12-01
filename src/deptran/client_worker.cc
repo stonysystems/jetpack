@@ -6,6 +6,7 @@
 #include "RW_command.h"
 #include "../bench/rw/workload.h"
 #include "benchmark_control_rpc.h"
+#include "../../jm_file_signal.h"
 
 namespace janus {
 
@@ -246,6 +247,23 @@ void ClientWorker::Work() {
     shared_ptr<Job> sp_job(p_job);
     poll_mgr_->add(sp_job);
   }
+
+  // Synchronize start time across all client workers via shared file signal.
+if (false) {
+  try {
+    jm_signal::set_key("jetpack", std::to_string(cli_id_), "client_sync");
+    auto* cfg = Config::GetConfig();
+    for (const auto& client_info : cfg->par_clients_) {
+      jm_signal::wait_for_key("jetpack",
+                              std::to_string(client_info.id),
+                              "client_sync");
+    }
+  } catch (const std::exception& e) {
+    Log_warn("[CLIENT_SYNC] Failed to synchronize clients: %s", e.what());
+  }
+  Log_info("[CLIENT_SYNC] Failed to synchronize clients");
+}
+
   for (uint32_t n_tx = 0; n_tx < n_concurrent_; n_tx++) {
     auto sp_job = std::make_shared<OneTimeJob>([this, n_tx] () {
       // this wait tries to avoid launching clients all at once, especially for open-loop clients.
