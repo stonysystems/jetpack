@@ -774,7 +774,7 @@ int main(int argc, char *argv[]) {
           file << ",";
         }
         if (i < commit_time.size()) {
-          file << commit_time[i].first;
+          file << std::fixed << commit_time[i].first;
           file << ",";
           file << commit_time[i].second;
         }
