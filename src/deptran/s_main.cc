@@ -450,13 +450,13 @@ void server_failover_co(bool random, bool leader, int srv_idx)
         //   }
         // }        
 #ifdef FAILOVER_DEBUG
-        Log_info("@@@@@@@@@@@@@@@@@@@@@@@@ before resume %d", svr_workers_g[idx].site_info_->id);
+        // Log_info("@@@@@@@@@@@@@@@@@@@@@@@@ before resume %d", svr_workers_g[idx].site_info_->id);
 #endif
         // client_workers_g[0]->Resume(idx) ;
-        Log_info("@@@@@@@@@@@@@@@@@@@@@@@@ failover resumed");
-        svr_workers_g[idx].Resume() ;
+        // Log_info("@@@@@@@@@@@@@@@@@@@@@@@@ failover resumed");
+        // svr_workers_g[idx].Resume() ;
 #ifdef FAILOVER_DEBUG
-        Log_info("server %d resumed for failover test", idx);
+        // Log_info("server %d resumed for failover test", idx);
 #endif
         if(leader)
         {

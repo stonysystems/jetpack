@@ -1,7 +1,7 @@
 
 failover:
         method: soft #none,soft,hard 
-        run_interval: 10 #second 
+        run_interval: 20 #second 
         stop_interval: 10 #second 
         failserver: leader #random, leader, follower or number(0,....)
 
