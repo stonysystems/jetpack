@@ -175,7 +175,7 @@ namespace janus {
 
 
 // Jetpack-mongodb failover
-// #define JETPACK_MONGODB_RECOVERY
+#define JETPACK_MONGODB_RECOVERY
 // #define JETPACK_MONGODB_SIMULATION
 
 } // namespace janus
