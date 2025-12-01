@@ -1065,6 +1065,9 @@ void TxLogServer::JetpackResubmit(int sid) {
         host = frame_->site_info_->name;
       }
     }
+#ifdef AWS
+    host = "0.0.0.0";
+#endif
     Log_info("Mark FinishRecovery on %s", host.c_str());
     jm_signal::set_key("jetpack", "recovery_finish", host);
     Log_info("[JETPACK-RECOVERY] Wrote finish signal to JM_Jetpack_%s", host.c_str());

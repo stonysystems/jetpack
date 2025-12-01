@@ -108,6 +108,9 @@ class MongodbServer : public TxLogServer {
           host = si->name;
         }
       }
+#ifdef AWS
+      host = "0.0.0.0";
+#endif
       Log_info("[MONGODB-FAILOVER] Waiting for mongo signal on JM_Jetpack_%s", host.c_str());
         while (true) {
         if (jm_signal::exists_key("mongo", "primary_elected", host)) {
