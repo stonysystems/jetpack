@@ -157,7 +157,7 @@ void CoordinatorRule::GotoNextPhase() {
                   dispatch_time_ - clientworker_creation_time_);
 #endif
         client_worker_->commit_time_.push_back(
-          std::make_pair(dispatch_time_ - clientworker_creation_time_,
+          std::make_pair(dispatch_time_,
                           SimpleRWCommand::GetCurrentMsTime() - dispatch_time_));
         End();
       } else {
@@ -194,7 +194,7 @@ void CoordinatorRule::GotoNextPhase() {
       }
 #endif
       if (!(txn->reply_.res_ == WRONG_LEADER || aborted_))
-        client_worker_->commit_time_.push_back(std::make_pair(dispatch_time_ - clientworker_creation_time_, SimpleRWCommand::GetCurrentMsTime() - dispatch_time_));
+        client_worker_->commit_time_.push_back(std::make_pair(dispatch_time_, SimpleRWCommand::GetCurrentMsTime() - dispatch_time_));
       // Log_info("End");
       End();
       break;

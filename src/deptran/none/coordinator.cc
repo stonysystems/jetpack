@@ -51,7 +51,7 @@ void CoordinatorNone::GotoNextPhase() {
       }
 #endif
       if (!aborted_)
-        client_worker_->commit_time_.push_back(std::make_pair(dispatch_time_ - clientworker_creation_time_, SimpleRWCommand::GetCurrentMsTime() - dispatch_time_));
+        client_worker_->commit_time_.push_back(std::make_pair(dispatch_time_, SimpleRWCommand::GetCurrentMsTime() - dispatch_time_));
       End();
       break;
     default:
