@@ -127,6 +127,20 @@ class MongodbServer : public TxLogServer {
     return loc_id_ == 0;
   }
   void Submit(const shared_ptr<Marshallable>& cmd) {
+    if (jetpack_status_ == TxLogServer::JetpackStatus::RECOVERY) {
+      if (cmd->kind_ == MarshallDeputy::CMD_TPC_COMMIT) {
+        auto tpc_cmd = dynamic_pointer_cast<TpcCommitCommand>(cmd);
+        if (tpc_cmd) {
+#ifdef JETPACK_WRONG_LEADER_DEBUG
+          Log_info("[WRONG_LEADER_FLOW] MongodbServer rejecting tx_id=%lu at loc_id=%d because status=RECOVERY",
+                   tpc_cmd->tx_id_, loc_id_);
+#endif
+          tpc_cmd->ret_ = WRONG_LEADER;
+        }
+      }
+      app_next_(*cmd);
+      return;
+    }
 #ifdef MONGODB_DEBUG
     Log_info("%.2f Submit <%d, %d> loc_id %d", SimpleRWCommand::GetMsTimeElaps(), SimpleRWCommand::GetCmdID(cmd).first, SimpleRWCommand::GetCmdID(cmd).second, loc_id_);
 #endif
