@@ -617,19 +617,28 @@ void ClientWorker::DispatchRequest(Coordinator* coo, bool void_request) {
 //                               std::placeholders::_1);
     req->callback_ = [coo, req, this] (TxReply& reply) {
 //      verify(coo->sp_ev_commit_->status_ != Event::WAIT);
+#ifdef JETPACK_WRONG_LEADER_DEBUG
+      Log_info("[WRONG_LEADER_FLOW] ClientWorker received reply for tx_id=0x%lx res=%d", reply.tx_id_, reply.res_);
+#endif
       
       // Check if we received a WRONG_LEADER response
       if (reply.res_ == WRONG_LEADER) {
+#ifdef JETPACK_WRONG_LEADER_DEBUG
         Log_info("[CLIENT_VIEW] Received WRONG_LEADER response for tx_id: 0x%lx", reply.tx_id_);
+#endif
         
         if (reply.sp_view_data_ != nullptr) {
           // Extract view data and update our view
           auto view_data = reply.sp_view_data_;
+#ifdef JETPACK_WRONG_LEADER_DEBUG
           Log_info("[CLIENT_VIEW] Extracted view data from response: %s", 
                    view_data->ToString().c_str());
+#endif
           commo_->UpdatePartitionView(view_data->partition_id_, view_data);
         } else {
+#ifdef JETPACK_WRONG_LEADER_DEBUG
           Log_info("[CLIENT_VIEW] No view data in WRONG_LEADER response for tx_id: 0x%lx", reply.tx_id_);
+#endif
         }
       }
       
