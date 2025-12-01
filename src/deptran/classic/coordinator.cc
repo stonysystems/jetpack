@@ -358,6 +358,10 @@ void CoordinatorClassic::DispatchAck(phase_t phase,
     aborted_ = true;
     txn->commit_.store(false);
     txn->reply_.res_ = WRONG_LEADER;
+#ifdef JETPACK_WRONG_LEADER_DEBUG
+    Log_info("[WRONG_LEADER_FLOW] DispatchAck marking tx_id=%lu as WRONG_LEADER; phase=%d dispatch_ack_=%d",
+             txn->id_, phase_, dispatch_ack_);
+#endif
     // For None mode, we need to check if we can get view data from the transaction
     // The view data should have been set by the scheduler
 #ifdef JETPACK_WRONG_LEADER_DEBUG
@@ -399,6 +403,10 @@ void CoordinatorClassic::DispatchAck(phase_t phase,
     Log_debug("receive all start acks, txn_id: %llx; START PREPARE",
               txn->id_);
     dispatch_ack_ = true;
+#ifdef JETPACK_WRONG_LEADER_DEBUG
+    Log_info("[WRONG_LEADER_FLOW] DispatchAck completed for tx_id=%lu; dispatch_ack_=true aborted_=%d",
+             txn->id_, aborted_);
+#endif
     // Log_info("CoordinatorRule coo_id=%d thread_id=%d cmd_ver_=%d cmd_ver=%d current_phase=%d [End of DispatchAck]", coo_id_, thread_id_, cmd_ver_, cmd_ver, phase % 3);
     if (phase != phase_) {
       // Log_info("AllDispatchAcked Failed CoroutineID %d %d", Coroutine::CurrentCoroutine()->id, Coroutine::CurrentCoroutine()->global_id);

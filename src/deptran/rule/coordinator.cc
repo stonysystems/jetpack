@@ -38,6 +38,15 @@ void CoordinatorRule::GotoNextPhase() {
   int current_phase = phase_ % n_phase;
   int phase_cp;
   auto txn = static_cast<TxData*>(cmd_);
+#ifdef JETPACK_WRONG_LEADER_DEBUG
+  Log_info("[WRONG_LEADER_FLOW] CoordinatorRule entering GotoNextPhase raw_phase=%d current_phase=%d res=%d aborted=%d fast_path_success_=%d dispatch_ack_=%d dispatch_since_birth=%.2fms",
+           phase_, current_phase,
+           txn ? txn->reply_.res_ : 0,
+           aborted_,
+           fast_path_success_,
+           dispatch_ack_,
+           dispatch_time_ - clientworker_creation_time_);
+#endif
   bool latency_window = dispatch_duration_3_times_ > Config::GetConfig()->duration_ * 1000 &&
                               dispatch_duration_3_times_ < Config::GetConfig()->duration_ * 2 * 1000;
   bool skip_latency = latency_window && (txn->reply_.res_ == WRONG_LEADER || aborted_);
@@ -110,6 +119,14 @@ void CoordinatorRule::GotoNextPhase() {
       //   else
       //     recent_fastpath_success_.append(0);
       // }
+      if (aborted_) {
+#ifdef JETPACK_WRONG_LEADER_DEBUG
+          Log_info("[WRONG_LEADER_FLOW] CoordinatorRule skipping commit_time for tx_id=%lu res=%d aborted=%d phase=%d (DISPATCHED) dispatch_since_birth=%.2fms",
+                   txn->id_, txn->reply_.res_, aborted_, current_phase,
+                   dispatch_time_ - clientworker_creation_time_);
+#endif
+        End();
+      }
       if (fast_path_success_ || dispatch_ack_) {
         committed_ = true;
         // verify(phase_ % n_phase == Phase::WAITING_ORIGIN);
@@ -134,7 +151,14 @@ void CoordinatorRule::GotoNextPhase() {
         }
         if (!fast_path_success_ && !skip_latency)
           client_worker_->cli2cli_[8+cmd_is_write_].append(SimpleRWCommand::GetCurrentMsTime() - dispatch_time_);
-        client_worker_->commit_time_.push_back(std::make_pair(dispatch_time_ - clientworker_creation_time_, SimpleRWCommand::GetCurrentMsTime() - dispatch_time_));
+#ifdef JETPACK_WRONG_LEADER_DEBUG
+        Log_info("[WRONG_LEADER_FLOW] CoordinatorRule recording commit_time for tx_id=%lu phase=%d (DISPATCHED) dispatch_since_birth=%.2fms",
+                  txn->id_, current_phase,
+                  dispatch_time_ - clientworker_creation_time_);
+#endif
+        client_worker_->commit_time_.push_back(
+          std::make_pair(dispatch_time_ - clientworker_creation_time_,
+                          SimpleRWCommand::GetCurrentMsTime() - dispatch_time_));
         End();
       } else {
         verify(phase_ % n_phase == Phase::WAITING_ORIGIN);
@@ -158,7 +182,19 @@ void CoordinatorRule::GotoNextPhase() {
       if (!skip_latency) {
         client_worker_->cli2cli_[8+cmd_is_write_].append(SimpleRWCommand::GetCurrentMsTime() - dispatch_time_);
       }
-      client_worker_->commit_time_.push_back(std::make_pair(dispatch_time_ - clientworker_creation_time_, SimpleRWCommand::GetCurrentMsTime() - dispatch_time_));
+#ifdef JETPACK_WRONG_LEADER_DEBUG
+      if (txn->reply_.res_ == WRONG_LEADER || aborted_) {
+        Log_info("[WRONG_LEADER_FLOW] CoordinatorRule skipping commit_time for tx_id=%lu res=%d aborted=%d phase=%d (WAITING_ORIGIN) dispatch_since_birth=%.2fms",
+                 txn->id_, txn->reply_.res_, aborted_, current_phase,
+                 dispatch_time_ - clientworker_creation_time_);
+      } else {
+        Log_info("[WRONG_LEADER_FLOW] CoordinatorRule recording commit_time for tx_id=%lu phase=%d (WAITING_ORIGIN) dispatch_since_birth=%.2fms",
+                 txn->id_, current_phase,
+                 dispatch_time_ - clientworker_creation_time_);
+      }
+#endif
+      if (!(txn->reply_.res_ == WRONG_LEADER || aborted_))
+        client_worker_->commit_time_.push_back(std::make_pair(dispatch_time_ - clientworker_creation_time_, SimpleRWCommand::GetCurrentMsTime() - dispatch_time_));
       // Log_info("End");
       End();
       break;

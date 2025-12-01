@@ -39,7 +39,19 @@ void CoordinatorNone::GotoNextPhase() {
         client_worker_->cli2cli_[5].append(SimpleRWCommand::GetCurrentMsTime() - dispatch_time_);
       }
       // Log_info("End");
-      client_worker_->commit_time_.push_back(std::make_pair(dispatch_time_ - clientworker_creation_time_, SimpleRWCommand::GetCurrentMsTime() - dispatch_time_));
+#ifdef JETPACK_WRONG_LEADER_DEBUG
+      if (aborted_) {
+        Log_info("[WRONG_LEADER_FLOW] CoordinatorNone skipping commit_time (aborted) for tx_id=%lu phase=%d dispatch_since_birth=%.2fms",
+                 ((TxData*)cmd_)->id_, phase_,
+                 dispatch_time_ - clientworker_creation_time_);
+      } else {
+        Log_info("[WRONG_LEADER_FLOW] CoordinatorNone recording commit_time for tx_id=%lu phase=%d dispatch_since_birth=%.2fms",
+                 ((TxData*)cmd_)->id_, phase_,
+                 dispatch_time_ - clientworker_creation_time_);
+      }
+#endif
+      if (!aborted_)
+        client_worker_->commit_time_.push_back(std::make_pair(dispatch_time_ - clientworker_creation_time_, SimpleRWCommand::GetCurrentMsTime() - dispatch_time_));
       End();
       break;
     default:
