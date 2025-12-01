@@ -1173,7 +1173,7 @@ void TxLogServer::DispatchRecoveredCommand(shared_ptr<Marshallable> cmd, shared_
                  completion_weight);
 #endif
         if (res == WRONG_LEADER) {
-#if JETPACK_WRONG_LEADER_DEBUG
+#ifdef JETPACK_WRONG_LEADER_DEBUG
           Log_error("[JETPACK-RECOVERY] Received WRONG_LEADER during recovery dispatch for partition %d.", par_id);
 #endif
         } else if (res == REJECT) {
