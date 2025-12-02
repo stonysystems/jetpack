@@ -251,17 +251,23 @@ void ClientWorker::Work() {
   // Synchronize start time across all client workers via shared file signal.
 if (false) {
   try {
-    jm_signal::set_key("jetpack", std::to_string(cli_id_), "client_sync");
+    jm_signal::set_key("jetpack", std::to_string(cli_id_), "client_sync"+std::to_string(cli_id_));
+    Log_info("[CLIENT_SYNC] Set key on client %d", cli_id_);
     auto* cfg = Config::GetConfig();
     for (const auto& client_info : cfg->par_clients_) {
+      Log_info("[CLIENT_SYNC] Try to synchronize clients:%d from %d", client_info.id, cli_id_);
+    }
+    for (const auto& client_info : cfg->par_clients_) {
+      Log_info("[CLIENT_SYNC] Wait for synchronize clients:%d from %d", client_info.id, cli_id_);
       jm_signal::wait_for_key("jetpack",
                               std::to_string(client_info.id),
-                              "client_sync");
+                              "client_sync"+std::to_string(client_info.id));
+      Log_info("[CLIENT_SYNC] Wait finish synchronize clients:%d from %d", client_info.id, cli_id_);
     }
   } catch (const std::exception& e) {
     Log_warn("[CLIENT_SYNC] Failed to synchronize clients: %s", e.what());
   }
-  Log_info("[CLIENT_SYNC] Failed to synchronize clients");
+  Log_info("[CLIENT_SYNC] Success to synchronize clients");
 }
 
   for (uint32_t n_tx = 0; n_tx < n_concurrent_; n_tx++) {

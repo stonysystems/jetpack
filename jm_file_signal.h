@@ -20,7 +20,12 @@ inline std::string BaseDir() {
   if (env && *env) {
     return std::string(env);
   }
+#ifdef AWS
+  return "/home/ubuntu/code/tmp";
+#endif
+#ifndef AWS
   return "/tmp";
+#endif
 }
 
 inline std::string FilePath(const std::string& host) {
@@ -50,15 +55,18 @@ inline void wait_for_key(const std::string& role,
   const std::string needle = role + ":" + value;
   for (;;) {
     std::ifstream in(path);
+    // std::system("ls /home/ubuntu/code/tmp");
     if (in.is_open()) {
       std::string line;
       while (std::getline(in, line)) {
         if (line == needle) {
           return;
+        } else {
+          Log_info("[CLIENT_SYNC] line=%s not match needle=%s", line.c_str(), needle.c_str());
         }
       }
     }
-    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
   }
 }
 
