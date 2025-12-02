@@ -60,6 +60,11 @@ class RaftServer : public TxLogServer {
   bool disconnected_ = false;
   bool req_voting_ = false ;
   bool in_applying_logs_ = false ;
+#ifdef RAFT_ELECTION_ONLY_INIT_AND_POST_FAILURE_ONCE_PATCH
+  bool init_election_done_ = false;
+  bool post_failure_election_done_ = false;
+  bool failure_triggered_seen_ = false;
+#endif
 #ifdef RAFT_TEST_CORO
   bool failover_{true} ;
 #else
@@ -204,6 +209,11 @@ class RaftServer : public TxLogServer {
     // election timeout between 0.4 and 0.7 seconds
     return RandomGenerator::rand_double(0.4, 0.7) ;
   }
+#ifdef RAFT_ELECTION_ONLY_INIT_AND_POST_FAILURE_ONCE_PATCH
+  std::string JmSignalHost() const;
+  void RefreshElectionSignalsLocked();
+  void MarkElectionDoneLocked(bool after_failure);
+#endif
  public:
   void NotifyReplicationEvents();
   slotid_t min_active_slot_ = 1; // anything before (lt) this slot is freed
@@ -229,6 +239,9 @@ class RaftServer : public TxLogServer {
   std::unordered_map<siteid_t, shared_ptr<IntEvent>> ready_for_replication_;
 
   void StartElectionTimer() ;
+#ifdef RAFT_ELECTION_ONLY_INIT_AND_POST_FAILURE_ONCE_PATCH
+  void Pause() override;
+#endif
 
   bool IsLeader()
   {

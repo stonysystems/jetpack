@@ -161,6 +161,8 @@ namespace janus {
 // #define JETPACK_WRONG_LEADER_DEBUG
 // #define RAFT_LEADER_ELECTION_LOGIC
 // #define RAFT_LEADER_ELECTION_DEBUG
+// Allow only one initial election and one post-failure election (jm_signal gated).
+#define RAFT_ELECTION_ONLY_INIT_AND_POST_FAILURE_ONCE_PATCH
 
 // #ifndef RAFT_TEST_CORO   
 // #define RAFT_BATCH_OPTIMIZATION

@@ -4,9 +4,56 @@
 #include "frame.h"
 #include "coordinator.h"
 #include "../classic/tpc_command.h"
+#ifdef RAFT_ELECTION_ONLY_INIT_AND_POST_FAILURE_ONCE_PATCH
+#include <exception>
+#include "../../../jm_file_signal.h"
+#endif
 
 
 namespace janus {
+
+#ifdef RAFT_ELECTION_ONLY_INIT_AND_POST_FAILURE_ONCE_PATCH
+std::string RaftServer::JmSignalHost() const {
+  return "raft_failure_recovery";
+  // return "raft_p" + std::to_string(partition_id_);
+}
+
+void RaftServer::RefreshElectionSignalsLocked() {
+  const auto host = JmSignalHost();
+  if (!failure_triggered_seen_) {
+    if (jm_signal::exists_key("raft", "failure_triggered", host)) {
+      failure_triggered_seen_ = true;
+      Log_info("[RAFT_SIGNAL] detected failure trigger for %s", host.c_str());
+    }
+  }
+  if (!init_election_done_ &&
+      jm_signal::exists_key("raft", "init_election_done", host)) {
+    init_election_done_ = true;
+  }
+  if (!post_failure_election_done_ &&
+      jm_signal::exists_key("raft", "post_failure_election_done", host)) {
+    post_failure_election_done_ = true;
+  }
+}
+
+void RaftServer::MarkElectionDoneLocked(bool after_failure) {
+  const char* value =
+      after_failure ? "post_failure_election_done" : "init_election_done";
+  bool* flag = after_failure ? &post_failure_election_done_
+                             : &init_election_done_;
+  if (*flag) {
+    return;
+  }
+  *flag = true;
+  const auto host = JmSignalHost();
+  try {
+    jm_signal::set_key("raft", value, host);
+  } catch (const std::exception& e) {
+    Log_warn("[RAFT_SIGNAL] failed to write %s for %s: %s",
+             value, host.c_str(), e.what());
+  }
+}
+#endif
 
 std::shared_ptr<IntEvent> RaftServer::CreateReplicationEvent(siteid_t follower_site_id) {
   std::lock_guard<std::recursive_mutex> lock(ready_for_replication_mtx_);
@@ -668,6 +715,23 @@ RaftServer::~RaftServer() {
       partition_id_, loc_id_, n_prepare_, n_accept_, n_commit_);
 }
 
+#ifdef RAFT_ELECTION_ONLY_INIT_AND_POST_FAILURE_ONCE_PATCH
+void RaftServer::Pause() {
+  {
+    std::lock_guard<std::recursive_mutex> lock(mtx_);
+    const auto host = JmSignalHost();
+    try {
+      jm_signal::set_key("raft", "failure_triggered", host);
+      failure_triggered_seen_ = true;
+      Log_info("[RAFT_SIGNAL] wrote failure trigger for %s", host.c_str());
+    } catch (const std::exception& e) {
+      Log_warn("[RAFT_SIGNAL] failed to write failure trigger: %s", e.what());
+    }
+  }
+  TxLogServer::Pause();
+}
+#endif
+
 bool RaftServer::RequestVote() {
   // for(int i = 0; i < 1000; i++) Log_info("not calling the wrong method");
 
@@ -679,9 +743,27 @@ bool RaftServer::RequestVote() {
   ballot_t lst_term = 0 ;
   ballot_t prev_term = 0;
   siteid_t prev_vote_for = INVALID_SITEID;
+#ifdef RAFT_ELECTION_ONLY_INIT_AND_POST_FAILURE_ONCE_PATCH
+  bool election_after_failure = false;
+#endif
 
   {
     std::lock_guard<std::recursive_mutex> lock(mtx_);
+#ifdef RAFT_ELECTION_ONLY_INIT_AND_POST_FAILURE_ONCE_PATCH
+    RefreshElectionSignalsLocked();
+    election_after_failure = failure_triggered_seen_;
+    // Temporary gating: allow only the initial election and one election after the simulated failure.
+    bool skip_init_election = (!election_after_failure && init_election_done_);
+    bool skip_post_failure = (election_after_failure && post_failure_election_done_);
+    if (skip_init_election || skip_post_failure) {
+      Log_info("[RAFT_ELECTION] server %d skipping election: failure_triggered=%d init_done=%d post_failure_done=%d",
+               site_id_, failure_triggered_seen_, init_election_done_, post_failure_election_done_);
+      req_voting_ = false;
+      resetTimer("election gated by jm_signal");
+      return false;
+    }
+#endif
+
     prev_term = currentTerm;
     prev_vote_for = vote_for_;
     auto prev_local_term = currentTerm;
@@ -716,6 +798,7 @@ bool RaftServer::RequestVote() {
 #ifdef RAFT_LEADER_ELECTION_DEBUG
       Log_info("[RAFT_ELECTION] server %d abandoning leadership claim because local term advanced to %lu", site_id_, currentTerm);
 #endif
+      req_voting_ = false;
       return false;
     }
     // become a leader
@@ -739,6 +822,9 @@ bool RaftServer::RequestVote() {
     if(IsLeader()) {
 	  	//for(int i = 0; i < 100; i++) Log_info("wait wait wait");
       Log_debug("vote accepted %d curterm %d", loc_id, currentTerm);
+#ifdef RAFT_ELECTION_ONLY_INIT_AND_POST_FAILURE_ONCE_PATCH
+      MarkElectionDoneLocked(election_after_failure);
+#endif
 #ifdef RAFT_TEST_CORO
       // Skip JetpackRecovery in test environment to avoid RPC handler issues
 #else
@@ -749,6 +835,7 @@ bool RaftServer::RequestVote() {
     } else {
       Log_debug("vote rejected %d curterm %d, do rollback", loc_id, currentTerm);
       setIsLeader(false) ;
+      req_voting_ = false;
     	return false;
 		}
   } else if (sp_quorum->No()) {
