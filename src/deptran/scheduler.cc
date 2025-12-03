@@ -1077,7 +1077,7 @@ void TxLogServer::JetpackResubmit(int sid) {
 #endif
   
   auto e = commo()->JetpackBroadcastFinishRecovery(partition_id_, site_id_, oepoch_);
-  e->Wait();
+  // e->Wait(); [Jetpack] BroadcastFinishRecovery do not need to sync
   
   Log_info("[JETPACK-RECOVERY] FinishRecovery broadcast completed, fast path restored");
 }
