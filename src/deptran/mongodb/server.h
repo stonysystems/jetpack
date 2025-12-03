@@ -130,7 +130,10 @@ class MongodbServer : public TxLogServer {
     return loc_id_ == 0;
   }
   void Submit(const shared_ptr<Marshallable>& cmd) {
-    if (jetpack_status_ == TxLogServer::JetpackStatus::RECOVERY) {
+    bool is_recovery_cmd = SimpleRWCommand(cmd).IsRecoveryCommand();
+
+    if (!is_recovery_cmd &&
+        jetpack_status_ == TxLogServer::JetpackStatus::RECOVERY) {
       if (cmd->kind_ == MarshallDeputy::CMD_TPC_COMMIT) {
         auto tpc_cmd = dynamic_pointer_cast<TpcCommitCommand>(cmd);
         if (tpc_cmd) {
