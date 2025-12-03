@@ -19,7 +19,7 @@ namespace janus {
 class MongodbServer : public TxLogServer {
   
 #ifdef AWS
-  const int mongodb_connection_ = 2000; // maximum connection maybe limited by ulimit, increase ulimit may solve connection limit problem. 2000 is designed for 0.66s latency 3000 clients open loop
+  const int mongodb_connection_ = 2500; // maximum connection maybe limited by ulimit, increase ulimit may solve connection limit problem. 2000 is designed for 0.66s latency 3000 clients open loop, change to 2500 to saturate CPU usage
 #endif
 #ifndef AWS
   const int mongodb_connection_ = 80; // seems maximum connextion between 95 * 5 and 100 * 5 at local
