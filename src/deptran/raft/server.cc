@@ -928,8 +928,8 @@ void RaftServer::StartElectionTimer() {
     double duration = randDuration() ;
     auto check_interval = HEARTBEAT_INTERVAL / 2;
 #ifdef AWS
-    auto election_timeout = RandomGenerator::rand((frame_->site_info_->locale_id + 1) * 100 * HEARTBEAT_INTERVAL,
-                                                  (frame_->site_info_->locale_id + 1) * 200 * HEARTBEAT_INTERVAL);
+    auto election_timeout = RandomGenerator::rand(2000 * HEARTBEAT_INTERVAL,
+                                                  3000 * HEARTBEAT_INTERVAL);
 #endif
 #ifndef AWS
     auto election_timeout = RandomGenerator::rand((frame_->site_info_->locale_id + 1) * 5 * HEARTBEAT_INTERVAL,
@@ -957,8 +957,8 @@ void RaftServer::StartElectionTimer() {
           if(stop_) return ;
         }
 #ifdef AWS
-        election_timeout = RandomGenerator::rand((frame_->site_info_->locale_id + 1) * 100 * HEARTBEAT_INTERVAL,
-                                                 (frame_->site_info_->locale_id + 1) * 200 * HEARTBEAT_INTERVAL);
+        election_timeout = RandomGenerator::rand(2000 * HEARTBEAT_INTERVAL,
+                                                 3000 * HEARTBEAT_INTERVAL);
 #endif
 #ifndef AWS
         election_timeout = RandomGenerator::rand((frame_->site_info_->locale_id + 1) * 5 * HEARTBEAT_INTERVAL,
