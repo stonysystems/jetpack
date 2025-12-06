@@ -54,8 +54,9 @@ static void KillMongodbPrimary() {
 #ifdef AWS
   host = "0.0.0.0"; // ALWAYS 0.0.0.0 online
 #endif
-  std::string kill_cmd = "pkill -f \"mongod.*--port " + std::to_string(mongo_port) +
-                         ".*--bind_ip " + host + "\"";
+std::string kill_cmd =
+    "pkill -KILL -f \"mongod.*--port " + std::to_string(mongo_port) +
+    ".*--bind_ip " + host + "\"";
   Log_info("[MONGODB-FAILOVER] Executing primary kill: %s", kill_cmd.c_str());
   std::system(kill_cmd.c_str());
 
