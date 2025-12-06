@@ -146,6 +146,16 @@ pair<int32_t, int32_t> SimpleRWCommand::GetCmdID(shared_ptr<Marshallable> cmd) {
   if (cmd == nullptr) {
     return make_pair(-32768, -32768);
   }
+  if (cmd->kind_ == MarshallDeputy::CMD_TPC_BATCH) {
+    auto batch = std::dynamic_pointer_cast<TpcBatchCommand>(cmd);
+    if (batch && !batch->cmds_.empty()) {
+      if (batch->cmds_.size() > 1) {
+        Log_warn("[SIMPLE_RW_CMD] GetCmdID called on batch with size %zu; using first command only", batch->cmds_.size());
+      }
+      return GetCmdID(batch->cmds_.front());
+    }
+    return make_pair(-32768, -32768);
+  }
   SimpleRWCommand parsed_cmd = SimpleRWCommand(cmd);
   return parsed_cmd.cmd_id_;
 }
