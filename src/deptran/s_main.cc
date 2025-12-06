@@ -432,7 +432,11 @@ void server_failover_co(bool random, bool leader, int srv_idx)
 #ifdef JETPACK_MONGODB_RECOVERY
         KillMongodbPrimary();
 #endif
-        Log_info("@@@@@@@@@@@@@@@@@@@@@@@@ svr_workers_g %d paused", idx);
+        struct timeval pause_tv;
+        gettimeofday(&pause_tv, nullptr);
+        double pause_time_ms = static_cast<double>(pause_tv.tv_sec) * 1000.0 +
+                               static_cast<double>(pause_tv.tv_usec) / 1000.0;
+        Log_info("@@@@@@@@@@@@@@@@@@@@@@@@ svr_workers_g %d paused time=%.6fms", idx, pause_time_ms);
         for (int i = 0; i < client_workers_g.size() ; ++i)
         {
           failover_triggers[i] = true ;

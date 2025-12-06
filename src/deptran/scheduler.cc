@@ -722,7 +722,12 @@ void Witness::print_log() {
 
 void TxLogServer::JetpackRecoveryEntry() {
   jetpack_recovery_start_time_ = std::chrono::steady_clock::now();
-  Log_info("[JETPACK-RECOVERY] ===== STARTING JETPACK RECOVERY ======");
+  struct timeval recovery_start_tv;
+  gettimeofday(&recovery_start_tv, nullptr);
+  double recovery_start_ms = static_cast<double>(recovery_start_tv.tv_sec) * 1000.0 +
+                             static_cast<double>(recovery_start_tv.tv_usec) / 1000.0;
+  Log_info("[JETPACK-RECOVERY] ===== STARTING JETPACK RECOVERY ====== time=%.6fms",
+           recovery_start_ms);
   Log_info("[JETPACK-RECOVERY] Leader: site_id=%d, jepoch=%d, oepoch=%d", site_id_, jepoch_, oepoch_);
   jetpack_status_ = TxLogServer::JetpackStatus::RECOVERY;
   
@@ -732,8 +737,13 @@ void TxLogServer::JetpackRecoveryEntry() {
   auto recovery_end_time = std::chrono::steady_clock::now();
   auto recovery_duration_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
       recovery_end_time - jetpack_recovery_start_time_).count();
-  Log_info("[JETPACK-RECOVERY] ===== JETPACK RECOVERY COMPLETED ====== duration=%lldms",
-           static_cast<long long>(recovery_duration_ms));
+  struct timeval recovery_end_tv;
+  gettimeofday(&recovery_end_tv, nullptr);
+  double recovery_end_ms = static_cast<double>(recovery_end_tv.tv_sec) * 1000.0 +
+                           static_cast<double>(recovery_end_tv.tv_usec) / 1000.0;
+  Log_info("[JETPACK-RECOVERY] ===== JETPACK RECOVERY COMPLETED ====== duration=%lldms time=%.6fms",
+           static_cast<long long>(recovery_duration_ms),
+           recovery_end_ms);
 }
 
 void TxLogServer::JetpackBeginRecovery() {
