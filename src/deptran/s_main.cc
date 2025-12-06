@@ -777,11 +777,11 @@ int main(int argc, char *argv[]) {
             file << cli2cli[k].data_[i];
           file << ",";
         }
-        if (i < commit_time.size()) {
+        if (i < commit_time.size())
           file << std::fixed << commit_time[i].first;
-          file << ",";
+        file << ",";
+        if (i < commit_time.size())
           file << commit_time[i].second;
-        }
         file << ",";
         if (i < dispatch_time_distribution.count()) {
           file << dispatch_time_distribution.data_[i];
