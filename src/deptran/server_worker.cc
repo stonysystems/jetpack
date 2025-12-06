@@ -98,6 +98,8 @@ void ServerWorker::SetupBase() {
                                            std::placeholders::_1));
   }
 #endif
+  Log_info("[SETUP_BASE] this=%p rep_frame=%p rep_sched=%p tx_frame=%p tx_sched=%p",
+           (void*) this, rep_frame_, rep_sched_, tx_frame_, tx_sched_);
 }
 
 void ServerWorker::PopTable() {
@@ -301,11 +303,13 @@ void ServerWorker::SetupCommo() {
 void ServerWorker::Pause() {
   Log_info("!!!!!!!! ServerWorker::Pause()");
   rep_sched_->Pause();
+  tx_sched_->Pause();
   svr_poll_mgr_->pause();
 }
 
 void ServerWorker::Resume() {
   svr_poll_mgr_->resume();
+  tx_sched_->Resume();
   rep_sched_->Resume();
 }
 
