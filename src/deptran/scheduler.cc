@@ -430,6 +430,12 @@ void TxLogServer::OnRuleSpeculativeExecute(const shared_ptr<Marshallable>& cmd,
                     bool_t* accepted,
                     value_t* result,
                     bool_t* is_leader) {
+  if (paused_) { // [Jetpack] Bad fix, should be blocked from handle_write, not to this layer
+    *accepted = false;
+    *result = 0;
+    *is_leader = false;
+    return;
+  }
 #ifdef ZERO_OVERHEAD
   // if (rep_sched_->ConflictWithOriginalUnexecutedLog(cmd))
   //   Log_info("Conflict!");
@@ -450,6 +456,7 @@ void TxLogServer::OnRuleSpeculativeExecute(const shared_ptr<Marshallable>& cmd,
     *result = 0;
   } else {
     *accepted = false;
+    *result = 0;
   }
   *is_leader = IsLeader();
 }

@@ -29,6 +29,9 @@ bool CoordinatorRaft::IsFPGALeader() {
 void CoordinatorRaft::Submit(shared_ptr<Marshallable>& cmd,
                                    const function<void()>& func,
                                    const function<void()>& exe_callback) {
+  if (this->svr_->paused_) { // [Jetpack] Bad fix for failure recovery. I don't know why server can still receive commands even if Client is paused_
+    return;
+  }
   auto reject_as_wrong_leader = [&](const char* reason_tag) {
     auto config = Config::GetConfig();
 #ifdef JETPACK_WRONG_LEADER_DEBUG

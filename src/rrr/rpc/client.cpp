@@ -478,10 +478,12 @@ void Client::handle_free(i64 xid) {
 
 void Client::pause() {
   paused_ = true;
+  Log_info("[RPC_CLIENT] paused client socket=%d host=%s", sock_, host_.c_str());
 }
 
 void Client::resume() {
   paused_ = false;
+  Log_info("[RPC_CLIENT] resumed client socket=%d host=%s", sock_, host_.c_str());
 }
 
 int Client::poll_mode() {
