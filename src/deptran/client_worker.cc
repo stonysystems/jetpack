@@ -1,4 +1,5 @@
 #include <cmath>
+#include <random>
 #include "client_worker.h"
 #include "frame.h"
 #include "procedure.h"
@@ -277,6 +278,28 @@ void ClientWorker::Work() {
     Log_info("[CLIENT_SYNC] Success to synchronize clients");
   }
 
+  auto monitor_job = std::make_shared<OneTimeJob>([this]() {
+    static thread_local std::mt19937 monitor_gen(std::random_device{}());
+    static thread_local std::uniform_int_distribution<int> monitor_dist(500 * 1000, 1000 * 1000);
+    while (all_done_ == 0 && !recovery_finish_seen_) {
+      if (!failure_triggered_seen_ &&
+          jm_signal::exists_key("failure", "failure_triggered", "failure_triggered")) {
+        failure_triggered_seen_ = true;
+        Log_info("[CLIENT_MONITOR] cli_id=%d detected failure_triggered", cli_id_);
+      }
+      if (failure_triggered_seen_ && !recovery_finish_seen_ &&
+          jm_signal::exists_key("jetpack", "recovery_finish_after_failure", "recovery_finish_after_failure")) {
+        recovery_finish_seen_ = true;
+        sp_n_tx_done_.value_ = n_tx_issued_;
+        Log_info("[CLIENT_MONITOR] cli_id=%d detected recovery_finish_after_failure; "
+                  "reset done count to %" PRId64, cli_id_, n_tx_issued_);
+        break;
+      }
+      Reactor::CreateSpEvent<TimeoutEvent>(monitor_dist(monitor_gen))->Wait();
+    }
+  });
+  poll_mgr_->add(dynamic_pointer_cast<Job>(monitor_job));
+
   for (uint32_t n_tx = 0; n_tx < n_concurrent_; n_tx++) {
     auto sp_job = std::make_shared<OneTimeJob>([this, n_tx] () {
       // this wait tries to avoid launching clients all at once, especially for open-loop clients.
@@ -290,6 +313,8 @@ void ClientWorker::Work() {
       end_time = beg_time + duration * 5 * pow(10, 2);
 #endif 
       bool open_loop_throttled = false;
+      bool pause_logged = false;
+      bool resume_logged = false;
       while (true) { // start while
         bool jetpack_first = true;
         if (jetpack_first) {
@@ -307,6 +332,22 @@ void ClientWorker::Work() {
         if (cur_time > read_end_time) {
 #endif
           break;
+        }
+        // If a failure has been signaled, pause issuing until recovery_finish_after_failure is present.
+        if (failure_triggered_seen_ && !recovery_finish_seen_) {
+          if (!pause_logged) {
+            Log_info("[CLIENT_PAUSE] cli_id=%d detected failure_triggered, pausing until recovery_finish_after_failure", cli_id_);
+            pause_logged = true;
+          }
+          while (!recovery_finish_seen_) {
+            static thread_local std::mt19937 pause_gen(std::random_device{}());
+            static thread_local std::uniform_int_distribution<int> pause_dist(50 * 1000, 100 * 1000);
+            Reactor::CreateSpEvent<TimeoutEvent>(pause_dist(pause_gen))->Wait();
+          }
+          if (!resume_logged) {
+            Log_info("[CLIENT_RESUME] cli_id=%d detected recovery_finish_after_failure, resuming", cli_id_);
+            resume_logged = true;
+          }
         }
         while (true) {
           auto n_undone_tx = n_tx_issued_ - sp_n_tx_done_.value_;

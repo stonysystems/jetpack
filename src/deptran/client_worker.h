@@ -57,6 +57,8 @@ class ClientWorker {
   shared_ptr<TxnRegistry> txn_reg_{nullptr};
   Config* config_{nullptr};
   Config::SiteInfo& my_site_;
+  bool failure_triggered_seen_{false};
+  bool recovery_finish_seen_{false};
   vector<string> servers_;
   bool* volatile failover_trigger_;
   volatile bool* failover_server_quit_;

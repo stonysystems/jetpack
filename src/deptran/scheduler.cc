@@ -19,6 +19,7 @@
 #include <algorithm>
 #include <gperftools/profiler.h>
 #include <cstdlib>
+#include <exception>
 
 #include "../../jm_file_signal.h"
 
@@ -321,8 +322,17 @@ void TxLogServer::DestroyExecutor(txnid_t txn_id) {
 
 void TxLogServer::Pause() {
   Log_info("!!!!!!!! TxLogServer::Pause()");
+  try {
+    jm_signal::set_key("failure", "failure_triggered", "failure_triggered");
+    Log_info("[JM_SIGNAL] wrote failure_triggered for host %s", "failure_triggered");
+  } catch (const std::exception& e) {
+    Log_warn("[JM_SIGNAL] failed to write failure_triggered for host %s: %s",
+              "failure_triggered", e.what());
+  }
   commo_->Pause();
   paused_ = true;
+  Log_info("[PAUSE_STATE] TxLogServer=%p paused_=1 comm_paused=%d",
+           (void*) this, commo_ ? commo_->paused : -1);
 };
 
 void TxLogServer::Resume() {
@@ -1069,25 +1079,13 @@ void TxLogServer::JetpackResubmit(int sid) {
   
   // Finally, broadcast FinishRecovery to update jepoch and make fast path available
 #ifdef JETPACK_MONGODB_RECOVERY
-  try {
-    std::string host;
-    if (frame_ && frame_->site_info_) {
-      if (!frame_->site_info_->host.empty()) {
-        host = frame_->site_info_->host;
-      } else if (!frame_->site_info_->proc_name.empty()) {
-        host = frame_->site_info_->proc_name;
-      } else if (!frame_->site_info_->name.empty()) {
-        host = frame_->site_info_->name;
-      }
-    }
-#ifdef AWS
-    host = "0.0.0.0";
-#endif
-    Log_info("Mark FinishRecovery on %s", host.c_str());
-    jm_signal::set_key("jetpack", "recovery_finish", host);
-    Log_info("[JETPACK-RECOVERY] Wrote finish signal to JM_Jetpack_%s", host.c_str());
-  } catch (const std::exception& ex) {
-    Log_warn("[JETPACK-RECOVERY] Failed to write finish signal: %s", ex.what());
+  Log_info("Mark FinishRecovery on %s", "recovery_finish");
+  jm_signal::set_key("jetpack", "recovery_finish", "recovery_finish");
+  Log_info("[JETPACK-RECOVERY] Wrote finish signal to JM_Jetpack_%s", "recovery_finish");
+  if (jm_signal::exists_key("failure", "failure_triggered", "failure_triggered")) {
+    jm_signal::set_key("jetpack", "recovery_finish_after_failure", "recovery_finish_after_failure");
+    Log_info("[JETPACK-RECOVERY] Wrote post-failure finish signal to JM_Jetpack_%s",
+              "recovery_finish_after_failure");
   }
 #endif
   

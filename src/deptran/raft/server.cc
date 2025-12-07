@@ -713,14 +713,8 @@ RaftServer::~RaftServer() {
 void RaftServer::Pause() {
   {
     std::lock_guard<std::recursive_mutex> lock(mtx_);
-    const auto host = JmSignalHost();
-    try {
-      jm_signal::set_key("raft", "failure_triggered", host);
-      failure_triggered_seen_ = true;
-      Log_info("[RAFT_SIGNAL] wrote failure trigger for %s", host.c_str());
-    } catch (const std::exception& e) {
-      Log_warn("[RAFT_SIGNAL] failed to write failure trigger: %s", e.what());
-    }
+    failure_triggered_seen_ = true;
+    Log_info("[RAFT_SIGNAL] marked failure trigger as seen (Pause)");
   }
   TxLogServer::Pause();
 }
