@@ -182,4 +182,6 @@ namespace janus {
 #define JETPACK_MONGODB_RECOVERY
 // #define JETPACK_MONGODB_SIMULATION
 
+#define COMMAND_POOL_ON_DISK
+
 } // namespace janus

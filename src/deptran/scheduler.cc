@@ -555,6 +555,45 @@ shared_ptr<Marshallable> RevoveryCandidates::get_cmd(uint64_t cmd_id) const {
   return nullptr;
 }
 
+#ifdef COMMAND_POOL_ON_DISK
+void Witness::OpenCommandPoolFile() {
+  if (command_pool_file_.is_open()) {
+    return;
+  }
+  if (owner_ == nullptr ||
+      owner_->loc_id_ == std::numeric_limits<locid_t>::max()) {
+    return;
+  }
+  command_pool_loc_id_ = owner_->loc_id_;
+  const std::string path = "/tmp/command_pool_" + std::to_string(command_pool_loc_id_);
+  command_pool_file_.open(path, std::ios::out | std::ios::trunc);
+  if (!command_pool_file_.is_open()) {
+    Log_warn("[COMMAND_POOL] failed to open %s", path.c_str());
+  }
+}
+
+void Witness::CloseCommandPoolFile() {
+  if (command_pool_file_.is_open()) {
+    command_pool_file_.close();
+  }
+}
+
+void Witness::WriteCommandToDisk(const SimpleRWCommand& cmd) {
+  if (!command_pool_file_.is_open()) {
+    OpenCommandPoolFile();
+  }
+  if (command_pool_file_.is_open()) {
+    command_pool_file_ << cmd.key_ << "," << cmd.value_ << "\n";
+  }
+}
+#endif
+
+Witness::~Witness() {
+#ifdef COMMAND_POOL_ON_DISK
+  CloseCommandPoolFile();
+#endif
+}
+
 bool Witness::push_back(const shared_ptr<Marshallable>& cmd) {
   if (owner_ && owner_->jetpack_status_ == TxLogServer::JetpackStatus::RECOVERY) {
 #ifdef JETPACK_RECOVERY_DEBUG
@@ -586,6 +625,9 @@ bool Witness::push_back(const shared_ptr<Marshallable>& cmd) {
 #endif
 #ifdef WITNESS_LOG_DEBUG
     witness_log_.push_back(WitnessLog(0, cmd, 1, witness_size_));
+#endif
+#ifdef COMMAND_POOL_ON_DISK
+    WriteCommandToDisk(parsed_cmd);
 #endif
     witness_cmd_count_++;
     if (was_empty) {

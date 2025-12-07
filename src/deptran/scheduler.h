@@ -12,6 +12,8 @@
 #include "RW_command.h"
 #include "config.h"
 #include <chrono>
+#include <fstream>
+#include <limits>
 
 namespace janus {
 
@@ -191,6 +193,12 @@ class Witness {
   int witness_size_ = 0; // number of keys tracked in candidates_
   int witness_cmd_count_ = 0; // total number of commands tracked
   Distribution witness_size_distribution_;
+#ifdef COMMAND_POOL_ON_DISK
+  std::ofstream command_pool_file_;
+  locid_t command_pool_loc_id_{std::numeric_limits<locid_t>::max()};
+  void OpenCommandPoolFile();
+  void CloseCommandPoolFile();
+#endif
 
 #ifdef WITNESS_LOG_DEBUG
   vector<WitnessLog> witness_log_;
@@ -204,7 +212,7 @@ class Witness {
   /* Recover related end */
 
   Witness() {};
-  ~Witness() {};
+  ~Witness();
   // return whether meet conflict, but not whether push_back success
   bool push_back(const shared_ptr<Marshallable>& cmd);
   // return how many cmd have been removed (cmd may be CMD_TPC_BATCH)
@@ -229,6 +237,9 @@ class Witness {
   /* Recover related end */
 #ifdef WITNESS_LOG_DEBUG
   void print_log();
+#endif
+#ifdef COMMAND_POOL_ON_DISK
+  void WriteCommandToDisk(const SimpleRWCommand& cmd);
 #endif
 };
 
@@ -372,7 +383,7 @@ class TxLogServer {
 
   void *svr_workers_g{nullptr};
 
-  locid_t loc_id_ = -1;
+  locid_t loc_id_ = std::numeric_limits<locid_t>::max();
   siteid_t site_id_ = -1;
   unordered_map<txid_t, shared_ptr<Tx>> dtxns_{};
   unordered_map<txid_t, mdb::Txn *> mdb_txns_{};
