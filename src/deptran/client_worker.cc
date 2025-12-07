@@ -278,6 +278,7 @@ void ClientWorker::Work() {
     Log_info("[CLIENT_SYNC] Success to synchronize clients");
   }
 
+#if defined(CLIENT_SIGNAL_PAUSE_SIGNAL_RESUME) || defined(CLIENT_SIGNAL_PAUSE_TIMEOUT_RESUME)
   auto monitor_job = std::make_shared<OneTimeJob>([this]() {
     static thread_local std::mt19937 monitor_gen(std::random_device{}());
     static thread_local std::uniform_int_distribution<int> monitor_dist(500 * 1000, 1000 * 1000);
@@ -299,6 +300,7 @@ void ClientWorker::Work() {
     }
   });
   poll_mgr_->add(dynamic_pointer_cast<Job>(monitor_job));
+#endif
 
   for (uint32_t n_tx = 0; n_tx < n_concurrent_; n_tx++) {
     auto sp_job = std::make_shared<OneTimeJob>([this, n_tx] () {
@@ -334,6 +336,7 @@ void ClientWorker::Work() {
           break;
         }
         // If a failure has been signaled, pause issuing until recovery_finish_after_failure is present.
+#if defined(CLIENT_SIGNAL_PAUSE_SIGNAL_RESUME)
         if (failure_triggered_seen_ && !recovery_finish_seen_) {
           if (!pause_logged) {
             Log_info("[CLIENT_PAUSE] cli_id=%d detected failure_triggered, pausing until recovery_finish_after_failure", cli_id_);
@@ -349,6 +352,19 @@ void ClientWorker::Work() {
             resume_logged = true;
           }
         }
+#elif defined(CLIENT_SIGNAL_PAUSE_TIMEOUT_RESUME)
+        if (failure_triggered_seen_ && !resume_logged) {
+          if (!pause_logged) {
+            Log_info("[CLIENT_PAUSE] cli_id=%d detected failure_triggered, pausing for fixed timeout", cli_id_);
+            pause_logged = true;
+          }
+          Reactor::CreateSpEvent<TimeoutEvent>(21 * 1000 * 1000)->Wait(); // 21s pause
+          if (!resume_logged) {
+            Log_info("[CLIENT_RESUME] cli_id=%d resuming after fixed timeout", cli_id_);
+            resume_logged = true;
+          }
+        }
+#endif
         while (true) {
           auto n_undone_tx = n_tx_issued_ - sp_n_tx_done_.value_;
           if (n_undone_tx % 1000 == 0) {

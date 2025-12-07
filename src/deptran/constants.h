@@ -173,6 +173,7 @@ namespace janus {
 // #define JETPACK_RECOVERY_DEBUG
 
 // #define MONGODB_STATISTICS
+// #define JM_SIGNAL_DEBUG
 
 // Feature toggle: enable MongoDB-specific JetPack recovery wiring.
 // Keep disabled by default so it does not affect other paths unless explicitly opted in.
@@ -183,5 +184,8 @@ namespace janus {
 // #define JETPACK_MONGODB_SIMULATION
 
 #define COMMAND_POOL_ON_DISK
+
+// #define CLIENT_SIGNAL_PAUSE_SIGNAL_RESUME
+// #define CLIENT_SIGNAL_PAUSE_TIMEOUT_RESUME
 
 } // namespace janus
