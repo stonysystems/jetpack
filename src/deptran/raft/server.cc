@@ -13,25 +13,20 @@
 namespace janus {
 
 #ifdef RAFT_ELECTION_ONLY_INIT_AND_POST_FAILURE_ONCE_PATCH
-std::string RaftServer::JmSignalHost() const {
-  return "raft_failure_recovery";
-  // return "raft_p" + std::to_string(partition_id_);
-}
 
 void RaftServer::RefreshElectionSignalsLocked() {
-  const auto host = JmSignalHost();
   if (!failure_triggered_seen_) {
-    if (jm_signal::exists_key("raft", "failure_triggered", host)) {
+    if (jm_signal::exists_key("failure", "failure_triggered", "failure_triggered")) {
       failure_triggered_seen_ = true;
-      Log_info("[RAFT_SIGNAL] detected failure trigger for %s", host.c_str());
+      Log_info("[RAFT_SIGNAL] detected failure trigger for %s", "failure_triggered");
     }
   }
   if (!init_election_done_ &&
-      jm_signal::exists_key("raft", "init_election_done", host)) {
+      jm_signal::exists_key("raft", "init_election_done",  "raft_init_election_done")) {
     init_election_done_ = true;
   }
   if (!post_failure_election_done_ &&
-      jm_signal::exists_key("raft", "post_failure_election_done", host)) {
+      jm_signal::exists_key("raft", "post_failure_election_done", "raft_post_failure_election_done")) {
     post_failure_election_done_ = true;
   }
 }
@@ -45,12 +40,11 @@ void RaftServer::MarkElectionDoneLocked(bool after_failure) {
     return;
   }
   *flag = true;
-  const auto host = JmSignalHost();
   try {
-    jm_signal::set_key("raft", value, host);
+    jm_signal::set_key("raft", value, std::string("raft_") + value);
   } catch (const std::exception& e) {
     Log_warn("[RAFT_SIGNAL] failed to write %s for %s: %s",
-             value, host.c_str(), e.what());
+             value, std::string("raft_") + value, e.what());
   }
 }
 #endif

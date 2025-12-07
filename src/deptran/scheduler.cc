@@ -20,9 +20,7 @@
 #include <gperftools/profiler.h>
 #include <cstdlib>
 
-#ifdef JETPACK_MONGODB_RECOVERY
 #include "../../jm_file_signal.h"
-#endif
 
 namespace janus {
 

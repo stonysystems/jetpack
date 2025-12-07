@@ -210,7 +210,6 @@ class RaftServer : public TxLogServer {
     return RandomGenerator::rand_double(0.4, 0.7) ;
   }
 #ifdef RAFT_ELECTION_ONLY_INIT_AND_POST_FAILURE_ONCE_PATCH
-  std::string JmSignalHost() const;
   void RefreshElectionSignalsLocked();
   void MarkElectionDoneLocked(bool after_failure);
 #endif
