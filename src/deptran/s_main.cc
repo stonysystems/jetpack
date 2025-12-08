@@ -421,6 +421,13 @@ void server_failover_co(bool random, bool leader, int srv_idx)
         // }
         // TODO the idx of client
         idx = find_current_leader();
+        try {
+          jm_signal::set_key("failure", "failure_triggered", "failure_triggered");
+          Log_info("[JM_SIGNAL] wrote failure_triggered for host %s", "failure_triggered");
+        } catch (const std::exception& e) {
+          Log_warn("[JM_SIGNAL] failed to write failure_triggered for host %s: %s",
+                    "failure_triggered", e.what());
+        }
         if (idx == -1) break; // [Jetpack] If no leader found, do not need to pause.
 #ifdef FAILOVER_DEBUG
         Log_info("@@@@@@@@@@@@@@@@@@@@@@@@ before pause %d", svr_workers_g[idx].site_info_->id);
