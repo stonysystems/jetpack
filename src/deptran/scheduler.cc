@@ -322,13 +322,6 @@ void TxLogServer::DestroyExecutor(txnid_t txn_id) {
 
 void TxLogServer::Pause() {
   Log_info("!!!!!!!! TxLogServer::Pause()");
-  try {
-    jm_signal::set_key("failure", "failure_triggered", "failure_triggered");
-    Log_info("[JM_SIGNAL] wrote failure_triggered for host %s", "failure_triggered");
-  } catch (const std::exception& e) {
-    Log_warn("[JM_SIGNAL] failed to write failure_triggered for host %s: %s",
-              "failure_triggered", e.what());
-  }
   commo_->Pause();
   paused_ = true;
   Log_info("[PAUSE_STATE] TxLogServer=%p paused_=1 comm_paused=%d",
@@ -1613,6 +1606,17 @@ void TxLogServer::OnJetpackFinishRecovery(const epoch_t& oepoch) {
     rep_sched_->witness_.reset();
     rep_sched_->jetpack_status_ = TxLogServer::JetpackStatus::READY;
   }
+  // Finally, broadcast FinishRecovery to update jepoch and make fast path available
+#ifdef JETPACK_MONGODB_RECOVERY
+  Log_info("Mark FinishRecovery on %s", "recovery_finish");
+  jm_signal::set_key("jetpack", "recovery_finish", "recovery_finish");
+  Log_info("[JETPACK-RECOVERY] Wrote finish signal to JM_Jetpack_%s", "recovery_finish");
+  if (jm_signal::exists_key("failure", "failure_triggered", "failure_triggered")) {
+    jm_signal::set_key("jetpack", "recovery_finish_after_failure", "recovery_finish_after_failure");
+    Log_info("[JETPACK-RECOVERY] Wrote post-failure finish signal to JM_Jetpack_%s",
+              "recovery_finish_after_failure");
+  }
+#endif
 }
 
 } // namespace janus
