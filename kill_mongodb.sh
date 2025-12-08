@@ -4,4 +4,8 @@ while pgrep -f 'mongod --replSet rsTest' > /dev/null; do
   sleep 1
 done
 
+rm -rf /tmp/rs*/*
+rm -rf /tmp/log/mongodb/rs*/*
+rm -rf /tmp/JM_*
+
 sleep 1

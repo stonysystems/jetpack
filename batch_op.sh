@@ -16,8 +16,8 @@ CMD="uptime"
 case "$op" in
   uptime)      CMD='uptime' ;;
   mongod)      CMD='ps aux | grep mongod' ;;
-  op)          CMD='bash ~/JetPack/op.sh' ;;
-  kill_mongod) CMD='bash ~/JetPack/kill_mongodb.sh' ;;
+  op)          CMD='bash ~/code/JetPack/op.sh' ;;
+  kill_mongod) CMD='bash ~/code/JetPack/kill_mongodb.sh' ;;
 esac
 
 if [[ "$op" == "kill_mongod" ]]; then

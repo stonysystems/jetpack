@@ -2,7 +2,7 @@
 
 bash batch_op.sh kill_mongod
 
-CMD=/home/ubuntu/JetPack/JetPack-Scripts/bin/mongod
+CMD=/home/ubuntu/code/JetPack/bin/mongod
 
 servers=(
   "184.72.49.232"
@@ -23,10 +23,10 @@ for idx in "${!servers[@]}"; do
     start_one=$SECONDS
     echo "[$ip] starting mongod for rs${rs_id}..."
 
-    ssh "$ip" "mkdir -p /data/rs${rs_id} /var/log/mongodb/rs${rs_id} && \
+    ssh "$ip" "mkdir -p /tmp/rs${rs_id} /tmp/log/mongodb/rs${rs_id} && \
       $CMD --replSet rsTest --port 27017 --bind_ip ${bind_ip} \
-           --dbpath /data/rs${rs_id} \
-           --logpath /var/log/mongodb/rs${rs_id}/mongod.log --fork"
+           --dbpath /tmp/rs${rs_id} \
+           --logpath /tmp/log/mongodb/rs${rs_id}/mongod.log --fork"
 
     elapsed_one=$((SECONDS - start_one))
     echo "[$ip] done in ${elapsed_one}s"
