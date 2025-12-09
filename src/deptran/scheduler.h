@@ -610,10 +610,6 @@ class TxLogServer {
 
   void JetpackRecovery();
 
-  void JetpackPrepare(int sid);
-
-  void JetpackAccept(int sid);
-
   void JetpackCommit(int sid);
 
   void JetpackResubmit(int sid);

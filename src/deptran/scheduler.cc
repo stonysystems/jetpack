@@ -844,11 +844,7 @@ void TxLogServer::JetpackRecovery() {
     if (!has_local) {
       missing_ids.push_back(entry);
     }
-    // else {
-    //   matched_keys.push_back(key);
-    // }
   }
-  // rec_set_.set_matched_key_set(sid, matched_keys);
 
   auto record_start = std::chrono::steady_clock::now();
   auto record_e = commo()->JetpackBroadcastRecordCmd(partition_id_, site_id_, jepoch_, oepoch_, sid, recovered_key_ids, missing_ids);
@@ -877,57 +873,46 @@ void TxLogServer::JetpackRecovery() {
   }
 
   // Use Paxos-like procedure to make consensus on sid
-  JetpackPrepare(sid);
-  
-}
-
-void TxLogServer::JetpackPrepare(int default_sid) {
   Log_info("[JETPACK-RECOVERY] Step 4: Starting Paxos Prepare phase for consensus");
 #ifdef JETPACK_RECOVERY_DEBUG
-  Log_info("[JETPACK-RECOVERY] Prepare: default_sid=%d, ballot=%lld", 
-           default_sid, witness_.max_seen_ballot_);
+  Log_info("[JETPACK-RECOVERY] Prepare: default_sid=%d, ballot=%lld",
+           sid, witness_.max_seen_ballot_);
 #endif
-  
-  // Use Paxos-like procedure to make consensus on sid
-  
-  auto e = commo()->JetpackBroadcastPrepare(partition_id_, site_id_, jepoch_, oepoch_, witness_.max_seen_ballot_);
-  
-  e->Wait();
-  
-  if (!e->Yes()) {
-    Log_info("[JETPACK-RECOVERY] Prepare FAILED: got %d/%d responses", e->n_voted_yes_, e->n_total_);
-    // Update local epochs and ballots from failed responses
-    if (e->max_jepoch_ > jepoch_) {
+
+  auto prepare_e = commo()->JetpackBroadcastPrepare(
+      partition_id_, site_id_, jepoch_, oepoch_, witness_.max_seen_ballot_);
+  prepare_e->Wait();
+
+  if (!prepare_e->Yes()) {
+    Log_info("[JETPACK-RECOVERY] Prepare FAILED: got %d/%d responses", prepare_e->n_voted_yes_, prepare_e->n_total_);
+    if (prepare_e->max_jepoch_ > jepoch_) {
 #ifdef JETPACK_RECOVERY_DEBUG
-      Log_info("[JETPACK-RECOVERY] Updating jepoch from %d to %d", jepoch_, e->max_jepoch_);
+      Log_info("[JETPACK-RECOVERY] Updating jepoch from %d to %d", jepoch_, prepare_e->max_jepoch_);
 #endif
-      jepoch_ = e->max_jepoch_;
+      jepoch_ = prepare_e->max_jepoch_;
       witness_.reset();
     }
-    if (e->max_oepoch_ > oepoch_) {
+    if (prepare_e->max_oepoch_ > oepoch_) {
 #ifdef JETPACK_RECOVERY_DEBUG
-      Log_info("[JETPACK-RECOVERY] Updating oepoch from %d to %d", oepoch_, e->max_oepoch_);
+      Log_info("[JETPACK-RECOVERY] Updating oepoch from %d to %d", oepoch_, prepare_e->max_oepoch_);
 #endif
-      oepoch_ = e->max_oepoch_;
+      oepoch_ = prepare_e->max_oepoch_;
     }
-    if (e->max_seen_ballot_ > witness_.max_seen_ballot_) {
+    if (prepare_e->max_seen_ballot_ > witness_.max_seen_ballot_) {
 #ifdef JETPACK_RECOVERY_DEBUG
-      Log_info("[JETPACK-RECOVERY] Updating ballot from %lld to %lld", 
-               witness_.max_seen_ballot_, e->max_seen_ballot_);
+      Log_info("[JETPACK-RECOVERY] Updating ballot from %lld to %lld",
+               witness_.max_seen_ballot_, prepare_e->max_seen_ballot_);
 #endif
-      witness_.max_seen_ballot_ = e->max_seen_ballot_;
+      witness_.max_seen_ballot_ = prepare_e->max_seen_ballot_;
     }
     return;
   }
-  
-  Log_info("[JETPACK-RECOVERY] Prepare SUCCESS: got %d/%d responses", e->n_voted_yes_, e->n_total_);
-  
-  // Determine which sid to propose
-  int propose_sid = default_sid;        // Default value from recovery
-  
-  if (e->HasValue()) {
-    // Use the value from the highest accepted ballot
-    propose_sid = e->GetSid();
+
+  Log_info("[JETPACK-RECOVERY] Prepare SUCCESS: got %d/%d responses", prepare_e->n_voted_yes_, prepare_e->n_total_);
+
+  int propose_sid = sid;
+  if (prepare_e->HasValue()) {
+    propose_sid = prepare_e->GetSid();
 #ifdef JETPACK_RECOVERY_DEBUG
     Log_info("[JETPACK-RECOVERY] Using previously accepted value: sid=%d", propose_sid);
 #endif
@@ -936,53 +921,47 @@ void TxLogServer::JetpackPrepare(int default_sid) {
     Log_info("[JETPACK-RECOVERY] No previous value, proposing recovered values: sid=%d", propose_sid);
 #endif
   }
-  
-  JetpackAccept(propose_sid);
-}
 
-void TxLogServer::JetpackAccept(int propose_sid) {
   Log_info("[JETPACK-RECOVERY] Step 5: Starting Paxos Accept phase");
-  
-  // Update local max_seen_ballot before accept
   witness_.max_seen_ballot_++;
 #ifdef JETPACK_RECOVERY_DEBUG
-  Log_info("[JETPACK-RECOVERY] Accept: proposing sid=%d, ballot=%lld", 
+  Log_info("[JETPACK-RECOVERY] Accept: proposing sid=%d, ballot=%lld",
            propose_sid, witness_.max_seen_ballot_);
 #endif
-  
-  auto e = commo()->JetpackBroadcastAccept(partition_id_, site_id_, jepoch_, oepoch_, 
-                                          witness_.max_seen_ballot_, propose_sid);
-  e->Wait();
-  
-  if (!e->Yes()) {
-    Log_info("[JETPACK-RECOVERY] Accept FAILED: got %d/%d responses", e->n_voted_yes_, e->n_total_);
-    // Update local epochs and ballots from failed responses
-    if (e->max_jepoch_ > jepoch_) {
+
+  auto accept_e = commo()->JetpackBroadcastAccept(
+      partition_id_, site_id_, jepoch_, oepoch_, witness_.max_seen_ballot_, propose_sid);
+  accept_e->Wait();
+
+  if (!accept_e->Yes()) {
+    Log_info("[JETPACK-RECOVERY] Accept FAILED: got %d/%d responses", accept_e->n_voted_yes_, accept_e->n_total_);
+    if (accept_e->max_jepoch_ > jepoch_) {
 #ifdef JETPACK_RECOVERY_DEBUG
-      Log_info("[JETPACK-RECOVERY] Updating jepoch from %d to %d", jepoch_, e->max_jepoch_);
+      Log_info("[JETPACK-RECOVERY] Updating jepoch from %d to %d", jepoch_, accept_e->max_jepoch_);
 #endif
-      jepoch_ = e->max_jepoch_;
+      jepoch_ = accept_e->max_jepoch_;
       witness_.reset();
     }
-    if (e->max_oepoch_ > oepoch_) {
+    if (accept_e->max_oepoch_ > oepoch_) {
 #ifdef JETPACK_RECOVERY_DEBUG
-      Log_info("[JETPACK-RECOVERY] Updating oepoch from %d to %d", oepoch_, e->max_oepoch_);
+      Log_info("[JETPACK-RECOVERY] Updating oepoch from %d to %d", oepoch_, accept_e->max_oepoch_);
 #endif
-      oepoch_ = e->max_oepoch_;
+      oepoch_ = accept_e->max_oepoch_;
     }
-    if (e->max_seen_ballot_ > witness_.max_seen_ballot_) {
+    if (accept_e->max_seen_ballot_ > witness_.max_seen_ballot_) {
 #ifdef JETPACK_RECOVERY_DEBUG
-      Log_info("[JETPACK-RECOVERY] Updating ballot from %lld to %lld", 
-               witness_.max_seen_ballot_, e->max_seen_ballot_);
+      Log_info("[JETPACK-RECOVERY] Updating ballot from %lld to %lld",
+               witness_.max_seen_ballot_, accept_e->max_seen_ballot_);
 #endif
-      witness_.max_seen_ballot_ = e->max_seen_ballot_;
+      witness_.max_seen_ballot_ = accept_e->max_seen_ballot_;
     }
     return;
   }
-  
-  Log_info("[JETPACK-RECOVERY] Accept SUCCESS: got %d/%d responses, proceeding to commit sid=%d", 
-           e->n_voted_yes_, e->n_total_, propose_sid);
+
+  Log_info("[JETPACK-RECOVERY] Accept SUCCESS: got %d/%d responses, proceeding to commit sid=%d",
+           accept_e->n_voted_yes_, accept_e->n_total_, propose_sid);
   JetpackCommit(propose_sid);
+  
 }
 
 void TxLogServer::JetpackCommit(int commit_sid) {
