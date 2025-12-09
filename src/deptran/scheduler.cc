@@ -798,13 +798,24 @@ void TxLogServer::JetpackRecoveryEntry() {
 
 
 void TxLogServer::JetpackRecovery() {
-  Log_info("[JETPACK-RECOVERY] Broadcasting combined PullRecovery to partition %d", partition_id_);
+  Log_info("[JETPACK-RECOVERY] Step 1: PullRecovery + Prepare (parallel) for partition %d", partition_id_);
 
-  const auto pull_start = std::chrono::steady_clock::now();
+  const auto step1_start = std::chrono::steady_clock::now();
+  const auto pull_start = step1_start;
   auto recovery_e = commo()->JetpackBroadcastPullRecovery(partition_id_, site_id_, old_view_, new_view_, jepoch_, oepoch_);
+
+  const auto prepare_start = std::chrono::steady_clock::now();
+  auto prepare_e = commo()->JetpackBroadcastPrepare(
+      partition_id_, site_id_, jepoch_, oepoch_, witness_.max_seen_ballot_);
+
+  // Round 1: PullRecovery and Prepare in parallel.
+  prepare_e->Wait();
+  auto prepare_wait_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+      std::chrono::steady_clock::now() - prepare_start).count();
   recovery_e->Wait();
   auto pull_wait_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
       std::chrono::steady_clock::now() - pull_start).count();
+  const auto round1_handle_start = std::chrono::steady_clock::now();
 
   if (!recovery_e->Yes()) {
     Log_info("[JETPACK-RECOVERY] PullRecovery FAILED: got %d/%d responses wait=%lldms",
@@ -822,6 +833,14 @@ void TxLogServer::JetpackRecovery() {
 #endif
       oepoch_ = recovery_e->max_oepoch_;
     }
+    auto step1_end = std::chrono::steady_clock::now();
+    auto handle_round1_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+        step1_end - round1_handle_start).count();
+    auto step1_total_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+        step1_end - step1_start).count();
+    Log_info("[JETPACK-RECOVERY][STEP1] pull_wait=%lldms prepare_wait=%lldms handle=%lldms total=%lldms",
+             (long long) pull_wait_ms, (long long) prepare_wait_ms,
+             (long long) handle_round1_ms, (long long) step1_total_ms);
     return;
   }
 
@@ -835,7 +854,6 @@ void TxLogServer::JetpackRecovery() {
   rec_set_.set_rec_set(sid, recovered_key_ids);
   // Build missing list where local witness lacks matching cmd id
   std::vector<std::pair<key_t, uint64_t>> missing_ids;
-  // std::vector<key_t> matched_keys;
   for (const auto& entry : recovered_key_ids) {
     key_t key = entry.first;
     uint64_t cmd_id = entry.second;
@@ -846,14 +864,63 @@ void TxLogServer::JetpackRecovery() {
     }
   }
 
+  bool prepare_ok = prepare_e->Yes();
+  int propose_sid = sid;
+  if (prepare_ok && prepare_e->HasValue()) {
+    propose_sid = prepare_e->GetSid();
+#ifdef JETPACK_RECOVERY_DEBUG
+    Log_info("[JETPACK-RECOVERY] Using previously accepted value: sid=%d", propose_sid);
+#endif
+  } else if (prepare_ok) {
+#ifdef JETPACK_RECOVERY_DEBUG
+    Log_info("[JETPACK-RECOVERY] No previous value, proposing recovered values: sid=%d", propose_sid);
+#endif
+  }
+
+  auto step1_end = std::chrono::steady_clock::now();
+  auto handle_round1_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+      step1_end - round1_handle_start).count();
+  auto step1_total_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+      step1_end - step1_start).count();
+  Log_info("[JETPACK-RECOVERY][STEP1] pull_wait=%lldms prepare_wait=%lldms handle=%lldms total=%lldms",
+           (long long) pull_wait_ms, (long long) prepare_wait_ms,
+           (long long) handle_round1_ms, (long long) step1_total_ms);
+
+  // Round 2: RecordCmd and Accept (if Prepare succeeded) in parallel.
+  const auto step2_start = std::chrono::steady_clock::now();
   auto record_start = std::chrono::steady_clock::now();
   auto record_e = commo()->JetpackBroadcastRecordCmd(partition_id_, site_id_, jepoch_, oepoch_, sid, recovered_key_ids, missing_ids);
+
+  std::shared_ptr<JetpackAcceptQuorumEvent> accept_e = nullptr;
+  std::chrono::steady_clock::time_point accept_start;
+  if (prepare_ok) {
+    Log_info("[JETPACK-RECOVERY] Step 2: Starting Paxos Accept phase");
+    witness_.max_seen_ballot_++;
+#ifdef JETPACK_RECOVERY_DEBUG
+    Log_info("[JETPACK-RECOVERY] Accept: proposing sid=%d, ballot=%lld",
+             propose_sid, witness_.max_seen_ballot_);
+#endif
+    accept_start = std::chrono::steady_clock::now();
+    accept_e = commo()->JetpackBroadcastAccept(
+        partition_id_, site_id_, jepoch_, oepoch_, witness_.max_seen_ballot_, propose_sid);
+  }
+
+  long long accept_wait_ms = 0;
+  if (accept_e) {
+    accept_e->Wait();
+    accept_wait_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now() - accept_start).count();
+  }
   if (record_e) {
     record_e->Wait();
-    auto record_wait_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-        std::chrono::steady_clock::now() - record_start).count();
+  }
+  auto record_wait_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+      std::chrono::steady_clock::now() - record_start).count();
+  
+      auto round2_handle_start = std::chrono::steady_clock::now();
+  
+  if (record_e) {
     if (record_e->Yes()) {
-      // Merge returned commands into witness and track missing set
       std::vector<std::pair<key_t, shared_ptr<Marshallable>>> missed_cmds;
       for (const auto& kv : record_e->GetRecoveredCmds()) {
         auto key = kv.first;
@@ -864,26 +931,15 @@ void TxLogServer::JetpackRecovery() {
         missed_cmds.emplace_back(key, cmd);
       }
       rec_set_.set_missed_key_cmd_set(sid, missed_cmds);
-      Log_info("[JETPACK-RECOVERY] RecordCmd SUCCESS: recorded=%zu new_rid=%d wait=%lldms",
-               recovered_key_ids.size(), rid, (long long) record_wait_ms);
+      Log_info("[JETPACK-RECOVERY] RecordCmd SUCCESS: recorded=%zu wait=%lldms",
+               recovered_key_ids.size(), (long long) record_wait_ms);
     } else {
       Log_info("[JETPACK-RECOVERY] RecordCmd FAILED: got %d/%d responses wait=%lldms",
                record_e->n_voted_yes_, record_e->n_total_, (long long) record_wait_ms);
     }
   }
 
-  // Use Paxos-like procedure to make consensus on sid
-  Log_info("[JETPACK-RECOVERY] Step 4: Starting Paxos Prepare phase for consensus");
-#ifdef JETPACK_RECOVERY_DEBUG
-  Log_info("[JETPACK-RECOVERY] Prepare: default_sid=%d, ballot=%lld",
-           sid, witness_.max_seen_ballot_);
-#endif
-
-  auto prepare_e = commo()->JetpackBroadcastPrepare(
-      partition_id_, site_id_, jepoch_, oepoch_, witness_.max_seen_ballot_);
-  prepare_e->Wait();
-
-  if (!prepare_e->Yes()) {
+  if (!prepare_ok) {
     Log_info("[JETPACK-RECOVERY] Prepare FAILED: got %d/%d responses", prepare_e->n_voted_yes_, prepare_e->n_total_);
     if (prepare_e->max_jepoch_ > jepoch_) {
 #ifdef JETPACK_RECOVERY_DEBUG
@@ -905,35 +961,18 @@ void TxLogServer::JetpackRecovery() {
 #endif
       witness_.max_seen_ballot_ = prepare_e->max_seen_ballot_;
     }
+    auto step2_end = std::chrono::steady_clock::now();
+    auto handle_round2_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+        step2_end - round2_handle_start).count();
+    auto step2_total_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+        step2_end - step2_start).count();
+    Log_info("[JETPACK-RECOVERY][STEP2] record_wait=%lldms accept_wait=%lldms handle=%lldms total=%lldms",
+             (long long) record_wait_ms, 0LL,
+             (long long) handle_round2_ms, (long long) step2_total_ms);
     return;
   }
 
-  Log_info("[JETPACK-RECOVERY] Prepare SUCCESS: got %d/%d responses", prepare_e->n_voted_yes_, prepare_e->n_total_);
-
-  int propose_sid = sid;
-  if (prepare_e->HasValue()) {
-    propose_sid = prepare_e->GetSid();
-#ifdef JETPACK_RECOVERY_DEBUG
-    Log_info("[JETPACK-RECOVERY] Using previously accepted value: sid=%d", propose_sid);
-#endif
-  } else {
-#ifdef JETPACK_RECOVERY_DEBUG
-    Log_info("[JETPACK-RECOVERY] No previous value, proposing recovered values: sid=%d", propose_sid);
-#endif
-  }
-
-  Log_info("[JETPACK-RECOVERY] Step 5: Starting Paxos Accept phase");
-  witness_.max_seen_ballot_++;
-#ifdef JETPACK_RECOVERY_DEBUG
-  Log_info("[JETPACK-RECOVERY] Accept: proposing sid=%d, ballot=%lld",
-           propose_sid, witness_.max_seen_ballot_);
-#endif
-
-  auto accept_e = commo()->JetpackBroadcastAccept(
-      partition_id_, site_id_, jepoch_, oepoch_, witness_.max_seen_ballot_, propose_sid);
-  accept_e->Wait();
-
-  if (!accept_e->Yes()) {
+  if (accept_e && !accept_e->Yes()) {
     Log_info("[JETPACK-RECOVERY] Accept FAILED: got %d/%d responses", accept_e->n_voted_yes_, accept_e->n_total_);
     if (accept_e->max_jepoch_ > jepoch_) {
 #ifdef JETPACK_RECOVERY_DEBUG
@@ -955,8 +994,26 @@ void TxLogServer::JetpackRecovery() {
 #endif
       witness_.max_seen_ballot_ = accept_e->max_seen_ballot_;
     }
+    auto step2_end = std::chrono::steady_clock::now();
+    auto handle_round2_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+        step2_end - round2_handle_start).count();
+    auto step2_total_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+        step2_end - step2_start).count();
+    Log_info("[JETPACK-RECOVERY][STEP2] record_wait=%lldms accept_wait=%lldms handle=%lldms total=%lldms",
+             (long long) record_wait_ms, (long long) accept_wait_ms,
+             (long long) handle_round2_ms, (long long) step2_total_ms);
     return;
   }
+
+  auto step2_end = std::chrono::steady_clock::now();
+  auto handle_round2_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+      step2_end - round2_handle_start).count();
+  auto step2_total_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+      step2_end - step2_start).count();
+
+  Log_info("[JETPACK-RECOVERY][STEP2] record_wait=%lldms accept_wait=%lldms handle=%lldms total=%lldms",
+           (long long) record_wait_ms, (long long) accept_wait_ms,
+           (long long) handle_round2_ms, (long long) step2_total_ms);
 
   Log_info("[JETPACK-RECOVERY] Accept SUCCESS: got %d/%d responses, proceeding to commit sid=%d",
            accept_e->n_voted_yes_, accept_e->n_total_, propose_sid);
@@ -965,7 +1022,7 @@ void TxLogServer::JetpackRecovery() {
 }
 
 void TxLogServer::JetpackCommit(int commit_sid) {
-  Log_info("[JETPACK-RECOVERY] Step 6: Broadcasting Commit for consensus decision");
+  Log_info("[JETPACK-RECOVERY] Step 3: Broadcasting Commit for consensus decision");
 #ifdef JETPACK_RECOVERY_DEBUG
   Log_info("[JETPACK-RECOVERY] Commit: sid=%d", commit_sid);
 #endif
@@ -982,7 +1039,7 @@ void TxLogServer::JetpackCommit(int commit_sid) {
 
 void TxLogServer::JetpackResubmit(int sid) {
   const int batch_size = 1;
-  Log_info("[JETPACK-RECOVERY] Step 7: Starting resubmit process for sid=%d (batch_size=%d)",
+  Log_info("[JETPACK-RECOVERY] Step 4: Starting resubmit process for sid=%d (batch_size=%d)",
            sid, batch_size);
 
   std::vector<std::shared_ptr<TpcCommitCommand>> cmds_to_dispatch;
@@ -1048,7 +1105,7 @@ void TxLogServer::JetpackResubmit(int sid) {
     DispatchRecoveredBatch(batch_buffer, recovery_event);
     resubmitted += batch_count;
     if ((resubmitted % 100) == 0 || resubmitted == total_to_dispatch) {
-      Log_info("[JETPACK-RECOVERY] Step 7: Resubmitted %d/%d commands for sid=%d",
+      Log_info("[JETPACK-RECOVERY] Step 4: Resubmitted %d/%d commands for sid=%d",
                resubmitted, total_to_dispatch, sid);
     }
     batch_buffer.clear();
@@ -1074,7 +1131,7 @@ void TxLogServer::JetpackResubmit(int sid) {
     Log_info("[JETPACK-RECOVERY] All recovery completed");
   }
   
-  Log_info("[JETPACK-RECOVERY] Step 8: Broadcasting FinishRecovery to complete recovery");
+  Log_info("[JETPACK-RECOVERY] Step 5: Broadcasting FinishRecovery to complete recovery");
   
   // Finally, broadcast FinishRecovery to update jepoch and make fast path available
 #ifdef JETPACK_MONGODB_RECOVERY
