@@ -1,0 +1,12 @@
+client:
+    type: open
+    rate: 1000 
+    # max_undone sizing (Little's Law): N ~= throughput (req/s) * latency (s)
+    #   Raft   : 11k req/s * 0.5s  ~= 5500
+    #   Copilot:  5k req/s * 0.55s ~= 2750
+    #   Mencius: 2.5k req/s * 0.4s ~= 1000
+    #   MongoDB:  4k req/s * 0.5s  ~= 2000
+    # Rule of thumb -> max_undone >= 1.5-2x max(lambda_i * L_i) => ~8k-10k globally.
+    # With ~60 client workers/threads => 8000/60 ~= 133; 10000/60 ~= 166.
+    # Pick 200 per client worker to keep CPU saturated and stay below the global cap.
+    max_undone: 50
