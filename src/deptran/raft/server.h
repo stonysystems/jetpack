@@ -165,9 +165,6 @@ class RaftServer : public TxLogServer {
                              MarshallDeputy* reply_old_view,
                              MarshallDeputy* reply_new_view,
                              shared_ptr<KeyCmdIdBatchData>& batch) override;
-  void OnJetpackBeginRecovery(const MarshallDeputy& old_view,
-                              const MarshallDeputy& new_view,
-                              const epoch_t& new_view_id) override;
   void OnJetpackPrepare(const epoch_t& jepoch,
                         const epoch_t& oepoch,
                         const ballot_t& max_seen_ballot,

@@ -796,21 +796,6 @@ void TxLogServer::JetpackRecoveryEntry() {
            recovery_end_ms);
 }
 
-void TxLogServer::JetpackBeginRecovery() {
-  Log_info("[JETPACK-RECOVERY] Step 1: Broadcasting BeginRecovery to partition %d", partition_id_);
-  Log_info("[JETPACK-RECOVERY] BeginRecovery: old_view leader=%d, new_view leader=%d, oepoch=%d", 
-           old_view_.GetLeader(), new_view_.GetLeader(), oepoch_);
-  
-  // Wait for majority to receive BeginRecovery
-  auto e = commo()->JetpackBroadcastBeginRecovery(partition_id_, site_id_, old_view_, new_view_, oepoch_);
-  e->Wait();
-  
-  if (!e->Yes()) {
-    Log_info("[JETPACK-RECOVERY] BeginRecovery FAILED: got %d/%d responses", e->n_voted_yes_, e->n_total_);
-    return;
-  }
-  Log_info("[JETPACK-RECOVERY] BeginRecovery SUCCESS: got %d/%d responses", e->n_voted_yes_, e->n_total_);
-}
 
 void TxLogServer::JetpackRecovery() {
   Log_info("[JETPACK-RECOVERY] Broadcasting combined PullRecovery to partition %d", partition_id_);

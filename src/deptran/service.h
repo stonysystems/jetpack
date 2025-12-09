@@ -284,11 +284,6 @@ class ClassicServiceImpl : public ClassicService {
   void CommitFebruus(const txid_t& tx_id,
                      const uint64_t& timestamp,
                      int32_t* res, DeferredReply* defer) override;
-  
-  void JetpackBeginRecovery(const MarshallDeputy& old_view, 
-                            const MarshallDeputy& new_view, 
-                            const epoch_t& new_view_id, 
-                            rrr::DeferredReply* defer) override;
 
   void JetpackPullRecovery(const MarshallDeputy& old_view,
                            const MarshallDeputy& new_view,

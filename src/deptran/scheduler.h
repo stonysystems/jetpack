@@ -608,8 +608,6 @@ class TxLogServer {
 
   void JetpackRecoveryEntry();
 
-  void JetpackBeginRecovery();
-
   void JetpackRecovery();
 
   void JetpackPrepare(int sid);
@@ -633,7 +631,7 @@ class TxLogServer {
                                      MarshallDeputy* reply_old_view,
                                      MarshallDeputy* reply_new_view,
                                      shared_ptr<KeyCmdIdBatchData>& id_batch);
-  virtual void OnJetpackBeginRecovery(const MarshallDeputy& old_view,
+  void OnJetpackBeginRecovery(const MarshallDeputy& old_view,
                                       const MarshallDeputy& new_view, 
                                       const epoch_t& new_view_id);
   

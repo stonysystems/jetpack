@@ -774,14 +774,6 @@ void ClassicServiceImpl::CommitFebruus(const txid_t& tx_id,
 }
 
 
-void ClassicServiceImpl::JetpackBeginRecovery(const MarshallDeputy& old_view, 
-                                              const MarshallDeputy& new_view, 
-                                              const epoch_t& new_view_id, 
-                                              rrr::DeferredReply* defer) {
-  dtxn_sched()->OnJetpackBeginRecovery(old_view, new_view, new_view_id);
-  defer->reply();
-}
-
 void ClassicServiceImpl::JetpackPullRecovery(const MarshallDeputy& old_view,
                                              const MarshallDeputy& new_view,
                                              const epoch_t& jepoch,

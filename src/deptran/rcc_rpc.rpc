@@ -340,10 +340,6 @@ abstract service Classic {
 
   defer CommitFebruus(txid_t tx_id, uint64_t timestamp | i32 ret);
 
-  defer JetpackBeginRecovery(MarshallDeputy old_view,
-                             MarshallDeputy new_view, 
-                             epoch_t new_view_id);
-
   defer JetpackPullRecovery(MarshallDeputy old_view,
                             MarshallDeputy new_view,
                             epoch_t jepoch,

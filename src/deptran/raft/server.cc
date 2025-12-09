@@ -128,15 +128,6 @@ void RaftServer::OnJetpackPullRecovery(const MarshallDeputy& old_view,
   }
 }
 
-void RaftServer::OnJetpackBeginRecovery(const MarshallDeputy& old_view,
-                                        const MarshallDeputy& new_view,
-                                        const epoch_t& new_view_id) {
-  TxLogServer::OnJetpackBeginRecovery(old_view, new_view, new_view_id);
-  if (!IsLeader()) {
-    resetTimer("JetpackBeginRecovery RPC");
-  }
-}
-
 void RaftServer::OnJetpackPrepare(const epoch_t& jepoch,
                                   const epoch_t& oepoch,
                                   const ballot_t& max_seen_ballot,

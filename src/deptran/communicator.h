@@ -592,10 +592,6 @@ class Communicator {
       const function<void(int)>& callback);
   
   /* Jetpack recovery begin */
-  shared_ptr<QuorumEvent> JetpackBroadcastBeginRecovery(parid_t par_id, locid_t loc_id, 
-                                                       const View& old_view, 
-                                                       const View& new_view, 
-                                                       epoch_t new_view_id);
   shared_ptr<JetpackPullRecoveryQuorumEvent> JetpackBroadcastPullRecovery(parid_t par_id, locid_t loc_id,
                                                                           const View& old_view,
                                                                           const View& new_view,
