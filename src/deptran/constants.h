@@ -185,7 +185,6 @@ namespace janus {
 
 #define COMMAND_POOL_ON_DISK
 
-// #define CLIENT_SIGNAL_PAUSE_SIGNAL_RESUME
-// #define CLIENT_SIGNAL_PAUSE_TIMEOUT_RESUME
+#define CLIENT_SIGNAL_PAUSE_SIGNAL_RESUME
 
 } // namespace janus

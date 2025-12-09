@@ -217,6 +217,11 @@ void ClientWorker::Work() {
   //          config_->client_max_undone_);
 
   bool failover = Config::GetConfig()->get_failover();
+#ifdef CLIENT_SIGNAL_PAUSE_SIGNAL_RESUME
+  if (failover) {
+    Log_info("[CLIENT_MONITOR] CLIENT_SIGNAL_PAUSE_SIGNAL_RESUME enabled for failure recovery");
+  }
+#endif
   if (failover) {
     auto p_job = (Job*)new OneTimeJob([this]() {
       int run_int = Config::GetConfig()->get_failover_run_interval() * pow(10, 6);
@@ -278,28 +283,30 @@ void ClientWorker::Work() {
     Log_info("[CLIENT_SYNC] Success to synchronize clients");
   }
 
-#if defined(CLIENT_SIGNAL_PAUSE_SIGNAL_RESUME) || defined(CLIENT_SIGNAL_PAUSE_TIMEOUT_RESUME)
-  auto monitor_job = std::make_shared<OneTimeJob>([this]() {
-    static thread_local std::mt19937 monitor_gen(std::random_device{}());
-    static thread_local std::uniform_int_distribution<int> monitor_dist(500 * 1000, 1000 * 1000);
-    while (all_done_ == 0 && !recovery_finish_seen_) {
-      if (!failure_triggered_seen_ &&
-          jm_signal::exists_key("failure", "failure_triggered", "failure_triggered")) {
-        failure_triggered_seen_ = true;
-        Log_info("[CLIENT_MONITOR] cli_id=%d detected failure_triggered", cli_id_);
+#ifdef CLIENT_SIGNAL_PAUSE_SIGNAL_RESUME
+  if (failover) {
+    auto monitor_job = std::make_shared<OneTimeJob>([this]() {
+      static thread_local std::mt19937 monitor_gen(std::random_device{}());
+      static thread_local std::uniform_int_distribution<int> monitor_dist(500 * 1000, 1000 * 1000);
+      while (all_done_ == 0 && !recovery_finish_seen_) {
+        if (!failure_triggered_seen_ &&
+            jm_signal::exists_key("failure", "failure_triggered", "failure_triggered")) {
+          failure_triggered_seen_ = true;
+          Log_info("[CLIENT_MONITOR] cli_id=%d detected failure_triggered", cli_id_);
+        }
+        if (failure_triggered_seen_ && !recovery_finish_seen_ &&
+            jm_signal::exists_key("jetpack", "recovery_finish_after_failure", "recovery_finish_after_failure")) {
+          recovery_finish_seen_ = true;
+          sp_n_tx_done_.value_ = n_tx_issued_;
+          Log_info("[CLIENT_MONITOR] cli_id=%d detected recovery_finish_after_failure; "
+                    "reset done count to %" PRId64, cli_id_, n_tx_issued_);
+          break;
+        }
+        Reactor::CreateSpEvent<TimeoutEvent>(monitor_dist(monitor_gen))->Wait();
       }
-      if (failure_triggered_seen_ && !recovery_finish_seen_ &&
-          jm_signal::exists_key("jetpack", "recovery_finish_after_failure", "recovery_finish_after_failure")) {
-        recovery_finish_seen_ = true;
-        sp_n_tx_done_.value_ = n_tx_issued_;
-        Log_info("[CLIENT_MONITOR] cli_id=%d detected recovery_finish_after_failure; "
-                  "reset done count to %" PRId64, cli_id_, n_tx_issued_);
-        break;
-      }
-      Reactor::CreateSpEvent<TimeoutEvent>(monitor_dist(monitor_gen))->Wait();
-    }
-  });
-  poll_mgr_->add(dynamic_pointer_cast<Job>(monitor_job));
+    });
+    poll_mgr_->add(dynamic_pointer_cast<Job>(monitor_job));
+  }
 #endif
 
   for (uint32_t n_tx = 0; n_tx < n_concurrent_; n_tx++) {
@@ -317,6 +324,9 @@ void ClientWorker::Work() {
       bool open_loop_throttled = false;
       bool pause_logged = false;
       bool resume_logged = false;
+#ifdef CLIENT_SIGNAL_PAUSE_SIGNAL_RESUME
+      const bool failover_enabled = Config::GetConfig()->get_failover();
+#endif
       while (true) { // start while
         bool jetpack_first = true;
         if (jetpack_first) {
@@ -336,8 +346,8 @@ void ClientWorker::Work() {
           break;
         }
         // If a failure has been signaled, pause issuing until recovery_finish_after_failure is present.
-#if defined(CLIENT_SIGNAL_PAUSE_SIGNAL_RESUME)
-        if (failure_triggered_seen_ && !recovery_finish_seen_) {
+#ifdef CLIENT_SIGNAL_PAUSE_SIGNAL_RESUME
+        if (failover_enabled && failure_triggered_seen_ && !recovery_finish_seen_) {
           if (!pause_logged) {
             Log_info("[CLIENT_PAUSE] cli_id=%d detected failure_triggered, pausing until recovery_finish_after_failure", cli_id_);
             pause_logged = true;
@@ -349,18 +359,6 @@ void ClientWorker::Work() {
           }
           if (!resume_logged) {
             Log_info("[CLIENT_RESUME] cli_id=%d detected recovery_finish_after_failure, resuming", cli_id_);
-            resume_logged = true;
-          }
-        }
-#elif defined(CLIENT_SIGNAL_PAUSE_TIMEOUT_RESUME)
-        if (failure_triggered_seen_ && !resume_logged) {
-          if (!pause_logged) {
-            Log_info("[CLIENT_PAUSE] cli_id=%d detected failure_triggered, pausing for fixed timeout", cli_id_);
-            pause_logged = true;
-          }
-          Reactor::CreateSpEvent<TimeoutEvent>(21 * 1000 * 1000)->Wait(); // 21s pause
-          if (!resume_logged) {
-            Log_info("[CLIENT_RESUME] cli_id=%d resuming after fixed timeout", cli_id_);
             resume_logged = true;
           }
         }
