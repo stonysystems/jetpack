@@ -20,10 +20,74 @@
 #include <gperftools/profiler.h>
 #include <cstdlib>
 #include <exception>
+#include <fstream>
+#include <sstream>
 
 #include "../../jm_file_signal.h"
 
 namespace janus {
+
+static bool ReadCpuStatsInternal(int core, CpuStatSnapshot* out) {
+  std::ifstream file("/proc/stat");
+  if (!file.is_open()) {
+    return false;
+  }
+  std::string line;
+  // Skip aggregate and prior cores.
+  for (int i = 0; i <= core + 1; ++i) {
+    if (!std::getline(file, line)) {
+      return false;
+    }
+  }
+  std::istringstream iss(line);
+  std::string label;
+  iss >> label >> out->user >> out->nice >> out->system >> out->idle
+      >> out->iowait >> out->irq >> out->softirq >> out->steal;
+  return true;
+}
+
+double TxLogServer::ComputeCpuUsage(const CpuStatSnapshot& old_stats, const CpuStatSnapshot& new_stats) {
+  auto total_diff = new_stats.Total() - old_stats.Total();
+  auto idle_diff = new_stats.IdleTime() - old_stats.IdleTime();
+  if (total_diff == 0) {
+    return -1.0;
+  }
+  return 100.0 * (1.0 - static_cast<double>(idle_diff) / static_cast<double>(total_diff));
+}
+
+bool TxLogServer::ReadCpuStats(int core, CpuStatSnapshot* out) {
+  return ReadCpuStatsInternal(core, out);
+}
+
+void TxLogServer::StartCpuMonitorIfNeeded() {
+  if (cpu_monitor_started_) {
+    return;
+  }
+  cpu_monitor_started_ = true;
+  cpu_monitor_stop_ = false;
+  Coroutine::CreateRun([this]() {
+    const int core_id = 1; // AWS pins server to core 1
+    CpuStatSnapshot prev{};
+    bool has_prev = false;
+    while (!cpu_monitor_stop_) {
+      CpuStatSnapshot curr{};
+      if (ReadCpuStats(core_id, &curr)) {
+        if (has_prev) {
+          double usage = ComputeCpuUsage(prev, curr);
+          last_cpu_usage_ = usage;
+        }
+        prev = curr;
+        has_prev = true;
+      }
+      Reactor::CreateSpEvent<TimeoutEvent>(200 * 1000)->Wait();
+    }
+  });
+}
+
+double TxLogServer::SampleCpuUsage() {
+  StartCpuMonitorIfNeeded();
+  return last_cpu_usage_;
+}
 
 shared_ptr<Tx> TxLogServer::CreateTx(epoch_t epoch, txnid_t tid, bool
 read_only) {
@@ -255,11 +319,13 @@ TxLogServer::~TxLogServer() {
     it->second = NULL;
   }
   mdb_txns_.clear();
+  cpu_monitor_stop_ = true;
 #ifdef CPU_PROFILE_SEVER
   if (site_id_ == 0) {
     ProfilerStop();
   }
 #endif
+  cpu_monitor_stop_ = true;
   std::vector<double> witness_size_distribution = witness_.witness_size_distribution();
   Log_info("loc_id=%d witness size distribution 50pct %.2f 90pct %.2f 99pct %.2f ave %.2f",
     loc_id_, witness_size_distribution[0], witness_size_distribution[1], witness_size_distribution[2], witness_size_distribution[3]);
@@ -432,11 +498,13 @@ value_t TxLogServer::DBPut(const shared_ptr<Marshallable>& cmd) {
 void TxLogServer::OnRuleSpeculativeExecute(const shared_ptr<Marshallable>& cmd,
                     bool_t* accepted,
                     value_t* result,
-                    bool_t* is_leader) {
+                    bool_t* is_leader,
+                    double* cpu_usage) {
   if (paused_) { // [Jetpack] Bad fix, should be blocked from handle_write, not to this layer
     *accepted = false;
     *result = 0;
     *is_leader = false;
+    *cpu_usage = -1.0;
     return;
   }
 #ifdef ZERO_OVERHEAD
@@ -462,6 +530,7 @@ void TxLogServer::OnRuleSpeculativeExecute(const shared_ptr<Marshallable>& cmd,
     *result = 0;
   }
   *is_leader = IsLeader();
+  *cpu_usage = SampleCpuUsage();
 }
 
 void TxLogServer::OriginalPathUnexecutedCmdConflictPlaceHolder(const shared_ptr<Marshallable>& cmd) {

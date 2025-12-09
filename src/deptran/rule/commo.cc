@@ -156,8 +156,9 @@ CommunicatorRule::BroadcastRuleSpeculativeExecute(shared_ptr<vector<shared_ptr<S
           bool_t accepted;
           value_t result;
           bool_t is_leader;
-          fu->get_reply() >> accepted >> result >> is_leader;
-          e->FeedResponse(accepted, result, is_leader);
+          double cpu_usage;
+          fu->get_reply() >> accepted >> result >> is_leader >> cpu_usage;
+          e->FeedResponse(accepted, result, is_leader, cpu_usage);
         };
     
     DepId di;

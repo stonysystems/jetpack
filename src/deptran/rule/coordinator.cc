@@ -72,17 +72,36 @@ void CoordinatorRule::GotoNextPhase() {
         // fixed percentage
         go_to_fastpath_ = RandomGenerator::rand(0, 99) < Config::GetConfig()->jetpack_fastpath_attempt_rate_;
       } else if (Config::GetConfig()->jetpack_fastpath_attempt_rate_ == 101) {
-        // static int printed_times = 0;
-        // std::vector<double> cpu_info = rrr::CPUInfo::per_cpu_stat();
-        // if (dispatch_duration_3_times_ > Config::GetConfig()->duration_ * 1000) {
-        //   Log_info("cpu_info %d %.6f %.6f %.6f %.6f", cpu_info.size(), cpu_info[0], cpu_info[1], cpu_info[2], cpu_info[3]);
-        //   // printed_times++;
-        // }
-        // go_to_fastpath_ = true;
-        // go_to_fastpath_ = Config::GetConfig()->replica_proto_ != MODE_MENCIUS || cpu_info[1] < 0.9;
-        // go_to_fastpath_ = client_worker_->one_armed_bandit_.ConsultAttempt();
-        go_to_fastpath_ = client_worker_->go_to_jetpack_fastpath_cnt_ < 10 || (client_worker_->cli2cli_[6+cmd_is_write_].count() > 0 && client_worker_->cli2cli_[6+cmd_is_write_].recent_100_ave() < std::min(client_worker_->cli2cli_[8+cmd_is_write_].recent_100_ave(), 500.0)) || client_worker_->one_armed_bandit_.ConsultAttempt();
-        // Log_info("client_worker_->go_to_jetpack_fastpath_cnt_ %d %d %.2f %.2f %d", client_worker_->go_to_jetpack_fastpath_cnt_, client_worker_->cli2cli_[6+cmd_is_write_].count(), client_worker_->cli2cli_[6+cmd_is_write_].recent_100_ave(), client_worker_->cli2cli_[8+cmd_is_write_].recent_100_ave(), client_worker_->one_armed_bandit_.ConsultAttempt());
+        go_to_fastpath_ = client_worker_->go_to_jetpack_fastpath_cnt_ < 10
+                          || (client_worker_->cli2cli_[6+cmd_is_write_].count() > 0 && client_worker_->cli2cli_[6+cmd_is_write_].recent_100_ave() < std::min(client_worker_->cli2cli_[8+cmd_is_write_].recent_100_ave(), 500.0))
+                          || client_worker_->one_armed_bandit_.ConsultAttempt();
+        if (Config::GetConfig()->replica_proto_ == MODE_MENCIUS) {
+          // double avg_all = client_worker_->cpu_usage_all_.recent_100_ave();
+          double avg_leaders = client_worker_->cpu_usage_leaders_.recent_100_ave();
+          static double max_leader_avg = 0.0;
+          if (avg_leaders > max_leader_avg) {
+            max_leader_avg = avg_leaders;
+          }
+          // Log_info("[CPU-MENC] recent100 all=%.2f leaders=%.2f max_leader=%.2f",
+          //          avg_all, avg_leaders, max_leader_avg);
+          double rand_val = RandomGenerator::rand(0, 99) / 100.0;
+          if (max_leader_avg > 95.0) {
+            if (rand_val < 0.99) {
+              go_to_fastpath_ = false;
+              // Log_info("[CPU-MENC] Disabling fastpath due to leader CPU max %.2f (>95%%), rand=%.2f", max_leader_avg, rand_val);
+            }
+          } else if (max_leader_avg > 90.0) {
+            if (rand_val < 0.75) {
+              go_to_fastpath_ = false;
+              // Log_info("[CPU-MENC] Disabling fastpath due to leader CPU max %.2f (>90%%), rand=%.2f", max_leader_avg, rand_val);
+            }
+          } else if (max_leader_avg > 80.0) {
+            if (rand_val < 0.50) {
+              go_to_fastpath_ = false;
+              // Log_info("[CPU-MENC] Disabling fastpath due to leader CPU max %.2f (>80%%), rand=%.2f", max_leader_avg, rand_val);
+            }
+          }
+        }
       } else {
         verify(0);
       }
@@ -237,6 +256,11 @@ void CoordinatorRule::BroadcastRuleSpeculativeExecute(int phase) {
     // e = commo()->BroadcastRuleSpeculativeExecute(sp_vec_piece);
   }
   e->Wait();
+  // Log_info("[CPU] AvgCpuAll=%.2f AvgCpuLeaders=%.2f", e->AvgCpuAll(), e->AvgCpuLeaders());
+  if (client_worker_) {
+    client_worker_->cpu_usage_all_.append(e->AvgCpuAll());
+    client_worker_->cpu_usage_leaders_.append(e->AvgCpuLeaders());
+  }
 #ifdef MONGODB_DEBUG
   Log_info("%.2f BroadcastRuleSpeculativeExecute after wait <%d, %d>", SimpleRWCommand::GetMsTimeElaps(), SimpleRWCommand::GetCmdID(sp_vpd_).first, SimpleRWCommand::GetCmdID(sp_vpd_).second);
 #endif

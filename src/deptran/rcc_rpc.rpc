@@ -187,7 +187,8 @@ abstract service Classic {
   defer RuleSpeculativeExecute(MarshallDeputy md |
                                bool_t accepted,
                                int32_t result,
-                               bool_t is_leader);
+                               bool_t is_leader,
+                               double cpu_usage);
   defer Dispatch(i64 tid, DepId dep_id, MarshallDeputy cmd |
                  i32 res, TxnOutput output, uint64_t coro_id, MarshallDeputy view_data);
   defer Prepare(i64 tid, 

@@ -24,6 +24,16 @@ struct UniqueCmdID {
   int32_t cmd_id_;
 };
 
+struct CpuStatSnapshot {
+  unsigned long long user{0}, nice{0}, system{0}, idle{0}, iowait{0}, irq{0}, softirq{0}, steal{0};
+  uint64_t Total() const {
+    return user + nice + system + idle + iowait + irq + softirq + steal;
+  }
+  uint64_t IdleTime() const {
+    return idle + iowait;
+  }
+};
+
 class Distribution {
   double creation_time_ = SimpleRWCommand::GetCurrentMsTime();
   double recent_100_sum_ = 0;
@@ -381,6 +391,11 @@ class TxLogServer {
   std::chrono::steady_clock::time_point jetpack_recovery_start_time_{};
   /* Some Jetpack elements end */
 
+  // CPU monitor for RuleSpeculativeExecute responses (lazy-start).
+  bool cpu_monitor_started_{false};
+  double last_cpu_usage_{-1.0};
+  bool cpu_monitor_stop_{false};
+
   void *svr_workers_g{nullptr};
 
   locid_t loc_id_ = std::numeric_limits<locid_t>::max();
@@ -450,6 +465,11 @@ class TxLogServer {
     verify(commo_ != nullptr);
     return commo_;
   }
+
+  void StartCpuMonitorIfNeeded();
+  bool ReadCpuStats(int core, CpuStatSnapshot* out);
+  double ComputeCpuUsage(const CpuStatSnapshot& old_stats, const CpuStatSnapshot& new_stats);
+  double SampleCpuUsage();
 
   TxLogServer();
   TxLogServer(int mode);
@@ -592,7 +612,8 @@ class TxLogServer {
   void OnRuleSpeculativeExecute(const shared_ptr<Marshallable>& cmd,
                                 bool_t* accepted,
                                 value_t* result,
-                                bool_t* is_leader);
+                                bool_t* is_leader,
+                                double* cpu_usage);
 
   void OriginalPathUnexecutedCmdConflictPlaceHolder(const shared_ptr<Marshallable>& cmd);
 
