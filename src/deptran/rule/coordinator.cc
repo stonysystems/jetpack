@@ -84,22 +84,12 @@ void CoordinatorRule::GotoNextPhase() {
           }
           // Log_info("[CPU-MENC] recent100 all=%.2f leaders=%.2f max_leader=%.2f",
           //          avg_all, avg_leaders, max_leader_avg);
-          double rand_val = RandomGenerator::rand(0, 99) / 100.0;
-          if (max_leader_avg > 95.0) {
-            if (rand_val < 0.99) {
-              go_to_fastpath_ = false;
-              // Log_info("[CPU-MENC] Disabling fastpath due to leader CPU max %.2f (>95%%), rand=%.2f", max_leader_avg, rand_val);
-            }
-          } else if (max_leader_avg > 90.0) {
-            if (rand_val < 0.75) {
-              go_to_fastpath_ = false;
-              // Log_info("[CPU-MENC] Disabling fastpath due to leader CPU max %.2f (>90%%), rand=%.2f", max_leader_avg, rand_val);
-            }
-          } else if (max_leader_avg > 80.0) {
-            if (rand_val < 0.50) {
-              go_to_fastpath_ = false;
-              // Log_info("[CPU-MENC] Disabling fastpath due to leader CPU max %.2f (>80%%), rand=%.2f", max_leader_avg, rand_val);
-            }
+          double rand_val = RandomGenerator::rand(0, 40);
+          if (max_leader_avg - 60.0 > rand_val) {
+            go_to_fastpath_ = false;
+            Log_info("[CPU-MENC] Disabling fastpath due to leader CPU %.2f, max_leader_avg - 60.0 %.2f > rand=%.2f", max_leader_avg, max_leader_avg - 60.0, rand_val);
+          } else {
+            Log_info("[CPU-MENC] Let go fastpath due to leader CPU %.2f, max_leader_avg - 60.0 %.2f <= rand=%.2f", max_leader_avg, max_leader_avg - 60.0, rand_val);
           }
         }
       } else {
