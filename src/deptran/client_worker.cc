@@ -287,7 +287,7 @@ void ClientWorker::Work() {
   if (failover) {
     auto monitor_job = std::make_shared<OneTimeJob>([this]() {
       static thread_local std::mt19937 monitor_gen(std::random_device{}());
-      static thread_local std::uniform_int_distribution<int> monitor_dist(500 * 1000, 1000 * 1000);
+      static thread_local std::uniform_int_distribution<int> monitor_dist(50 * 1000, 100 * 1000);
       while (all_done_ == 0 && !recovery_finish_seen_) {
         if (!failure_triggered_seen_ &&
             jm_signal::exists_key("failure", "failure_triggered", "failure_triggered")) {
