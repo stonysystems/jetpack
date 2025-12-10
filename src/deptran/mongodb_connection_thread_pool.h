@@ -95,7 +95,7 @@ class MongodbConnectionThreadPool {
         { (void) metrics; }
 #endif
    public:
-    void push(const shared_ptr<Marshallable>& cmd, bool record_stats = true) {
+    size_t push(const shared_ptr<Marshallable>& cmd, bool record_stats = true) {
       std::lock_guard<std::mutex> lock(mutex);
       queue.push(
 #ifdef MONGODB_STATISTICS
@@ -112,6 +112,7 @@ class MongodbConnectionThreadPool {
       (void)record_stats;
 #endif
       cond_var.notify_one();
+      return queue.size();
     }
     shared_ptr<Marshallable> pop(double* wait_ms = nullptr) {
       std::unique_lock<std::mutex> lock(mutex);
@@ -242,15 +243,16 @@ class MongodbConnectionThreadPool {
 
   }
 
-  void MongodbRequest(const shared_ptr<Marshallable>& cmd) {
+  size_t MongodbRequest(const shared_ptr<Marshallable>& cmd) {
     if (thread_num_ == 0) {
       Log_warn("[MONGODB][POOL] thread_num is 0, dropping MongoDB request");
-      return;
+      return 0;
     }
-    request_queues_[round_robin_]->push(cmd);
+    auto depth = request_queues_[round_robin_]->push(cmd);
     round_robin_++;
     if (round_robin_ >= thread_num_)
       round_robin_ = 0;
+    return depth;
   }
 
   shared_ptr<Marshallable> MongodbFinishedPop() {

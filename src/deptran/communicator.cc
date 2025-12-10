@@ -32,7 +32,7 @@ size_t GetKeyCmdBatchSize(const std::shared_ptr<KeyCmdBatchData>& batch) {
 
 /************************RULE begin*********************************/
 
-void RuleSpeculativeExecuteQuorumEvent::FeedResponse(bool y, value_t result, bool is_leader, double cpu_usage) {
+void RuleSpeculativeExecuteQuorumEvent::FeedResponse(bool y, value_t result, bool is_leader, double cpu_usage, double queue_depth) {
   if (cpu_usage >= 0.0) {
     total_cpu_usage_ += cpu_usage;
     cpu_samples_++;
@@ -40,6 +40,9 @@ void RuleSpeculativeExecuteQuorumEvent::FeedResponse(bool y, value_t result, boo
       leader_cpu_usage_ += cpu_usage;
       leader_cpu_samples_++;
     }
+  }
+  if (queue_depth >= 0.0 && is_leader) {
+    leader_queue_depth_ = queue_depth;
   }
   if (y) {
     if (has_result_) {

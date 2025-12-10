@@ -72,9 +72,10 @@ void ClassicServiceImpl::RuleSpeculativeExecute(const MarshallDeputy& md,
                                                 int32_t* result,
                                                 bool_t* is_leader,
                                                 double* cpu_usage,
+                                                double* queue_depth,
                                                 rrr::DeferredReply* defer) {
   shared_ptr<Marshallable> sp = md.sp_data_;
-  dtxn_sched()->OnRuleSpeculativeExecute(sp, accepted, result, is_leader, cpu_usage);
+  dtxn_sched()->OnRuleSpeculativeExecute(sp, accepted, result, is_leader, cpu_usage, queue_depth);
   if (!dtxn_sched()->paused_)
     defer->reply();
 }

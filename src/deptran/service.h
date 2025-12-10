@@ -53,6 +53,7 @@ class ClassicServiceImpl : public ClassicService {
                               int32_t* result,
                               bool_t* is_leader,
                               double* cpu_usage,
+                              double* queue_depth,
                               rrr::DeferredReply* defer) override;
 
   void Dispatch(const i64& cmd_id,

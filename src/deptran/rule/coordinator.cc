@@ -105,6 +105,17 @@ void CoordinatorRule::GotoNextPhase() {
       } else {
         verify(0);
       }
+      // Keep MongoDB inflight commands within 5 per thread_queue_
+      if (Config::GetConfig()->replica_proto_ == MODE_MONGODB) {
+        double queue_depth = client_worker_->mongodb_queue_depth_.recent_100_ave();
+        double rand_val = RandomGenerator::rand(0, 99);
+        if (rand_val < queue_depth * 20) {
+          go_to_fastpath_ = false;
+          // Log_info("[MONGODB] Disabling fastpath due to queue_depth=%.2f (>2.0), rand=%.2f < %.2f", queue_depth, rand_val, queue_depth * 20);
+        } else {
+          // Log_info("[MONGODB] NOT Disabling fastpath due to queue_depth=%.2f (>2.0), rand=%.2f >= %.2f", queue_depth, rand_val, queue_depth * 20);
+        }
+      }
       client_worker_->go_to_jetpack_fastpath_cnt_ += go_to_fastpath_;
 
       sp_vec_piece_by_par_.clear();
@@ -260,6 +271,9 @@ void CoordinatorRule::BroadcastRuleSpeculativeExecute(int phase) {
   if (client_worker_) {
     client_worker_->cpu_usage_all_.append(e->AvgCpuAll());
     client_worker_->cpu_usage_leaders_.append(e->AvgCpuLeaders());
+    if (Config::GetConfig()->replica_proto_ == MODE_MONGODB) {
+      client_worker_->mongodb_queue_depth_.append(e->LeaderQueueDepth());
+    }
   }
 #ifdef MONGODB_DEBUG
   Log_info("%.2f BroadcastRuleSpeculativeExecute after wait <%d, %d>", SimpleRWCommand::GetMsTimeElaps(), SimpleRWCommand::GetCmdID(sp_vpd_).first, SimpleRWCommand::GetCmdID(sp_vpd_).second);

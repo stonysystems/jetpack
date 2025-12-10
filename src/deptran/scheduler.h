@@ -428,6 +428,7 @@ class TxLogServer {
   const int EPOCH_DURATION = 5;
 
   bool paused_ = false; // [Jetpack] For failure recovery additional helper
+  Distribution request_queues_depth_;
 
 #ifdef CHECK_ISO
   typedef map<Row*, map<colid_t, int>> deltas_t;
@@ -613,7 +614,8 @@ class TxLogServer {
                                 bool_t* accepted,
                                 value_t* result,
                                 bool_t* is_leader,
-                                double* cpu_usage);
+                                double* cpu_usage,
+                                double* queue_depth);
 
   void OriginalPathUnexecutedCmdConflictPlaceHolder(const shared_ptr<Marshallable>& cmd);
 

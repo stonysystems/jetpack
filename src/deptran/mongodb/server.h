@@ -157,7 +157,8 @@ class MongodbServer : public TxLogServer {
 #ifdef MONGODB_DEBUG
     Log_info("%.2f Before MongodbRequest <%d, %d>", SimpleRWCommand::GetMsTimeElaps(), SimpleRWCommand::GetCmdID(cmd).first, SimpleRWCommand::GetCmdID(cmd).second);
 #endif
-    mongodb_->MongodbRequest(cmd);
+    auto depth = mongodb_->MongodbRequest(cmd);
+    request_queues_depth_.append(static_cast<double>(depth));
 #ifdef MONGODB_DEBUG
     Log_info("%.2f Before cmd_content->mongodb_finished->Wait() <%d, %d>", SimpleRWCommand::GetMsTimeElaps(), SimpleRWCommand::GetCmdID(cmd).first, SimpleRWCommand::GetCmdID(cmd).second);
 #endif

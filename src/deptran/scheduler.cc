@@ -499,12 +499,14 @@ void TxLogServer::OnRuleSpeculativeExecute(const shared_ptr<Marshallable>& cmd,
                     bool_t* accepted,
                     value_t* result,
                     bool_t* is_leader,
-                    double* cpu_usage) {
+                    double* cpu_usage,
+                    double* queue_depth) {
   if (paused_) { // [Jetpack] Bad fix, should be blocked from handle_write, not to this layer
     *accepted = false;
     *result = 0;
     *is_leader = false;
-    *cpu_usage = -1.0;
+    if (cpu_usage) *cpu_usage = -1.0;
+    if (queue_depth) *queue_depth = -1.0;
     return;
   }
 #ifdef ZERO_OVERHEAD
@@ -530,7 +532,16 @@ void TxLogServer::OnRuleSpeculativeExecute(const shared_ptr<Marshallable>& cmd,
     *result = 0;
   }
   *is_leader = IsLeader();
-  *cpu_usage = SampleCpuUsage();
+  if (cpu_usage) {
+    *cpu_usage = SampleCpuUsage();
+  }
+  if (queue_depth) {
+    if (rep_sched_) {
+      *queue_depth = rep_sched_->request_queues_depth_.recent_100_ave();
+    } else {
+      *queue_depth = request_queues_depth_.recent_100_ave();
+    }
+  }
 }
 
 void TxLogServer::OriginalPathUnexecutedCmdConflictPlaceHolder(const shared_ptr<Marshallable>& cmd) {

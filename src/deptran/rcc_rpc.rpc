@@ -188,7 +188,8 @@ abstract service Classic {
                                bool_t accepted,
                                int32_t result,
                                bool_t is_leader,
-                               double cpu_usage);
+                               double cpu_usage,
+                               double queue_depth);
   defer Dispatch(i64 tid, DepId dep_id, MarshallDeputy cmd |
                  i32 res, TxnOutput output, uint64_t coro_id, MarshallDeputy view_data);
   defer Prepare(i64 tid, 

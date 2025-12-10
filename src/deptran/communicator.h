@@ -88,17 +88,19 @@ class RuleSpeculativeExecuteQuorumEvent: public QuorumEvent {
   double leader_cpu_usage_{0.0};
   int cpu_samples_{0};
   int leader_cpu_samples_{0};
+  double leader_queue_depth_{-1.0};
  public:
   RuleSpeculativeExecuteQuorumEvent(int n_total, int quorum, int num_leader)
     : QuorumEvent(n_total, quorum) {
       num_leader_ = num_leader;
   }
-  void FeedResponse(bool y, value_t result, bool is_leader, double cpu_usage);
+  void FeedResponse(bool y, value_t result, bool is_leader, double cpu_usage, double queue_depth);
   bool Yes() override;
   bool No() override;
   value_t GetResult();
   double AvgCpuAll() const { return cpu_samples_ > 0 ? total_cpu_usage_ / cpu_samples_ : 0.0; }
   double AvgCpuLeaders() const { return leader_cpu_samples_ > 0 ? leader_cpu_usage_ / leader_cpu_samples_ : 0.0; }
+  double LeaderQueueDepth() const { return leader_queue_depth_; }
 };
 
 class JetpackPullIdSetQuorumEvent: public QuorumEvent {
