@@ -9,4 +9,4 @@ client:
     # Rule of thumb -> max_undone >= 1.5-2x max(lambda_i * L_i) => ~8k-10k globally.
     # With ~60 client workers/threads => 8000/60 ~= 133; 10000/60 ~= 166.
     # Pick 200 per client worker to keep CPU saturated and stay below the global cap.
-    max_undone: 100
+    max_undone: 200
