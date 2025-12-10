@@ -852,6 +852,17 @@ void TxLogServer::JetpackRecoveryEntry() {
   
   // Combined recovery RPC: updates views and pulls commands
   JetpackRecovery();
+
+  // // Comment JetpackRecovery(); and uncomment below can enable original path failure recovery only
+  // Log_info("Mark FinishRecovery on %s", "recovery_finish");
+  // jm_signal::set_key("jetpack", "recovery_finish", "recovery_finish");
+  // Log_info("[JETPACK-RECOVERY] Wrote finish signal to JM_Jetpack_%s", "recovery_finish");
+  // if (jm_signal::exists_key("failure", "failure_triggered", "failure_triggered")) {
+  //   jm_signal::set_key("jetpack", "recovery_finish_after_failure", "recovery_finish_after_failure");
+  //   Log_info("[JETPACK-RECOVERY] Wrote post-failure finish signal to JM_Jetpack_%s",
+  //             "recovery_finish_after_failure");
+  // }
+  // auto e = commo()->JetpackBroadcastFinishRecovery(partition_id_, site_id_, oepoch_);
   
   auto recovery_end_time = std::chrono::steady_clock::now();
   auto recovery_duration_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
