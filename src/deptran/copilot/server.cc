@@ -621,6 +621,10 @@ bool CopilotServer::executeCmd(shared_ptr<CopilotData>& ins) {
       app_next_(*ins->cmd);
     }
     ins->status = Status::EXECUTED;
+    if (ongoing_cmds_ > 0) {
+      request_queues_depth_.append(--ongoing_cmds_);
+      // Log_info("[Copilot] ongoing_cmds_ decreased to %d", ongoing_cmds_);
+    }
     updateMaxExecSlot(ins);
     return true;
   } else {

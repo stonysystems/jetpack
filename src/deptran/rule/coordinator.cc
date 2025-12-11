@@ -84,7 +84,7 @@ void CoordinatorRule::GotoNextPhase() {
           }
           // Log_info("[CPU-MENC] recent100 all=%.2f leaders=%.2f max_leader=%.2f",
           //          avg_all, avg_leaders, max_leader_avg);
-          double rand_val = RandomGenerator::rand(0, 40);
+          double rand_val = RandomGenerator::rand(0, 30);
           if (max_leader_avg - 60.0 > rand_val) {
             go_to_fastpath_ = false;
             Log_info("[CPU-MENC] Disabling fastpath due to leader CPU %.2f, max_leader_avg - 60.0 %.2f > rand=%.2f", max_leader_avg, max_leader_avg - 60.0, rand_val);
@@ -95,17 +95,29 @@ void CoordinatorRule::GotoNextPhase() {
       } else {
         verify(0);
       }
-      // Keep MongoDB inflight commands within 5 per thread_queue_
+
+      // Keep leader queues from being overloaded for MongoDB/Copilot.
       if (Config::GetConfig()->replica_proto_ == MODE_MONGODB) {
-        double queue_depth = client_worker_->mongodb_queue_depth_.recent_100_ave();
+        double queue_depth = client_worker_->queue_depth_.recent_100_ave();
         double rand_val = RandomGenerator::rand(0, 99);
-        if (rand_val < queue_depth * 20) {
+        if (queue_depth * 20 > rand_val) {
           go_to_fastpath_ = false;
-          // Log_info("[MONGODB] Disabling fastpath due to queue_depth=%.2f (>2.0), rand=%.2f < %.2f", queue_depth, rand_val, queue_depth * 20);
+          // Log_info("[QUEUE_DEPTH] Disabling fastpath due to queue_depth=%.2f (>2.0), rand=%.2f < %.2f", queue_depth, rand_val, queue_depth * 20);
         } else {
-          // Log_info("[MONGODB] NOT Disabling fastpath due to queue_depth=%.2f (>2.0), rand=%.2f >= %.2f", queue_depth, rand_val, queue_depth * 20);
+          // Log_info("[QUEUE_DEPTH] Let go fastpath due to queue_depth=%.2f (>2.0), rand=%.2f >= %.2f", queue_depth, rand_val, queue_depth * 20);
+        }
+      } else if (Config::GetConfig()->replica_proto_ == MODE_COPILOT) {
+        double queue_depth = client_worker_->queue_depth_.recent_100_ave();
+        // Log_info("[QUEUE_DEPTH] %.2f", queue_depth);
+        double rand_val = RandomGenerator::rand(0, 99);
+        if (queue_depth - 300 > rand_val) {
+          go_to_fastpath_ = false;
+          // Log_info("[QUEUE_DEPTH] Disabling fastpath due to queue_depth=%.2f (>2.0), rand=%.2f < %.2f", queue_depth, rand_val, queue_depth * 20);
+        } else {
+          // Log_info("[QUEUE_DEPTH] Let go fastpath due to queue_depth=%.2f (>2.0), rand=%.2f >= %.2f", queue_depth, rand_val, queue_depth * 20);
         }
       }
+
       client_worker_->go_to_jetpack_fastpath_cnt_ += go_to_fastpath_;
 
       sp_vec_piece_by_par_.clear();
@@ -261,8 +273,9 @@ void CoordinatorRule::BroadcastRuleSpeculativeExecute(int phase) {
   if (client_worker_) {
     client_worker_->cpu_usage_all_.append(e->AvgCpuAll());
     client_worker_->cpu_usage_leaders_.append(e->AvgCpuLeaders());
-    if (Config::GetConfig()->replica_proto_ == MODE_MONGODB) {
-      client_worker_->mongodb_queue_depth_.append(e->LeaderQueueDepth());
+    double leader_queue_depth = e->LeaderQueueDepth();
+    if (leader_queue_depth >= 0.0) {
+      client_worker_->queue_depth_.append(leader_queue_depth);
     }
   }
 #ifdef MONGODB_DEBUG

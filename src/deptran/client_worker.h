@@ -84,7 +84,7 @@ class ClientWorker {
   Distribution dispatch_time_distribution_;
   Distribution cpu_usage_all_;
   Distribution cpu_usage_leaders_;
-  Distribution mongodb_queue_depth_;
+  Distribution queue_depth_;
   int go_to_jetpack_fastpath_cnt_ = 0;
   vector<std::pair<double, double>> commit_time_; // <dispatch_time, duration>
   Frequency frequency_;

@@ -42,7 +42,8 @@ void RuleSpeculativeExecuteQuorumEvent::FeedResponse(bool y, value_t result, boo
     }
   }
   if (queue_depth >= 0.0 && is_leader) {
-    leader_queue_depth_ = queue_depth;
+    leader_queue_depth_sum_ += queue_depth;
+    leader_queue_samples_++;
   }
   if (y) {
     if (has_result_) {

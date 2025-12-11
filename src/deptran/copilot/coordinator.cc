@@ -48,6 +48,8 @@ void CoordinatorCopilot::Submit(shared_ptr<Marshallable> &cmd,
   verify(IsPilot() || IsCopilot());  // only pilot or copilot can initiate command submission
   done_ = false;
   std::lock_guard<std::recursive_mutex> lock(mtx_);
+  sch_->request_queues_depth_.append(++sch_->ongoing_cmds_);
+  // Log_info("[Copilot] ongoing_cmds_ increased to %d", sch_->ongoing_cmds_);
 #ifdef FULL_LOG_DEBUG
   Log_info("cmd<%d, %d> entered site %d CoordinatorCopilot::Submit", SimpleRWCommand::GetCmdID(cmd).first, SimpleRWCommand::GetCmdID(cmd).second, loc_id_);
 #endif

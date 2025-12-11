@@ -495,6 +495,13 @@ value_t TxLogServer::DBPut(const shared_ptr<Marshallable>& cmd) {
 
 // below are about rule
 
+double TxLogServer::GetQueueDepthForRule() {
+  if (rep_sched_) {
+    return rep_sched_->request_queues_depth_.recent_100_ave();
+  }
+  return request_queues_depth_.recent_100_ave();
+}
+
 void TxLogServer::OnRuleSpeculativeExecute(const shared_ptr<Marshallable>& cmd,
                     bool_t* accepted,
                     value_t* result,
@@ -536,11 +543,7 @@ void TxLogServer::OnRuleSpeculativeExecute(const shared_ptr<Marshallable>& cmd,
     *cpu_usage = SampleCpuUsage();
   }
   if (queue_depth) {
-    if (rep_sched_) {
-      *queue_depth = rep_sched_->request_queues_depth_.recent_100_ave();
-    } else {
-      *queue_depth = request_queues_depth_.recent_100_ave();
-    }
+    *queue_depth = GetQueueDepthForRule();
   }
 }
 

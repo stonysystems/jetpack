@@ -428,7 +428,8 @@ class TxLogServer {
   const int EPOCH_DURATION = 5;
 
   bool paused_ = false; // [Jetpack] For failure recovery additional helper
-  Distribution request_queues_depth_;
+  Distribution request_queues_depth_; // [Jetpack] For inflight control: avoid original protocol have too many onging commands
+  int ongoing_cmds_{0}; // [Jetpack] For inflight control: avoid original protocol have too many onging commands
 
 #ifdef CHECK_ISO
   typedef map<Row*, map<colid_t, int>> deltas_t;
@@ -607,6 +608,7 @@ class TxLogServer {
 
   // below are about rule
 
+  double GetQueueDepthForRule();
   Witness witness_;
 
   // For Rule usage
