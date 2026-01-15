@@ -87,7 +87,7 @@ EmptyJPool ==
      accepted_value |-> {},
      pool |-> [k \in Key |-> Nil]]
 
-JPoolCommands(p) == {p.pool[k] : k \in Key, p.pool[k] /= Nil}
+JPoolCommands(p) == {p.pool[k] : k \in Key} \ {Nil}
 
 PrepResp == [accepted_ballot: Nat, accepted_value: SUBSET Commands]
 
@@ -156,8 +156,13 @@ Quorum == {q \in SUBSET(Server) : Cardinality(q) * 2 > Cardinality(Server)}
 JQuorum(v) == {q \in SUBSET(v.replica_ids) :
                    Cardinality(q) * 2 > Cardinality(v.replica_ids)}
 
-\* Fast-path quorum must include all proposers.
-FastpathQuorum(v) == {q \in JQuorum(v) : v.proposing_replica_ids \subseteq q}
+\* Fast-path quorum must include all proposers and any two fast-path quorums
+\* must intersect in a quorum.
+FastpathQuorum(v) ==
+    {q \in JQuorum(v) :
+        /\ v.proposing_replica_ids \subseteq q
+        /\ \A q2 \in JQuorum(v) :
+             v.proposing_replica_ids \subseteq q2 => (q \cap q2) \in JQuorum(v)}
 
 \* Term of the last entry in a log.
 LastTerm(xlog) == IF Len(xlog) = 0 THEN 0 ELSE xlog[Len(xlog)].term
@@ -165,6 +170,9 @@ LastTerm(xlog) == IF Len(xlog) = 0 THEN 0 ELSE xlog[Len(xlog)].term
 \* Return min/max from a set (undefined for empty set).
 Min(s) == CHOOSE x \in s : \A y \in s : x <= y
 Max(s) == CHOOSE x \in s : \A y \in s : x >= y
+
+\* Convert a sequence into the set of its elements.
+SeqToSet(s) == {s[i] : i \in 1..Len(s)}
 
 \* Message bag helpers.
 WithMessage(m, msgs) ==
@@ -192,10 +200,16 @@ AddMessages(ms, msgs) ==
          IN AddMessages(ms \ {m}, WithMessage(m, msgs))
 
 \* Uniqueness helper for commands.
+LogCmdIds ==
+    UNION { {log[i][k].value.cmd_id : k \in 1..Len(log[i])} : i \in Server }
+
+ExecCmdIds ==
+    UNION { {executed_cmds[i][k].cmd_id : k \in 1..Len(executed_cmds[i])} : i \in Server }
+
 UsedCmdIds ==
     {cmd.cmd_id : cmd \in SeqToSet(fastpath_success_cmds)} \cup
-    {log[i][k].value.cmd_id : i \in Server, k \in 1..Len(log[i])} \cup
-    {executed_cmds[i][k].cmd_id : i \in Server, k \in 1..Len(executed_cmds[i])}
+    LogCmdIds \cup
+    ExecCmdIds
 
 AvailableCommands == {cmd \in Commands : cmd.cmd_id \notin UsedCmdIds}
 
@@ -214,6 +228,12 @@ RecoveryCommands(i, qs) ==
 ExecAt(i, k) == IF k <= Len(executed_cmds[i]) THEN executed_cmds[i][k] ELSE Nil
 
 MaxExecLen == Max({Len(executed_cmds[i]) : i \in Server} \cup {0})
+
+\* All commands in chosen_value are executed by every replica in the view.
+ChosenExecutedInView(i) ==
+    \A cmd \in chosen_value[i] :
+        \A s \in new_view[i].replica_ids :
+            cmd \in SeqToSet(executed_cmds[s])
 
 (***************************************************************************)
 (* Initialization                                                          *)
@@ -273,7 +293,7 @@ Init ==
 
 (***************************************************************************)
 (* Raft transitions                                                        *)
-(*************************************************************************** )
+(***************************************************************************)
 
 Restart(i) ==
     /\ ostate' = [ostate EXCEPT ![i] = Follower]
@@ -519,9 +539,9 @@ RaftReceive(m) ==
           /\ \/ DropStaleResponse(i, j, m)
              \/ HandleAppendEntriesResponse(i, j, m)
 
-(*************************************************************************** )
+(***************************************************************************)
 (* Jetpack transitions                                                     *)
-(*************************************************************************** )
+(***************************************************************************)
 
 \* Client sends a Preaccept to all replicas in its view.
 ClientSendPreaccept(c) ==
@@ -744,7 +764,8 @@ CompletePrepare(i) ==
          /\ LET respVals == {prep_responses[i][s] : s \in qs}
                 ballots == {r.accepted_ballot : r \in respVals}
                 maxb == IF ballots = {} THEN 0 ELSE Max(ballots)
-                bestVals == {r.accepted_value : r \in respVals : r.accepted_ballot = maxb}
+                topVals == {r \in respVals : r.accepted_ballot = maxb}
+                bestVals == {r.accepted_value : r \in topVals}
                 pick == IF maxb = 0 \/ bestVals = {}
                         THEN chosen_value[i]
                         ELSE CHOOSE v \in bestVals : TRUE
@@ -832,7 +853,7 @@ CompleteAccept(i) ==
                    recovery_set, chosen_value, br_responses,
                    prep_responses, accept_responses, clientVars>>
 
-\* Resubmit chosen_value via Preaccept to proposers.
+\* Resubmit chosen_value via Preaccept to proposers (does not advance state).
 Resubmit(i) ==
     /\ jstate[i] = AfterAccept
     /\ LET proposers == new_view[i].proposing_replica_ids
@@ -844,11 +865,20 @@ Resubmit(i) ==
                         mcmd |-> cmd] :
                         s \in proposers, cmd \in chosen_value[i] }
        IN /\ messages' = AddMessages(msgSet, messages)
-          /\ jstate' = [jstate EXCEPT ![i] = AfterResubmit]
           /\ UNCHANGED <<serverVars, candidateVars, leaderVars, logVars,
-                         jepoch, oepoch, old_view, new_view, jpool,
+                         jstate, jepoch, oepoch, old_view, new_view, jpool,
                          recovery_set, chosen_value, br_responses,
                          prep_responses, accept_responses, clientVars>>
+
+\* Advance to AfterResubmit once chosen_value has been executed in Raft.
+CompleteResubmit(i) ==
+    /\ jstate[i] = AfterAccept
+    /\ ChosenExecutedInView(i)
+    /\ jstate' = [jstate EXCEPT ![i] = AfterResubmit]
+    /\ UNCHANGED <<messages, serverVars, candidateVars, leaderVars, logVars,
+                   jepoch, oepoch, old_view, new_view, jpool,
+                   recovery_set, chosen_value, br_responses,
+                   prep_responses, accept_responses, clientVars>>
 
 FinishRecovery(i) ==
     /\ jstate[i] = AfterResubmit
@@ -893,9 +923,9 @@ HandleFinishRecovery(i, m) ==
                    elections, logVars, br_responses, prep_responses,
                    accept_responses, clientVars>>
 
-(*************************************************************************** )
+(***************************************************************************)
 (* Message receive plumbing                                                *)
-(*************************************************************************** )
+(***************************************************************************)
 
 ServerReceive(m) ==
     /\ m.mdest \in Server
@@ -937,9 +967,9 @@ DropMessage(m) ==
     /\ UNCHANGED <<serverVars, candidateVars, leaderVars, logVars,
                    jetpackVars, clientVars>>
 
-(*************************************************************************** )
+(***************************************************************************)
 (* Next-state relation                                                     *)
-(*************************************************************************** )
+(***************************************************************************)
 
 Next ==
     /\ \/ \E i \in Server : Restart(i)
@@ -959,6 +989,7 @@ Next ==
        \/ \E i \in Server : SendAccept(i)
        \/ \E i \in Server : CompleteAccept(i)
        \/ \E i \in Server : Resubmit(i)
+       \/ \E i \in Server : CompleteResubmit(i)
        \/ \E i \in Server : FinishRecovery(i)
 
        \/ \E m \in DOMAIN messages : ServerReceive(m)
@@ -970,9 +1001,9 @@ Next ==
 
 Spec == Init /\ [][Next]_vars
 
-(*************************************************************************** )
+(***************************************************************************)
 (* Properties                                                              *)
-(*************************************************************************** )
+(***************************************************************************)
 
 \* Executed commands are identical or missing at any position.
 ExecutedCmdsAgreement ==
@@ -990,5 +1021,13 @@ Durability ==
     \A cmd \in Commands :
         cmd \in SeqToSet(fastpath_success_cmds)
         => <> (\A s \in Server : cmd \in SeqToSet(executed_cmds[s]))
+
+\* Temporal wrappers for TLC configs.
+Safety == []ExecutedCmdsAgreement
+Liveness == Durability
+
+\* Implication forms (useful for theorem statements or properties).
+SpecSafety == Spec => Safety
+SpecLiveness == Spec => Liveness
 
 =============================================================================
