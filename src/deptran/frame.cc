@@ -499,6 +499,7 @@ map<string, int> &Frame::FrameNameToMode() {
       {"rep_commit",    MODE_NOT_READY},
       {"rule",          MODE_RULE},
       {"mongodb",       MODE_MONGODB},
+      {"etcd",          MODE_ETCD},
   };
   return frame_name_mode_s;
 }

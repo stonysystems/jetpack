@@ -104,6 +104,7 @@ std::vector<int> CommunicatorRule::LeadersForPartition(parid_t par_id) const {
     case MODE_RAFT:
     case MODE_FPGA_RAFT:
     case MODE_MONGODB:
+    case MODE_ETCD:
       leaders.push_back(0);
       break;
     case MODE_COPILOT:

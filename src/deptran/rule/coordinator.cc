@@ -96,8 +96,9 @@ void CoordinatorRule::GotoNextPhase() {
         verify(0);
       }
 
-      // Keep leader queues from being overloaded for MongoDB/Copilot.
-      if (Config::GetConfig()->replica_proto_ == MODE_MONGODB) {
+      // Keep leader queues from being overloaded for MongoDB/Etcd/Copilot.
+      if (Config::GetConfig()->replica_proto_ == MODE_MONGODB ||
+          Config::GetConfig()->replica_proto_ == MODE_ETCD) {
         double queue_depth = client_worker_->queue_depth_.recent_100_ave();
         double rand_val = RandomGenerator::rand(0, 99);
         if (queue_depth * 20 > rand_val) {

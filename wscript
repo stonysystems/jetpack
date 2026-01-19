@@ -96,7 +96,7 @@ def configure(conf):
     conf.check_boost(lib='system filesystem context thread coroutine')
 
     conf.env.append_value("CXXFLAGS", "-Wno-sign-compare")
-    conf.env.append_value('INCLUDES', ['/usr/local/include'])
+    conf.env.append_value('INCLUDES', ['/usr/local/include', os.path.expanduser('~/.local/include')])
 #    conf.check_cxx(lib='boost_system', use='BOOST_SYSTEM')
 #    conf.check_cxx(lib='boost_filesystem', use='BOOST_FILESYSTEM')
 #    conf.check_cxx(lib='boost_coroutine', use='BOOST_COROUTINE')
@@ -133,7 +133,11 @@ def configure(conf):
     conf.env.append_value('INCLUDES', ['/usr/local/include/mongocxx/v_noabi', '/usr/local/include/bsoncxx/v_noabi'])
     # conf.env.append_value("LINKFLAGS", ['-lboost_system', '-lpthread', '-lcrypto', '-lssl', '-lmongocxx', '-lbsoncxx'])
     # conf.env.append_value("LDFLAGS", ['-lboost_system', '-lpthread', '-lcrypto', '-lssl', '-lmongocxx', '-lbsoncxx'])
+    conf.env.append_value('LIBPATH', [os.path.expanduser('~/.local/lib')])
+    conf.env.append_value('RPATH', [os.path.expanduser('~/.local/lib')])
     conf.env.append_value("LDFLAGS", ["-lmongocxx", "-lbsoncxx"])
+    conf.env.append_value("LDFLAGS", "-lcpprest")
+    conf.env.append_value("LDFLAGS", "-letcd-cpp-api")
 
 def build(bld):
     _depend("src/rrr/pylib/simplerpcgen/rpcgen.py",

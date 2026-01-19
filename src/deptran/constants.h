@@ -105,6 +105,7 @@ namespace janus {
 #define MODE_FPGA_RAFT (0x401)
 #define MODE_COPILOT        (0x4000)
 #define MODE_MONGODB (0x9000)
+#define MODE_ETCD (0x9001)
 #define MODE_NOT_READY     (0x00)
 
 #define OP_IR   (0x1)
@@ -147,6 +148,7 @@ namespace janus {
 // #define LATENCY_DEBUG
 // #define LATENCY_LOG_DEBUG
 // #define MONGODB_DEBUG
+// #define ETCD_DEBUG
 #define CHECK_KEY_DISTRIBUTION
 #define READ_NOT_CONFLICT_OPTIMIZATION
 #define JETPACK_DEDUPLICATE_OPTIMIZATION
@@ -173,6 +175,7 @@ namespace janus {
 // #define JETPACK_RECOVERY_DEBUG
 
 // #define MONGODB_STATISTICS
+// #define ETCD_STATISTICS
 // #define JM_SIGNAL_DEBUG
 
 // Feature toggle: enable MongoDB-specific JetPack recovery wiring.
