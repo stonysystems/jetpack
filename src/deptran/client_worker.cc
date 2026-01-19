@@ -329,7 +329,7 @@ void ClientWorker::Work() {
 #endif
       while (true) { // start while
         bool jetpack_first = true;
-        if (jetpack_first) {
+        if (config_->client_type_ == Config::Open && jetpack_first) {
           static std::mt19937 gen(std::random_device{}());           // RNG, seeded once
           std::uniform_int_distribution<int> dist(0, 1000000 / n_concurrent_); // n_concurrent_ Coordinators share 0~1s random delay
           int delay_us = dist(gen); 
