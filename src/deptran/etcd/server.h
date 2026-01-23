@@ -10,6 +10,10 @@
 #include "../../rrr/reactor/event.h"
 #include <cstdlib>
 
+#ifdef JETPACK_ETCD_RECOVERY
+#include "../../../jm_file_signal.h"
+#endif
+
 namespace janus {
 
 class EtcdServer : public TxLogServer {
@@ -29,7 +33,42 @@ class EtcdServer : public TxLogServer {
     SimpleRWCommand::SetZeroTime();
     etcd_uri_ = kEtcdUri;
     Log_info("etcd_uri_:%s, loc_id_:%d, etcd_connection_:%d", etcd_uri_.c_str(), loc_id_, etcd_connection_);
+#ifdef JETPACK_ETCD_RECOVERY
+    etcd_ = make_shared<EtcdConnectionThreadPool>(etcd_connection_, etcd_uri_);
+#else
     etcd_ = make_shared<EtcdConnectionThreadPool>(loc_id_ == 0 ? etcd_connection_ : 0, etcd_uri_);
+#endif
+
+#ifdef JETPACK_ETCD_RECOVERY
+    if (loc_id_ != 0) {
+      Coroutine::CreateRun([this]() {
+        std::string host;
+        if (frame_ && frame_->site_info_) {
+          auto* si = frame_->site_info_;
+          if (!si->host.empty()) {
+            host = si->host;
+          } else if (!si->proc_name.empty()) {
+            host = si->proc_name;
+          } else if (!si->name.empty()) {
+            host = si->name;
+          }
+        }
+#ifdef AWS
+        host = "0.0.0.0";
+#endif
+        Log_info("[ETCD-FAILOVER] Waiting for etcd signal on JM_Jetpack_%s", host.c_str());
+        while (true) {
+          if (jm_signal::exists_key("etcd", "primary_elected", host)) {
+            Log_info("[ETCD-FAILOVER] Received etcd signal on JM_Jetpack_%s", host.c_str());
+            JetpackRecoveryEntry();
+            break;
+          }
+          auto sp_e = Reactor::CreateSpEvent<TimeoutEvent>(10 * 1000); // 10ms
+          sp_e->Wait();
+        }
+      });
+    }
+#endif
   }
   bool IsLeader() override {
     return loc_id_ == 0;

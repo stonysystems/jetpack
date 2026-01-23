@@ -143,7 +143,7 @@ namespace janus {
 // #define TC
 
 #define AWS
-// #define SIMULATE_WAN
+#define SIMULATE_WAN
 // #define FULL_LOG_DEBUG
 // #define LATENCY_DEBUG
 // #define LATENCY_LOG_DEBUG
@@ -185,6 +185,9 @@ namespace janus {
 // Jetpack-mongodb failover
 #define JETPACK_MONGODB_RECOVERY
 // #define JETPACK_MONGODB_SIMULATION
+// Jetpack-etcd failover
+#define JETPACK_ETCD_RECOVERY
+// #define JETPACK_ETCD_SIMULATION
 
 #define COMMAND_POOL_ON_DISK
 

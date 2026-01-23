@@ -12,7 +12,7 @@
 #include <cstdlib>
 #include <thread>
 
-#ifdef JETPACK_MONGODB_RECOVERY
+#if defined(JETPACK_MONGODB_RECOVERY) || defined(JETPACK_ETCD_RECOVERY)
 #include "../jm_file_signal.h"
 #endif
 
@@ -76,6 +76,47 @@ std::string kill_cmd =
     Log_info("[MONGODB-FAILOVER] Simulated new mongo primary: %s", new_primary_host.c_str());
   }
   #endif
+}
+#endif
+#ifdef JETPACK_ETCD_RECOVERY
+static void KillEtcdPrimary() {
+  std::string host = "127.0.0.1";
+  if (!svr_workers_g.empty() && svr_workers_g[0].site_info_) {
+    if (!svr_workers_g[0].site_info_->host.empty()) {
+      host = svr_workers_g[0].site_info_->host;
+    } else if (!svr_workers_g[0].site_info_->proc_name.empty()) {
+      host = svr_workers_g[0].site_info_->proc_name;
+    } else if (!svr_workers_g[0].site_info_->name.empty()) {
+      host = svr_workers_g[0].site_info_->name;
+    }
+  }
+#ifdef AWS
+  host = "0.0.0.0"; // ALWAYS 0.0.0.0 online
+#endif
+  const int etcd_port = 2379;
+  std::string kill_cmd =
+      "pkill -KILL -f \"etcd.*--listen-client-urls .*:" +
+      std::to_string(etcd_port) + "\"";
+  Log_info("[ETCD-FAILOVER] Executing primary kill (host=%s): %s",
+           host.c_str(), kill_cmd.c_str());
+  std::system(kill_cmd.c_str());
+
+#ifdef JETPACK_ETCD_SIMULATION
+  // Simulate etcd electing a new primary after a short delay.
+  std::this_thread::sleep_for(std::chrono::milliseconds(100));
+  auto cfg = Config::GetConfig();
+  auto hosts = cfg->GetReplicaHosts(0);
+  if (hosts.size() > 1) {
+    std::string new_primary_host = hosts[1];
+    auto pos = new_primary_host.find(':');
+    if (pos != std::string::npos) {
+      new_primary_host = new_primary_host.substr(0, pos);
+    }
+    jm_signal::set_key("etcd", "primary_elected", new_primary_host);
+    Log_info("[ETCD-FAILOVER] Simulated new etcd primary: %s",
+             new_primary_host.c_str());
+  }
+#endif
 }
 #endif
 // All the following statistics only count mid 1/3 duration
@@ -334,8 +375,9 @@ void server_failover_co(bool random, bool leader, int srv_idx)
 #endif
     int idx = -1 ;
     int expected_idx = -1 ;
-    int run_int = Config::GetConfig()->get_failover_run_interval() ;
-    int stop_int = Config::GetConfig()->get_failover_stop_interval() ;
+    auto cfg = Config::GetConfig();
+    int run_int = cfg->get_failover_run_interval() ;
+    int stop_int = cfg->get_failover_stop_interval() ;
 
     if (srv_idx != -1)
     {
@@ -437,7 +479,14 @@ void server_failover_co(bool random, bool leader, int srv_idx)
         // Log_info("@@@@@@@@@@@@@@@@@@@@@@@@ client_workers_g paused");
         svr_workers_g[idx].Pause() ;
 #ifdef JETPACK_MONGODB_RECOVERY
-        KillMongodbPrimary();
+        if (cfg->replica_proto_ == MODE_MONGODB) {
+          KillMongodbPrimary();
+        }
+#endif
+#ifdef JETPACK_ETCD_RECOVERY
+        if (cfg->replica_proto_ == MODE_ETCD) {
+          KillEtcdPrimary();
+        }
 #endif
         struct timeval pause_tv;
         gettimeofday(&pause_tv, nullptr);
