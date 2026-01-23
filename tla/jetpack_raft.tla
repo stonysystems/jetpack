@@ -1001,6 +1001,10 @@ Next ==
 
 Spec == Init /\ [][Next]_vars
 
+StateConstraint ==
+    /\ \A i \in Server : currentTerm[i] <= 3
+    /\ \A m \in DOMAIN messages : messages[m] <= 1
+
 (***************************************************************************)
 (* Properties                                                              *)
 (***************************************************************************)
