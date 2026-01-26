@@ -314,14 +314,15 @@ Timeout(i) ==
     /\ ostate[i] \in {Follower, Candidate}
     /\ ostate' = [ostate EXCEPT ![i] = Candidate]
     /\ currentTerm' = [currentTerm EXCEPT ![i] = currentTerm[i] + 1]
-    /\ votedFor' = [votedFor EXCEPT ![i] = Nil]
-    /\ votesResponded' = [votesResponded EXCEPT ![i] = {}]
-    /\ votesGranted' = [votesGranted EXCEPT ![i] = {}]
-    /\ voterLog' = [voterLog EXCEPT ![i] = [j \in Server |-> <<>>]]
+    /\ votedFor' = [votedFor EXCEPT ![i] = i]
+    /\ votesResponded' = [votesResponded EXCEPT ![i] = {i}]
+    /\ votesGranted' = [votesGranted EXCEPT ![i] = {i}]
+    /\ voterLog' = [voterLog EXCEPT ![i] = [j \in Server |-> IF j = i THEN log[i] ELSE <<>>]]
     /\ UNCHANGED <<messages, leaderVars, logVars, jetpackVars, clientVars>>
 
 RequestVote(i, j) ==
     /\ ostate[i] = Candidate
+    /\ i /= j
     /\ j \notin votesResponded[i]
     /\ Send([mtype         |-> RequestVoteRequest,
              mterm         |-> currentTerm[i],
