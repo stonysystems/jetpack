@@ -10,6 +10,10 @@ CONSTANTS Server, Client, CmdId, Key
 
 \* Reserved value used as a "nil" placeholder.
 Nil == "Nil"
+\* Typed nils for record values (avoid record vs. non-record equality).
+NilCmd == [tag |-> "NilCmd"]
+NilJPool == [tag |-> "NilJPool"]
+NilPrepResp == [tag |-> "NilPrepResp"]
 
 \* Raft roles.
 Follower   == "Follower"
@@ -79,15 +83,15 @@ LogEntry == { [term |-> t, value |-> v] : t \in Nat, v \in Commands }
 JPool == [max_seen_ballot: Nat,
           accepted_ballot: Nat,
           accepted_value: SUBSET Commands,
-          pool: [Key -> Commands \cup {Nil}]]
+          pool: [Key -> Commands \cup {NilCmd}]]
 
 EmptyJPool ==
     [max_seen_ballot |-> 0,
      accepted_ballot |-> 0,
      accepted_value |-> {},
-     pool |-> [k \in Key |-> Nil]]
+     pool |-> [k \in Key |-> NilCmd]]
 
-JPoolCommands(p) == {p.pool[k] : k \in Key} \ {Nil}
+JPoolCommands(p) == {p.pool[k] : k \in Key} \ {NilCmd}
 
 PrepResp == [accepted_ballot: Nat, accepted_value: SUBSET Commands]
 
@@ -215,7 +219,7 @@ AvailableCommands == {cmd \in Commands : cmd.cmd_id \notin UsedCmdIds}
 
 \* Key conflict check for a command in a pool.
 HasConflict(pool, cmd) ==
-    /\ pool[cmd.key] /= Nil
+    /\ pool[cmd.key] /= NilCmd
     /\ pool[cmd.key] /= cmd
 
 \* Compute recovery set from a quorum of BeginRecovery responses.
@@ -224,8 +228,8 @@ RecoveryCommands(i, qs) ==
         Cardinality({s \in qs : cmd \in JPoolCommands(br_responses[i][s])}) * 2
             > Cardinality(qs)}
 
-\* Read the "kth" executed command or Nil if out of range.
-ExecAt(i, k) == IF k <= Len(executed_cmds[i]) THEN executed_cmds[i][k] ELSE Nil
+\* Read the "kth" executed command or NilCmd if out of range.
+ExecAt(i, k) == IF k <= Len(executed_cmds[i]) THEN executed_cmds[i][k] ELSE NilCmd
 
 MaxExecLen == Max({Len(executed_cmds[i]) : i \in Server} \cup {0})
 
@@ -270,13 +274,13 @@ InitJetpackVars ==
     /\ jpool = [i \in Server |-> EmptyJPool]
     /\ recovery_set = [i \in Server |-> {}]
     /\ chosen_value = [i \in Server |-> {}]
-    /\ br_responses = [i \in Server |-> [j \in Server |-> Nil]]
-    /\ prep_responses = [i \in Server |-> [j \in Server |-> Nil]]
-    /\ accept_responses = [i \in Server |-> [j \in Server |-> Nil]]
+    /\ br_responses = [i \in Server |-> [j \in Server |-> NilJPool]]
+    /\ prep_responses = [i \in Server |-> [j \in Server |-> NilPrepResp]]
+    /\ accept_responses = [i \in Server |-> [j \in Server |-> FALSE]]
 
 InitClientVars ==
     /\ client_view = [c \in Client |-> DefaultView]
-    /\ client_pending = [c \in Client |-> Nil]
+    /\ client_pending = [c \in Client |-> NilCmd]
     /\ client_successes = [c \in Client |-> {}]
     /\ fastpath_success_cmds = <<>>
     /\ executed_cmds = [i \in Server |-> <<>>]
@@ -545,7 +549,7 @@ RaftReceive(m) ==
 
 \* Client sends a Preaccept to all replicas in its view.
 ClientSendPreaccept(c) ==
-    /\ client_pending[c] = Nil
+    /\ client_pending[c] = NilCmd
     /\ AvailableCommands /= {}
     /\ \E cmd \in AvailableCommands :
           LET view == client_view[c]
@@ -609,7 +613,7 @@ HandlePreacceptResponse(c, m) ==
               ELSE [client_successes EXCEPT ![c] = newSuccesses]
           /\ client_pending' =
               IF fastOk \/ \lnot m.msuccess
-              THEN [client_pending EXCEPT ![c] = Nil]
+              THEN [client_pending EXCEPT ![c] = NilCmd]
               ELSE [client_pending EXCEPT ![c] = client_pending[c]]
           /\ client_view' =
               IF \lnot m.msuccess
@@ -635,7 +639,7 @@ SendBeginRecovery(i) ==
                         mnew_view |-> new_view[i]] : s \in view.replica_ids }
        IN /\ messages' = AddMessages(msgSet, messages)
           /\ jstate' = [jstate EXCEPT ![i] = Recovery]
-          /\ br_responses' = [br_responses EXCEPT ![i] = [s \in Server |-> Nil]]
+          /\ br_responses' = [br_responses EXCEPT ![i] = [s \in Server |-> NilJPool]]
           /\ UNCHANGED <<serverVars, candidateVars, leaderVars, logVars,
                          jepoch, oepoch, old_view, new_view, jpool,
                          recovery_set, chosen_value, prep_responses,
@@ -672,7 +676,7 @@ HandleBeginRecoveryResponse(i, m) ==
 CompleteBeginRecovery(i) ==
     /\ jstate[i] = Recovery
     /\ \E qs \in JQuorum(new_view[i]) :
-         /\ \A s \in qs : br_responses[i][s] /= Nil
+         /\ \A s \in qs : br_responses[i][s] /= NilJPool
          /\ LET rec == RecoveryCommands(i, qs)
             IN /\ recovery_set' = [recovery_set EXCEPT ![i] = rec]
                /\ chosen_value' = [chosen_value EXCEPT ![i] = rec]
@@ -692,7 +696,7 @@ SendPrepare(i) ==
                         msource |-> i,
                         mdest |-> s] : s \in view.replica_ids }
        IN /\ messages' = AddMessages(msgSet, messages)
-          /\ prep_responses' = [prep_responses EXCEPT ![i] = [s \in Server |-> Nil]]
+          /\ prep_responses' = [prep_responses EXCEPT ![i] = [s \in Server |-> NilPrepResp]]
           /\ UNCHANGED <<serverVars, candidateVars, leaderVars, logVars,
                          jstate, jepoch, oepoch, old_view, new_view, jpool,
                          recovery_set, chosen_value, br_responses,
@@ -760,7 +764,7 @@ HandlePrepareResponse(i, m) ==
 CompletePrepare(i) ==
     /\ jstate[i] = AfterBeginRecovery
     /\ \E qs \in JQuorum(new_view[i]) :
-         /\ \A s \in qs : prep_responses[i][s] /= Nil
+         /\ \A s \in qs : prep_responses[i][s] /= NilPrepResp
          /\ LET respVals == {prep_responses[i][s] : s \in qs}
                 ballots == {r.accepted_ballot : r \in respVals}
                 maxb == IF ballots = {} THEN 0 ELSE Max(ballots)
@@ -787,7 +791,7 @@ SendAccept(i) ==
                         msource |-> i,
                         mdest |-> s] : s \in view.replica_ids }
        IN /\ messages' = AddMessages(msgSet, messages)
-          /\ accept_responses' = [accept_responses EXCEPT ![i] = [s \in Server |-> Nil]]
+          /\ accept_responses' = [accept_responses EXCEPT ![i] = [s \in Server |-> FALSE]]
           /\ UNCHANGED <<serverVars, candidateVars, leaderVars, logVars,
                          jstate, jepoch, oepoch, old_view, new_view, jpool,
                          recovery_set, chosen_value, br_responses,
@@ -897,9 +901,9 @@ FinishRecovery(i) ==
           /\ jstate' = [jstate EXCEPT ![i] = Ready]
           /\ recovery_set' = [recovery_set EXCEPT ![i] = {}]
           /\ chosen_value' = [chosen_value EXCEPT ![i] = {}]
-          /\ br_responses' = [br_responses EXCEPT ![i] = [s \in Server |-> Nil]]
-          /\ prep_responses' = [prep_responses EXCEPT ![i] = [s \in Server |-> Nil]]
-          /\ accept_responses' = [accept_responses EXCEPT ![i] = [s \in Server |-> Nil]]
+          /\ br_responses' = [br_responses EXCEPT ![i] = [s \in Server |-> NilJPool]]
+          /\ prep_responses' = [prep_responses EXCEPT ![i] = [s \in Server |-> NilPrepResp]]
+          /\ accept_responses' = [accept_responses EXCEPT ![i] = [s \in Server |-> FALSE]]
           /\ ostate' = [ostate EXCEPT ![i] = Leader]
           /\ UNCHANGED <<currentTerm, votedFor, votesResponded,
                          votesGranted, voterLog, nextIndex, matchIndex,
@@ -1017,8 +1021,8 @@ ExecutedCmdsAgreement ==
             LET ci == ExecAt(i, k)
                 cj == ExecAt(j, k)
             IN \/ ci = cj
-               \/ ci = Nil
-               \/ cj = Nil
+               \/ ci = NilCmd
+               \/ cj = NilCmd
 
 \* Durability: any fast-path success eventually appears in every executed_cmds.
 Durability ==
