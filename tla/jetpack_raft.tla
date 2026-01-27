@@ -102,7 +102,7 @@ PrepResp == [accepted_ballot: Nat, accepted_value: SUBSET Commands]
 VARIABLES
     messages,
     elections,
-    allLogs,
+\*    allLogs,
 
     \* Raft per-server variables.
     currentTerm,
@@ -146,7 +146,7 @@ jetpackVars == <<jstate, jepoch, oepoch, old_view, new_view, jpool,
 clientVars == <<client_view, client_pending, client_successes,
                 fastpath_success_cmds, executed_cmds>>
 
-vars == <<messages, allLogs, serverVars, candidateVars, leaderVars,
+vars == <<messages, \* allLogs,
           logVars, jetpackVars, clientVars>>
 
 (***************************************************************************)
@@ -248,7 +248,7 @@ ChosenExecutedInView(i) ==
 
 InitHistoryVars ==
     /\ elections = {}
-    /\ allLogs = {}
+\*    /\ allLogs = {}
 
 InitServerVars ==
     /\ currentTerm = [i \in Server |-> 1]
@@ -1005,7 +1005,7 @@ Next ==
        \/ \E m \in DOMAIN messages : DuplicateMessage(m)
        \/ \E m \in DOMAIN messages : DropMessage(m)
 
-    /\ allLogs' = allLogs \cup {log[i] : i \in Server}
+\*    /\ allLogs' = allLogs \cup {log[i] : i \in Server}
 
 Spec == Init /\ [][Next]_vars
 
