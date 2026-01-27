@@ -146,7 +146,7 @@ jetpackVars == <<jstate, jepoch, oepoch, old_view, new_view, jpool,
 clientVars == <<client_view, client_pending, client_successes,
                 fastpath_success_cmds, executed_cmds>>
 
-vars == <<messages, \* allLogs,
+vars == <<messages, serverVars, candidateVars, leaderVars,
           logVars, jetpackVars, clientVars>>
 
 (***************************************************************************)
@@ -248,7 +248,8 @@ ChosenExecutedInView(i) ==
 
 InitHistoryVars ==
     \* /\ elections = {}
-\*    /\ allLogs = {}
+    \* /\ allLogs = {}
+    /\ TRUE
 
 InitServerVars ==
     /\ currentTerm = [i \in Server |-> 1]
@@ -515,8 +516,7 @@ HandleAppendEntriesResponse(i, j, m) ==
                                Max({nextIndex[i][j] - 1, 1})]
           /\ UNCHANGED <<matchIndex>>
     /\ Discard(m)
-    /\ UNCHANGED <<serverVars, candidateVars, logVars, elections,
-                   jetpackVars, clientVars>>
+    /\ UNCHANGED <<serverVars, candidateVars, logVars, jetpackVars, clientVars>>
 
 UpdateTerm(i, j, m) ==
     /\ m.mterm > currentTerm[i]
@@ -909,9 +909,9 @@ FinishRecovery(i) ==
           /\ prep_responses' = [prep_responses EXCEPT ![i] = [s \in Server |-> NilPrepResp]]
           /\ accept_responses' = [accept_responses EXCEPT ![i] = [s \in Server |-> FALSE]]
           /\ ostate' = [ostate EXCEPT ![i] = Leader]
-          /\ UNCHANGED <<currentTerm, votedFor, votesResponded,
-                         votesGranted, voterLog, nextIndex, matchIndex,
-                         elections, logVars, clientVars>>
+    /\ UNCHANGED <<currentTerm, votedFor, votesResponded,
+                   votesGranted, nextIndex, matchIndex,
+                   logVars, clientVars>>
 
 HandleFinishRecovery(i, m) ==
     /\ m.mtype = FinishRecoveryRequest
@@ -927,8 +927,8 @@ HandleFinishRecovery(i, m) ==
     /\ ostate' = [ostate EXCEPT ![i] = IF ostate[i] = ToBeLeader THEN Leader ELSE ostate[i]]
     /\ Discard(m)
     /\ UNCHANGED <<currentTerm, votedFor, votesResponded,
-                   votesGranted, voterLog, nextIndex, matchIndex,
-                   elections, logVars, br_responses, prep_responses,
+                   votesGranted, nextIndex, matchIndex,
+                   logVars, br_responses, prep_responses,
                    accept_responses, clientVars>>
 
 (***************************************************************************)
