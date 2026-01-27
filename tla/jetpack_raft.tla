@@ -153,6 +153,9 @@ vars == <<messages, allLogs, serverVars, candidateVars, leaderVars,
 (* Helpers                                                                 *)
 (***************************************************************************)
 
+\* Symmetry reduction over servers.
+Symmetry == Permutations(Server)
+
 \* Simple majority quorum over all servers.
 Quorum == {q \in SUBSET(Server) : Cardinality(q) * 2 > Cardinality(Server)}
 
