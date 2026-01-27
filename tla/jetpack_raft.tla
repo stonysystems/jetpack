@@ -101,7 +101,7 @@ PrepResp == [accepted_ballot: Nat, accepted_value: SUBSET Commands]
 
 VARIABLES
     messages,
-    elections,
+    \* elections,
 \*    allLogs,
 
     \* Raft per-server variables.
@@ -112,7 +112,7 @@ VARIABLES
     commitIndex,
     votesResponded,
     votesGranted,
-    voterLog,
+    \* voterLog,
     nextIndex,
     matchIndex,
 
@@ -138,8 +138,8 @@ VARIABLES
 
 serverVars == <<currentTerm, ostate, votedFor>>
 logVars == <<log, commitIndex>>
-candidateVars == <<votesResponded, votesGranted, voterLog>>
-leaderVars == <<nextIndex, matchIndex, elections>>
+candidateVars == <<votesResponded, votesGranted>>
+leaderVars == <<nextIndex, matchIndex>>
 jetpackVars == <<jstate, jepoch, oepoch, old_view, new_view, jpool,
                  recovery_set, chosen_value, br_responses,
                  prep_responses, accept_responses>>
@@ -247,7 +247,7 @@ ChosenExecutedInView(i) ==
 (***************************************************************************)
 
 InitHistoryVars ==
-    /\ elections = {}
+    \* /\ elections = {}
 \*    /\ allLogs = {}
 
 InitServerVars ==
@@ -258,7 +258,7 @@ InitServerVars ==
 InitCandidateVars ==
     /\ votesResponded = [i \in Server |-> {}]
     /\ votesGranted = [i \in Server |-> {}]
-    /\ voterLog = [i \in Server |-> [j \in Server |-> <<>>]]
+    \* /\ voterLog = [i \in Server |-> [j \in Server |-> <<>>]]
 
 InitLeaderVars ==
     /\ nextIndex = [i \in Server |-> [j \in Server |-> 1]]
@@ -306,11 +306,11 @@ Restart(i) ==
     /\ ostate' = [ostate EXCEPT ![i] = Follower]
     /\ votesResponded' = [votesResponded EXCEPT ![i] = {}]
     /\ votesGranted' = [votesGranted EXCEPT ![i] = {}]
-    /\ voterLog' = [voterLog EXCEPT ![i] = [j \in Server |-> <<>>]]
+    \* /\ voterLog' = [voterLog EXCEPT ![i] = [j \in Server |-> <<>>]]
     /\ nextIndex' = [nextIndex EXCEPT ![i] = [j \in Server |-> 1]]
     /\ matchIndex' = [matchIndex EXCEPT ![i] = [j \in Server |-> 0]]
     /\ commitIndex' = [commitIndex EXCEPT ![i] = 0]
-    /\ UNCHANGED <<messages, currentTerm, votedFor, log, elections,
+    /\ UNCHANGED <<messages, currentTerm, votedFor, log,
                    jetpackVars, clientVars>>
 
 Timeout(i) ==
@@ -320,7 +320,7 @@ Timeout(i) ==
     /\ votedFor' = [votedFor EXCEPT ![i] = i]
     /\ votesResponded' = [votesResponded EXCEPT ![i] = {i}]
     /\ votesGranted' = [votesGranted EXCEPT ![i] = {i}]
-    /\ voterLog' = [voterLog EXCEPT ![i] = [j \in Server |-> IF j = i THEN log[i] ELSE <<>>]]
+    \* /\ voterLog' = [voterLog EXCEPT ![i] = [j \in Server |-> IF j = i THEN log[i] ELSE <<>>]]
     /\ UNCHANGED <<messages, leaderVars, logVars, jetpackVars, clientVars>>
 
 RequestVote(i, j) ==
@@ -368,12 +368,12 @@ BecomeToBeLeader(i) ==
                         [j \in Server |-> Len(log[i]) + 1]]
     /\ matchIndex' = [matchIndex EXCEPT ![i] =
                         [j \in Server |-> 0]]
-    /\ elections' = elections \cup
-                        {[eterm     |-> currentTerm[i],
-                          eleader   |-> i,
-                          elog      |-> log[i],
-                          evotes    |-> votesGranted[i],
-                          evoterLog |-> voterLog[i]]}
+    \* /\ elections' = elections \cup
+    \*                     {[eterm     |-> currentTerm[i],
+    \*                       eleader   |-> i,
+    \*                       elog      |-> log[i],
+    \*                       evotes    |-> votesGranted[i],
+    \*                       evoterLog |-> voterLog[i]]}
     /\ UNCHANGED <<messages, currentTerm, votedFor, candidateVars, logVars,
                    jetpackVars, clientVars>>
 
@@ -438,9 +438,9 @@ HandleRequestVoteResponse(i, j, m) ==
     /\ \/ /\ m.mvoteGranted
           /\ votesGranted' = [votesGranted EXCEPT ![i] =
                                   votesGranted[i] \cup {j}]
-          /\ voterLog' = [voterLog EXCEPT ![i][j] = m.mlog]
+          \* /\ voterLog' = [voterLog EXCEPT ![i][j] = m.mlog]
        \/ /\ ~m.mvoteGranted
-          /\ UNCHANGED <<votesGranted, voterLog>>
+          /\ UNCHANGED votesGranted
     /\ Discard(m)
     /\ UNCHANGED <<serverVars, leaderVars, logVars, jetpackVars, clientVars>>
 
@@ -1012,6 +1012,9 @@ Spec == Init /\ [][Next]_vars
 StateConstraint ==
     /\ \A i \in Server : currentTerm[i] <= 3
     /\ \A m \in DOMAIN messages : messages[m] <= 1
+    /\ Cardinality(DOMAIN messages) <= 5
+    /\ \A i \in Server : Len(log[i]) <= 4
+    /\ \A i \in Server : Len(executed_cmds[i]) <= 4
 
 (***************************************************************************)
 (* Properties                                                              *)
