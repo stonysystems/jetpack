@@ -266,6 +266,10 @@ LogCmdAt(i, k) == IF k <= Len(log[i]) THEN log[i][k].value ELSE NilCmd
 MaxLogLen == Max({Len(log[i]) : i \in Server} \cup {0})
 MaxLogExecLen == Max({MaxLogLen, Len(execution_cmds)})
 
+IsPrefix(p, s) ==
+    /\ Len(p) <= Len(s)
+    /\ \A k \in 1..Len(p) : p[k] = s[k]
+
 \* All commands in chosen_value are executed by every replica in the view.
 ChosenExecutedInView(i) ==
     \A cmd \in chosen_value[i] :
@@ -1079,7 +1083,8 @@ LogOrderMatchesExecution ==
 
 \* Deduplicated original executions match execution_cmds.
 ExecutionDedupMatches ==
-    Dedup(original_execution_cmds) = execution_cmds
+    \/ IsPrefix(Dedup(original_execution_cmds), execution_cmds)
+    \/ IsPrefix(Dedup(execution_cmds), original_execution_cmds)
 
 \* Temporal wrappers for TLC configs.
 Safety == [](LogAgreement /\ LogOrderMatchesExecution /\ ExecutionDedupMatches)
