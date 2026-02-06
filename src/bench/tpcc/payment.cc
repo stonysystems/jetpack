@@ -81,7 +81,7 @@ void TpccWorkload::RegPayment() {
        {TPCC_PAYMENT, TPCC_PAYMENT_0, TPCC_VAR_W_NAME, TPCC_VAR_W_STREET_1,
         TPCC_VAR_W_STREET_2, TPCC_VAR_W_CITY, TPCC_VAR_W_STATE,
         TPCC_VAR_W_ZIP}, // o
-       {}, // c TODO
+       {}, // c: read-only on warehouse, no conflict needed
        {TPCC_TB_WAREHOUSE, {TPCC_VAR_W_ID}}, // s
        DF_NO,
        PROC {
@@ -124,7 +124,7 @@ void TpccWorkload::RegPayment() {
   RegP(TPCC_PAYMENT, TPCC_PAYMENT_1,
        {TPCC_VAR_W_ID, TPCC_VAR_D_ID}, // i
        {TPCC_VAR_D_NAME}, // o
-       {}, // c TODO
+       {}, // c: read-only on district, no conflict needed
        {TPCC_TB_DISTRICT, {TPCC_VAR_W_ID}}, DF_NO, PROC {
         verify(cmd.input.size() >= 2);
         Log_debug("TPCC_PAYMENT, piece: %d", TPCC_PAYMENT_1);
@@ -170,7 +170,10 @@ void TpccWorkload::RegPayment() {
        TPCC_PAYMENT_2,
        {TPCC_VAR_W_ID, TPCC_VAR_D_ID, TPCC_VAR_H_AMOUNT}, // i
        {}, // o
-       {}, // c
+       {conf_id_t(TPCC_TB_DISTRICT,
+               {TPCC_VAR_D_ID, TPCC_VAR_W_ID},
+               {TPCC_COL_DISTRICT_D_YTD},
+               ROW_DISTRICT_TEMP)}, // c
        {TPCC_TB_DISTRICT, {TPCC_VAR_W_ID}}, // s
        DF_REAL,
        PROC {
@@ -207,7 +210,7 @@ void TpccWorkload::RegPayment() {
         TPCC_VAR_C_ID, **/ TPCC_VAR_C_W_ID, TPCC_VAR_C_D_ID, TPCC_VAR_H_KEY,
         TPCC_VAR_H_AMOUNT}, // i
        {}, // o
-       {}, // c TODO
+       {}, // c: insert-only on history, no conflict needed
        {TPCC_TB_HISTORY, {TPCC_VAR_H_KEY}}, // s
        DF_REAL,
        PROC {
@@ -309,7 +312,12 @@ void TpccWorkload::RegPayment() {
        {TPCC_VAR_W_ID, TPCC_VAR_D_ID, TPCC_VAR_H_AMOUNT, TPCC_VAR_C_ID,
         TPCC_VAR_C_W_ID, TPCC_VAR_C_D_ID}, // i
        {}, // o
-       {}, // c
+       {conf_id_t(TPCC_TB_CUSTOMER,
+               {TPCC_VAR_C_ID, TPCC_VAR_C_D_ID, TPCC_VAR_C_W_ID},
+               {TPCC_COL_CUSTOMER_C_BALANCE,
+                TPCC_COL_CUSTOMER_C_YTD_PAYMENT,
+                TPCC_COL_CUSTOMER_C_DATA},
+               ROW_CUSTOMER)}, // c
        {TPCC_TB_CUSTOMER, {TPCC_VAR_C_W_ID}}, // s
        DF_REAL,
        PROC {

@@ -26,6 +26,11 @@
 ## small tasks (a few days)
 
 * **add conflict declaration in tpcc and tpca, shrink the number of pieces in tpcc.**
+  * ~~add conflict declarations for TPCC PAYMENT pieces (warehouse W_YTD write, district D_YTD write, customer balance/ytd_payment writes)~~
+  * ~~add conflict declarations for TPCC DELIVERY pieces (new_order, order, order_line, customer writes)~~
+  * TPCA already has complete conflict declarations; no changes needed.
+  * ORDER_STATUS and STOCK_LEVEL are read-only transactions; no conflict declarations needed.
+  * NEW_ORDER already has conflicts on DISTRICT and STOCK; pieces 1-4 already merged into piece 0.
 * **rewrite how janus handles pre-accept request, use the conflict delaration above**
 * write README and a guide for setup and plot.
 
