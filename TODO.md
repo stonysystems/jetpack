@@ -22,7 +22,9 @@ All TLA+ model checking runs in Docker (`tla/Dockerfile`).
   - `jetpack.tla`: Jetpack plugin layer, runs with any compatible base protocol
 - [x] Create `tla/copilot.tla`: CoPilot consensus protocol
 - [x] Create `tla/mencius.tla`: Mencius consensus protocol
-- [ ] Create wrapper/composition modules (e.g. `jetpack_copilot.tla`, `jetpack_mencius.tla`)
+- [x] Create wrapper/composition modules (`jetpack_copilot.tla`, `jetpack_mencius.tla`)
+  - `jetpack_copilot.tla`: Jetpack + CoPilot composition (SANY verified)
+  - `jetpack_mencius.tla`: Jetpack + Mencius composition (SANY verified)
 
 ## TLA+ Verification (via Docker)
 
