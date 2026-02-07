@@ -5,19 +5,24 @@
 namespace janus {
 
 void TpccProcedure::PaymentInit(TxRequest& req) {
-  // Pieces 0+1+2 merged into single piece 0 (all W_ID-sharded).
-  // Remaining pieces: 0 (merged), 3, 4, 5.
-  n_pieces_all_ = 4;
+  n_pieces_all_ = 6;
   status_[TPCC_PAYMENT_0] = WAITING;
+  status_[TPCC_PAYMENT_1] = WAITING;
+  status_[TPCC_PAYMENT_2] = WAITING;
   status_[TPCC_PAYMENT_3] = WAITING;
   status_[TPCC_PAYMENT_4] = WAITING;
   status_[TPCC_PAYMENT_5] = WAITING;
   p_types_[TPCC_PAYMENT_0] = TPCC_PAYMENT_0;
+  p_types_[TPCC_PAYMENT_1] = TPCC_PAYMENT_1;
+  p_types_[TPCC_PAYMENT_2] = TPCC_PAYMENT_2;
   p_types_[TPCC_PAYMENT_3] = TPCC_PAYMENT_3;
   p_types_[TPCC_PAYMENT_4] = TPCC_PAYMENT_4;
   p_types_[TPCC_PAYMENT_5] = TPCC_PAYMENT_5;
-  // merged piece 0 outputs: warehouse info (6) + district info (6)
-  output_size_[TPCC_PAYMENT_0] = 12;
+  output_size_[TPCC_PAYMENT_0] = 6;
+  // piece 1, Ri district
+  output_size_[TPCC_PAYMENT_1] = 6;
+  // piece 2, W district
+  output_size_[TPCC_PAYMENT_2] = 0;
   n_pieces_dispatchable_ = 0;
   n_pieces_dispatch_acked_ = 0;
   n_pieces_dispatched_ = 0;
@@ -41,13 +46,15 @@ void TpccProcedure::PaymentInit(TxRequest& req) {
 
   // piece 4, R & W customer
   output_size_[TPCC_PAYMENT_4] = 15;
-  // piece 5, W history (insert)
+  // piece 5, W history (insert), depends on piece 0, 1
   output_size_[TPCC_PAYMENT_5] = 0;
   CheckReady();
 }
 
 void TpccProcedure::PaymentRetry() {
   status_[TPCC_PAYMENT_0] = WAITING;
+  status_[TPCC_PAYMENT_1] = WAITING;
+  status_[TPCC_PAYMENT_2] = WAITING;
   status_[TPCC_PAYMENT_3] = WAITING;
   status_[TPCC_PAYMENT_4] = WAITING;
   status_[TPCC_PAYMENT_5] = WAITING;
@@ -66,34 +73,25 @@ void TpccProcedure::PaymentRetry() {
 }
 
 void TpccWorkload::RegPayment() {
-  // Pieces 0+1+2 merged into single piece 0 (all W_ID-sharded).
-  // Former piece 0: read warehouse info (TXN_BYPASS, no conflict)
-  // Former piece 1: read district info (TXN_BYPASS, no conflict)
-  // Former piece 2: read+write district D_YTD (TXN_DEFERRED, conflict on D_YTD)
+  // piece 0, Ri & W warehouse
   RegP(TPCC_PAYMENT,
        TPCC_PAYMENT_0,
        {TPCC_VAR_W_ID, TPCC_VAR_D_ID, TPCC_VAR_H_AMOUNT,
         TPCC_VAR_C_W_ID, TPCC_VAR_C_D_ID, TPCC_VAR_H_KEY}, // i
-       {TPCC_VAR_W_NAME, TPCC_VAR_W_STREET_1,
+       {TPCC_PAYMENT, TPCC_PAYMENT_0, TPCC_VAR_W_NAME, TPCC_VAR_W_STREET_1,
         TPCC_VAR_W_STREET_2, TPCC_VAR_W_CITY, TPCC_VAR_W_STATE,
-        TPCC_VAR_W_ZIP,
-        TPCC_VAR_D_NAME, TPCC_VAR_D_STREET_1,
-        TPCC_VAR_D_STREET_2, TPCC_VAR_D_CITY, TPCC_VAR_D_STATE,
-        TPCC_VAR_D_ZIP}, // o
-       {conf_id_t(TPCC_TB_DISTRICT,
-               {TPCC_VAR_D_ID, TPCC_VAR_W_ID},
-               {TPCC_COL_DISTRICT_D_YTD},
-               ROW_DISTRICT_TEMP)}, // c: from former piece 2
+        TPCC_VAR_W_ZIP}, // o
+       {}, // c: read-only on warehouse, no conflict needed
        {TPCC_TB_WAREHOUSE, {TPCC_VAR_W_ID}}, // s
-       DF_REAL,
+       DF_NO,
        PROC {
          verify(cmd.input.size() >= 6);
-         Log_debug("TPCC_PAYMENT, merged piece 0 (warehouse+district R+W)");
-
-         // --- former piece 0: R warehouse ---
+         Log_debug("TPCC_PAYMENT, piece: %d", TPCC_PAYMENT_0);
+         i32 oi = 0;
          mdb::Row* row_warehouse = tx.Query(tx.GetTable(TPCC_TB_WAREHOUSE),
                                             cmd.input[TPCC_VAR_W_ID].get_blob(),
                                             ROW_WAREHOUSE);
+         // R warehouse
          output[TPCC_VAR_W_NAME] = Value("");
          tx.ReadColumn(row_warehouse,
                        TPCC_COL_WAREHOUSE_W_NAME,
@@ -119,52 +117,83 @@ void TpccWorkload::RegPayment() {
                        TPCC_COL_WAREHOUSE_W_ZIP,
                        &output[TPCC_VAR_W_ZIP],
                        TXN_BYPASS);
+         *res = SUCCESS;
+       });
 
-         // --- former piece 1: R district ---
-         mdb::MultiBlob mb(2);
-         mb[0] = cmd.input[TPCC_VAR_D_ID].get_blob();
-         mb[1] = cmd.input[TPCC_VAR_W_ID].get_blob();
-         mdb::Row* row_district =
-             tx.Query(tx.GetTable(TPCC_TB_DISTRICT), mb, ROW_DISTRICT);
-         output[TPCC_VAR_D_NAME] = Value("");
-         tx.ReadColumn(row_district,
-                       TPCC_COL_DISTRICT_D_NAME,
-                       &output[TPCC_VAR_D_NAME],
-                       TXN_BYPASS);
-         tx.ReadColumn(row_district,
-                       TPCC_COL_DISTRICT_D_STREET_1,
-                       &output[TPCC_VAR_D_STREET_1],
-                       TXN_BYPASS);
-         tx.ReadColumn(row_district,
-                       TPCC_COL_DISTRICT_D_STREET_2,
-                       &output[TPCC_VAR_D_STREET_2],
-                       TXN_BYPASS);
-         tx.ReadColumn(row_district,
-                       TPCC_COL_DISTRICT_D_CITY,
-                       &output[TPCC_VAR_D_CITY],
-                       TXN_BYPASS);
-         tx.ReadColumn(row_district,
-                       TPCC_COL_DISTRICT_D_STATE,
-                       &output[TPCC_VAR_D_STATE],
-                       TXN_BYPASS);
-         tx.ReadColumn(row_district,
-                       TPCC_COL_DISTRICT_D_ZIP,
-                       &output[TPCC_VAR_D_ZIP],
-                       TXN_BYPASS);
+  // piece 1, Ri district
+  RegP(TPCC_PAYMENT, TPCC_PAYMENT_1,
+       {TPCC_VAR_W_ID, TPCC_VAR_D_ID}, // i
+       {TPCC_VAR_D_NAME}, // o
+       {}, // c: read-only on district, no conflict needed
+       {TPCC_TB_DISTRICT, {TPCC_VAR_W_ID}}, DF_NO, PROC {
+        verify(cmd.input.size() >= 2);
+        Log_debug("TPCC_PAYMENT, piece: %d", TPCC_PAYMENT_1);
+        Value buf;
+        mdb::MultiBlob mb(2);
+        mb[0] = cmd.input[TPCC_VAR_D_ID].get_blob();
+        mb[1] = cmd.input[TPCC_VAR_W_ID].get_blob();
+        mdb::Row* row_district =
+            tx.Query(tx.GetTable(TPCC_TB_DISTRICT), mb, ROW_DISTRICT);
+        output[TPCC_VAR_D_NAME] = Value("");
 
-         // --- former piece 2: R+W district D_YTD ---
+        // R district
+        tx.ReadColumn(row_district,
+                      TPCC_COL_DISTRICT_D_NAME,
+                      &output[TPCC_VAR_D_NAME],
+                      TXN_BYPASS);
+        tx.ReadColumn(row_district,
+                      TPCC_COL_DISTRICT_D_STREET_1,
+                      &output[TPCC_VAR_D_STREET_1],
+                      TXN_BYPASS);
+        tx.ReadColumn(row_district,
+                      TPCC_COL_DISTRICT_D_STREET_2,
+                      &output[TPCC_VAR_D_STREET_2],
+                      TXN_BYPASS);
+        tx.ReadColumn(row_district,
+                      TPCC_COL_DISTRICT_D_CITY,
+                      &output[TPCC_VAR_D_CITY],
+                      TXN_BYPASS);
+        tx.ReadColumn(row_district,
+                      TPCC_COL_DISTRICT_D_STATE,
+                      &output[TPCC_VAR_D_STATE],
+                      TXN_BYPASS);
+        tx.ReadColumn(row_district,
+                      TPCC_COL_DISTRICT_D_ZIP,
+                      &output[TPCC_VAR_D_ZIP],
+                      TXN_BYPASS);
+
+        *res = SUCCESS;
+      });
+
+  // piece 1, Ri & W district
+  RegP(TPCC_PAYMENT,
+       TPCC_PAYMENT_2,
+       {TPCC_VAR_W_ID, TPCC_VAR_D_ID, TPCC_VAR_H_AMOUNT}, // i
+       {}, // o
+       {conf_id_t(TPCC_TB_DISTRICT,
+               {TPCC_VAR_D_ID, TPCC_VAR_W_ID},
+               {TPCC_COL_DISTRICT_D_YTD},
+               ROW_DISTRICT_TEMP)}, // c
+       {TPCC_TB_DISTRICT, {TPCC_VAR_W_ID}}, // s
+       DF_REAL,
+       PROC {
+         verify(cmd.input.size() >= 3);
+         Log_debug("TPCC_PAYMENT, piece: %d", TPCC_PAYMENT_2);
+
          Value buf_temp(0.0);
+         mdb::Row* row_temp = NULL;
          mdb::MultiBlob mb_temp(2);
          mb_temp[0] = cmd.input[TPCC_VAR_D_ID].get_blob();
          mb_temp[1] = cmd.input[TPCC_VAR_W_ID].get_blob();
-         mdb::Row* row_temp = tx.Query(tx.GetTable(TPCC_TB_DISTRICT),
-                                       mb_temp,
-                                       ROW_DISTRICT_TEMP);
+         row_temp = tx.Query(tx.GetTable(TPCC_TB_DISTRICT),
+                             mb_temp,
+                             ROW_DISTRICT_TEMP);
          verify(row_temp->schema_ != nullptr);
          tx.ReadColumn(row_temp,
                        TPCC_COL_DISTRICT_D_YTD,
                        &buf_temp,
                        TXN_BYPASS);
+         // W district
          Value buf(0.0);
          buf.set_double(
              buf_temp.get_double() + cmd.input[TPCC_VAR_H_AMOUNT].get_double());
@@ -175,7 +204,6 @@ void TpccWorkload::RegPayment() {
          *res = SUCCESS;
        });
 
-  // piece 5, W history (insert)
   RegP(TPCC_PAYMENT,
        TPCC_PAYMENT_5,
        {TPCC_VAR_W_ID, TPCC_VAR_D_ID, /**TPCC_VAR_W_NAME, TPCC_VAR_D_NAME,
@@ -222,7 +250,7 @@ void TpccWorkload::RegPayment() {
          *res = SUCCESS;
        });
 
-  // piece 3, R customer secondary index, c_last -> c_id
+  // piece 2, R customer secondary index, c_last -> c_id
   RegP(TPCC_PAYMENT,
        TPCC_PAYMENT_3,
        {TPCC_VAR_C_W_ID, TPCC_VAR_C_D_ID, TPCC_VAR_C_LAST}, // i

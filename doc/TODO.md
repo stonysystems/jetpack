@@ -33,7 +33,7 @@
   * NEW_ORDER already has conflicts on DISTRICT and STOCK; pieces 1-4 already merged into piece 0.
   * **shrink pieces in TPCC transactions (merge same-shard pieces):**
     * ~~merge DELIVERY pieces 0-3 into single piece (all W_ID-sharded, sequential deps)~~
-    * ~~merge PAYMENT pieces 0+1+2 into single piece (all W_ID-sharded on warehouse/district)~~
+    * merge PAYMENT pieces 0+1+2 into single piece (all W_ID-sharded on warehouse/district)
     * merge ORDER_STATUS pieces 1+2+3 into single piece (all W_ID-sharded, read-only; piece 0 is optional c_last lookup)
     * merge STOCK_LEVEL pieces 0+1 into single piece (both W_ID-sharded on district/order_line)
 * **rewrite how janus handles pre-accept request, use the conflict delaration above**
