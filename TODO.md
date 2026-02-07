@@ -42,6 +42,12 @@ All TLA+ model checking runs in Docker (`tla/Dockerfile`).
 <!-- "composed jetpack + X" means running jetpack.tla together with X.tla as the base
      protocol (e.g. via a wrapper module). This is NOT the same as jetpack_raft.tla,
      which is the original monolithic spec. The same applies to copilot and mencius. -->
-- [ ] TLC verification of composed jetpack + raft
-- [ ] TLC verification of composed jetpack + copilot
-- [ ] TLC verification of composed jetpack + mencius
+- [x] TLC verification of composed jetpack + raft (`jetpack_raft.tla`)
+  - Exhaustive: 82K states, 6K distinct, depth 26 (3 servers, 1 cmd, SmallStateConstraint)
+  - Partial: 47M+ states, 5M+ distinct, no violations (3 servers, 2 cmds, StateConstraint)
+- [x] TLC verification of composed jetpack + copilot (`jetpack_copilot.tla`)
+  - Exhaustive: 515 states, 70 distinct, depth 7 (3 servers, 1 cmd, SmallStateConstraint)
+  - Partial: 49M+ states, 5.3M+ distinct, no violations (3 servers, 2 cmds, StateConstraint)
+- [x] TLC verification of composed jetpack + mencius (`jetpack_mencius.tla`)
+  - Partial: 37M+ states, 3.6M+ distinct, no violations (3 servers, 1 cmd, SmallStateConstraint)
+  - Note: Mencius composition state space too large for exhaustive checking

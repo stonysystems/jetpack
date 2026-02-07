@@ -1070,6 +1070,15 @@ StateConstraint ==
     /\ Len(original_execution_cmds) <= 3
     /\ Len(execution_cmds) <= 3
 
+\* Tighter constraint for quick exhaustive checking.
+SmallStateConstraint ==
+    /\ \A i \in Server : currentTerm[i] <= 2
+    /\ \A m \in DOMAIN messages : messages[m] <= 1
+    /\ Cardinality(DOMAIN messages) <= 2
+    /\ \A i \in Server : Len(log[i]) <= 2
+    /\ Len(original_execution_cmds) <= 2
+    /\ Len(execution_cmds) <= 2
+
 (***************************************************************************)
 (* Properties                                                              *)
 (***************************************************************************)
