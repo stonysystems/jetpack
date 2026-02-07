@@ -112,16 +112,8 @@ bool TpccProcedure::HandleOutput(int pi,
     // for debug
 
     ret = CheckReady();
-    if (type_ == TPCC_DELIVERY) {
-      if (pi == TPCC_DELIVERY_2) {
-        verify(output_map.count(TPCC_VAR_OL_AMOUNT) > 0);
-        verify(ws_.count(TPCC_VAR_OL_AMOUNT) > 0);
-      }
-      if (pi == TPCC_DELIVERY_1) {
-        verify(output_map.count(TPCC_VAR_C_ID) > 0);
-        verify(ws_.count(TPCC_VAR_C_ID) > 0);
-      }
-    }
+    // DELIVERY pieces 0-3 merged into single piece 0; no inter-piece
+    // outputs to verify anymore.
     return ret;
   }
   // above is for debug.

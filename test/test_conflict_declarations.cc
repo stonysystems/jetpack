@@ -117,14 +117,11 @@ TEST(TxnRegistryTest, RegisterMultipleConflicts) {
 
 // ============================================================
 // Tests verifying TPCC conflict declarations match expectations
-// These tests verify the conflict declarations are consistent
-// with what each piece reads/writes as documented in the code.
 // ============================================================
 
 // Test: TPCC NEW_ORDER piece 0 should have district conflict
 TEST(TpccConflictDeclarations, NewOrderPiece0HasDistrictConflict) {
   auto reg = std::make_shared<TxnRegistry>();
-  // Simulate the conflict declaration from new_order.cc
   std::vector<conf_id_t> conflicts = {
       conf_id_t(TPCC_TB_DISTRICT,
                 {TPCC_VAR_D_ID, TPCC_VAR_W_ID},
@@ -142,11 +139,9 @@ TEST(TpccConflictDeclarations, NewOrderPiece0HasDistrictConflict) {
   auto& piece = reg->get(TPCC_NEW_ORDER, TPCC_NEW_ORDER_0);
   ASSERT_EQ(piece.conflicts_.size(), 1u);
   EXPECT_EQ(piece.conflicts_[0].table, std::string(TPCC_TB_DISTRICT));
-  // Primary keys: D_ID, W_ID
   ASSERT_EQ(piece.conflicts_[0].primary_keys.size(), 2u);
   EXPECT_EQ(piece.conflicts_[0].primary_keys[0], TPCC_VAR_D_ID);
   EXPECT_EQ(piece.conflicts_[0].primary_keys[1], TPCC_VAR_W_ID);
-  // Column: D_NEXT_O_ID
   ASSERT_EQ(piece.conflicts_[0].columns.size(), 1u);
   EXPECT_EQ(piece.conflicts_[0].columns[0], TPCC_COL_DISTRICT_D_NEXT_O_ID);
 }
@@ -284,99 +279,98 @@ TEST(TpccConflictDeclarations, PaymentReadOnlyPiecesHaveNoConflict) {
   EXPECT_TRUE(reg->get(TPCC_PAYMENT, TPCC_PAYMENT_5).conflicts_.empty());
 }
 
-// Test: TPCC DELIVERY piece 0 has new_order conflict
-TEST(TpccConflictDeclarations, DeliveryPiece0HasNewOrderConflict) {
+// Test: TPCC DELIVERY merged piece 0 has all 4 conflict declarations
+TEST(TpccConflictDeclarations, DeliveryMergedPiece0HasAllConflicts) {
   auto reg = std::make_shared<TxnRegistry>();
+  // After merging pieces 0-3, piece 0 has conflicts on all 4 tables
   std::vector<conf_id_t> conflicts = {
       conf_id_t(TPCC_TB_NEW_ORDER,
                 {TPCC_VAR_D_ID, TPCC_VAR_W_ID},
                 {TPCC_COL_NEW_ORDER_NO_O_ID},
-                RS_NEW_ORDER)
-  };
-  RegP(reg, TPCC_DELIVERY, TPCC_DELIVERY_0,
-       {TPCC_VAR_W_ID, TPCC_VAR_D_ID, TPCC_VAR_O_CARRIER_ID},
-       {TPCC_VAR_O_ID}, conflicts,
-       {TPCC_TB_NEW_ORDER, {TPCC_VAR_W_ID}}, DF_REAL);
-
-  auto& piece = reg->get(TPCC_DELIVERY, TPCC_DELIVERY_0);
-  ASSERT_EQ(piece.conflicts_.size(), 1u);
-  EXPECT_EQ(piece.conflicts_[0].table, std::string(TPCC_TB_NEW_ORDER));
-  ASSERT_EQ(piece.conflicts_[0].primary_keys.size(), 2u);
-  ASSERT_EQ(piece.conflicts_[0].columns.size(), 1u);
-  EXPECT_EQ(piece.conflicts_[0].columns[0], TPCC_COL_NEW_ORDER_NO_O_ID);
-}
-
-// Test: TPCC DELIVERY piece 1 has order conflict
-TEST(TpccConflictDeclarations, DeliveryPiece1HasOrderConflict) {
-  auto reg = std::make_shared<TxnRegistry>();
-  std::vector<conf_id_t> conflicts = {
+                RS_NEW_ORDER),
       conf_id_t(TPCC_TB_ORDER,
-                {TPCC_VAR_D_ID, TPCC_VAR_W_ID, TPCC_VAR_O_ID},
+                {TPCC_VAR_D_ID, TPCC_VAR_W_ID},
                 {TPCC_COL_ORDER_O_CARRIER_ID},
-                ROW_ORDER)
-  };
-  RegP(reg, TPCC_DELIVERY, TPCC_DELIVERY_1,
-       {TPCC_VAR_W_ID, TPCC_VAR_D_ID, TPCC_VAR_O_ID, TPCC_VAR_O_CARRIER_ID},
-       {TPCC_VAR_C_ID}, conflicts,
-       {TPCC_TB_ORDER, {TPCC_VAR_W_ID}}, DF_NO);
-
-  auto& piece = reg->get(TPCC_DELIVERY, TPCC_DELIVERY_1);
-  ASSERT_EQ(piece.conflicts_.size(), 1u);
-  EXPECT_EQ(piece.conflicts_[0].table, std::string(TPCC_TB_ORDER));
-  ASSERT_EQ(piece.conflicts_[0].primary_keys.size(), 3u);
-  ASSERT_EQ(piece.conflicts_[0].columns.size(), 1u);
-  EXPECT_EQ(piece.conflicts_[0].columns[0], TPCC_COL_ORDER_O_CARRIER_ID);
-}
-
-// Test: TPCC DELIVERY piece 2 has order_line conflict
-TEST(TpccConflictDeclarations, DeliveryPiece2HasOrderLineConflict) {
-  auto reg = std::make_shared<TxnRegistry>();
-  std::vector<conf_id_t> conflicts = {
+                ROW_ORDER),
       conf_id_t(TPCC_TB_ORDER_LINE,
-                {TPCC_VAR_D_ID, TPCC_VAR_W_ID, TPCC_VAR_O_ID},
+                {TPCC_VAR_D_ID, TPCC_VAR_W_ID},
                 {TPCC_COL_ORDER_LINE_OL_AMOUNT,
                  TPCC_COL_ORDER_LINE_OL_DELIVERY_D},
-                RS_ORDER_LINE)
-  };
-  RegP(reg, TPCC_DELIVERY, TPCC_DELIVERY_2,
-       {TPCC_VAR_W_ID, TPCC_VAR_D_ID, TPCC_VAR_O_ID},
-       {}, conflicts,
-       {TPCC_TB_ORDER_LINE, {TPCC_VAR_W_ID}}, DF_NO);
-
-  auto& piece = reg->get(TPCC_DELIVERY, TPCC_DELIVERY_2);
-  ASSERT_EQ(piece.conflicts_.size(), 1u);
-  EXPECT_EQ(piece.conflicts_[0].table, std::string(TPCC_TB_ORDER_LINE));
-  ASSERT_EQ(piece.conflicts_[0].primary_keys.size(), 3u);
-  ASSERT_EQ(piece.conflicts_[0].columns.size(), 2u);
-  EXPECT_EQ(piece.conflicts_[0].columns[0], TPCC_COL_ORDER_LINE_OL_AMOUNT);
-  EXPECT_EQ(piece.conflicts_[0].columns[1], TPCC_COL_ORDER_LINE_OL_DELIVERY_D);
-}
-
-// Test: TPCC DELIVERY piece 3 has customer conflict
-TEST(TpccConflictDeclarations, DeliveryPiece3HasCustomerConflict) {
-  auto reg = std::make_shared<TxnRegistry>();
-  std::vector<conf_id_t> conflicts = {
+                RS_ORDER_LINE),
       conf_id_t(TPCC_TB_CUSTOMER,
-                {TPCC_VAR_C_ID, TPCC_VAR_D_ID, TPCC_VAR_W_ID},
+                {TPCC_VAR_D_ID, TPCC_VAR_W_ID},
                 {TPCC_COL_CUSTOMER_C_BALANCE,
                  TPCC_COL_CUSTOMER_C_DELIVERY_CNT},
                 ROW_CUSTOMER)
   };
-  RegP(reg, TPCC_DELIVERY, TPCC_DELIVERY_3,
-       {TPCC_VAR_W_ID, TPCC_VAR_D_ID, TPCC_VAR_C_ID, TPCC_VAR_OL_AMOUNT},
+  RegP(reg, TPCC_DELIVERY, TPCC_DELIVERY_0,
+       {TPCC_VAR_W_ID, TPCC_VAR_D_ID, TPCC_VAR_O_CARRIER_ID},
        {}, conflicts,
-       {TPCC_TB_CUSTOMER, {TPCC_VAR_W_ID}}, DF_REAL);
+       {TPCC_TB_NEW_ORDER, {TPCC_VAR_W_ID}}, DF_REAL);
 
-  auto& piece = reg->get(TPCC_DELIVERY, TPCC_DELIVERY_3);
-  ASSERT_EQ(piece.conflicts_.size(), 1u);
-  EXPECT_EQ(piece.conflicts_[0].table, std::string(TPCC_TB_CUSTOMER));
-  ASSERT_EQ(piece.conflicts_[0].primary_keys.size(), 3u);
-  EXPECT_EQ(piece.conflicts_[0].primary_keys[0], TPCC_VAR_C_ID);
-  EXPECT_EQ(piece.conflicts_[0].primary_keys[1], TPCC_VAR_D_ID);
-  EXPECT_EQ(piece.conflicts_[0].primary_keys[2], TPCC_VAR_W_ID);
-  ASSERT_EQ(piece.conflicts_[0].columns.size(), 2u);
-  EXPECT_EQ(piece.conflicts_[0].columns[0], TPCC_COL_CUSTOMER_C_BALANCE);
-  EXPECT_EQ(piece.conflicts_[0].columns[1], TPCC_COL_CUSTOMER_C_DELIVERY_CNT);
+  auto& piece = reg->get(TPCC_DELIVERY, TPCC_DELIVERY_0);
+  ASSERT_EQ(piece.conflicts_.size(), 4u);
+
+  // Conflict 0: new_order
+  EXPECT_EQ(piece.conflicts_[0].table, std::string(TPCC_TB_NEW_ORDER));
+  ASSERT_EQ(piece.conflicts_[0].primary_keys.size(), 2u);
+  EXPECT_EQ(piece.conflicts_[0].primary_keys[0], TPCC_VAR_D_ID);
+  EXPECT_EQ(piece.conflicts_[0].primary_keys[1], TPCC_VAR_W_ID);
+  ASSERT_EQ(piece.conflicts_[0].columns.size(), 1u);
+  EXPECT_EQ(piece.conflicts_[0].columns[0], TPCC_COL_NEW_ORDER_NO_O_ID);
+
+  // Conflict 1: order
+  EXPECT_EQ(piece.conflicts_[1].table, std::string(TPCC_TB_ORDER));
+  ASSERT_EQ(piece.conflicts_[1].primary_keys.size(), 2u);
+  ASSERT_EQ(piece.conflicts_[1].columns.size(), 1u);
+  EXPECT_EQ(piece.conflicts_[1].columns[0], TPCC_COL_ORDER_O_CARRIER_ID);
+
+  // Conflict 2: order_line
+  EXPECT_EQ(piece.conflicts_[2].table, std::string(TPCC_TB_ORDER_LINE));
+  ASSERT_EQ(piece.conflicts_[2].primary_keys.size(), 2u);
+  ASSERT_EQ(piece.conflicts_[2].columns.size(), 2u);
+  EXPECT_EQ(piece.conflicts_[2].columns[0], TPCC_COL_ORDER_LINE_OL_AMOUNT);
+  EXPECT_EQ(piece.conflicts_[2].columns[1], TPCC_COL_ORDER_LINE_OL_DELIVERY_D);
+
+  // Conflict 3: customer
+  EXPECT_EQ(piece.conflicts_[3].table, std::string(TPCC_TB_CUSTOMER));
+  ASSERT_EQ(piece.conflicts_[3].primary_keys.size(), 2u);
+  EXPECT_EQ(piece.conflicts_[3].primary_keys[0], TPCC_VAR_D_ID);
+  EXPECT_EQ(piece.conflicts_[3].primary_keys[1], TPCC_VAR_W_ID);
+  ASSERT_EQ(piece.conflicts_[3].columns.size(), 2u);
+  EXPECT_EQ(piece.conflicts_[3].columns[0], TPCC_COL_CUSTOMER_C_BALANCE);
+  EXPECT_EQ(piece.conflicts_[3].columns[1], TPCC_COL_CUSTOMER_C_DELIVERY_CNT);
+}
+
+// Test: Merged DELIVERY piece has no outputs (data flows via local vars)
+TEST(TpccConflictDeclarations, DeliveryMergedPieceHasNoOutputs) {
+  auto reg = std::make_shared<TxnRegistry>();
+  RegP(reg, TPCC_DELIVERY, TPCC_DELIVERY_0,
+       {TPCC_VAR_W_ID, TPCC_VAR_D_ID, TPCC_VAR_O_CARRIER_ID},
+       {}, // no outputs since everything is handled internally
+       {conf_id_t(TPCC_TB_NEW_ORDER,
+                  {TPCC_VAR_D_ID, TPCC_VAR_W_ID},
+                  {TPCC_COL_NEW_ORDER_NO_O_ID},
+                  RS_NEW_ORDER)},
+       {TPCC_TB_NEW_ORDER, {TPCC_VAR_W_ID}}, DF_REAL);
+
+  auto& piece = reg->get(TPCC_DELIVERY, TPCC_DELIVERY_0);
+  EXPECT_TRUE(piece.output_vars_.empty());
+  EXPECT_EQ(piece.input_vars_.size(), 3u);
+}
+
+// Test: Merged DELIVERY piece shards on W_ID via new_order table
+TEST(TpccConflictDeclarations, DeliveryMergedPieceShardsOnWID) {
+  auto reg = std::make_shared<TxnRegistry>();
+  RegP(reg, TPCC_DELIVERY, TPCC_DELIVERY_0,
+       {TPCC_VAR_W_ID, TPCC_VAR_D_ID, TPCC_VAR_O_CARRIER_ID},
+       {}, {},
+       {TPCC_TB_NEW_ORDER, {TPCC_VAR_W_ID}}, DF_REAL);
+
+  auto& piece = reg->get(TPCC_DELIVERY, TPCC_DELIVERY_0);
+  EXPECT_EQ(piece.sharder_.first, std::string(TPCC_TB_NEW_ORDER));
+  ASSERT_EQ(piece.sharder_.second.size(), 1u);
+  EXPECT_EQ(piece.sharder_.second[0], TPCC_VAR_W_ID);
 }
 
 // Test: TPCC ORDER_STATUS all pieces read-only, no conflicts
@@ -436,28 +430,28 @@ TEST(TpcaConflictDeclarations, AllPiecesHaveConflicts) {
   EXPECT_EQ(p3.conflicts_[0].table, std::string(TPCA_BRANCH));
 }
 
-// Test: Conflict primary keys match input vars used for querying
-TEST(TpccConflictDeclarations, ConflictKeysMatchQueryKeys) {
-  // Verify that the primary keys in conflict declarations match
-  // the keys used to Query() rows in the piece handlers.
+// Test: Merged DELIVERY conflict keys use only D_ID, W_ID
+// (O_ID and C_ID are no longer input vars after merging)
+TEST(TpccConflictDeclarations, MergedDeliveryConflictKeysUseDIDWID) {
+  // After merging, ORDER and ORDER_LINE conflicts use {D_ID, W_ID}
+  // instead of {D_ID, W_ID, O_ID} since O_ID is computed internally
+  conf_id_t order_conf(TPCC_TB_ORDER,
+                       {TPCC_VAR_D_ID, TPCC_VAR_W_ID},
+                       {TPCC_COL_ORDER_O_CARRIER_ID},
+                       ROW_ORDER);
+  ASSERT_EQ(order_conf.primary_keys.size(), 2u);
+  EXPECT_EQ(order_conf.primary_keys[0], TPCC_VAR_D_ID);
+  EXPECT_EQ(order_conf.primary_keys[1], TPCC_VAR_W_ID);
 
-  // PAYMENT piece 2: queries district by (D_ID, W_ID)
-  conf_id_t p2_conf(TPCC_TB_DISTRICT,
-                     {TPCC_VAR_D_ID, TPCC_VAR_W_ID},
-                     {TPCC_COL_DISTRICT_D_YTD},
-                     ROW_DISTRICT_TEMP);
-  EXPECT_EQ(p2_conf.primary_keys[0], TPCC_VAR_D_ID);
-  EXPECT_EQ(p2_conf.primary_keys[1], TPCC_VAR_W_ID);
-
-  // DELIVERY piece 3: queries customer by (C_ID, D_ID, W_ID)
-  conf_id_t d3_conf(TPCC_TB_CUSTOMER,
-                     {TPCC_VAR_C_ID, TPCC_VAR_D_ID, TPCC_VAR_W_ID},
-                     {TPCC_COL_CUSTOMER_C_BALANCE,
-                      TPCC_COL_CUSTOMER_C_DELIVERY_CNT},
-                     ROW_CUSTOMER);
-  EXPECT_EQ(d3_conf.primary_keys[0], TPCC_VAR_C_ID);
-  EXPECT_EQ(d3_conf.primary_keys[1], TPCC_VAR_D_ID);
-  EXPECT_EQ(d3_conf.primary_keys[2], TPCC_VAR_W_ID);
+  // Customer conflict also uses {D_ID, W_ID} instead of {C_ID, D_ID, W_ID}
+  conf_id_t cust_conf(TPCC_TB_CUSTOMER,
+                      {TPCC_VAR_D_ID, TPCC_VAR_W_ID},
+                      {TPCC_COL_CUSTOMER_C_BALANCE,
+                       TPCC_COL_CUSTOMER_C_DELIVERY_CNT},
+                      ROW_CUSTOMER);
+  ASSERT_EQ(cust_conf.primary_keys.size(), 2u);
+  EXPECT_EQ(cust_conf.primary_keys[0], TPCC_VAR_D_ID);
+  EXPECT_EQ(cust_conf.primary_keys[1], TPCC_VAR_W_ID);
 }
 
 int main(int argc, char **argv) {
