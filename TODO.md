@@ -12,6 +12,7 @@ variables or transitions. The original combined spec `jetpack_raft.tla` is prese
 as reference but the separated specs are the primary artifacts going forward.
 
 All TLA+ related work (specifications, configs, Docker environment) lives in the `tla/` folder.
+All TLA+ model checking runs in Docker (`tla/Dockerfile`).
 
 ## TLA+ Specifications
 
