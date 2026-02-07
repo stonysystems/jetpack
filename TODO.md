@@ -33,6 +33,9 @@ All TLA+ model checking runs in Docker (`tla/Dockerfile`).
 - [ ] `mencius.tla`: TLC model check (SlotAgreement)
 - [ ] `jetpack.tla`: SANY parse check (not standalone, needs base protocol to run)
 - [ ] `jetpack_raft.tla`: SANY parse check (original combined spec preserved)
+<!-- "composed jetpack + X" means running jetpack.tla together with X.tla as the base
+     protocol (e.g. via a wrapper module). This is NOT the same as jetpack_raft.tla,
+     which is the original monolithic spec. The same applies to copilot and mencius. -->
 - [ ] TLC verification of composed jetpack + raft
 - [ ] TLC verification of composed jetpack + copilot
 - [ ] TLC verification of composed jetpack + mencius
