@@ -51,7 +51,7 @@ void TpccWorkload::RegStockLevel() {
   RegP(TPCC_STOCK_LEVEL, TPCC_STOCK_LEVEL_0,
        {TPCC_VAR_W_ID, TPCC_VAR_D_ID}, // i
        {}, // o
-       {}, // c: read-only on district, no conflict needed
+       {}, // c TODO
        {TPCC_TB_DISTRICT, {TPCC_VAR_W_ID}}, // s
        DF_NO,
        PROC {

@@ -41,11 +41,8 @@ void TpccWorkload::RegDelivery() {
   RegP(TPCC_DELIVERY, TPCC_DELIVERY_0,
        {TPCC_VAR_W_ID, TPCC_VAR_D_ID, TPCC_VAR_O_CARRIER_ID}, // i
        {TPCC_VAR_O_ID},  // o
-       {conf_id_t(TPCC_TB_NEW_ORDER,
-               {TPCC_VAR_D_ID, TPCC_VAR_W_ID},
-               {TPCC_COL_NEW_ORDER_NO_O_ID},
-               RS_NEW_ORDER)}, // c
-       {TPCC_TB_NEW_ORDER, {TPCC_VAR_W_ID}}, // s
+       {}, // TODO c
+       {TPCC_TB_NEW_ORDER, {TPCC_VAR_W_ID}}, // TODO s
        DF_REAL,
        PROC {
          // this is a little bit tricky, the first half will do most of the job,
@@ -102,10 +99,7 @@ void TpccWorkload::RegDelivery() {
        {TPCC_VAR_W_ID, TPCC_VAR_D_ID,
         TPCC_VAR_O_ID, TPCC_VAR_O_CARRIER_ID}, // i
        {TPCC_VAR_C_ID}, // o
-       {conf_id_t(TPCC_TB_ORDER,
-               {TPCC_VAR_D_ID, TPCC_VAR_W_ID, TPCC_VAR_O_ID},
-               {TPCC_COL_ORDER_O_CARRIER_ID},
-               ROW_ORDER)}, // c
+       {}, // TODO c
        {TPCC_TB_ORDER, {TPCC_VAR_W_ID}}, // s
        DF_NO,
        PROC {
@@ -136,11 +130,7 @@ void TpccWorkload::RegDelivery() {
   RegP(TPCC_DELIVERY, TPCC_DELIVERY_2,
        {TPCC_VAR_W_ID, TPCC_VAR_D_ID, TPCC_VAR_O_ID}, // i
        {}, // TODO o
-       {conf_id_t(TPCC_TB_ORDER_LINE,
-               {TPCC_VAR_D_ID, TPCC_VAR_W_ID, TPCC_VAR_O_ID},
-               {TPCC_COL_ORDER_LINE_OL_AMOUNT,
-                TPCC_COL_ORDER_LINE_OL_DELIVERY_D},
-               RS_ORDER_LINE)}, // c
+       {}, // TODO c
        {TPCC_TB_ORDER_LINE, {TPCC_VAR_W_ID}}, // s
        DF_NO,
        PROC {
@@ -206,11 +196,7 @@ void TpccWorkload::RegDelivery() {
        {TPCC_VAR_W_ID, TPCC_VAR_D_ID,
         TPCC_VAR_C_ID, TPCC_VAR_OL_AMOUNT}, // i
        {}, // o
-       {conf_id_t(TPCC_TB_CUSTOMER,
-               {TPCC_VAR_C_ID, TPCC_VAR_D_ID, TPCC_VAR_W_ID},
-               {TPCC_COL_CUSTOMER_C_BALANCE,
-                TPCC_COL_CUSTOMER_C_DELIVERY_CNT},
-               ROW_CUSTOMER)}, // c
+       {}, // TODO c
        {TPCC_TB_CUSTOMER, {TPCC_VAR_W_ID}}, // s
        DF_REAL,
        PROC {
