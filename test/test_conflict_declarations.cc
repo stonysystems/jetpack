@@ -192,8 +192,9 @@ TEST(TpccConflictDeclarations, NewOrderWSHasStockConflict) {
   EXPECT_EQ(piece.conflicts_[0].columns[3], TPCC_COL_STOCK_S_REMOTE_CNT);
 }
 
-// Test: TPCC PAYMENT piece 2 should have district D_YTD conflict
-TEST(TpccConflictDeclarations, PaymentPiece2HasDistrictYTDConflict) {
+// Test: TPCC PAYMENT merged piece 0 has district D_YTD conflict
+// (pieces 0+1+2 merged; conflict from former piece 2)
+TEST(TpccConflictDeclarations, PaymentMergedPiece0HasDistrictYTDConflict) {
   auto reg = std::make_shared<TxnRegistry>();
   std::vector<conf_id_t> conflicts = {
       conf_id_t(TPCC_TB_DISTRICT,
@@ -201,12 +202,19 @@ TEST(TpccConflictDeclarations, PaymentPiece2HasDistrictYTDConflict) {
                 {TPCC_COL_DISTRICT_D_YTD},
                 ROW_DISTRICT_TEMP)
   };
-  RegP(reg, TPCC_PAYMENT, TPCC_PAYMENT_2,
-       {TPCC_VAR_W_ID, TPCC_VAR_D_ID, TPCC_VAR_H_AMOUNT},
-       {}, conflicts,
-       {TPCC_TB_DISTRICT, {TPCC_VAR_W_ID}}, DF_REAL);
+  RegP(reg, TPCC_PAYMENT, TPCC_PAYMENT_0,
+       {TPCC_VAR_W_ID, TPCC_VAR_D_ID, TPCC_VAR_H_AMOUNT,
+        TPCC_VAR_C_W_ID, TPCC_VAR_C_D_ID, TPCC_VAR_H_KEY},
+       {TPCC_VAR_W_NAME, TPCC_VAR_W_STREET_1,
+        TPCC_VAR_W_STREET_2, TPCC_VAR_W_CITY, TPCC_VAR_W_STATE,
+        TPCC_VAR_W_ZIP,
+        TPCC_VAR_D_NAME, TPCC_VAR_D_STREET_1,
+        TPCC_VAR_D_STREET_2, TPCC_VAR_D_CITY, TPCC_VAR_D_STATE,
+        TPCC_VAR_D_ZIP},
+       conflicts,
+       {TPCC_TB_WAREHOUSE, {TPCC_VAR_W_ID}}, DF_REAL);
 
-  auto& piece = reg->get(TPCC_PAYMENT, TPCC_PAYMENT_2);
+  auto& piece = reg->get(TPCC_PAYMENT, TPCC_PAYMENT_0);
   ASSERT_EQ(piece.conflicts_.size(), 1u);
   EXPECT_EQ(piece.conflicts_[0].table, std::string(TPCC_TB_DISTRICT));
   ASSERT_EQ(piece.conflicts_[0].primary_keys.size(), 2u);
@@ -214,6 +222,10 @@ TEST(TpccConflictDeclarations, PaymentPiece2HasDistrictYTDConflict) {
   EXPECT_EQ(piece.conflicts_[0].primary_keys[1], TPCC_VAR_W_ID);
   ASSERT_EQ(piece.conflicts_[0].columns.size(), 1u);
   EXPECT_EQ(piece.conflicts_[0].columns[0], TPCC_COL_DISTRICT_D_YTD);
+  // Merged piece outputs warehouse + district info (12 output vars)
+  EXPECT_EQ(piece.output_vars_.size(), 12u);
+  // Merged piece shards on warehouse W_ID
+  EXPECT_EQ(piece.sharder_.first, std::string(TPCC_TB_WAREHOUSE));
 }
 
 // Test: TPCC PAYMENT piece 4 should have customer conflict
@@ -246,23 +258,10 @@ TEST(TpccConflictDeclarations, PaymentPiece4HasCustomerConflict) {
   EXPECT_EQ(piece.conflicts_[0].columns[2], TPCC_COL_CUSTOMER_C_DATA);
 }
 
-// Test: TPCC PAYMENT read-only pieces have no conflict
+// Test: TPCC PAYMENT read-only/insert-only pieces have no conflict
+// (pieces 0+1+2 merged into piece 0 which has a conflict; pieces 3 and 5 remain)
 TEST(TpccConflictDeclarations, PaymentReadOnlyPiecesHaveNoConflict) {
   auto reg = std::make_shared<TxnRegistry>();
-
-  // Piece 0: read warehouse (TXN_BYPASS)
-  RegP(reg, TPCC_PAYMENT, TPCC_PAYMENT_0,
-       {TPCC_VAR_W_ID, TPCC_VAR_D_ID, TPCC_VAR_H_AMOUNT,
-        TPCC_VAR_C_W_ID, TPCC_VAR_C_D_ID, TPCC_VAR_H_KEY},
-       {}, {},
-       {TPCC_TB_WAREHOUSE, {TPCC_VAR_W_ID}}, DF_NO);
-  EXPECT_TRUE(reg->get(TPCC_PAYMENT, TPCC_PAYMENT_0).conflicts_.empty());
-
-  // Piece 1: read district (TXN_BYPASS)
-  RegP(reg, TPCC_PAYMENT, TPCC_PAYMENT_1,
-       {TPCC_VAR_W_ID, TPCC_VAR_D_ID}, {}, {},
-       {TPCC_TB_DISTRICT, {TPCC_VAR_W_ID}}, DF_NO);
-  EXPECT_TRUE(reg->get(TPCC_PAYMENT, TPCC_PAYMENT_1).conflicts_.empty());
 
   // Piece 3: customer secondary index lookup (read-only)
   RegP(reg, TPCC_PAYMENT, TPCC_PAYMENT_3,
