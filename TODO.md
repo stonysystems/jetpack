@@ -11,7 +11,7 @@ plugin layer assumes certain base protocol properties without embedding base pro
 variables or transitions. The original combined spec `jetpack_raft.tla` is preserved
 as reference but the separated specs are the primary artifacts going forward.
 
-All TLA+ model checking runs in Docker (`tla/Dockerfile`).
+All TLA+ related work (specifications, configs, Docker environment) lives in the `tla/` folder.
 
 ## TLA+ Specifications
 
