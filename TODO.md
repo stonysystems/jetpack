@@ -28,11 +28,17 @@ All TLA+ model checking runs in Docker (`tla/Dockerfile`).
 
 ## TLA+ Verification (via Docker)
 
-- [ ] `raft.tla`: TLC model check (CommittedLogAgreement, ElectionSafety)
-- [ ] `copilot.tla`: TLC model check (CommittedLogAgreement, ActiveProposerBound)
-- [ ] `mencius.tla`: TLC model check (SlotAgreement)
-- [ ] `jetpack.tla`: SANY parse check (not standalone, needs base protocol to run)
-- [ ] `jetpack_raft.tla`: SANY parse check (original combined spec preserved)
+- [x] `raft.tla`: TLC model check (CommittedLogAgreement, ElectionSafety)
+  - Exhaustive: 40M states, 2.8M distinct, depth 56 (3 servers, 1 cmd, SmallStateConstraint)
+  - Partial: 145M+ states, 20M+ distinct, no violations (3 servers, 2 cmds, StateConstraint)
+- [x] `copilot.tla`: TLC model check (CommittedLogAgreement, ActiveProposerBound)
+  - Exhaustive: 186K states, 21K distinct, depth 15 (3 servers, 1 cmd, SmallStateConstraint)
+  - Partial: 114M+ states, 21M+ distinct, no violations (3 servers, 2 cmds, StateConstraint)
+- [x] `mencius.tla`: TLC model check (SlotAgreement)
+  - Partial: 119M+ states, 17M+ distinct, no violations (3 servers, 1 cmd, SmallStateConstraint)
+  - Note: Mencius slot state space is too large for exhaustive checking in bounded time
+- [x] `jetpack.tla`: SANY parse check (not standalone, needs base protocol to run)
+- [x] `jetpack_raft.tla`: SANY parse check (original combined spec preserved)
 <!-- "composed jetpack + X" means running jetpack.tla together with X.tla as the base
      protocol (e.g. via a wrapper module). This is NOT the same as jetpack_raft.tla,
      which is the original monolithic spec. The same applies to copilot and mencius. -->

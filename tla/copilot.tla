@@ -388,6 +388,15 @@ StateConstraint ==
     /\ \A i \in Server : Len(cpLog[i]) <= 4
     /\ Len(execution_cmds) <= 4
 
+\* Tighter constraint for quick exhaustive checking.
+SmallStateConstraint ==
+    /\ \A i \in Server : currentTerm[i] <= 2
+    /\ \A m \in DOMAIN messages : messages[m] <= 1
+    /\ Cardinality(DOMAIN messages) <= 2
+    /\ \A i \in Server : Len(log[i]) <= 2
+    /\ \A i \in Server : Len(cpLog[i]) <= 2
+    /\ Len(execution_cmds) <= 2
+
 (***************************************************************************)
 (* Properties                                                              *)
 (***************************************************************************)
