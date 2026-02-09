@@ -370,6 +370,51 @@ No existing integration code. Needs to be implemented from scratch.
     chain (Maven+Java+CMake), unified 3-phase Paxos recovery across all three backends,
     Docker test harness (3 modes), 81 infrastructure validation checks
 
+## Priority 2 (Medium): Benchmark Results (`result.md`)
+
+Collect benchmark data from all integration tests and export to `result.md`.
+Latency (median, average) and throughput metrics are already computed in `src/deptran/s_main.cc`.
+
+### Performance chart (6 experiments)
+
+Run single-process and multi-process tests for all 3 combinations.
+Use 20ms simulated network latency (`LATENCY_MS=20`) for multi-process tests.
+
+| Experiment | Median Latency | Average Latency | Throughput |
+|---|---|---|---|
+| MongoDB single-process | | | |
+| MongoDB multi-process (20ms) | | | |
+| etcd single-process | | | |
+| etcd multi-process (20ms) | | | |
+| ZooKeeper single-process | | | |
+| ZooKeeper multi-process (20ms) | | | |
+
+- [ ] Run MongoDB single-process test, record median latency, average latency, throughput
+- [ ] Run MongoDB multi-process test (20ms latency), record median latency, average latency, throughput
+- [ ] Run etcd single-process test, record median latency, average latency, throughput
+- [ ] Run etcd multi-process test (20ms latency), record median latency, average latency, throughput
+- [ ] Run ZooKeeper single-process test, record median latency, average latency, throughput
+- [ ] Run ZooKeeper multi-process test (20ms latency), record median latency, average latency, throughput
+
+### Failure recovery downtime (3 experiments)
+
+Run failure recovery test for all 3 combinations. Measure original protocol downtime
+and Jetpack downtime separately.
+
+| Experiment | Original Protocol Downtime | Jetpack Downtime |
+|---|---|---|
+| MongoDB recovery | | |
+| etcd recovery | | |
+| ZooKeeper recovery | | |
+
+- [ ] Run MongoDB recovery test, record MongoDB downtime and Jetpack downtime
+- [ ] Run etcd recovery test, record etcd downtime and Jetpack downtime
+- [ ] Run ZooKeeper recovery test, record ZooKeeper downtime and Jetpack downtime
+
+### Export
+
+- [ ] Export all data above to `result.md`
+
 ## Ongoing: README Documentation
 
 For every completed task above, document the command(s) to run and verify it in
