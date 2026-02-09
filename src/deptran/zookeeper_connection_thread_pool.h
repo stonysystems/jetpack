@@ -146,19 +146,20 @@ class ZookeeperConnectionThreadPool {
     auto cmd_content = *(((VecPieceData*)(tpc_cmd->cmd_.get()))->sp_vec_piece_data_->begin());
     auto start_time = std::chrono::steady_clock::now();
 
+    // Use async ZooKeeper API: callbacks fire on ZooKeeper's internal I/O
+    // thread (zookeeper_mt), avoiding per-request thread creation overhead.
     if (parsed_cmd.IsRead()) {
-      const int key = parsed_cmd.key_;
-      std::thread([this, cmd_content, key, start_time]() {
-        handler_->Read(key);
-        SignalFinished(cmd_content, start_time);
-      }).detach();
+      handler_->ReadAsync(parsed_cmd.key_,
+          [this, cmd_content, start_time](int rc) {
+            (void)rc;
+            SignalFinished(cmd_content, start_time);
+          });
     } else if (parsed_cmd.IsWrite()) {
-      const int key = parsed_cmd.key_;
-      const int value = parsed_cmd.value_;
-      std::thread([this, cmd_content, key, value, start_time]() {
-        handler_->Write(key, value);
-        SignalFinished(cmd_content, start_time);
-      }).detach();
+      handler_->WriteAsync(parsed_cmd.key_, parsed_cmd.value_,
+          [this, cmd_content, start_time](int rc) {
+            (void)rc;
+            SignalFinished(cmd_content, start_time);
+          });
     } else {
       Log_warn("[ZOOKEEPER] unsupported command type");
       SignalFinished(cmd_content, start_time);

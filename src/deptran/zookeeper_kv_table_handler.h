@@ -1,5 +1,6 @@
 #pragma once
 
+#include <functional>
 #include <string>
 #include <cstring>
 #include <zookeeper/zookeeper.h>
@@ -12,6 +13,14 @@ constexpr char kZookeeperKeyPrefix[] = "/JetPack/KVTable/";
 constexpr char kZookeeperRootPath[] = "/JetPack";
 constexpr char kZookeeperTablePath[] = "/JetPack/KVTable";
 
+// Callback context for async ZooKeeper operations.
+struct ZkAsyncContext {
+  std::function<void(int)> on_complete;
+  std::string path;   // for write: used in create-on-ZNONODE fallback
+  std::string value;  // for write: data to create if node doesn't exist
+  zhandle_t* zh;      // handle for fallback create in write path
+};
+
 class ZookeeperKVTableHandler {
   std::string uri_str_;
   zhandle_t* zh_{nullptr};
@@ -23,6 +32,55 @@ class ZookeeperKVTableHandler {
   static void DefaultWatcher(zhandle_t* zh, int type, int state,
                               const char* path, void* ctx) {
     (void)zh; (void)type; (void)state; (void)path; (void)ctx;
+  }
+
+  // Async callback for zoo_aget: fires on ZooKeeper I/O thread.
+  static void ReadAsyncCallback(int rc, const char* value, int value_len,
+                                 const struct Stat* stat, const void* data) {
+    (void)value; (void)value_len; (void)stat;
+    auto* ctx = static_cast<ZkAsyncContext*>(const_cast<void*>(data));
+    if (ctx->on_complete) {
+      ctx->on_complete(rc);
+    }
+    delete ctx;
+  }
+
+  // Async callback for zoo_aset: fires on ZooKeeper I/O thread.
+  // On ZNONODE, falls back to zoo_acreate (upsert semantics).
+  static void WriteSetAsyncCallback(int rc, const struct Stat* stat,
+                                     const void* data) {
+    (void)stat;
+    auto* ctx = static_cast<ZkAsyncContext*>(const_cast<void*>(data));
+    if (rc == ZNONODE && ctx->zh) {
+      // Node doesn't exist yet — create it asynchronously.
+      auto* create_ctx = new ZkAsyncContext{ctx->on_complete, ctx->path, ctx->value, nullptr};
+      int crc = zoo_acreate(ctx->zh, ctx->path.c_str(),
+                            ctx->value.c_str(),
+                            static_cast<int>(ctx->value.size()),
+                            &ZOO_OPEN_ACL_UNSAFE, 0,
+                            WriteCreateAsyncCallback, create_ctx);
+      if (crc != ZOK) {
+        Log_warn("[ZOOKEEPER] async create dispatch failed: %s", zerror(crc));
+        if (create_ctx->on_complete) create_ctx->on_complete(crc);
+        delete create_ctx;
+      }
+    } else {
+      if (ctx->on_complete) {
+        ctx->on_complete(rc);
+      }
+    }
+    delete ctx;
+  }
+
+  // Async callback for zoo_acreate (write fallback).
+  static void WriteCreateAsyncCallback(int rc, const char* value,
+                                        const void* data) {
+    (void)value;
+    auto* ctx = static_cast<ZkAsyncContext*>(const_cast<void*>(data));
+    if (ctx->on_complete) {
+      ctx->on_complete(rc);
+    }
+    delete ctx;
   }
 
  public:
@@ -44,6 +102,8 @@ class ZookeeperKVTableHandler {
     }
   }
 
+  zhandle_t* handle() const { return zh_; }
+
   void Setup() {
     if (!zh_) return;
     // Create parent znodes if they don't exist.
@@ -57,6 +117,8 @@ class ZookeeperKVTableHandler {
                  &ZOO_OPEN_ACL_UNSAFE, 0, nullptr, 0);
     }
   }
+
+  // --- Synchronous API ---
 
   bool Write(int key, int value) {
     if (!zh_) return false;
@@ -94,8 +156,44 @@ class ZookeeperKVTableHandler {
     return std::atoi(buffer);
   }
 
+  // --- Asynchronous API ---
+  // Callbacks fire on ZooKeeper's internal I/O thread (zookeeper_mt).
+
+  int ReadAsync(int key, std::function<void(int)> on_complete) {
+    if (!zh_) {
+      if (on_complete) on_complete(ZINVALIDSTATE);
+      return ZINVALIDSTATE;
+    }
+    std::string path = MakeKey(key);
+    auto* ctx = new ZkAsyncContext{on_complete, path, "", nullptr};
+    int rc = zoo_aget(zh_, path.c_str(), 0, ReadAsyncCallback, ctx);
+    if (rc != ZOK) {
+      if (on_complete) on_complete(rc);
+      delete ctx;
+    }
+    return rc;
+  }
+
+  int WriteAsync(int key, int value, std::function<void(int)> on_complete) {
+    if (!zh_) {
+      if (on_complete) on_complete(ZINVALIDSTATE);
+      return ZINVALIDSTATE;
+    }
+    std::string path = MakeKey(key);
+    std::string val = std::to_string(value);
+    // Try set first; on ZNONODE the callback falls back to create.
+    auto* ctx = new ZkAsyncContext{on_complete, path, val, zh_};
+    int rc = zoo_aset(zh_, path.c_str(), val.c_str(),
+                      static_cast<int>(val.size()), -1,
+                      WriteSetAsyncCallback, ctx);
+    if (rc != ZOK) {
+      if (on_complete) on_complete(rc);
+      delete ctx;
+    }
+    return rc;
+  }
+
   void Clear() {
-    // Delete all children of KVTable, then KVTable and root.
     if (!zh_) return;
     struct String_vector children;
     if (zoo_get_children(zh_, kZookeeperTablePath, 0, &children) == ZOK) {

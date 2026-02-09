@@ -292,7 +292,13 @@ No existing integration code. Needs to be implemented from scratch.
 - [x] Implement Jetpack calling ZooKeeper API for read/write commands
       Done: ZookeeperKVTableHandler uses zoo_get() for reads, zoo_exists()+zoo_create()/zoo_set()
       for upsert writes. Data stored as znodes under /JetPack/KVTable/{key} with integer values.
-- [ ] Use async ZooKeeper API where available, sync API otherwise
+- [x] Use async ZooKeeper API where available, sync API otherwise
+      Done: Added ReadAsync()/WriteAsync() to ZookeeperKVTableHandler using
+      zoo_aget/zoo_aset/zoo_acreate callbacks. WriteAsync uses zoo_aset with
+      ZNONODE fallback to zoo_acreate (async upsert). Connection thread pool
+      uses async API by default — callbacks fire on ZooKeeper's internal I/O
+      thread (zookeeper_mt), avoiding per-request thread creation. Sync API
+      (zoo_get/zoo_set) retained for Setup() and Clear() operations.
 
 #### Failure Recovery
 - [ ] ZooKeeper hooker: detect when new ZooKeeper leader finishes recovery/election,
