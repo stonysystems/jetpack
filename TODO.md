@@ -415,12 +415,12 @@ and Jetpack downtime separately.
 
 - [ ] Export all data above to `result.md`
 
-## Ongoing: README Documentation
+## Priority 1 (High): README Documentation
 
-For every completed task above, document the command(s) to run and verify it in
-the project README.md. Clean up README as needed.
-
-- [x] TLA+ model checking: how to build Docker image and run TLC for each spec
-- [x] MongoDB integration: how to build, run single/multi/recovery tests
-- [x] etcd integration: how to build, run single/multi/recovery tests
-- [x] ZooKeeper integration: how to build, run single/multi/recovery tests
+- [ ] Document Docker and Docker Compose version requirements in README
+- [ ] For every completed task above, document the command(s) to run and verify it in
+      the project README.md (clean up README as needed)
+  - [x] TLA+ model checking: how to build Docker image and run TLC for each spec
+  - [x] MongoDB integration: how to build, run single/multi/recovery tests
+  - [x] etcd integration: how to build, run single/multi/recovery tests
+  - [x] ZooKeeper integration: how to build, run single/multi/recovery tests
