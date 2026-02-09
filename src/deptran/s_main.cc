@@ -15,6 +15,9 @@
 #if defined(JETPACK_MONGODB_RECOVERY) || defined(JETPACK_ETCD_RECOVERY)
 #include "../jm_file_signal.h"
 #endif
+#ifdef JETPACK_ETCD_RECOVERY
+#include "etcd_leader_watcher.h"
+#endif
 
 // #define CPU_PROFILE 1
 
@@ -79,6 +82,8 @@ std::string kill_cmd =
 }
 #endif
 #ifdef JETPACK_ETCD_RECOVERY
+static std::shared_ptr<janus::EtcdLeaderWatcher> etcd_leader_watcher_g;
+
 static void KillEtcdPrimary() {
   std::string host = "127.0.0.1";
   if (!svr_workers_g.empty() && svr_workers_g[0].site_info_) {
@@ -116,6 +121,35 @@ static void KillEtcdPrimary() {
     Log_info("[ETCD-FAILOVER] Simulated new etcd primary: %s",
              new_primary_host.c_str());
   }
+#else
+  // Start real etcd leader watcher to detect when etcd elects a new leader.
+  // The watcher monitors the JetPack/leader key in etcd; when a new leader
+  // writes to it, the watcher signals Jetpack via jm_file_signal.
+  auto cfg = Config::GetConfig();
+  auto hosts = cfg->GetReplicaHosts(0);
+  std::string etcd_uri = std::string(janus::kEtcdUri);
+  if (hosts.size() > 1) {
+    // Connect to a surviving etcd node (not the killed primary).
+    auto pos = hosts[1].find(':');
+    if (pos != std::string::npos) {
+      etcd_uri = "http://" + hosts[1].substr(0, pos) + ":2379";
+    } else {
+      etcd_uri = "http://" + hosts[1] + ":2379";
+    }
+  }
+  // Determine the local hostname that Jetpack replicas are polling for.
+  std::string signal_host = host;
+  if (hosts.size() > 1) {
+    auto pos = hosts[1].find(':');
+    if (pos != std::string::npos) {
+      signal_host = hosts[1].substr(0, pos);
+    } else {
+      signal_host = hosts[1];
+    }
+  }
+  etcd_leader_watcher_g = std::make_shared<janus::EtcdLeaderWatcher>(
+      etcd_uri, signal_host);
+  etcd_leader_watcher_g->Start();
 #endif
 }
 #endif

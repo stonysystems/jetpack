@@ -118,10 +118,19 @@ Existing integration code: `src/deptran/etcd/`, `src/deptran/etcd_*.h`
   - Sync fallback uses `std::thread(...).detach()` per request
 
 #### Failure Recovery
-- [ ] etcd hooker: detect when new etcd leader finishes recovery/election,
+- [x] etcd hooker: detect when new etcd leader finishes recovery/election,
       write a signal file with the new term/view_id for Jetpack to read
-- [ ] Jetpack hooker: monitor signal from etcd, trigger Jetpack failure recovery
+  - Created `EtcdLeaderWatcher` (`src/deptran/etcd_leader_watcher.h`)
+  - Watches `JetPack/leader` key in etcd for PUT events (leader changes)
+  - Async path: uses `etcd::Watcher` callback API (when pplx available)
+  - Sync fallback: polls key every 100ms via `etcd::SyncClient`
+  - On leader change: calls `jm_signal::set_key("etcd", "primary_elected", host)`
+  - Integrated into `KillEtcdPrimary()` in `s_main.cc` (non-simulation path)
+- [x] Jetpack hooker: monitor signal from etcd, trigger Jetpack failure recovery
       when etcd view change is detected
+  - Already implemented in `EtcdServer::Setup()` (`src/deptran/etcd/server.h`)
+  - Non-leader replicas run coroutine polling for `etcd:primary_elected` signal
+  - On signal: calls `JetpackRecoveryEntry()` to run 3-phase Paxos recovery
 
 #### Testing (in Docker)
 - [ ] Docker environment for etcd integration testing (create Dockerfile if needed)
