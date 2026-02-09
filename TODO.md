@@ -325,11 +325,36 @@ No existing integration code. Needs to be implemented from scratch.
   - `docker/zookeeper/run-zookeeper-test.sh`: Entrypoint script with modes: single, multi, recovery, zookeeper-only, bash
   - `docker/zookeeper/test-zookeeper-setup.sh`: Infrastructure validation test (81 checks)
   - Uses existing config: `config/1c1s3r1p.yml` for single-process tests
-- [ ] Single-process test: basic read/write through Jetpack + ZooKeeper
-- [ ] Multi-process test: 5 servers, 5 processes, simulated network latency between servers
-- [ ] Failure recovery test: run normal procedure, kill ZooKeeper leader, let ZooKeeper
+- [x] Single-process test: basic read/write through Jetpack + ZooKeeper
+  - Implemented in `run-zookeeper-test.sh single` mode
+  - Starts embedded ZooKeeper (via `zkServer.sh`), verifies ZooKeeper health via `ruok`
+  - Launches Jetpack with `1c1s3r1p.yml` config and `-P zookeeper -r zookeeper` flags
+  - Data stored as znodes under `/JetPack/KVTable/{key}` via ZooKeeper C API
+  - Validates: process exit codes, ZooKeeper availability, no crashes
+- [x] Multi-process test: 5 servers, 5 processes, simulated network latency between servers
+  - Implemented in `run-zookeeper-test.sh multi` mode
+  - Config: `config/5c1s5r1p_zookeeper.yml` — 5 servers on separate loopback IPs (127.0.0.1-5)
+  - Network latency via `tc`/`netem` on loopback (per-IP filtering, default 5ms +/- 2ms)
+  - Configurable via `LATENCY_MS` and `LATENCY_JITTER` environment variables
+  - Validates: process exit codes, latency simulation active, no crashes
+- [x] Failure recovery test: run normal procedure, kill ZooKeeper leader, let ZooKeeper
       leader-elect and trigger Jetpack leader-elect, measure recovery duration of both
       ZooKeeper and Jetpack
+  - Implemented in `run-zookeeper-test.sh recovery` mode
+  - Creates 3-node ZooKeeper ensemble on separate loopback IPs (127.0.0.1-3)
+  - Config: `config/failover_zookeeper.yml` (run 5s, then soft-kill leader, wait 10s)
+  - Detects ZooKeeper leader via `srvr` four-letter command, kills with SIGKILL
+  - Measures new leader election time (nanosecond precision)
+  - Jetpack uses `JETPACK_ZOOKEEPER_RECOVERY` build flag to enable real recovery path
+  - Recovery sequence: kill ZooKeeper leader → new leader elected by ensemble →
+    `ZookeeperLeaderWatcher` detects via watch on `/JetPack/leader` znode →
+    signals via jm_file_signal → `ZookeeperServer` recovery coroutine triggers
+    `JetpackRecoveryEntry()` → 3-phase Paxos recovery
+  - Validates: failover triggered, `JetpackRecoveryEntry` in logs, recovery duration,
+    ZooKeeper ensemble survival (2/3 healthy), no crashes
+  - Helper functions: `start_zookeeper_ensemble()`, `get_zookeeper_leader()`,
+    `kill_zookeeper_node()`, `wait_zookeeper_new_leader()`
+  - Infrastructure validation: 81 checks pass (test-zookeeper-setup.sh)
 
 #### Documentation
 - [ ] Write integration notes for anything interesting/noteworthy/suitable for the paper
