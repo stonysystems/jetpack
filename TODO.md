@@ -2,6 +2,10 @@
 
 <!-- NOTE: doc/TODO.md is obsolete and must be ignored. Do NOT read or reference it. -->
 
+<!-- PROMPT FOR FUTURE WORK: For every completed task in this TODO, document the
+     command(s) to run and verify it in the README.md (clean up README as needed).
+     This ensures reproducibility and serves as living documentation. -->
+
 ## Goal
 
 Jetpack is a plugin consensus protocol that sits on top of a base protocol (e.g. Raft,
@@ -365,3 +369,13 @@ No existing integration code. Needs to be implemented from scratch.
     than Raft (~1-3s) but watch-based detection faster than SDAM heartbeat, heavyweight build
     chain (Maven+Java+CMake), unified 3-phase Paxos recovery across all three backends,
     Docker test harness (3 modes), 81 infrastructure validation checks
+
+## Ongoing: README Documentation
+
+For every completed task above, document the command(s) to run and verify it in
+the project README.md. Clean up README as needed.
+
+- [ ] TLA+ model checking: how to build Docker image and run TLC for each spec
+- [ ] MongoDB integration: how to build, run single/multi/recovery tests
+- [ ] etcd integration: how to build, run single/multi/recovery tests
+- [ ] ZooKeeper integration: how to build, run single/multi/recovery tests
