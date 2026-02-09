@@ -173,7 +173,11 @@ Existing integration code: `src/deptran/etcd/`, `src/deptran/etcd_*.h`
   - Infrastructure validation: 68 checks pass (test-etcd-setup.sh)
 
 #### Documentation
-- [ ] Write integration notes for anything interesting/noteworthy/suitable for the paper
+- [x] Write integration notes for anything interesting/noteworthy/suitable for the paper
+  - Document: `doc/etcd_integration_notes.md`
+  - Key findings: etcd as ordering oracle (not data store), dual async/sync API,
+    non-leader throttling, fire-and-forget replication, file-based IPC for failover,
+    3-phase Paxos recovery protocol, Docker test harness (3 modes)
 
 ### 2c. Jetpack + ZooKeeper
 
