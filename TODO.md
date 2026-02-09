@@ -133,7 +133,13 @@ Existing integration code: `src/deptran/etcd/`, `src/deptran/etcd_*.h`
   - On signal: calls `JetpackRecoveryEntry()` to run 3-phase Paxos recovery
 
 #### Testing (in Docker)
-- [ ] Docker environment for etcd integration testing (create Dockerfile if needed)
+- [x] Docker environment for etcd integration testing (create Dockerfile if needed)
+  - `docker/etcd/Dockerfile`: Multi-stage build (Ubuntu 22.04, Python 3.10 for WAF compatibility)
+    - Stage 1: Builds etcd-cpp-apiv3 + Jetpack from source
+    - Stage 2: Runtime image with etcd v3.5.17 server binary + Jetpack binaries
+  - `docker/etcd/docker-compose.yml`: Orchestration for external etcd + Jetpack testing
+  - `docker/etcd/run-etcd-test.sh`: Entrypoint script with modes: single, etcd-only, bash
+  - Uses existing config: `config/1c1s3r1p.yml` + `config/none_etcd.yml`
 - [ ] Single-process test: basic read/write through Jetpack + etcd
 - [ ] Multi-process test: 5 servers, 5 processes, simulated network latency between servers
 - [ ] Failure recovery test: run normal procedure, kill etcd leader, let etcd
