@@ -67,6 +67,7 @@ echo ""
 # --- 2. Config files ---
 echo "2. Config Files"
 check_file_exists "Site config (1c1s3r1p.yml)" "$PROJECT_DIR/config/1c1s3r1p.yml"
+check_file_exists "Multi-process config (5c1s5r1p_mongodb.yml)" "$PROJECT_DIR/config/5c1s5r1p_mongodb.yml"
 check_file_exists "Mode config (none_mongodb.yml)" "$PROJECT_DIR/config/none_mongodb.yml"
 check_file_exists "Benchmark config (rw_fixed.yml)" "$PROJECT_DIR/config/rw_fixed.yml"
 echo ""
@@ -78,6 +79,10 @@ check_file_contains "rw_fixed.yml has workload: rw" "$PROJECT_DIR/config/rw_fixe
 check_file_contains "1c1s3r1p.yml has 3 servers" "$PROJECT_DIR/config/1c1s3r1p.yml" "s301"
 check_file_contains "1c1s3r1p.yml has client" "$PROJECT_DIR/config/1c1s3r1p.yml" "c01"
 check_file_contains "1c1s3r1p.yml maps to localhost" "$PROJECT_DIR/config/1c1s3r1p.yml" "localhost"
+check_file_contains "5c1s5r1p_mongodb.yml has 5 servers" "$PROJECT_DIR/config/5c1s5r1p_mongodb.yml" "s501"
+check_file_contains "5c1s5r1p_mongodb.yml has 5 clients" "$PROJECT_DIR/config/5c1s5r1p_mongodb.yml" "c501"
+check_file_contains "5c1s5r1p_mongodb.yml has separate loopback IPs" "$PROJECT_DIR/config/5c1s5r1p_mongodb.yml" "127.0.0.5"
+check_file_contains "5c1s5r1p_mongodb.yml maps hosts h1-h5" "$PROJECT_DIR/config/5c1s5r1p_mongodb.yml" "h5:"
 echo ""
 
 # --- 4. Shell script syntax ---
@@ -125,6 +130,20 @@ check_file_contains "Script checks KVTable collection" "$SCRIPT_DIR/run-mongodb-
 check_file_contains "Script has run_single_process_test function" "$SCRIPT_DIR/run-mongodb-test.sh" "run_single_process_test"
 check_file_contains "Script has cleanup trap" "$SCRIPT_DIR/run-mongodb-test.sh" "trap cleanup"
 check_file_contains "Script validates 4 processes" "$SCRIPT_DIR/run-mongodb-test.sh" "All 4 processes"
+echo ""
+
+# --- 7b. Multi-process test mode ---
+echo "7b. Test Script Content (multi mode)"
+check_file_contains "Script has multi mode" "$SCRIPT_DIR/run-mongodb-test.sh" "run_multi_process_test"
+check_file_contains "Script references 5c1s5r1p_mongodb config" "$SCRIPT_DIR/run-mongodb-test.sh" "5c1s5r1p_mongodb"
+check_file_contains "Script has latency simulation (setup_latency)" "$SCRIPT_DIR/run-mongodb-test.sh" "setup_latency"
+check_file_contains "Script has latency cleanup (remove_latency)" "$SCRIPT_DIR/run-mongodb-test.sh" "remove_latency"
+check_file_contains "Script uses tc netem for latency" "$SCRIPT_DIR/run-mongodb-test.sh" "netem delay"
+check_file_contains "Script launches 5 servers" "$SCRIPT_DIR/run-mongodb-test.sh" 's401.*s501'
+check_file_contains "Script launches 5 clients" "$SCRIPT_DIR/run-mongodb-test.sh" 'c401.*c501'
+check_file_contains "Script validates 10 processes" "$SCRIPT_DIR/run-mongodb-test.sh" "5 servers.*5 clients"
+check_file_contains "Script has LATENCY_MS env var" "$SCRIPT_DIR/run-mongodb-test.sh" "LATENCY_MS"
+check_file_contains "Script installs iproute2" "$SCRIPT_DIR/Dockerfile" "iproute2"
 echo ""
 
 # --- 8. Source code dependencies ---

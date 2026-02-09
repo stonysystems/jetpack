@@ -146,7 +146,15 @@ Existing integration code: `src/deptran/mongodb/`, `src/deptran/mongodb_*.h`
   - Validates: process exit codes, MongoDB document count, throughput in logs, no crashes
   - Servers start before client (1s stagger) for proper initialization
   - Infrastructure validation: 64 checks pass (test-mongodb-setup.sh)
-- [ ] Multi-process test: 5 servers, 5 processes, simulated network latency between servers
+- [x] Multi-process test: 5 servers, 5 processes, simulated network latency between servers
+  - Implemented in `run-mongodb-test.sh multi` mode
+  - Config: `config/5c1s5r1p_mongodb.yml` — 5 servers on separate loopback IPs (127.0.0.1-5)
+  - Launches 5 server replicas + 5 clients with 2s stagger
+  - Network latency via `tc`/`netem` on loopback (per-IP filtering, default 5ms +/- 2ms)
+  - Configurable via `LATENCY_MS` and `LATENCY_JITTER` environment variables
+  - Dockerfile already includes `iproute2` for `tc` support (requires `--privileged` or `NET_ADMIN`)
+  - Validates: process exit codes, MongoDB document count, throughput, crash detection
+  - Infrastructure validation: 79 checks pass (test-mongodb-setup.sh)
 - [ ] Failure recovery test: run normal procedure, kill MongoDB leader, let MongoDB
       leader-elect and trigger Jetpack leader-elect, measure recovery duration of both
       MongoDB and Jetpack
