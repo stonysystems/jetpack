@@ -106,6 +106,7 @@ namespace janus {
 #define MODE_COPILOT        (0x4000)
 #define MODE_MONGODB (0x9000)
 #define MODE_ETCD (0x9001)
+#define MODE_ZOOKEEPER (0x9002)
 #define MODE_NOT_READY     (0x00)
 
 #define OP_IR   (0x1)

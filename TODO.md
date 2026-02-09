@@ -278,8 +278,20 @@ No existing integration code. Needs to be implemented from scratch.
       with CMake build (WANT_SYNCAPI=ON for sync+async zookeeper_mt library).
       Created build_zookeeper.sh (Maven jute generation + CMake build).
       Updated third_party/README.md with ZooKeeper documentation.
-- [ ] Create `src/deptran/zookeeper/` integration module (frame, coordinator, server, commo, service)
-- [ ] Implement Jetpack calling ZooKeeper API for read/write commands
+- [x] Create `src/deptran/zookeeper/` integration module (frame, coordinator, server, commo, service)
+      Done: Created full integration module following etcd/MongoDB patterns:
+      - ZookeeperFrame (factory registration with MODE_ZOOKEEPER/0x9002)
+      - ZookeeperServer (connection pool, Submit with ThreadSafeIntEvent sync)
+      - CoordinatorZookeeper (dispatch + BroadcastCommit)
+      - ZookeeperCommo (fire-and-forget replication)
+      - ZookeeperServiceImpl (RPC Commit handler)
+      Supporting files: zookeeper_kv_table_handler.h (ZooKeeper C API: zoo_get/zoo_set/zoo_create),
+      zookeeper_connection_thread_pool.h (inflight tracking, thread-per-request).
+      Added MODE_ZOOKEEPER constant, zookeeper_finished event in TxPieceData,
+      Zookeeper RPC service in rcc_rpc.rpc, frame name mapping in frame.cc.
+- [x] Implement Jetpack calling ZooKeeper API for read/write commands
+      Done: ZookeeperKVTableHandler uses zoo_get() for reads, zoo_exists()+zoo_create()/zoo_set()
+      for upsert writes. Data stored as znodes under /JetPack/KVTable/{key} with integer values.
 - [ ] Use async ZooKeeper API where available, sync API otherwise
 
 #### Failure Recovery

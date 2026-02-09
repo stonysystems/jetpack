@@ -33,6 +33,10 @@ abstract service Etcd {
   defer Commit(MarshallDeputy cmd);
 }
 
+abstract service Zookeeper {
+  defer Commit(MarshallDeputy cmd);
+}
+
 abstract service Mencius {
 
   defer Prepare(uint64_t slot,
