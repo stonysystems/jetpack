@@ -301,10 +301,19 @@ No existing integration code. Needs to be implemented from scratch.
       (zoo_get/zoo_set) retained for Setup() and Clear() operations.
 
 #### Failure Recovery
-- [ ] ZooKeeper hooker: detect when new ZooKeeper leader finishes recovery/election,
+- [x] ZooKeeper hooker: detect when new ZooKeeper leader finishes recovery/election,
       write a signal file with the new epoch/view_id for Jetpack to read
-- [ ] Jetpack hooker: monitor signal from ZooKeeper, trigger Jetpack failure recovery
+      Done: Created ZookeeperLeaderWatcher (zookeeper_leader_watcher.h) using
+      ZooKeeper's native watch mechanism. Watches /JetPack/leader ephemeral
+      znode via zoo_wexists() with re-registering one-shot watches. Detects
+      leader loss (ZOO_DELETED_EVENT) and new leader (ZOO_CREATED_EVENT),
+      signals via jm_signal::set_key("zookeeper", "primary_elected", host).
+      Handles session expiry with automatic reconnection.
+- [x] Jetpack hooker: monitor signal from ZooKeeper, trigger Jetpack failure recovery
       when ZooKeeper view change is detected
+      Done: Already wired in ZookeeperServer::Setup() under JETPACK_ZOOKEEPER_RECOVERY.
+      Non-leader replicas poll jm_signal::exists_key("zookeeper", "primary_elected")
+      every 10ms via coroutine, trigger JetpackRecoveryEntry() on detection.
 
 #### Testing (in Docker)
 - [ ] Docker environment for ZooKeeper integration testing (create Dockerfile if needed)
