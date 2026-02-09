@@ -70,6 +70,7 @@ check_file_exists "Site config (1c1s3r1p.yml)" "$PROJECT_DIR/config/1c1s3r1p.yml
 check_file_exists "Multi-process config (5c1s5r1p_mongodb.yml)" "$PROJECT_DIR/config/5c1s5r1p_mongodb.yml"
 check_file_exists "Mode config (none_mongodb.yml)" "$PROJECT_DIR/config/none_mongodb.yml"
 check_file_exists "Benchmark config (rw_fixed.yml)" "$PROJECT_DIR/config/rw_fixed.yml"
+check_file_exists "Failover config (failover_mongodb.yml)" "$PROJECT_DIR/config/failover_mongodb.yml"
 echo ""
 
 # --- 3. Config content validation ---
@@ -83,6 +84,10 @@ check_file_contains "5c1s5r1p_mongodb.yml has 5 servers" "$PROJECT_DIR/config/5c
 check_file_contains "5c1s5r1p_mongodb.yml has 5 clients" "$PROJECT_DIR/config/5c1s5r1p_mongodb.yml" "c501"
 check_file_contains "5c1s5r1p_mongodb.yml has separate loopback IPs" "$PROJECT_DIR/config/5c1s5r1p_mongodb.yml" "127.0.0.5"
 check_file_contains "5c1s5r1p_mongodb.yml maps hosts h1-h5" "$PROJECT_DIR/config/5c1s5r1p_mongodb.yml" "h5:"
+check_file_contains "failover_mongodb.yml has failover method" "$PROJECT_DIR/config/failover_mongodb.yml" "method: soft"
+check_file_contains "failover_mongodb.yml has run_interval" "$PROJECT_DIR/config/failover_mongodb.yml" "run_interval:"
+check_file_contains "failover_mongodb.yml has stop_interval" "$PROJECT_DIR/config/failover_mongodb.yml" "stop_interval:"
+check_file_contains "failover_mongodb.yml targets leader" "$PROJECT_DIR/config/failover_mongodb.yml" "failserver: leader"
 echo ""
 
 # --- 4. Shell script syntax ---
@@ -144,6 +149,21 @@ check_file_contains "Script launches 5 clients" "$SCRIPT_DIR/run-mongodb-test.sh
 check_file_contains "Script validates 10 processes" "$SCRIPT_DIR/run-mongodb-test.sh" "5 servers.*5 clients"
 check_file_contains "Script has LATENCY_MS env var" "$SCRIPT_DIR/run-mongodb-test.sh" "LATENCY_MS"
 check_file_contains "Script installs iproute2" "$SCRIPT_DIR/Dockerfile" "iproute2"
+echo ""
+
+# --- 7c. Recovery test mode ---
+echo "7c. Test Script Content (recovery mode)"
+check_file_contains "Script has recovery mode" "$SCRIPT_DIR/run-mongodb-test.sh" "run_recovery_test"
+check_file_contains "Script has MongoDB replica set setup" "$SCRIPT_DIR/run-mongodb-test.sh" "start_mongodb_replset"
+check_file_contains "Script has MongoDB primary detection" "$SCRIPT_DIR/run-mongodb-test.sh" "get_mongodb_primary"
+check_file_contains "Script has MongoDB node kill function" "$SCRIPT_DIR/run-mongodb-test.sh" "kill_mongodb_node"
+check_file_contains "Script has new primary wait function" "$SCRIPT_DIR/run-mongodb-test.sh" "wait_mongodb_new_primary"
+check_file_contains "Script references failover config" "$SCRIPT_DIR/run-mongodb-test.sh" "failover_mongodb"
+check_file_contains "Script checks for recovery completion" "$SCRIPT_DIR/run-mongodb-test.sh" "JETPACK-RECOVERY.*COMPLETED"
+check_file_contains "Script checks signal files" "$SCRIPT_DIR/run-mongodb-test.sh" "JM_Jetpack_"
+check_file_contains "Script uses rs.initiate" "$SCRIPT_DIR/run-mongodb-test.sh" "rs.initiate"
+check_file_contains "Script checks surviving MongoDB nodes" "$SCRIPT_DIR/run-mongodb-test.sh" "surviving_nodes"
+check_file_contains "Script detects MongoDB topology changes" "$SCRIPT_DIR/run-mongodb-test.sh" "MONGODB-HOOKER.*Topology"
 echo ""
 
 # --- 8. Source code dependencies ---

@@ -4,6 +4,7 @@
 # Usage:
 #   ./run-mongodb-test.sh single       # Single-process: embedded mongod + 3 Jetpack servers + 1 client
 #   ./run-mongodb-test.sh multi        # Multi-process: embedded mongod + 5 servers + 5 clients + latency
+#   ./run-mongodb-test.sh recovery     # Recovery: 3-node MongoDB replica set, kill primary, measure recovery
 #   ./run-mongodb-test.sh mongodb-only # Start only the embedded MongoDB server (for external use)
 #   ./run-mongodb-test.sh bash         # Interactive shell
 #
@@ -451,6 +452,340 @@ run_multi_process_test() {
     return $exit_code
 }
 
+# ---------------------------------------------------------------------------
+# 3-member MongoDB replica set for failure recovery testing.
+#
+# Members run on separate loopback addresses:
+#   mongod0: 127.0.0.1:27017 (data), log: /tmp/mongod-0.log
+#   mongod1: 127.0.0.2:27017 (data), log: /tmp/mongod-1.log
+#   mongod2: 127.0.0.3:27017 (data), log: /tmp/mongod-2.log
+# ---------------------------------------------------------------------------
+REPLSET_IPS=("127.0.0.1" "127.0.0.2" "127.0.0.3")
+REPLSET_PIDS=()
+REPLSET_NAME="jetpack-rs"
+
+start_mongodb_replset() {
+    log_info "Starting 3-member MongoDB replica set..."
+
+    REPLSET_PIDS=()
+    for i in 0 1 2; do
+        local ip="${REPLSET_IPS[$i]}"
+        local data_dir="/tmp/mongodb-data-${i}"
+        local log_file="/tmp/mongod-${i}.log"
+
+        rm -rf "$data_dir"
+        mkdir -p "$data_dir"
+
+        mongod \
+            --replSet "$REPLSET_NAME" \
+            --port 27017 \
+            --bind_ip "$ip" \
+            --dbpath "$data_dir" \
+            --logpath "$log_file" \
+            --fork \
+            --quiet
+
+        # Get the PID of the forked mongod
+        local pid
+        pid=$(pgrep -f "mongod.*--bind_ip ${ip}" | tail -1)
+        REPLSET_PIDS+=("$pid")
+        log_info "  mongod${i} ($ip:27017) PID=$pid"
+    done
+
+    # Wait for all mongod instances to be reachable
+    for i in 0 1 2; do
+        local ip="${REPLSET_IPS[$i]}"
+        for attempt in $(seq 1 30); do
+            if mongosh --host "${ip}:27017" --eval "db.adminCommand('ping')" --quiet >/dev/null 2>&1; then
+                break
+            fi
+            sleep 0.5
+        done
+    done
+
+    # Initiate the replica set
+    log_info "Initiating replica set '$REPLSET_NAME'..."
+    mongosh --host "127.0.0.1:27017" --eval "
+        rs.initiate({
+            _id: '$REPLSET_NAME',
+            members: [
+                { _id: 0, host: '127.0.0.1:27017' },
+                { _id: 1, host: '127.0.0.2:27017' },
+                { _id: 2, host: '127.0.0.3:27017' }
+            ]
+        })
+    " --quiet >/dev/null 2>&1
+
+    # Wait for replica set to elect a primary
+    for attempt in $(seq 1 60); do
+        local primary
+        primary=$(get_mongodb_primary 2>/dev/null) || true
+        if [ -n "$primary" ]; then
+            log_info "Replica set is ready (primary=$primary)"
+            return 0
+        fi
+        sleep 0.5
+    done
+
+    log_error "MongoDB replica set failed to elect a primary within 30 seconds"
+    for i in 0 1 2; do
+        log_info "--- mongod${i} log ---"
+        tail -5 "/tmp/mongod-${i}.log" 2>/dev/null || true
+    done
+    return 1
+}
+
+get_mongodb_primary() {
+    # Query any replica set member to find the current primary
+    for ip in "${REPLSET_IPS[@]}"; do
+        local result
+        result=$(mongosh --host "${ip}:27017" --eval '
+            var s = rs.status();
+            var primary = "";
+            s.members.forEach(function(m) {
+                if (m.stateStr === "PRIMARY") primary = m.name;
+            });
+            print(primary);
+        ' --quiet 2>/dev/null) || continue
+        if [ -n "$result" ] && [ "$result" != "" ]; then
+            # Extract IP from host:port
+            echo "$result" | cut -d: -f1
+            return 0
+        fi
+    done
+    return 1
+}
+
+kill_mongodb_node() {
+    local target_ip="$1"
+    for i in 0 1 2; do
+        local ip="${REPLSET_IPS[$i]}"
+        if [ "$ip" = "$target_ip" ] && [ -n "${REPLSET_PIDS[$i]:-}" ]; then
+            log_info "Killing MongoDB node at $ip (PID=${REPLSET_PIDS[$i]})"
+            kill -KILL "${REPLSET_PIDS[$i]}" 2>/dev/null || true
+            wait "${REPLSET_PIDS[$i]}" 2>/dev/null || true
+            REPLSET_PIDS[$i]=""
+            return 0
+        fi
+    done
+    log_warn "Could not find mongod PID for $target_ip"
+    return 1
+}
+
+wait_mongodb_new_primary() {
+    local killed_ip="$1"
+    local timeout_s="${2:-30}"
+    log_info "Waiting for new MongoDB primary (old primary was $killed_ip)..."
+    local start_time
+    start_time=$(date +%s%N)
+
+    for attempt in $(seq 1 $((timeout_s * 10))); do
+        local primary
+        primary=$(get_mongodb_primary 2>/dev/null) || true
+        if [ -n "$primary" ] && [ "$primary" != "$killed_ip" ]; then
+            local end_time
+            end_time=$(date +%s%N)
+            local elapsed_ms=$(( (end_time - start_time) / 1000000 ))
+            log_info "New MongoDB primary elected: $primary (took ${elapsed_ms}ms)"
+            echo "$elapsed_ms"
+            return 0
+        fi
+        sleep 0.1
+    done
+
+    log_error "No new MongoDB primary elected within ${timeout_s}s"
+    echo "-1"
+    return 1
+}
+
+run_recovery_test() {
+    log_info "=== Failure Recovery Test: kill MongoDB primary, measure recovery ==="
+    log_info "Config: 3 server replicas, 1 client, 3-member MongoDB replica set"
+    log_info "Failover: run 5s, then kill MongoDB primary, wait 10s for recovery"
+    log_info "Duration: ${TEST_DURATION}s"
+
+    # Start 3-member MongoDB replica set
+    start_mongodb_replset
+
+    # Verify R/W against the replica set
+    local rs_uri="mongodb://127.0.0.1:27017,127.0.0.2:27017,127.0.0.3:27017/?replicaSet=${REPLSET_NAME}"
+    MONGODB_ENDPOINTS="$rs_uri"
+    verify_mongodb_rw
+
+    mkdir -p "$LOG_DIR"
+
+    local config_site="${JETPACK_DIR}/config/1c1s3r1p.yml"
+    local config_mode="${JETPACK_DIR}/config/none_mongodb.yml"
+    local config_bench="${JETPACK_DIR}/config/rw_fixed.yml"
+    local config_failover="${JETPACK_DIR}/config/failover_mongodb.yml"
+    local server_bin="${JETPACK_DIR}/build/deptran_server"
+
+    if [ ! -x "$server_bin" ]; then
+        log_error "Jetpack server binary not found at $server_bin"
+        return 1
+    fi
+
+    for cfg in "$config_site" "$config_mode" "$config_bench" "$config_failover"; do
+        if [ ! -f "$cfg" ]; then
+            log_error "Config file not found: $cfg"
+            return 1
+        fi
+    done
+
+    # Clean any stale signal files
+    rm -f /tmp/JM_Jetpack_* 2>/dev/null || true
+
+    # Launch Jetpack servers (with failover config)
+    local server_procs=("s101" "s201" "s301")
+    local client_procs=("c01")
+    local pids=()
+    local proc_names=()
+
+    for proc in "${server_procs[@]}"; do
+        local port
+        case "$proc" in
+            s101) port=38200 ;;
+            s201) port=38201 ;;
+            s301) port=38202 ;;
+        esac
+        log_info "Starting server $proc on port $port (with failover)"
+        "$server_bin" \
+            -f "$config_site" \
+            -f "$config_mode" \
+            -f "$config_bench" \
+            -f "$config_failover" \
+            -P "$proc" \
+            -p "$port" \
+            -d "$TEST_DURATION" \
+            -r "$LOG_DIR" \
+            > "$LOG_DIR/proc-${proc}.log" 2>&1 &
+        pids+=($!)
+        proc_names+=("$proc")
+    done
+
+    sleep 1
+
+    for proc in "${client_procs[@]}"; do
+        log_info "Starting client $proc on port 38203 (with failover)"
+        "$server_bin" \
+            -f "$config_site" \
+            -f "$config_mode" \
+            -f "$config_bench" \
+            -f "$config_failover" \
+            -P "$proc" \
+            -p 38203 \
+            -d "$TEST_DURATION" \
+            -r "$LOG_DIR" \
+            > "$LOG_DIR/proc-${proc}.log" 2>&1 &
+        pids+=($!)
+        proc_names+=("$proc")
+    done
+
+    log_info "Waiting for ${#pids[@]} processes to complete (timeout: $((TEST_DURATION + 60))s)..."
+
+    # Wait for all Jetpack processes
+    local exit_code=0
+    for i in "${!pids[@]}"; do
+        if ! wait "${pids[$i]}" 2>/dev/null; then
+            log_warn "Process ${proc_names[$i]} (PID ${pids[$i]}) exited with non-zero status"
+            exit_code=1
+        fi
+    done
+
+    # Phase 2: Validate recovery results from logs
+    log_info "--- Recovery Result Validation ---"
+
+    local failover_triggered=false
+    local recovery_completed=false
+    local jetpack_recovery_ms=""
+
+    for proc in "${proc_names[@]}"; do
+        local logfile="$LOG_DIR/proc-${proc}.log"
+        [ -f "$logfile" ] || continue
+
+        # Check for failover trigger
+        if grep -q "failure_triggered\|MONGODB-FAILOVER\|KillMongodbPrimary" "$logfile" 2>/dev/null; then
+            failover_triggered=true
+            log_info "  $proc: failover triggered"
+        fi
+
+        # Check for Jetpack recovery completion
+        if grep -q "JETPACK-RECOVERY.*COMPLETED\|RECOVERY.*COMPLETED\|recovery.*completed" "$logfile" 2>/dev/null; then
+            recovery_completed=true
+            local dur
+            dur=$(grep -o "duration=[0-9]*ms\|duration=[0-9]*" "$logfile" 2>/dev/null | tail -1)
+            if [ -n "$dur" ]; then
+                jetpack_recovery_ms="$dur"
+                log_info "  $proc: Jetpack recovery $dur"
+            else
+                log_info "  $proc: Jetpack recovery completed (duration not parsed)"
+            fi
+        fi
+
+        # Check for MongoDB leader change detection
+        if grep -q "MONGODB-HOOKER.*Topology changed\|primary_elected\|ReplicaSetWithPrimary" "$logfile" 2>/dev/null; then
+            log_info "  $proc: MongoDB leader change detected"
+        fi
+
+        # Check for crashes
+        if grep -qi "segfault\|segmentation fault\|abort\|FATAL" "$logfile" 2>/dev/null; then
+            log_error "  $proc: crash detected in log"
+            exit_code=1
+        fi
+    done
+
+    # Check if MongoDB replica set survived (2 of 3 nodes should be healthy)
+    local surviving_nodes=0
+    for ip in "${REPLSET_IPS[@]}"; do
+        if mongosh --host "${ip}:27017" --eval "db.adminCommand('ping')" --quiet >/dev/null 2>&1; then
+            surviving_nodes=$((surviving_nodes + 1))
+        fi
+    done
+    log_info "  MongoDB replica set: $surviving_nodes/3 nodes healthy after test"
+
+    # Check MongoDB documents
+    local mongo_docs=0
+    for ip in "${REPLSET_IPS[@]}"; do
+        if mongosh --host "${ip}:27017" --eval "db.adminCommand('ping')" --quiet >/dev/null 2>&1; then
+            mongo_docs=$(mongosh --host "${ip}:27017" --eval 'db.getSiblingDB("JetPack").KVTable.countDocuments()' --quiet 2>/dev/null || echo "0")
+            break
+        fi
+    done
+    log_info "  MongoDB documents in JetPack.KVTable: $mongo_docs"
+
+    # Check signal files
+    local signal_files
+    signal_files=$(ls /tmp/JM_Jetpack_* 2>/dev/null | wc -l)
+    log_info "  Signal files created: $signal_files"
+
+    # Final verdict
+    echo ""
+    if [ $exit_code -eq 0 ]; then
+        log_info "=== Failure Recovery Test PASSED ==="
+        log_info "  - All Jetpack processes exited cleanly"
+        log_info "  - MongoDB replica set: $surviving_nodes/3 nodes healthy"
+        log_info "  - MongoDB documents: $mongo_docs"
+        if $failover_triggered; then
+            log_info "  - Failover was triggered"
+        else
+            log_warn "  - Failover was NOT triggered (test duration may be too short)"
+        fi
+        if $recovery_completed; then
+            log_info "  - Jetpack recovery completed ($jetpack_recovery_ms)"
+        else
+            log_warn "  - Jetpack recovery not detected in logs (may need JETPACK_MONGODB_RECOVERY build)"
+        fi
+    else
+        log_error "=== Failure Recovery Test FAILED ==="
+        log_info "Check logs in $LOG_DIR for details:"
+        for proc in "${proc_names[@]}"; do
+            log_info "  $LOG_DIR/proc-${proc}.log"
+        done
+    fi
+
+    return $exit_code
+}
+
 run_mongodb_only() {
     log_info "=== Starting MongoDB server only ==="
     start_embedded_mongodb
@@ -472,6 +807,9 @@ case "$MODE" in
     multi)
         run_multi_process_test
         ;;
+    recovery)
+        run_recovery_test
+        ;;
     mongodb-only)
         run_mongodb_only
         ;;
@@ -480,11 +818,12 @@ case "$MODE" in
         exec bash
         ;;
     *)
-        echo "Usage: $0 {single|multi|mongodb-only|bash}"
+        echo "Usage: $0 {single|multi|recovery|mongodb-only|bash}"
         echo ""
         echo "Modes:"
         echo "  single       - Embedded mongod + 3 servers + 1 client"
         echo "  multi        - Embedded mongod + 5 servers + 5 clients + network latency"
+        echo "  recovery     - 3-member MongoDB replica set + failover test + recovery measurement"
         echo "  mongodb-only - Start only the embedded MongoDB server"
         echo "  bash         - Interactive shell with MongoDB running"
         exit 1

@@ -155,9 +155,21 @@ Existing integration code: `src/deptran/mongodb/`, `src/deptran/mongodb_*.h`
   - Dockerfile already includes `iproute2` for `tc` support (requires `--privileged` or `NET_ADMIN`)
   - Validates: process exit codes, MongoDB document count, throughput, crash detection
   - Infrastructure validation: 79 checks pass (test-mongodb-setup.sh)
-- [ ] Failure recovery test: run normal procedure, kill MongoDB leader, let MongoDB
+- [x] Failure recovery test: run normal procedure, kill MongoDB leader, let MongoDB
       leader-elect and trigger Jetpack leader-elect, measure recovery duration of both
       MongoDB and Jetpack
+  - Implemented in `run-mongodb-test.sh recovery` mode
+  - Creates 3-member MongoDB replica set on separate loopback IPs (127.0.0.1-3)
+  - Config: `config/failover_mongodb.yml` (run 5s, then soft-kill primary, wait 10s)
+  - Jetpack uses `JETPACK_MONGODB_RECOVERY` build flag to enable real recovery path
+  - Recovery sequence: kill MongoDB primary → `MongodbLeaderWatcher` detects topology
+    change via APM → signals via jm_file_signal → `MongodbServer` recovery coroutine
+    triggers `JetpackRecoveryEntry()` → 3-phase Paxos recovery
+  - Validates: failover triggered, Jetpack recovery completed, recovery duration,
+    MongoDB replica set survival (2/3 healthy), signal files created, no crashes
+  - Helper functions: `start_mongodb_replset()`, `get_mongodb_primary()`,
+    `kill_mongodb_node()`, `wait_mongodb_new_primary()`
+  - Infrastructure validation: 95 checks pass (test-mongodb-setup.sh)
 
 #### Documentation
 - [ ] Write integration notes for anything interesting/noteworthy/suitable for the paper

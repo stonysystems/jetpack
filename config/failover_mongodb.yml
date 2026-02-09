@@ -1,0 +1,12 @@
+
+# Failover configuration for MongoDB Docker integration test.
+#
+# Short intervals for fast test completion:
+#   - run_interval: 5s of normal operation before triggering failure
+#   - stop_interval: 10s pause for recovery to complete
+
+failover:
+        method: soft
+        run_interval: 5
+        stop_interval: 10
+        failserver: leader
