@@ -139,8 +139,14 @@ Existing integration code: `src/deptran/etcd/`, `src/deptran/etcd_*.h`
     - Stage 2: Runtime image with etcd v3.5.17 server binary + Jetpack binaries
   - `docker/etcd/docker-compose.yml`: Orchestration for external etcd + Jetpack testing
   - `docker/etcd/run-etcd-test.sh`: Entrypoint script with modes: single, etcd-only, bash
-  - Uses existing config: `config/1c1s3r1p.yml` + `config/none_etcd.yml`
-- [ ] Single-process test: basic read/write through Jetpack + etcd
+  - `docker/etcd/test-etcd-setup.sh`: Infrastructure validation test (39 checks)
+  - Uses existing config: `config/1c1s3r1p.yml` + `config/none_etcd.yml` + `config/rw_fixed.yml`
+- [x] Single-process test: basic read/write through Jetpack + etcd
+  - Implemented in `run-etcd-test.sh single` mode
+  - Starts embedded etcd, verifies etcd R/W, launches 3 server replicas + 1 client
+  - Uses `rw_fixed.yml` benchmark (100% writes to etcd via JetPack/KVTable/ prefix)
+  - Validates: process exit codes, etcd key count, throughput in logs, no crashes
+  - Servers start before client (1s stagger) for proper initialization
 - [ ] Multi-process test: 5 servers, 5 processes, simulated network latency between servers
 - [ ] Failure recovery test: run normal procedure, kill etcd leader, let etcd
       leader-elect and trigger Jetpack leader-elect, measure recovery duration of both

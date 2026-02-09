@@ -102,8 +102,8 @@ verify_etcd_rw() {
 }
 
 run_single_process_test() {
-    log_info "=== Single-Process Test ==="
-    log_info "Config: 1 client, 1 server (3 replicas), 1 partition"
+    log_info "=== Single-Process Test: basic read/write through Jetpack + etcd ==="
+    log_info "Config: 1 client, 3 server replicas, 1 partition, rw benchmark"
     log_info "Duration: ${TEST_DURATION}s"
 
     start_embedded_etcd
@@ -113,6 +113,7 @@ run_single_process_test() {
 
     local config_site="${JETPACK_DIR}/config/1c1s3r1p.yml"
     local config_mode="${JETPACK_DIR}/config/none_etcd.yml"
+    local config_bench="${JETPACK_DIR}/config/rw_fixed.yml"
     local server_bin="${JETPACK_DIR}/build/deptran_server"
 
     if [ ! -x "$server_bin" ]; then
@@ -121,42 +122,125 @@ run_single_process_test() {
         return 1
     fi
 
-    # Start 3 server replicas + 1 client in the same process
-    # The run.py script handles multi-process orchestration, but for a
-    # single-process test we launch the server directly.
-    local processes=("s101" "s201" "s301" "c01")
-    local pids=()
-    local base_port=38200
+    # Verify all config files exist
+    for cfg in "$config_site" "$config_mode" "$config_bench"; do
+        if [ ! -f "$cfg" ]; then
+            log_error "Config file not found: $cfg"
+            return 1
+        fi
+    done
 
-    for proc in "${processes[@]}"; do
-        local port=$((base_port + ${#pids[@]}))
-        log_info "Starting process $proc on port $port"
+    # Phase 1: Start 3 server replicas first, then client.
+    # Servers need to be up before the client connects.
+    local server_procs=("s101" "s201" "s301")
+    local client_procs=("c01")
+    local pids=()
+    local proc_names=()
+
+    # Launch servers
+    for proc in "${server_procs[@]}"; do
+        local port
+        case "$proc" in
+            s101) port=38200 ;;
+            s201) port=38201 ;;
+            s301) port=38202 ;;
+        esac
+        log_info "Starting server $proc on port $port"
         "$server_bin" \
             -f "$config_site" \
             -f "$config_mode" \
+            -f "$config_bench" \
             -P "$proc" \
             -p "$port" \
             -d "$TEST_DURATION" \
             -r "$LOG_DIR" \
             > "$LOG_DIR/proc-${proc}.log" 2>&1 &
         pids+=($!)
+        proc_names+=("$proc")
     done
 
-    log_info "Waiting for ${#pids[@]} processes to complete..."
+    # Brief delay for servers to initialize before starting client
+    sleep 1
 
+    # Launch client
+    for proc in "${client_procs[@]}"; do
+        log_info "Starting client $proc on port 38203"
+        "$server_bin" \
+            -f "$config_site" \
+            -f "$config_mode" \
+            -f "$config_bench" \
+            -P "$proc" \
+            -p 38203 \
+            -d "$TEST_DURATION" \
+            -r "$LOG_DIR" \
+            > "$LOG_DIR/proc-${proc}.log" 2>&1 &
+        pids+=($!)
+        proc_names+=("$proc")
+    done
+
+    log_info "Waiting for ${#pids[@]} processes to complete (timeout: $((TEST_DURATION + 30))s)..."
+
+    # Wait for all processes with a timeout
     local exit_code=0
     for i in "${!pids[@]}"; do
         if ! wait "${pids[$i]}" 2>/dev/null; then
-            log_warn "Process ${processes[$i]} (PID ${pids[$i]}) exited with non-zero status"
+            log_warn "Process ${proc_names[$i]} (PID ${pids[$i]}) exited with non-zero status"
             exit_code=1
         fi
     done
 
+    # Phase 2: Validate results
+    log_info "--- Result Validation ---"
+
+    # Check that etcd received KV writes from Jetpack
+    local endpoint="${ETCD_ENDPOINTS:-http://127.0.0.1:2379}"
+    local etcd_keys
+    etcd_keys=$(etcdctl --endpoints="$endpoint" get "JetPack/" --prefix --keys-only 2>/dev/null | wc -l)
+    if [ "$etcd_keys" -gt 0 ]; then
+        log_info "etcd has $etcd_keys keys under JetPack/ prefix (Jetpack wrote to etcd)"
+    else
+        log_warn "No keys found under JetPack/ prefix in etcd"
+    fi
+
+    # Check server logs for throughput
+    local throughput_found=false
+    for proc in "${proc_names[@]}"; do
+        local logfile="$LOG_DIR/proc-${proc}.log"
+        if [ -f "$logfile" ]; then
+            # Check for throughput line (indicates benchmark ran)
+            if grep -qi "throughput\|tps\|commit" "$logfile" 2>/dev/null; then
+                throughput_found=true
+                local tp_line
+                tp_line=$(grep -i "throughput" "$logfile" | tail -1)
+                if [ -n "$tp_line" ]; then
+                    log_info "  $proc: $tp_line"
+                fi
+            fi
+            # Check for errors/crashes
+            if grep -qi "segfault\|segmentation fault\|abort\|FATAL" "$logfile" 2>/dev/null; then
+                log_error "  $proc: crash detected in log"
+                exit_code=1
+            fi
+        else
+            log_warn "  $proc: log file missing"
+        fi
+    done
+
+    # Final verdict
+    echo ""
     if [ $exit_code -eq 0 ]; then
         log_info "=== Single-Process Test PASSED ==="
+        log_info "  - All 4 processes exited cleanly"
+        log_info "  - etcd keys: $etcd_keys"
+        if $throughput_found; then
+            log_info "  - Throughput metrics found in logs"
+        fi
     else
-        log_warn "=== Single-Process Test completed with warnings ==="
-        log_info "Check logs in $LOG_DIR for details"
+        log_error "=== Single-Process Test FAILED ==="
+        log_info "Check logs in $LOG_DIR for details:"
+        for proc in "${proc_names[@]}"; do
+            log_info "  $LOG_DIR/proc-${proc}.log"
+        done
     fi
 
     return $exit_code
