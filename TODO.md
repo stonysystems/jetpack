@@ -172,7 +172,12 @@ Existing integration code: `src/deptran/mongodb/`, `src/deptran/mongodb_*.h`
   - Infrastructure validation: 95 checks pass (test-mongodb-setup.sh)
 
 #### Documentation
-- [ ] Write integration notes for anything interesting/noteworthy/suitable for the paper
+- [x] Write integration notes for anything interesting/noteworthy/suitable for the paper
+  - Document: `doc/mongodb_integration_notes.md`
+  - Key findings: MongoDB as data store (not ordering oracle like etcd), thread pool as
+    canonical async pattern for mongocxx, SDAM APM topology monitoring for leader detection,
+    blocking Submit for durability guarantees, unified 3-phase Paxos recovery across backends,
+    Docker test harness (3 modes), ~10s MongoDB election timeout vs ~1-3s etcd
 
 ### 2b. Jetpack + etcd (higher priority within this section)
 
