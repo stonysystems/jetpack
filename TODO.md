@@ -14,7 +14,7 @@ as reference but the separated specs are the primary artifacts going forward.
 All TLA+ related work (specifications, configs, Docker environment) lives in the `tla/` folder.
 All TLA+ model checking runs in Docker (`tla/Dockerfile`).
 
-## TLA+ Specifications
+## Priority 1 (High): TLA+ Specifications
 
 - [x] Docker environment for TLA+ model checking (`tla/Dockerfile`, `tla/run-tlc.sh`)
 - [x] Separate `tla/jetpack_raft.tla` into `tla/raft.tla` and `tla/jetpack.tla`
@@ -26,7 +26,7 @@ All TLA+ model checking runs in Docker (`tla/Dockerfile`).
   - `jetpack_copilot.tla`: Jetpack + CoPilot composition (SANY verified)
   - `jetpack_mencius.tla`: Jetpack + Mencius composition (SANY verified)
 
-## TLA+ Verification (via Docker)
+## Priority 1 (High): TLA+ Verification (via Docker)
 
 - [x] `raft.tla`: TLC model check (CommittedLogAgreement, ElectionSafety)
   - Exhaustive: 40M states, 2.8M distinct, depth 56 (3 servers, 1 cmd, SmallStateConstraint)
@@ -51,3 +51,93 @@ All TLA+ model checking runs in Docker (`tla/Dockerfile`).
 - [x] TLC verification of composed jetpack + mencius (`jetpack_mencius.tla`)
   - Partial: 37M+ states, 3.6M+ distinct, no violations (3 servers, 1 cmd, SmallStateConstraint)
   - Note: Mencius composition state space too large for exhaustive checking
+
+## Priority 2 (Medium): Jetpack + Industry Applications
+
+Integrate Jetpack with real-world consensus/coordination systems. For each integration,
+the Jetpack framework calls the original protocol's API for read/write commands (prefer
+async API if available, otherwise use sync API). Existing integration code lives in
+`src/deptran/` (e.g. `src/deptran/mongodb/`, `src/deptran/etcd/`).
+
+All experiments run in Docker containers. Create a new Dockerfile if needed.
+
+### 2a. Jetpack + MongoDB
+
+Existing integration code: `src/deptran/mongodb/`, `src/deptran/mongodb_*.h`
+
+#### Integration (without failure recovery)
+- [ ] Set up `third_party/` folder and clone MongoDB source
+- [ ] Review existing MongoDB integration (`src/deptran/mongodb/`)
+- [ ] Verify/fix Jetpack calling MongoDB API for read/write commands
+- [ ] Use async MongoDB API where available, sync API otherwise
+
+#### Failure Recovery
+- [ ] MongoDB hooker: detect when new MongoDB leader finishes recovery/election,
+      write a signal file with the new term/view_id for Jetpack to read
+- [ ] Jetpack hooker: monitor signal from MongoDB, trigger Jetpack failure recovery
+      when MongoDB view change is detected
+
+#### Testing (in Docker)
+- [ ] Docker environment for MongoDB integration testing (create Dockerfile if needed)
+- [ ] Single-process test: basic read/write through Jetpack + MongoDB
+- [ ] Multi-process test: 5 servers, 5 processes, simulated network latency between servers
+- [ ] Failure recovery test: run normal procedure, kill MongoDB leader, let MongoDB
+      leader-elect and trigger Jetpack leader-elect, measure recovery duration of both
+      MongoDB and Jetpack
+
+#### Documentation
+- [ ] Write integration notes for anything interesting/noteworthy/suitable for the paper
+
+### 2b. Jetpack + etcd
+
+Existing integration code: `src/deptran/etcd/`, `src/deptran/etcd_*.h`
+
+#### Integration (without failure recovery)
+- [ ] Set up `third_party/` folder and clone etcd source
+- [ ] Review existing etcd integration (`src/deptran/etcd/`)
+- [ ] Verify/fix Jetpack calling etcd API for read/write commands
+- [ ] Use async etcd API where available, sync API otherwise
+
+#### Failure Recovery
+- [ ] etcd hooker: detect when new etcd leader finishes recovery/election,
+      write a signal file with the new term/view_id for Jetpack to read
+- [ ] Jetpack hooker: monitor signal from etcd, trigger Jetpack failure recovery
+      when etcd view change is detected
+
+#### Testing (in Docker)
+- [ ] Docker environment for etcd integration testing (create Dockerfile if needed)
+- [ ] Single-process test: basic read/write through Jetpack + etcd
+- [ ] Multi-process test: 5 servers, 5 processes, simulated network latency between servers
+- [ ] Failure recovery test: run normal procedure, kill etcd leader, let etcd
+      leader-elect and trigger Jetpack leader-elect, measure recovery duration of both
+      etcd and Jetpack
+
+#### Documentation
+- [ ] Write integration notes for anything interesting/noteworthy/suitable for the paper
+
+### 2c. Jetpack + ZooKeeper
+
+No existing integration code. Needs to be implemented from scratch.
+
+#### Integration (without failure recovery)
+- [ ] Set up `third_party/` folder and clone ZooKeeper source
+- [ ] Create `src/deptran/zookeeper/` integration module (frame, coordinator, server, commo, service)
+- [ ] Implement Jetpack calling ZooKeeper API for read/write commands
+- [ ] Use async ZooKeeper API where available, sync API otherwise
+
+#### Failure Recovery
+- [ ] ZooKeeper hooker: detect when new ZooKeeper leader finishes recovery/election,
+      write a signal file with the new epoch/view_id for Jetpack to read
+- [ ] Jetpack hooker: monitor signal from ZooKeeper, trigger Jetpack failure recovery
+      when ZooKeeper view change is detected
+
+#### Testing (in Docker)
+- [ ] Docker environment for ZooKeeper integration testing (create Dockerfile if needed)
+- [ ] Single-process test: basic read/write through Jetpack + ZooKeeper
+- [ ] Multi-process test: 5 servers, 5 processes, simulated network latency between servers
+- [ ] Failure recovery test: run normal procedure, kill ZooKeeper leader, let ZooKeeper
+      leader-elect and trigger Jetpack leader-elect, measure recovery duration of both
+      ZooKeeper and Jetpack
+
+#### Documentation
+- [ ] Write integration notes for anything interesting/noteworthy/suitable for the paper
