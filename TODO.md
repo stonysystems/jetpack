@@ -357,4 +357,11 @@ No existing integration code. Needs to be implemented from scratch.
   - Infrastructure validation: 81 checks pass (test-zookeeper-setup.sh)
 
 #### Documentation
-- [ ] Write integration notes for anything interesting/noteworthy/suitable for the paper
+- [x] Write integration notes for anything interesting/noteworthy/suitable for the paper
+  - Document: `doc/zookeeper_integration_notes.md`
+  - Key findings: ZooKeeper as ordering oracle (like etcd, unlike MongoDB), native C callback
+    async API (no thread pool needed), two-phase async upsert with ZNONODE fallback, ephemeral
+    znode + watch mechanism for automatic leader crash detection, ZAB election (~2-10s) slower
+    than Raft (~1-3s) but watch-based detection faster than SDAM heartbeat, heavyweight build
+    chain (Maven+Java+CMake), unified 3-phase Paxos recovery across all three backends,
+    Docker test harness (3 modes), 81 infrastructure validation checks
