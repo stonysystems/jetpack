@@ -99,7 +99,13 @@ Existing integration code: `src/deptran/etcd/`, `src/deptran/etcd_*.h`
 - [x] Set up `third_party/` folder and clone etcd source
   - `third_party/etcd-cpp-apiv3` (v0.2.14): C++ client for etcd v3 API
   - `third_party/build_etcd.sh`: Build script
-- [ ] Review existing etcd integration (`src/deptran/etcd/`)
+- [x] Review existing etcd integration (`src/deptran/etcd/`)
+  - 11 files: frame, coordinator, server, commo, service, kv_handler, thread_pool
+  - Integration is functionally complete for basic read/write path
+  - Uses etcd-cpp-apiv3 with dual async (pplx) / sync API support
+  - Failure recovery via file-based signaling (`jm_file_signal.h`)
+  - Issues: hardcoded URIs, no server.cc, AWS-specific connection counts
+  - Detailed review: `doc/etcd_integration_review.md`
 - [ ] Verify/fix Jetpack calling etcd API for read/write commands
 - [ ] Use async etcd API where available, sync API otherwise
 
