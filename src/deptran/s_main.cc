@@ -15,6 +15,9 @@
 #if defined(JETPACK_MONGODB_RECOVERY) || defined(JETPACK_ETCD_RECOVERY)
 #include "../jm_file_signal.h"
 #endif
+#ifdef JETPACK_MONGODB_RECOVERY
+#include "mongodb_leader_watcher.h"
+#endif
 #ifdef JETPACK_ETCD_RECOVERY
 #include "etcd_leader_watcher.h"
 #endif
@@ -40,6 +43,8 @@ volatile bool failover_server_quit = false;
 volatile locid_t failover_server_idx;
 volatile double total_throughput = 0;
 #ifdef JETPACK_MONGODB_RECOVERY
+static std::shared_ptr<janus::MongodbLeaderWatcher> mongodb_leader_watcher_g;
+
 static void KillMongodbPrimary() {
   // Kill only the local mongod bound to this host on the default port.
   std::string host = "127.0.0.1";
@@ -53,19 +58,17 @@ static void KillMongodbPrimary() {
     }
   }
   const int mongo_port = 27017;
-  // pkill -f "mongod.*--port 27017.*--bind_ip 127.0.0.1"
 #ifdef AWS
   host = "0.0.0.0"; // ALWAYS 0.0.0.0 online
 #endif
-std::string kill_cmd =
-    "pkill -KILL -f \"mongod.*--port " + std::to_string(mongo_port) +
-    ".*--bind_ip " + host + "\"";
+  std::string kill_cmd =
+      "pkill -KILL -f \"mongod.*--port " + std::to_string(mongo_port) +
+      ".*--bind_ip " + host + "\"";
   Log_info("[MONGODB-FAILOVER] Executing primary kill: %s", kill_cmd.c_str());
   std::system(kill_cmd.c_str());
 
-  #ifdef JETPACK_MONGODB_SIMULATION
+#ifdef JETPACK_MONGODB_SIMULATION
   // Simulate MongoDB electing a new primary (server1) after a short delay.
-  // Let's do a simulation
   std::this_thread::sleep_for(std::chrono::milliseconds(100));
   auto cfg = Config::GetConfig();
   auto hosts = cfg->GetReplicaHosts(0);
@@ -78,7 +81,45 @@ std::string kill_cmd =
     jm_signal::set_key("mongo", "primary_elected", new_primary_host);
     Log_info("[MONGODB-FAILOVER] Simulated new mongo primary: %s", new_primary_host.c_str());
   }
-  #endif
+#else
+  // Start real MongoDB leader watcher to detect when replica set elects a new
+  // primary. The watcher uses mongocxx APM topology_changed callbacks; the
+  // driver's SDAM background thread monitors the replica set and fires the
+  // callback when a new primary is detected.
+  auto cfg = Config::GetConfig();
+  auto hosts = cfg->GetReplicaHosts(0);
+  std::string mongo_uri = std::string(janus::kMongoDbUri);
+  if (hosts.size() > 1) {
+    // Build replica set URI connecting to surviving nodes (not the killed primary).
+    std::ostringstream oss;
+    oss << "mongodb://";
+    bool first = true;
+    for (size_t i = 1; i < hosts.size(); ++i) {
+      if (!first) oss << ",";
+      first = false;
+      auto pos = hosts[i].find(':');
+      if (pos != std::string::npos) {
+        oss << hosts[i].substr(0, pos) << ":27017";
+      } else {
+        oss << hosts[i] << ":27017";
+      }
+    }
+    mongo_uri = oss.str();
+  }
+  // Determine the local hostname that Jetpack replicas are polling for.
+  std::string signal_host = host;
+  if (hosts.size() > 1) {
+    auto pos = hosts[1].find(':');
+    if (pos != std::string::npos) {
+      signal_host = hosts[1].substr(0, pos);
+    } else {
+      signal_host = hosts[1];
+    }
+  }
+  mongodb_leader_watcher_g = std::make_shared<janus::MongodbLeaderWatcher>(
+      mongo_uri, signal_host);
+  mongodb_leader_watcher_g->Start();
+#endif
 }
 #endif
 #ifdef JETPACK_ETCD_RECOVERY

@@ -164,6 +164,27 @@ check_file_exists "etcd/service.cc" "$PROJECT_DIR/src/deptran/etcd/service.cc"
 check_file_exists "jm_file_signal.h" "$PROJECT_DIR/jm_file_signal.h"
 echo ""
 
+# --- 9. MongoDB source code dependencies ---
+echo "9. MongoDB Source Code Dependencies"
+check_file_exists "mongodb_leader_watcher.h" "$PROJECT_DIR/src/deptran/mongodb_leader_watcher.h"
+check_file_contains "MongodbLeaderWatcher class" "$PROJECT_DIR/src/deptran/mongodb_leader_watcher.h" "class MongodbLeaderWatcher"
+check_file_contains "Uses APM topology_changed" "$PROJECT_DIR/src/deptran/mongodb_leader_watcher.h" "on_topology_changed"
+check_file_contains "Detects ReplicaSetWithPrimary" "$PROJECT_DIR/src/deptran/mongodb_leader_watcher.h" "ReplicaSetWithPrimary"
+check_file_contains "Detects ReplicaSetNoPrimary" "$PROJECT_DIR/src/deptran/mongodb_leader_watcher.h" "ReplicaSetNoPrimary"
+check_file_contains "Signals via jm_file_signal" "$PROJECT_DIR/src/deptran/mongodb_leader_watcher.h" "jm_signal::set_key"
+check_file_contains "Signals mongo:primary_elected" "$PROJECT_DIR/src/deptran/mongodb_leader_watcher.h" 'primary_elected'
+check_file_contains "Finds RSPrimary server" "$PROJECT_DIR/src/deptran/mongodb_leader_watcher.h" "RSPrimary"
+check_file_contains "Has Start method" "$PROJECT_DIR/src/deptran/mongodb_leader_watcher.h" "void Start()"
+check_file_contains "Has Stop method" "$PROJECT_DIR/src/deptran/mongodb_leader_watcher.h" "void Stop()"
+check_file_exists "mongodb_kv_table_handler.h" "$PROJECT_DIR/src/deptran/mongodb_kv_table_handler.h"
+check_file_exists "mongodb_connection_thread_pool.h" "$PROJECT_DIR/src/deptran/mongodb_connection_thread_pool.h"
+check_file_exists "mongodb/server.h" "$PROJECT_DIR/src/deptran/mongodb/server.h"
+check_file_contains "MongoDB server has recovery hooker" "$PROJECT_DIR/src/deptran/mongodb/server.h" 'exists_key.*mongo.*primary_elected'
+check_file_contains "s_main.cc includes mongodb_leader_watcher.h" "$PROJECT_DIR/src/deptran/s_main.cc" 'mongodb_leader_watcher.h'
+check_file_contains "s_main.cc has MongodbLeaderWatcher global" "$PROJECT_DIR/src/deptran/s_main.cc" 'mongodb_leader_watcher_g'
+check_file_contains "s_main.cc starts MongodbLeaderWatcher" "$PROJECT_DIR/src/deptran/s_main.cc" 'mongodb_leader_watcher_g->Start'
+echo ""
+
 # --- Summary ---
 echo "=== Summary ==="
 echo "  Passed: $PASS"

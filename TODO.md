@@ -112,10 +112,21 @@ Existing integration code: `src/deptran/mongodb/`, `src/deptran/mongodb_*.h`
   - No code changes needed — current implementation is already the correct async pattern
 
 #### Failure Recovery
-- [ ] MongoDB hooker: detect when new MongoDB leader finishes recovery/election,
+- [x] MongoDB hooker: detect when new MongoDB leader finishes recovery/election,
       write a signal file with the new term/view_id for Jetpack to read
-- [ ] Jetpack hooker: monitor signal from MongoDB, trigger Jetpack failure recovery
+  - Created `MongodbLeaderWatcher` (`src/deptran/mongodb_leader_watcher.h`)
+  - Uses mongocxx APM `on_topology_changed` callback (SDAM background monitoring)
+  - Detects topology transitions: "ReplicaSetNoPrimary" → "ReplicaSetWithPrimary"
+  - Finds the new primary by iterating server descriptions for "RSPrimary" type
+  - On new primary: calls `jm_signal::set_key("mongo", "primary_elected", host)`
+  - Integrated into `KillMongodbPrimary()` in `s_main.cc` (non-simulation path)
+  - Pattern: create `mongocxx::client` with APM options → driver's SDAM thread
+    monitors replica set → topology_changed callback fires → signals Jetpack
+- [x] Jetpack hooker: monitor signal from MongoDB, trigger Jetpack failure recovery
       when MongoDB view change is detected
+  - Already implemented in `MongodbServer::Setup()` (`src/deptran/mongodb/server.h`)
+  - Non-leader replicas run coroutine polling for `mongo:primary_elected` signal
+  - On signal: calls `JetpackRecoveryEntry()` to run 3-phase Paxos recovery
 
 #### Testing (in Docker)
 - [ ] Docker environment for MongoDB integration testing (create Dockerfile if needed)
