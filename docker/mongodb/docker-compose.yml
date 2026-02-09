@@ -1,0 +1,42 @@
+# Docker Compose for Jetpack + MongoDB integration testing.
+#
+# Usage:
+#   # Build the image first:
+#   docker compose -f docker/mongodb/docker-compose.yml build
+#
+#   # Single-process test (mongod + Jetpack in one container):
+#   docker compose -f docker/mongodb/docker-compose.yml run --rm jetpack-mongodb single
+#
+#   # MongoDB only (start embedded MongoDB server):
+#   docker compose -f docker/mongodb/docker-compose.yml up mongodb
+#   # Then in another terminal:
+#   docker compose -f docker/mongodb/docker-compose.yml run --rm jetpack-mongodb mongodb-only
+#
+#   # Cleanup:
+#   docker compose -f docker/mongodb/docker-compose.yml down -v
+
+services:
+  # Standalone MongoDB server for external-mode testing
+  mongodb:
+    image: mongo:7.0
+    command: ["mongod", "--bind_ip", "0.0.0.0", "--port", "27017"]
+    ports:
+      - "27017:27017"
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')", "--host", "127.0.0.1:27017", "--quiet"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # Jetpack with MongoDB integration
+  jetpack-mongodb:
+    build:
+      context: ../..
+      dockerfile: docker/mongodb/Dockerfile
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    environment:
+      - MONGODB_ENDPOINTS=mongodb://mongodb:27017
+    volumes:
+      - ../../config:/jetpack/config:ro

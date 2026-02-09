@@ -129,7 +129,15 @@ Existing integration code: `src/deptran/mongodb/`, `src/deptran/mongodb_*.h`
   - On signal: calls `JetpackRecoveryEntry()` to run 3-phase Paxos recovery
 
 #### Testing (in Docker)
-- [ ] Docker environment for MongoDB integration testing (create Dockerfile if needed)
+- [x] Docker environment for MongoDB integration testing (create Dockerfile if needed)
+  - `docker/mongodb/Dockerfile`: Multi-stage build (Ubuntu 22.04, Python 3.10 for WAF compatibility)
+    - Stage 1: Builds mongo-c-driver + mongo-cxx-driver from `third_party/`, then Jetpack via WAF
+    - Stage 2: Runtime image with MongoDB 7.0 server (mongod + mongosh from official apt repo)
+    - Copies built mongocxx/bsoncxx libraries and Jetpack binaries
+  - `docker/mongodb/docker-compose.yml`: Orchestration for external MongoDB + Jetpack testing
+  - `docker/mongodb/run-mongodb-test.sh`: Entrypoint script with modes: single, mongodb-only, bash
+  - `docker/mongodb/test-mongodb-setup.sh`: Infrastructure validation test (58 checks)
+  - Uses existing config: `config/1c1s3r1p.yml` + `config/none_mongodb.yml` + `config/rw_fixed.yml`
 - [ ] Single-process test: basic read/write through Jetpack + MongoDB
 - [ ] Multi-process test: 5 servers, 5 processes, simulated network latency between servers
 - [ ] Failure recovery test: run normal procedure, kill MongoDB leader, let MongoDB
