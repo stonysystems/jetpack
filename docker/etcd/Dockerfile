@@ -98,6 +98,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     wget \
     curl \
     procps \
+    iproute2 \
     && rm -rf /var/lib/apt/lists/*
 
 # Install etcd server binary (v3.5.17)

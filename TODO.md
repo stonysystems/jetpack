@@ -147,7 +147,15 @@ Existing integration code: `src/deptran/etcd/`, `src/deptran/etcd_*.h`
   - Uses `rw_fixed.yml` benchmark (100% writes to etcd via JetPack/KVTable/ prefix)
   - Validates: process exit codes, etcd key count, throughput in logs, no crashes
   - Servers start before client (1s stagger) for proper initialization
-- [ ] Multi-process test: 5 servers, 5 processes, simulated network latency between servers
+- [x] Multi-process test: 5 servers, 5 processes, simulated network latency between servers
+  - Implemented in `run-etcd-test.sh multi` mode
+  - Config: `config/5c1s5r1p_etcd.yml` — 5 servers on separate loopback IPs (127.0.0.1-5)
+  - Launches 5 server replicas + 5 clients with 2s stagger
+  - Network latency via `tc`/`netem` on loopback (per-IP filtering, default 5ms +/- 2ms)
+  - Configurable via `LATENCY_MS` and `LATENCY_JITTER` environment variables
+  - Dockerfile updated with `iproute2` for `tc` support (requires `--privileged` or `NET_ADMIN`)
+  - Validates: process exit codes, etcd key count, throughput, crash detection
+  - Infrastructure validation: 53 checks pass (test-etcd-setup.sh)
 - [ ] Failure recovery test: run normal procedure, kill etcd leader, let etcd
       leader-elect and trigger Jetpack leader-elect, measure recovery duration of both
       etcd and Jetpack

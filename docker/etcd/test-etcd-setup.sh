@@ -68,6 +68,7 @@ echo ""
 # --- 2. Config files ---
 echo "2. Config Files"
 check_file_exists "Site config (1c1s3r1p.yml)" "$PROJECT_DIR/config/1c1s3r1p.yml"
+check_file_exists "Multi-process config (5c1s5r1p_etcd.yml)" "$PROJECT_DIR/config/5c1s5r1p_etcd.yml"
 check_file_exists "Mode config (none_etcd.yml)" "$PROJECT_DIR/config/none_etcd.yml"
 check_file_exists "Benchmark config (rw_fixed.yml)" "$PROJECT_DIR/config/rw_fixed.yml"
 echo ""
@@ -79,6 +80,10 @@ check_file_contains "rw_fixed.yml has workload: rw" "$PROJECT_DIR/config/rw_fixe
 check_file_contains "1c1s3r1p.yml has 3 servers" "$PROJECT_DIR/config/1c1s3r1p.yml" "s301"
 check_file_contains "1c1s3r1p.yml has client" "$PROJECT_DIR/config/1c1s3r1p.yml" "c01"
 check_file_contains "1c1s3r1p.yml maps to localhost" "$PROJECT_DIR/config/1c1s3r1p.yml" "localhost"
+check_file_contains "5c1s5r1p_etcd.yml has 5 servers" "$PROJECT_DIR/config/5c1s5r1p_etcd.yml" "s501"
+check_file_contains "5c1s5r1p_etcd.yml has 5 clients" "$PROJECT_DIR/config/5c1s5r1p_etcd.yml" "c501"
+check_file_contains "5c1s5r1p_etcd.yml has separate loopback IPs" "$PROJECT_DIR/config/5c1s5r1p_etcd.yml" "127.0.0.5"
+check_file_contains "5c1s5r1p_etcd.yml maps hosts h1-h5" "$PROJECT_DIR/config/5c1s5r1p_etcd.yml" "h5:"
 echo ""
 
 # --- 4. Shell script syntax ---
@@ -94,6 +99,7 @@ check_file_contains "Dockerfile installs etcd server" "$SCRIPT_DIR/Dockerfile" "
 check_file_contains "Dockerfile builds etcd-cpp-apiv3" "$SCRIPT_DIR/Dockerfile" "etcd-cpp-apiv3"
 check_file_contains "Dockerfile copies config" "$SCRIPT_DIR/Dockerfile" "config"
 check_file_contains "Dockerfile uses WAF build" "$SCRIPT_DIR/Dockerfile" "waf"
+check_file_contains "Dockerfile installs iproute2 (tc)" "$SCRIPT_DIR/Dockerfile" "iproute2"
 echo ""
 
 # --- 6. docker-compose.yml validation ---
@@ -104,7 +110,7 @@ check_file_contains "docker-compose exposes port 2379" "$SCRIPT_DIR/docker-compo
 echo ""
 
 # --- 7. run-etcd-test.sh content validation ---
-echo "7. Test Script Content"
+echo "7. Test Script Content (single mode)"
 check_file_contains "Script includes benchmark config (rw_fixed)" "$SCRIPT_DIR/run-etcd-test.sh" "rw_fixed"
 check_file_contains "Script includes site config" "$SCRIPT_DIR/run-etcd-test.sh" "1c1s3r1p"
 check_file_contains "Script includes mode config" "$SCRIPT_DIR/run-etcd-test.sh" "none_etcd"
@@ -112,6 +118,18 @@ check_file_contains "Script starts servers before client" "$SCRIPT_DIR/run-etcd-
 check_file_contains "Script validates etcd keys" "$SCRIPT_DIR/run-etcd-test.sh" "JetPack/"
 check_file_contains "Script checks for crashes" "$SCRIPT_DIR/run-etcd-test.sh" "segfault\|FATAL"
 check_file_contains "Script reports throughput" "$SCRIPT_DIR/run-etcd-test.sh" "throughput"
+echo ""
+
+# --- 7b. Multi-process test mode ---
+echo "7b. Test Script Content (multi mode)"
+check_file_contains "Script has multi mode" "$SCRIPT_DIR/run-etcd-test.sh" "run_multi_process_test"
+check_file_contains "Script references 5c1s5r1p_etcd config" "$SCRIPT_DIR/run-etcd-test.sh" "5c1s5r1p_etcd"
+check_file_contains "Script has latency simulation (setup_latency)" "$SCRIPT_DIR/run-etcd-test.sh" "setup_latency"
+check_file_contains "Script has latency cleanup (remove_latency)" "$SCRIPT_DIR/run-etcd-test.sh" "remove_latency"
+check_file_contains "Script uses tc netem for latency" "$SCRIPT_DIR/run-etcd-test.sh" "netem delay"
+check_file_contains "Script launches 5 servers" "$SCRIPT_DIR/run-etcd-test.sh" "s401.*s501"
+check_file_contains "Script launches 5 clients" "$SCRIPT_DIR/run-etcd-test.sh" "c401.*c501"
+check_file_contains "Script validates 10 processes" "$SCRIPT_DIR/run-etcd-test.sh" "5 servers.*5 clients"
 echo ""
 
 # --- 8. Source code dependencies ---
