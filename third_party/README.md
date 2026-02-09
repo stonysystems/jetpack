@@ -61,3 +61,41 @@ cd third_party
 
 The etcd server is installed separately. See the
 [etcd releases](https://github.com/etcd-io/etcd/releases) page.
+
+## ZooKeeper C Client
+
+| Submodule | Version | Description |
+|-----------|---------|-------------|
+| `zookeeper` | 3.9.4 | Apache ZooKeeper (C client at `zookeeper-client/zookeeper-client-c/`) |
+
+The ZooKeeper C client provides both synchronous and asynchronous APIs
+(`zookeeper_mt` library with `-DTHREADED`). Only the C client subdirectory
+is used; the rest of the repository is needed for jute code generation.
+
+### Build
+
+```bash
+# Install system prerequisites (Ubuntu/Debian)
+sudo apt-get install -y build-essential cmake libssl-dev pkg-config \
+    libsasl2-dev default-jdk maven
+
+# Initialize submodule (if not already done)
+git submodule update --init third_party/zookeeper
+
+# Build and install (default prefix: /usr/local)
+cd third_party
+./build_zookeeper.sh
+
+# Or with custom prefix
+./build_zookeeper.sh --prefix ~/.local
+```
+
+Note: Maven and Java are required to generate the jute serialization files
+(`zookeeper.jute.c`, `zookeeper.jute.h`) from the git checkout. The build
+script handles this automatically and skips generation if the files already
+exist.
+
+### ZooKeeper Server
+
+The ZooKeeper server is installed separately. See the
+[Apache ZooKeeper releases](https://zookeeper.apache.org/releases.html) page.

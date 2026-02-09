@@ -272,7 +272,12 @@ Existing integration code: `src/deptran/etcd/`, `src/deptran/etcd_*.h`
 No existing integration code. Needs to be implemented from scratch.
 
 #### Integration (without failure recovery)
-- [ ] Set up `third_party/` folder and clone ZooKeeper source
+- [x] Set up `third_party/` folder and clone ZooKeeper source
+      Done: Added apache/zookeeper as git submodule at third_party/zookeeper/
+      (tag release-3.9.4). C client at zookeeper-client/zookeeper-client-c/
+      with CMake build (WANT_SYNCAPI=ON for sync+async zookeeper_mt library).
+      Created build_zookeeper.sh (Maven jute generation + CMake build).
+      Updated third_party/README.md with ZooKeeper documentation.
 - [ ] Create `src/deptran/zookeeper/` integration module (frame, coordinator, server, commo, service)
 - [ ] Implement Jetpack calling ZooKeeper API for read/write commands
 - [ ] Use async ZooKeeper API where available, sync API otherwise
