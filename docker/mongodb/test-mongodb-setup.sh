@@ -119,6 +119,12 @@ check_file_contains "Script reports throughput" "$SCRIPT_DIR/run-mongodb-test.sh
 check_file_contains "Script starts embedded MongoDB" "$SCRIPT_DIR/run-mongodb-test.sh" "start_embedded_mongodb"
 check_file_contains "Script verifies MongoDB read/write" "$SCRIPT_DIR/run-mongodb-test.sh" "verify_mongodb_rw"
 check_file_contains "Script uses mongosh for verification" "$SCRIPT_DIR/run-mongodb-test.sh" "mongosh"
+check_file_contains "Script launches 3 server replicas" "$SCRIPT_DIR/run-mongodb-test.sh" 's101.*s201.*s301'
+check_file_contains "Script launches 1 client" "$SCRIPT_DIR/run-mongodb-test.sh" 'client_procs.*c01'
+check_file_contains "Script checks KVTable collection" "$SCRIPT_DIR/run-mongodb-test.sh" "KVTable"
+check_file_contains "Script has run_single_process_test function" "$SCRIPT_DIR/run-mongodb-test.sh" "run_single_process_test"
+check_file_contains "Script has cleanup trap" "$SCRIPT_DIR/run-mongodb-test.sh" "trap cleanup"
+check_file_contains "Script validates 4 processes" "$SCRIPT_DIR/run-mongodb-test.sh" "All 4 processes"
 echo ""
 
 # --- 8. Source code dependencies ---

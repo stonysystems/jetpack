@@ -138,7 +138,14 @@ Existing integration code: `src/deptran/mongodb/`, `src/deptran/mongodb_*.h`
   - `docker/mongodb/run-mongodb-test.sh`: Entrypoint script with modes: single, mongodb-only, bash
   - `docker/mongodb/test-mongodb-setup.sh`: Infrastructure validation test (58 checks)
   - Uses existing config: `config/1c1s3r1p.yml` + `config/none_mongodb.yml` + `config/rw_fixed.yml`
-- [ ] Single-process test: basic read/write through Jetpack + MongoDB
+- [x] Single-process test: basic read/write through Jetpack + MongoDB
+  - Implemented in `run-mongodb-test.sh single` mode
+  - Starts embedded mongod (standalone), verifies MongoDB R/W via mongosh
+  - Launches 3 server replicas (s101, s201, s301) + 1 client (c01)
+  - Uses `rw_fixed.yml` benchmark (100% writes via JetPack.KVTable collection)
+  - Validates: process exit codes, MongoDB document count, throughput in logs, no crashes
+  - Servers start before client (1s stagger) for proper initialization
+  - Infrastructure validation: 64 checks pass (test-mongodb-setup.sh)
 - [ ] Multi-process test: 5 servers, 5 processes, simulated network latency between servers
 - [ ] Failure recovery test: run normal procedure, kill MongoDB leader, let MongoDB
       leader-elect and trigger Jetpack leader-elect, measure recovery duration of both
