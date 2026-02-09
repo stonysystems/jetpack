@@ -79,7 +79,25 @@ Existing integration code: `src/deptran/mongodb/`, `src/deptran/mongodb_*.h`
   - Issues: hardcoded legacy URIs, empty server.cc, Restart() crashes, sync-only API
   - Replicas do not execute transactions — only leader writes to MongoDB
   - Detailed review: `doc/mongodb_integration_review.md`
-- [ ] Verify/fix Jetpack calling MongoDB API for read/write commands
+- [x] Verify/fix Jetpack calling MongoDB API for read/write commands
+  - Verified all mongocxx v3 API calls against r3.10.1 driver headers:
+    - `collection.update_one(filter, update, options::update{}.upsert(true))` → returns `stdx::optional<result::update>` (correct)
+    - `collection.find_one(filter)` → returns `stdx::optional<bsoncxx::document::value>` (correct)
+    - `collection.create_index(index)` → returns `bsoncxx::document::value` (handler wraps in optional, harmless implicit conversion)
+    - `db.drop()` for Clear operation (correct)
+    - BSON construction via `bsoncxx::builder::stream::document` with `$set` operator (correct)
+  - Verified SimpleRWCommand parsing correctly extracts key/value from TPC commands
+    - Handles CMD_TPC_COMMIT, CMD_TPC_BATCH, CMD_VEC_PIECE, CONTAINER_CMD kinds
+    - `IsRead()` checks RW_BENCHMARK_R_TXN / RW_BENCHMARK_R_TXN_0
+    - `IsWrite()` checks RW_BENCHMARK_W_TXN / RW_BENCHMARK_W_TXN_0
+  - Verified thread pool completion signaling: `cmd_content->mongodb_finished->Set(1)` matches
+    `cmd_content->mongodb_finished->Wait()` in server.h Submit() (ThreadSafeIntEvent pattern)
+  - Verified coordinator dispatches correctly: Submit → Server()->Submit(cmd) → BroadcastCommit
+  - URI handling: recovery mode builds from config hosts (same pattern as etcd); legacy URIs
+    only used in non-recovery mode (intentional, matches etcd behavior)
+  - Read results used directly (unlike etcd which discards results — MongoDB acts as data store)
+  - Notes: `finished_queue_` in thread pool is commented out (orphaned from abandoned ExecutionHandler);
+    error handling logs to stderr (adequate for current use)
 - [ ] Use async MongoDB API where available, sync API otherwise
 
 #### Failure Recovery
