@@ -66,7 +66,10 @@ All experiments run in Docker containers. Create a new Dockerfile if needed.
 Existing integration code: `src/deptran/mongodb/`, `src/deptran/mongodb_*.h`
 
 #### Integration (without failure recovery)
-- [ ] Set up `third_party/` folder and clone MongoDB source
+- [x] Set up `third_party/` folder and clone MongoDB source
+  - `third_party/mongo-c-driver` (v1.27.1): MongoDB C driver (libmongoc + libbson)
+  - `third_party/mongo-cxx-driver` (r3.10.1): MongoDB C++ driver (mongocxx + bsoncxx)
+  - `third_party/build_mongodb.sh`: Build script for both drivers
 - [ ] Review existing MongoDB integration (`src/deptran/mongodb/`)
 - [ ] Verify/fix Jetpack calling MongoDB API for read/write commands
 - [ ] Use async MongoDB API where available, sync API otherwise

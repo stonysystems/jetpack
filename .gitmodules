@@ -1,3 +1,9 @@
 [submodule "dependencies/yaml-cpp"]
 	path = dependencies/yaml-cpp
 	url = https://github.com/jbeder/yaml-cpp/
+[submodule "third_party/mongo-c-driver"]
+	path = third_party/mongo-c-driver
+	url = https://github.com/mongodb/mongo-c-driver.git
+[submodule "third_party/mongo-cxx-driver"]
+	path = third_party/mongo-cxx-driver
+	url = https://github.com/mongodb/mongo-cxx-driver.git
