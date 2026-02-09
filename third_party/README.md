@@ -31,3 +31,33 @@ cd third_party
 
 The MongoDB server (mongod v7.0) is installed separately via the system
 package manager. See `dep.sh` for the full installation procedure.
+
+## etcd C++ Client
+
+| Submodule | Version | Description |
+|-----------|---------|-------------|
+| `etcd-cpp-apiv3` | v0.2.14 | C++ client for etcd v3 API |
+
+### Build
+
+```bash
+# Install system prerequisites (Ubuntu/Debian)
+sudo apt-get install -y build-essential cmake libssl-dev pkg-config \
+    libboost-all-dev libprotobuf-dev protobuf-compiler \
+    libgrpc++-dev protobuf-compiler-grpc libcpprest-dev
+
+# Initialize submodule (if not already done)
+git submodule update --init third_party/etcd-cpp-apiv3
+
+# Build and install (default prefix: /usr/local)
+cd third_party
+./build_etcd.sh
+
+# Or with custom prefix
+./build_etcd.sh --prefix ~/.local
+```
+
+### etcd Server
+
+The etcd server is installed separately. See the
+[etcd releases](https://github.com/etcd-io/etcd/releases) page.

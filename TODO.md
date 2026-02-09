@@ -96,7 +96,9 @@ Existing integration code: `src/deptran/mongodb/`, `src/deptran/mongodb_*.h`
 Existing integration code: `src/deptran/etcd/`, `src/deptran/etcd_*.h`
 
 #### Integration (without failure recovery)
-- [ ] Set up `third_party/` folder and clone etcd source
+- [x] Set up `third_party/` folder and clone etcd source
+  - `third_party/etcd-cpp-apiv3` (v0.2.14): C++ client for etcd v3 API
+  - `third_party/build_etcd.sh`: Build script
 - [ ] Review existing etcd integration (`src/deptran/etcd/`)
 - [ ] Verify/fix Jetpack calling etcd API for read/write commands
 - [ ] Use async etcd API where available, sync API otherwise
