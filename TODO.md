@@ -70,7 +70,15 @@ Existing integration code: `src/deptran/mongodb/`, `src/deptran/mongodb_*.h`
   - `third_party/mongo-c-driver` (v1.27.1): MongoDB C driver (libmongoc + libbson)
   - `third_party/mongo-cxx-driver` (r3.10.1): MongoDB C++ driver (mongocxx + bsoncxx)
   - `third_party/build_mongodb.sh`: Build script for both drivers
-- [ ] Review existing MongoDB integration (`src/deptran/mongodb/`)
+- [x] Review existing MongoDB integration (`src/deptran/mongodb/`)
+  - 12 files (~860 lines): frame, coordinator, server, commo, service, kv_handler, thread_pool
+  - Integration is functionally complete for basic read/write path
+  - Uses mongocxx v3 (sync only) with BSON serialization
+  - Thread pool: pre-allocated worker threads with round-robin dispatch (2500 AWS, 80 local)
+  - Failover recovery via file-based signaling (same pattern as etcd)
+  - Issues: hardcoded legacy URIs, empty server.cc, Restart() crashes, sync-only API
+  - Replicas do not execute transactions — only leader writes to MongoDB
+  - Detailed review: `doc/mongodb_integration_review.md`
 - [ ] Verify/fix Jetpack calling MongoDB API for read/write commands
 - [ ] Use async MongoDB API where available, sync API otherwise
 
