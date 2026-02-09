@@ -98,7 +98,18 @@ Existing integration code: `src/deptran/mongodb/`, `src/deptran/mongodb_*.h`
   - Read results used directly (unlike etcd which discards results — MongoDB acts as data store)
   - Notes: `finished_queue_` in thread pool is commented out (orphaned from abandoned ExecutionHandler);
     error handling logs to stderr (adequate for current use)
-- [ ] Use async MongoDB API where available, sync API otherwise
+- [x] Use async MongoDB API where available, sync API otherwise
+  - mongocxx r3.10.1 has NO native async API (no futures, no callbacks, no coroutine support)
+  - Unlike etcd (which has `pplx::task`-based async via `etcd::Client`), mongocxx is sync-only
+  - Async behavior already implemented via `MongodbConnectionThreadPool`:
+    - N persistent worker threads, each owning a dedicated `mongocxx::client` (thread-safety requirement)
+    - Main thread pushes commands into per-worker `CommandQueue` (non-blocking, round-robin)
+    - Workers execute sync mongocxx operations and signal completion via `ThreadSafeIntEvent`
+  - Thread pool approach is superior to detached-thread fallback for mongocxx because:
+    - Each `mongocxx::client` must be used by a single thread (driver constraint)
+    - Persistent connections avoid per-request client creation overhead
+    - This is the official mongocxx recommended pattern for concurrent access
+  - No code changes needed — current implementation is already the correct async pattern
 
 #### Failure Recovery
 - [ ] MongoDB hooker: detect when new MongoDB leader finishes recovery/election,
