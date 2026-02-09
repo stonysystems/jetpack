@@ -52,6 +52,33 @@ All TLA+ model checking runs in Docker (`tla/Dockerfile`).
   - Partial: 37M+ states, 3.6M+ distinct, no violations (3 servers, 1 cmd, SmallStateConstraint)
   - Note: Mencius composition state space too large for exhaustive checking
 
+## Priority 1.5 (Medium-High): Jetpack + etcd
+
+Existing integration code: `src/deptran/etcd/`, `src/deptran/etcd_*.h`
+
+### Integration (without failure recovery)
+- [ ] Set up `third_party/` folder and clone etcd source
+- [ ] Review existing etcd integration (`src/deptran/etcd/`)
+- [ ] Verify/fix Jetpack calling etcd API for read/write commands
+- [ ] Use async etcd API where available, sync API otherwise
+
+### Failure Recovery
+- [ ] etcd hooker: detect when new etcd leader finishes recovery/election,
+      write a signal file with the new term/view_id for Jetpack to read
+- [ ] Jetpack hooker: monitor signal from etcd, trigger Jetpack failure recovery
+      when etcd view change is detected
+
+### Testing (in Docker)
+- [ ] Docker environment for etcd integration testing (create Dockerfile if needed)
+- [ ] Single-process test: basic read/write through Jetpack + etcd
+- [ ] Multi-process test: 5 servers, 5 processes, simulated network latency between servers
+- [ ] Failure recovery test: run normal procedure, kill etcd leader, let etcd
+      leader-elect and trigger Jetpack leader-elect, measure recovery duration of both
+      etcd and Jetpack
+
+### Documentation
+- [ ] Write integration notes for anything interesting/noteworthy/suitable for the paper
+
 ## Priority 2 (Medium): Jetpack + Industry Applications
 
 Integrate Jetpack with real-world consensus/coordination systems. For each integration,
@@ -91,34 +118,7 @@ Existing integration code: `src/deptran/mongodb/`, `src/deptran/mongodb_*.h`
 #### Documentation
 - [ ] Write integration notes for anything interesting/noteworthy/suitable for the paper
 
-### 2b. Jetpack + etcd
-
-Existing integration code: `src/deptran/etcd/`, `src/deptran/etcd_*.h`
-
-#### Integration (without failure recovery)
-- [ ] Set up `third_party/` folder and clone etcd source
-- [ ] Review existing etcd integration (`src/deptran/etcd/`)
-- [ ] Verify/fix Jetpack calling etcd API for read/write commands
-- [ ] Use async etcd API where available, sync API otherwise
-
-#### Failure Recovery
-- [ ] etcd hooker: detect when new etcd leader finishes recovery/election,
-      write a signal file with the new term/view_id for Jetpack to read
-- [ ] Jetpack hooker: monitor signal from etcd, trigger Jetpack failure recovery
-      when etcd view change is detected
-
-#### Testing (in Docker)
-- [ ] Docker environment for etcd integration testing (create Dockerfile if needed)
-- [ ] Single-process test: basic read/write through Jetpack + etcd
-- [ ] Multi-process test: 5 servers, 5 processes, simulated network latency between servers
-- [ ] Failure recovery test: run normal procedure, kill etcd leader, let etcd
-      leader-elect and trigger Jetpack leader-elect, measure recovery duration of both
-      etcd and Jetpack
-
-#### Documentation
-- [ ] Write integration notes for anything interesting/noteworthy/suitable for the paper
-
-### 2c. Jetpack + ZooKeeper
+### 2b. Jetpack + ZooKeeper
 
 No existing integration code. Needs to be implemented from scratch.
 
