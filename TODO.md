@@ -156,9 +156,21 @@ Existing integration code: `src/deptran/etcd/`, `src/deptran/etcd_*.h`
   - Dockerfile updated with `iproute2` for `tc` support (requires `--privileged` or `NET_ADMIN`)
   - Validates: process exit codes, etcd key count, throughput, crash detection
   - Infrastructure validation: 53 checks pass (test-etcd-setup.sh)
-- [ ] Failure recovery test: run normal procedure, kill etcd leader, let etcd
+- [x] Failure recovery test: run normal procedure, kill etcd leader, let etcd
       leader-elect and trigger Jetpack leader-elect, measure recovery duration of both
       etcd and Jetpack
+  - Implemented in `run-etcd-test.sh recovery` mode
+  - Creates 3-node etcd cluster on separate loopback IPs (127.0.0.1-3)
+  - Config: `config/failover_etcd.yml` (run 5s, then soft-kill leader, wait 10s)
+  - Jetpack uses `JETPACK_ETCD_RECOVERY` build flag to enable real recovery path
+  - Recovery sequence: kill etcd primary → EtcdLeaderWatcher detects new leader →
+    signals via jm_file_signal → EtcdServer recovery coroutine triggers
+    JetpackRecoveryEntry() → 3-phase Paxos recovery
+  - Validates: failover triggered, Jetpack recovery completed, recovery duration,
+    etcd cluster survival (2/3 healthy), signal files created, no crashes
+  - Helper functions: `start_etcd_cluster()`, `get_etcd_leader_ip()`,
+    `kill_etcd_node()`, `wait_etcd_new_leader()`
+  - Infrastructure validation: 68 checks pass (test-etcd-setup.sh)
 
 #### Documentation
 - [ ] Write integration notes for anything interesting/noteworthy/suitable for the paper

@@ -71,6 +71,7 @@ check_file_exists "Site config (1c1s3r1p.yml)" "$PROJECT_DIR/config/1c1s3r1p.yml
 check_file_exists "Multi-process config (5c1s5r1p_etcd.yml)" "$PROJECT_DIR/config/5c1s5r1p_etcd.yml"
 check_file_exists "Mode config (none_etcd.yml)" "$PROJECT_DIR/config/none_etcd.yml"
 check_file_exists "Benchmark config (rw_fixed.yml)" "$PROJECT_DIR/config/rw_fixed.yml"
+check_file_exists "Failover config (failover_etcd.yml)" "$PROJECT_DIR/config/failover_etcd.yml"
 echo ""
 
 # --- 3. Config content validation ---
@@ -84,6 +85,10 @@ check_file_contains "5c1s5r1p_etcd.yml has 5 servers" "$PROJECT_DIR/config/5c1s5
 check_file_contains "5c1s5r1p_etcd.yml has 5 clients" "$PROJECT_DIR/config/5c1s5r1p_etcd.yml" "c501"
 check_file_contains "5c1s5r1p_etcd.yml has separate loopback IPs" "$PROJECT_DIR/config/5c1s5r1p_etcd.yml" "127.0.0.5"
 check_file_contains "5c1s5r1p_etcd.yml maps hosts h1-h5" "$PROJECT_DIR/config/5c1s5r1p_etcd.yml" "h5:"
+check_file_contains "failover_etcd.yml has failover method" "$PROJECT_DIR/config/failover_etcd.yml" "method: soft"
+check_file_contains "failover_etcd.yml has run_interval" "$PROJECT_DIR/config/failover_etcd.yml" "run_interval:"
+check_file_contains "failover_etcd.yml has stop_interval" "$PROJECT_DIR/config/failover_etcd.yml" "stop_interval:"
+check_file_contains "failover_etcd.yml targets leader" "$PROJECT_DIR/config/failover_etcd.yml" "failserver: leader"
 echo ""
 
 # --- 4. Shell script syntax ---
@@ -130,6 +135,20 @@ check_file_contains "Script uses tc netem for latency" "$SCRIPT_DIR/run-etcd-tes
 check_file_contains "Script launches 5 servers" "$SCRIPT_DIR/run-etcd-test.sh" "s401.*s501"
 check_file_contains "Script launches 5 clients" "$SCRIPT_DIR/run-etcd-test.sh" "c401.*c501"
 check_file_contains "Script validates 10 processes" "$SCRIPT_DIR/run-etcd-test.sh" "5 servers.*5 clients"
+echo ""
+
+# --- 7c. Recovery test mode ---
+echo "7c. Test Script Content (recovery mode)"
+check_file_contains "Script has recovery mode" "$SCRIPT_DIR/run-etcd-test.sh" "run_recovery_test"
+check_file_contains "Script has 3-node etcd cluster setup" "$SCRIPT_DIR/run-etcd-test.sh" "start_etcd_cluster"
+check_file_contains "Script has etcd leader detection" "$SCRIPT_DIR/run-etcd-test.sh" "get_etcd_leader_ip"
+check_file_contains "Script has etcd node kill function" "$SCRIPT_DIR/run-etcd-test.sh" "kill_etcd_node"
+check_file_contains "Script has new leader wait function" "$SCRIPT_DIR/run-etcd-test.sh" "wait_etcd_new_leader"
+check_file_contains "Script references failover config" "$SCRIPT_DIR/run-etcd-test.sh" "failover_etcd"
+check_file_contains "Script checks for recovery completion" "$SCRIPT_DIR/run-etcd-test.sh" "JETPACK-RECOVERY.*COMPLETED"
+check_file_contains "Script checks signal files" "$SCRIPT_DIR/run-etcd-test.sh" "JM_Jetpack_"
+check_file_contains "Script seeds JetPack/leader key" "$SCRIPT_DIR/run-etcd-test.sh" "JetPack/leader"
+check_file_contains "Script checks surviving etcd nodes" "$SCRIPT_DIR/run-etcd-test.sh" "surviving_nodes"
 echo ""
 
 # --- 8. Source code dependencies ---
