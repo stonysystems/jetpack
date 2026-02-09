@@ -375,7 +375,7 @@ No existing integration code. Needs to be implemented from scratch.
 For every completed task above, document the command(s) to run and verify it in
 the project README.md. Clean up README as needed.
 
-- [ ] TLA+ model checking: how to build Docker image and run TLC for each spec
-- [ ] MongoDB integration: how to build, run single/multi/recovery tests
-- [ ] etcd integration: how to build, run single/multi/recovery tests
-- [ ] ZooKeeper integration: how to build, run single/multi/recovery tests
+- [x] TLA+ model checking: how to build Docker image and run TLC for each spec
+- [x] MongoDB integration: how to build, run single/multi/recovery tests
+- [x] etcd integration: how to build, run single/multi/recovery tests
+- [x] ZooKeeper integration: how to build, run single/multi/recovery tests
