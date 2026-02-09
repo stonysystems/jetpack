@@ -85,9 +85,12 @@ EtcdServiceImpl::Commit() (on replicas)
 
 ## Issues and Observations
 
-1. **Hardcoded URIs**: `kEtcdUri = "http://127.0.0.1:2379"` is hardcoded in
+1. **Hardcoded URIs**: ~~`kEtcdUri = "http://127.0.0.1:2379"` is hardcoded in
    `etcd_kv_table_handler.h`. For multi-node setups, this needs to be
-   configurable per-node.
+   configurable per-node.~~ **FIXED**: In `JETPACK_ETCD_RECOVERY` mode,
+   `EtcdServer::Setup()` now builds the URI from `Config::GetReplicaHosts()`
+   (same pattern as MongoDB). The hardcoded constant is only used as fallback
+   in non-recovery mode.
 
 2. **No server.cc**: All `EtcdServer` logic is in the header file. This is
    functional but unconventional for a class this large (~190 lines).
@@ -128,3 +131,24 @@ abstract service Etcd {
 
 This generates `EtcdService` (base), `EtcdServiceImpl` (server-side),
 and `EtcdProxy` (client-side stub).
+
+## API Verification
+
+Verified the etcd API call chain against `etcd-cpp-apiv3` v0.2.14 headers:
+
+| Jetpack Call | etcd-cpp-apiv3 Method | Return Type (async) | Return Type (sync) |
+|---|---|---|---|
+| `handler_->WriteAsync(key, value)` | `Client::put(string, string)` | `pplx::task<Response>` | N/A |
+| `handler_->ReadAsync(key)` | `Client::get(string)` | `pplx::task<Response>` | N/A |
+| `handler_->Write(key, value)` | `Client::put(...)` / `SyncClient::put(...)` | `pplx::task<Response>` | `Response` |
+| `handler_->Read(key)` | `Client::get(...)` / `SyncClient::get(...)` | `pplx::task<Response>` | `Response` |
+| `handler_->Clear()` | `Client::rmdir(prefix, true)` / `SyncClient::rmdir(...)` | `pplx::task<Response>` | `Response` |
+
+All method signatures match. `Response::is_ok()` and `Response::value().as_string()`
+are confirmed to exist in the library headers.
+
+**Key observation**: Read results are intentionally discarded in
+`EtcdConnectionThreadPool::EtcdRequest()`. Etcd serves as the atomic broadcast
+(ordering) layer — the actual state machine lives in Jetpack. The read/write to
+etcd ensures the command is ordered through etcd's Raft consensus, not for data
+retrieval.

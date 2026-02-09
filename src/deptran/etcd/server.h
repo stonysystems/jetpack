@@ -31,11 +31,23 @@ class EtcdServer : public TxLogServer {
 
   void Setup() override {
     SimpleRWCommand::SetZeroTime();
-    etcd_uri_ = kEtcdUri;
-    Log_info("etcd_uri_:%s, loc_id_:%d, etcd_connection_:%d", etcd_uri_.c_str(), loc_id_, etcd_connection_);
 #ifdef JETPACK_ETCD_RECOVERY
+    // Build etcd URI from config replica hosts for this partition.
+    auto cfg = Config::GetConfig();
+    auto hosts = cfg->GetReplicaHosts(partition_id_);
+    if (!hosts.empty()) {
+      auto pos = hosts[0].find(':');
+      if (pos != std::string::npos) {
+        etcd_uri_ = "http://" + hosts[0].substr(0, pos) + ":2379";
+      } else {
+        etcd_uri_ = "http://" + hosts[0] + ":2379";
+      }
+    }
+    Log_info("etcd_uri_:%s, loc_id_:%d, etcd_connection_:%d", etcd_uri_.c_str(), loc_id_, etcd_connection_);
     etcd_ = make_shared<EtcdConnectionThreadPool>(etcd_connection_, etcd_uri_);
 #else
+    etcd_uri_ = kEtcdUri;
+    Log_info("etcd_uri_:%s, loc_id_:%d, etcd_connection_:%d", etcd_uri_.c_str(), loc_id_, etcd_connection_);
     etcd_ = make_shared<EtcdConnectionThreadPool>(loc_id_ == 0 ? etcd_connection_ : 0, etcd_uri_);
 #endif
 

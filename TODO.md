@@ -106,8 +106,16 @@ Existing integration code: `src/deptran/etcd/`, `src/deptran/etcd_*.h`
   - Failure recovery via file-based signaling (`jm_file_signal.h`)
   - Issues: hardcoded URIs, no server.cc, AWS-specific connection counts
   - Detailed review: `doc/etcd_integration_review.md`
-- [ ] Verify/fix Jetpack calling etcd API for read/write commands
-- [ ] Use async etcd API where available, sync API otherwise
+- [x] Verify/fix Jetpack calling etcd API for read/write commands
+  - Verified all etcd-cpp-apiv3 API calls (put/get/rmdir) match library signatures
+  - Verified SimpleRWCommand parsing correctly extracts key/value from TPC commands
+  - Verified async (pplx) and sync (std::thread) paths both signal completion correctly
+  - Fixed: etcd URI now built from config hosts in recovery mode (was hardcoded)
+  - Read results intentionally discarded (etcd serves as ordering/AB layer, not data store)
+- [x] Use async etcd API where available, sync API otherwise
+  - Already implemented: compile-time `JANUS_ETCD_HAS_PPLX` auto-detection via `__has_include`
+  - Async path uses `pplx::task` with `.then()` continuations
+  - Sync fallback uses `std::thread(...).detach()` per request
 
 #### Failure Recovery
 - [ ] etcd hooker: detect when new etcd leader finishes recovery/election,
