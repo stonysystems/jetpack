@@ -1,0 +1,31 @@
+
+# 5 clients, 1 site, 5 replicas, 1 partition — ZooKeeper multi-process Docker test.
+#
+# Each server is mapped to a separate loopback address (127.0.0.1 - 127.0.0.5)
+# so that tc/netem can apply per-server latency to simulate network delays.
+# Clients share 127.0.0.1.
+
+site:
+  server: # each line is a partition, the first is the master site_name:port
+    - ["s101:18000", "s201:18001", "s301:18002", "s401:18003", "s501:18004"]
+  client: # each line is a partition
+    - ["c101", "c201", "c301", "c401", "c501"]
+
+process:
+  s101: h1
+  s201: h2
+  s301: h3
+  s401: h4
+  s501: h5
+  c101: h1
+  c201: h2
+  c301: h3
+  c401: h4
+  c501: h5
+
+host:
+  h1: 127.0.0.1
+  h2: 127.0.0.2
+  h3: 127.0.0.3
+  h4: 127.0.0.4
+  h5: 127.0.0.5

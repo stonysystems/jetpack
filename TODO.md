@@ -316,7 +316,15 @@ No existing integration code. Needs to be implemented from scratch.
       every 10ms via coroutine, trigger JetpackRecoveryEntry() on detection.
 
 #### Testing (in Docker)
-- [ ] Docker environment for ZooKeeper integration testing (create Dockerfile if needed)
+- [x] Docker environment for ZooKeeper integration testing (create Dockerfile if needed)
+  - `docker/zookeeper/Dockerfile`: Multi-stage build (Ubuntu 22.04, Python 3.10 for WAF compatibility)
+    - Stage 1: Builds ZooKeeper C client (Maven jute generation + CMake), then Jetpack via WAF
+    - Stage 2: Runtime image with Apache ZooKeeper 3.9.4 server (Java-based from Apache downloads)
+    - Copies built libzookeeper libraries and Jetpack binaries
+  - `docker/zookeeper/docker-compose.yml`: Orchestration for external ZooKeeper + Jetpack testing
+  - `docker/zookeeper/run-zookeeper-test.sh`: Entrypoint script with modes: single, multi, recovery, zookeeper-only, bash
+  - `docker/zookeeper/test-zookeeper-setup.sh`: Infrastructure validation test (81 checks)
+  - Uses existing config: `config/1c1s3r1p.yml` for single-process tests
 - [ ] Single-process test: basic read/write through Jetpack + ZooKeeper
 - [ ] Multi-process test: 5 servers, 5 processes, simulated network latency between servers
 - [ ] Failure recovery test: run normal procedure, kill ZooKeeper leader, let ZooKeeper
