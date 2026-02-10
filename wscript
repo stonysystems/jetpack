@@ -139,6 +139,12 @@ def configure(conf):
     conf.env.append_value("LDFLAGS", "-lcpprest")
     conf.env.append_value("LDFLAGS", "-letcd-cpp-api")
 
+    # enable ZooKeeper synchronous API (zoo_exists, zoo_create, etc.)
+    conf.env.append_value("CXXFLAGS", "-DTHREADED")
+    conf.env.append_value("LDFLAGS", "-lzookeeper")
+    conf.env.append_value("LDFLAGS", "-lhashtable")
+    conf.env.append_value("LDFLAGS", ["-lssl", "-lcrypto"])
+
 def build(bld):
     _depend("src/rrr/pylib/simplerpcgen/rpcgen.py",
             "src/rrr/pylib/simplerpcgen/rpcgen.g",

@@ -73,13 +73,13 @@ class Config {
   int timestamp_{TimestampType::CLOCK};
 
   // failover configuration
-  bool failover_;
-  bool failover_soft_;
-  bool failover_random_;
-  bool failover_leader_;
-  int32_t failover_srv_idx_;
-  int32_t failover_run_int_;
-  int32_t failover_stop_int_;
+  bool failover_{false};
+  bool failover_soft_{false};
+  bool failover_random_{false};
+  bool failover_leader_{false};
+  int32_t failover_srv_idx_{-1};
+  int32_t failover_run_int_{0};
+  int32_t failover_stop_int_{0};
 
   // TODO remove, will cause problems.
   uint32_t num_site_;

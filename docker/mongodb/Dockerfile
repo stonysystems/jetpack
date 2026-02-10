@@ -1,28 +1,30 @@
 # Docker environment for Jetpack + MongoDB integration testing.
 #
-# Builds Jetpack with mongocxx support and bundles a MongoDB server
-# for self-contained integration testing.
+# Builds Jetpack with all backend libraries (mongocxx, etcd-cpp-api,
+# libzookeeper) since WAF compiles all integration modules, then
+# bundles a MongoDB server for self-contained integration testing.
 #
 # Build:
-#   docker build -t jetpack-mongodb docker/mongodb/
+#   docker build --network=host -t jetpack-mongodb -f docker/mongodb/Dockerfile .
 #
 # Run (single-process test):
-#   docker run --rm jetpack-mongodb
+#   docker run --rm --privileged jetpack-mongodb
 #
 # Run (interactive):
-#   docker run --rm -it jetpack-mongodb bash
+#   docker run --rm --privileged -it jetpack-mongodb bash
 
 FROM ubuntu:22.04 AS builder
 
 ENV DEBIAN_FRONTEND=noninteractive
 ENV TZ=Etc/UTC
 
-# Build dependencies for Jetpack + MongoDB C/C++ drivers
+# Build dependencies for Jetpack + all backend libraries
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     cmake \
     git \
     pkg-config \
+    python2 \
     python3 \
     python3-dev \
     python3-pip \
@@ -36,6 +38,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libsnappy-dev \
     zlib1g-dev \
     libicu-dev \
+    # etcd dependencies
+    libprotobuf-dev \
+    protobuf-compiler \
+    protobuf-compiler-grpc \
+    libgrpc++-dev \
+    libcpprest-dev \
+    # ZooKeeper C client dependencies (jute files pre-generated on host)
+    #
     # Jetpack dependencies
     libboost-all-dev \
     libyaml-cpp-dev \
@@ -80,12 +90,45 @@ RUN cd /build/third_party/mongo-cxx-driver && \
     cmake --build . -- -j"$(nproc)" && \
     cmake --install .
 
-# Update library cache so linker can find mongocxx/bsoncxx
+# Build etcd-cpp-apiv3 library
+RUN cd /build/third_party/etcd-cpp-apiv3 && \
+    mkdir -p build && cd build && \
+    cmake .. \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DCMAKE_INSTALL_PREFIX=/usr/local \
+        -DBUILD_ETCD_TESTS=OFF \
+        -DBUILD_SHARED_LIBS=ON && \
+    cmake --build . -- -j"$(nproc)" && \
+    cmake --install .
+
+# Build ZooKeeper C client (jute files must be pre-generated on host)
+# Note: ZooKeeper's CMakeLists.txt has no install() rules, so we manually
+# install headers and libraries after building.
+RUN cd /build/third_party/zookeeper/zookeeper-client/zookeeper-client-c && \
+    mkdir -p build && cd build && \
+    cmake .. \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DCMAKE_INSTALL_PREFIX=/usr/local \
+        -DWANT_SYNCAPI=ON \
+        -DWANT_CPPUNIT=OFF \
+        -DWITH_OPENSSL=ON \
+        -DWITH_CYRUS_SASL=OFF && \
+    cmake --build . -- -j"$(nproc)" && \
+    mkdir -p /usr/local/include/zookeeper && \
+    cp ../include/*.h /usr/local/include/zookeeper/ && \
+    cp ../generated/zookeeper.jute.h /usr/local/include/zookeeper/ && \
+    cp include/config.h /usr/local/include/zookeeper/ && \
+    cp libzookeeper.a /usr/local/lib/ && \
+    cp libhashtable.a /usr/local/lib/
+
+# Update library cache so linker can find all libraries
 RUN ldconfig
 
+# Generate RPC files (rpcgen requires python2)
+RUN python2 bin/rpcgen --python --cpp src/deptran/rcc_rpc.rpc
+
 # Build Jetpack (WAF). Ubuntu 22.04 ships Python 3.10 which is compatible.
-RUN python3 waf configure && python3 waf build -j"$(nproc)" || \
-    echo "WAF build completed (some warnings may be expected)"
+RUN python3 waf configure && python3 waf build -j"$(nproc)"
 
 # ---------------------------------------------------------------------------
 # Runtime image
@@ -95,7 +138,7 @@ FROM ubuntu:22.04
 ENV DEBIAN_FRONTEND=noninteractive
 ENV TZ=Etc/UTC
 
-# Runtime libraries
+# Runtime libraries (all backends)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libssl3 \
     libsasl2-2 \
@@ -112,19 +155,24 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libgoogle-perftools4 \
     libapr1 \
     libaprutil1 \
+    libprotobuf23 \
+    libgrpc++1 \
+    libcpprest \
     python3 \
     python3-yaml \
     wget \
     curl \
     gnupg \
+    ca-certificates \
     procps \
     iproute2 \
     && rm -rf /var/lib/apt/lists/*
 
 # Install MongoDB server (mongod + mongosh) from official MongoDB repo
 ARG MONGODB_VERSION=7.0
-RUN wget -qO - https://www.mongodb.org/static/pgp/server-${MONGODB_VERSION}.asc | \
-    gpg --dearmor -o /usr/share/keyrings/mongodb-server-${MONGODB_VERSION}.gpg && \
+ADD https://pgp.mongodb.com/server-${MONGODB_VERSION}.asc /tmp/mongodb-server.asc
+RUN gpg --dearmor -o /usr/share/keyrings/mongodb-server-${MONGODB_VERSION}.gpg /tmp/mongodb-server.asc && \
+    rm /tmp/mongodb-server.asc && \
     echo "deb [ signed-by=/usr/share/keyrings/mongodb-server-${MONGODB_VERSION}.gpg ] \
     https://repo.mongodb.org/apt/ubuntu jammy/mongodb-org/${MONGODB_VERSION} multiverse" | \
     tee /etc/apt/sources.list.d/mongodb-org-${MONGODB_VERSION}.list && \
@@ -135,11 +183,13 @@ RUN wget -qO - https://www.mongodb.org/static/pgp/server-${MONGODB_VERSION}.asc 
         mongodb-mongosh \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy built MongoDB C/C++ driver libraries from builder
+# Copy built libraries from builder (all backends)
 COPY --from=builder /usr/local/lib/libmongoc* /usr/local/lib/
 COPY --from=builder /usr/local/lib/libbson* /usr/local/lib/
 COPY --from=builder /usr/local/lib/libmongocxx* /usr/local/lib/
 COPY --from=builder /usr/local/lib/libbsoncxx* /usr/local/lib/
+COPY --from=builder /usr/local/lib/libetcd* /usr/local/lib/
+# ZooKeeper and hashtable are statically linked, no runtime copy needed
 RUN ldconfig
 
 # Copy Jetpack build artifacts
@@ -147,6 +197,7 @@ COPY --from=builder /build/build/ /jetpack/build/
 COPY --from=builder /build/config/ /jetpack/config/
 COPY --from=builder /build/scripts/ /jetpack/scripts/
 COPY --from=builder /build/docker/mongodb/run-mongodb-test.sh /jetpack/run-mongodb-test.sh
+COPY --from=builder /build/docker/mongodb/test-mongodb-setup.sh /jetpack/test-mongodb-setup.sh
 
 WORKDIR /jetpack
 

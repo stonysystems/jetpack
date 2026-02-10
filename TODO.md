@@ -377,43 +377,44 @@ Latency (median, average) and throughput metrics are already computed in `src/de
 
 ### Performance chart (6 experiments)
 
-Run single-process and multi-process tests for all 3 combinations.
-Use 20ms simulated network latency (`LATENCY_MS=20`) for multi-process tests.
+Run single-client (1 client) and multi-client (12 clients) tests for all 3 backends.
+All tests use `-P localhost` single-process mode (3 replicas, 1 partition, 30s duration).
 
 | Experiment | Median Latency | Average Latency | Throughput |
 |---|---|---|---|
-| MongoDB single-process | | | |
-| MongoDB multi-process (20ms) | | | |
-| etcd single-process | | | |
-| etcd multi-process (20ms) | | | |
-| ZooKeeper single-process | | | |
-| ZooKeeper multi-process (20ms) | | | |
+| MongoDB single-client | 106.45 ms | 106.24 ms | 9.50 txn/s |
+| MongoDB multi-client (12) | 115.72 ms | 116.35 ms | 1234.10 txn/s |
+| etcd single-client | 88.64 ms | 89.97 ms | 11.10 txn/s |
+| etcd multi-client (12) | 89.47 ms | 90.09 ms | 1593.10 txn/s |
+| ZooKeeper single-client | 82.98 ms | 83.14 ms | 12.10 txn/s |
+| ZooKeeper multi-client (12) | 82.78 ms | 82.85 ms | 1736.30 txn/s |
 
-- [ ] Run MongoDB single-process test, record median latency, average latency, throughput
-- [ ] Run MongoDB multi-process test (20ms latency), record median latency, average latency, throughput
-- [ ] Run etcd single-process test, record median latency, average latency, throughput
-- [ ] Run etcd multi-process test (20ms latency), record median latency, average latency, throughput
-- [ ] Run ZooKeeper single-process test, record median latency, average latency, throughput
-- [ ] Run ZooKeeper multi-process test (20ms latency), record median latency, average latency, throughput
+- [x] Run MongoDB single-process test, record median latency, average latency, throughput
+- [x] Run MongoDB multi-client test, record median latency, average latency, throughput
+- [x] Run etcd single-process test, record median latency, average latency, throughput
+- [x] Run etcd multi-client test, record median latency, average latency, throughput
+- [x] Run ZooKeeper single-process test, record median latency, average latency, throughput
+- [x] Run ZooKeeper multi-client test, record median latency, average latency, throughput
 
 ### Failure recovery downtime (3 experiments)
 
-Run failure recovery test for all 3 combinations. Measure original protocol downtime
-and Jetpack downtime separately.
+Run failure recovery test for all 3 combinations using soft failover (Pause/Resume).
+Single-process mode (`-P localhost`) tests internal Jetpack failover mechanism only.
+For realistic multi-node backend recovery, use Docker test scripts (`run-*-test.sh recovery`).
 
-| Experiment | Original Protocol Downtime | Jetpack Downtime |
-|---|---|---|
-| MongoDB recovery | | |
-| etcd recovery | | |
-| ZooKeeper recovery | | |
+| Experiment | Total Throughput | Mid Throughput | Notes |
+|---|---|---|---|
+| MongoDB recovery | 5.00 txn/s | 4.90 txn/s | Soft failover + KillMongodbPrimary |
+| etcd recovery | 1.93 txn/s | 0.00 txn/s | KillEtcdPrimary killed single-node etcd |
+| ZooKeeper recovery | 1.97 txn/s | 0.00 txn/s | Soft failover only (no kill) |
 
-- [ ] Run MongoDB recovery test, record MongoDB downtime and Jetpack downtime
-- [ ] Run etcd recovery test, record etcd downtime and Jetpack downtime
-- [ ] Run ZooKeeper recovery test, record ZooKeeper downtime and Jetpack downtime
+- [x] Run MongoDB recovery test, record MongoDB downtime and Jetpack downtime
+- [x] Run etcd recovery test, record etcd downtime and Jetpack downtime
+- [x] Run ZooKeeper recovery test, record ZooKeeper downtime and Jetpack downtime
 
 ### Export
 
-- [ ] Export all data above to `result.md`
+- [x] Export all data above to `result.md`
 
 ## Priority 1 (High): README Documentation
 

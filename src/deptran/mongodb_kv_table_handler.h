@@ -1,6 +1,7 @@
 #pragma once
 
 
+#include "mongocxx/instance.hpp"
 #include "mongocxx/client.hpp"
 #include "mongocxx/database.hpp"
 #include "mongocxx/uri.hpp"
@@ -9,6 +10,13 @@
 #include "bsoncxx/oid.hpp"
 
 namespace janus {
+
+// mongocxx requires exactly one instance to exist before any driver use.
+// Uses Meyer's singleton pattern for thread-safe lazy initialization.
+inline mongocxx::instance& GetMongoInstance() {
+  static mongocxx::instance inst{};
+  return inst;
+}
 
 #if defined(JETPACK_MONGODB_RECOVERY) 
 // Use local loopback in recovery mode to avoid changing legacy defaults.
@@ -27,6 +35,9 @@ constexpr char kCollectionName[] = "KVTable";
 
 class MongodbKVTableHandler {
  private:
+  // Force mongocxx::instance initialization before any driver objects.
+  struct InstanceGuard { InstanceGuard() { GetMongoInstance(); } };
+  InstanceGuard instance_guard_;
   std::string uri_str_;
   mongocxx::uri uri;
   mongocxx::client client;
@@ -34,7 +45,8 @@ class MongodbKVTableHandler {
   mongocxx::collection collection;
  public:
   explicit MongodbKVTableHandler(const std::string& uri_str = kMongoDbUri)
-    : uri_str_(uri_str),
+    : instance_guard_(),
+      uri_str_(uri_str),
       uri(mongocxx::uri(uri_str_)),
       client(mongocxx::client(uri)),
       db(client[kDatabaseName]),
