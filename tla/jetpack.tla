@@ -224,6 +224,7 @@ ChosenExecutedInView(i) ==
             cmd \in SeqToSet(CommittedCmds(s))
 
 ExecAt(k) == IF k <= Len(execution_cmds) THEN execution_cmds[k] ELSE NilCmd
+LogEntryAt(i, k) == IF k <= Len(log[i]) THEN log[i][k] ELSE Nil
 LogCmdAt(i, k) == IF k <= Len(log[i]) THEN log[i][k].value ELSE NilCmd
 
 MaxLogLen == Max({Len(log[i]) : i \in Server} \cup {0})
@@ -687,6 +688,18 @@ JetpackNext ==
 (***************************************************************************)
 (* Properties                                                              *)
 (***************************************************************************)
+
+\* Committed log entries agree across servers at each index.
+\* Entries may be missing (shorter logs), but where they exist they must match.
+LogAgreement ==
+    /\ MaxLogLen >= 0
+    /\ \A i, j \in Server :
+         \A k \in 1..MaxLogLen :
+            LET li == LogEntryAt(i, k)
+                lj == LogEntryAt(j, k)
+            IN \/ li = lj
+               \/ li = Nil
+               \/ lj = Nil
 
 \* Log order matches execution_cmds (allowing NilCmd for missing).
 LogOrderMatchesExecution ==

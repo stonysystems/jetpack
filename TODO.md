@@ -149,7 +149,9 @@ Properties for original base protocols (`raft.tla`, `copilot.tla`, `mencius.tla`
 Run wrapper modules through TLC successfully. Getting them to pass is more important
 than abstraction at this stage.
 
-- [ ] Add LogAgreement, LogOrderMatchesExecution, ExecutionDedupMatches to jetpack.tla properties
+- [x] Add LogAgreement, LogOrderMatchesExecution, ExecutionDedupMatches to jetpack.tla properties
+  - Added LogAgreement + LogEntryAt helper to jetpack.tla (was missing; LogOrderMatchesExecution and ExecutionDedupMatches already existed)
+  - SANY parse check passed; TLC verification of jetpack_raft.tla (small) passed: 82K states, 6K distinct, depth 26
 - [ ] TLC verification of `jetpack_raft.tla` with full Jetpack properties
 - [ ] TLC verification of `jetpack_copilot.tla` with full Jetpack properties
 - [ ] TLC verification of `jetpack_mencius.tla` with full Jetpack properties
