@@ -1,6 +1,6 @@
 # TODO
 
-<!-- NOTE: doc/TODO.md is obsolete and must be ignored. Do NOT read or reference it. -->
+<!-- NOTE: The old doc/ folder has been merged into docs/. All documentation is now in docs/. -->
 
 <!-- PROMPT FOR FUTURE WORK: For every completed task in this TODO, document the
      command(s) to run and verify it in the README.md (clean up README as needed).
@@ -29,36 +29,19 @@ TLC logs are saved to `tla/log/` with protocol name and timestamp.
 
 ## Priority 0 (Top): Documentation Cleanup
 
-- [ ] Merge `doc/` files into `docs/` (single documentation folder)
-  - Existing `doc/` files: `build.md`, `run.md`, `plot.md`, `ec2.md`, `paxos.md`, `profile.md`,
-    `Open-loop-vs-Closed-loop-clients.md`, `README.md`,
-    `etcd_integration_review.md`, `etcd_integration_notes.md`,
-    `mongodb_integration_review.md`, `mongodb_integration_notes.md`,
-    `zookeeper_integration_notes.md`
-  - Existing `docs/` file: `Jetpack_Failure_Recovery_and_MongoDB_Integration.md`
-  - After merge, remove `doc/` folder
-- [ ] Write a doc (`docs/leader_election_signal.md`) explaining the leader election signal
-      mechanism for Jetpack failure recovery. Key points to document:
-  - **The problem**: After the original protocol (MongoDB/etcd/ZooKeeper) completes leader
-    election, Jetpack needs to know so it can trigger its own recovery. The new leader of
-    the original protocol must write a signal file after its recovery finishes.
-  - **Current approach (client-side detection)**: The current `*_leader_watcher.h` files in
-    `src/deptran/` detect leader changes from the client side (watching topology/keys/znodes).
-    This does NOT modify the original protocol source code — it observes externally.
-    - `mongodb_leader_watcher.h`: watches mongocxx APM topology changes
-    - `etcd_leader_watcher.h`: watches `JetPack/leader` key for PUT events
-    - `zookeeper_leader_watcher.h`: watches `/JetPack/leader` ephemeral znode
-  - **What's missing**: No source code modifications have been made to MongoDB, etcd, or
-    ZooKeeper themselves. For accurate recovery timing, we need to modify the original
-    protocol's source code so the **new leader itself** writes the signal file immediately
-    after finishing its own recovery/election — not detected indirectly from the client side.
+- [x] Merge `doc/` files into `docs/` (single documentation folder)
+  - Moved all files from `doc/` to `docs/` using `git mv`
+  - Updated all references from `doc/` to `docs/`
+  - Removed `doc/` folder
+- [x] Write a doc (`docs/leader_election_signal.md`) explaining the leader election signal
+      mechanism for Jetpack failure recovery
+  - Documented: signal mechanism (jm_file_signal.h), signal chain, three detection
+    approaches (client-side watcher, external script, source code modification),
+    server polling code, recovery procedure, timing results, key files
   - **TODO: Source code modifications needed** (in `third_party/` cloned repos):
     - [ ] MongoDB: find where new primary finishes step-up, add signal file write
     - [ ] etcd: find where new leader finishes Raft election, add signal file write
     - [ ] ZooKeeper: find where new leader finishes ZAB election, add signal file write
-  - Signal mechanism: `src/deptran/jm_file_signal.h` (file-based IPC)
-  - Jetpack-side hookers: `src/deptran/mongodb/server.h`, `src/deptran/etcd/server.h`,
-    `src/deptran/zookeeper/server.h` — poll for signal, trigger `JetpackRecoveryEntry()`
 
 ## Priority 0 (Top): Benchmark Data Collection (`result.md`)
 
@@ -242,7 +225,7 @@ Existing integration code: `src/deptran/mongodb/`, `src/deptran/mongodb_*.h`
   - Failover recovery via file-based signaling (same pattern as etcd)
   - Issues: hardcoded legacy URIs, empty server.cc, Restart() crashes, sync-only API
   - Replicas do not execute transactions — only leader writes to MongoDB
-  - Detailed review: `doc/mongodb_integration_review.md`
+  - Detailed review: `docs/mongodb_integration_review.md`
 - [x] Verify/fix Jetpack calling MongoDB API for read/write commands
 - [x] Use async MongoDB API where available, sync API otherwise
 
@@ -262,7 +245,7 @@ Existing integration code: `src/deptran/mongodb/`, `src/deptran/mongodb_*.h`
 
 #### Documentation
 - [x] Write integration notes for anything interesting/noteworthy/suitable for the paper
-  - Document: `doc/mongodb_integration_notes.md`
+  - Document: `docs/mongodb_integration_notes.md`
 
 ### 2b. Jetpack + etcd (higher priority within this section)
 
@@ -290,7 +273,7 @@ Existing integration code: `src/deptran/etcd/`, `src/deptran/etcd_*.h`
 
 #### Documentation
 - [x] Write integration notes for anything interesting/noteworthy/suitable for the paper
-  - Document: `doc/etcd_integration_notes.md`
+  - Document: `docs/etcd_integration_notes.md`
 
 ### 2c. Jetpack + ZooKeeper
 
@@ -318,7 +301,7 @@ No existing integration code. Needs to be implemented from scratch.
 
 #### Documentation
 - [x] Write integration notes for anything interesting/noteworthy/suitable for the paper
-  - Document: `doc/zookeeper_integration_notes.md`
+  - Document: `docs/zookeeper_integration_notes.md`
 
 ## Priority 1 (High): README Documentation
 
