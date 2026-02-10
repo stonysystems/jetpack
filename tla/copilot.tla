@@ -414,7 +414,29 @@ CommittedLogAgreement ==
 ActiveProposerBound ==
     Cardinality({i \in Server : role[i] \in {Pilot, Copilot}}) <= 2
 
-Safety == [](CommittedLogAgreement /\ ActiveProposerBound)
+MaxLogExecLen == Max({MaxLogLen, Len(execution_cmds)})
+
+\* Logs agree at each index (using length guards to avoid TLC type errors).
+LogAgreement ==
+    /\ MaxLogLen >= 0
+    /\ \A i, j \in Server :
+         \A k \in 1..MaxLogLen :
+            \/ k > Len(log[i])
+            \/ k > Len(log[j])
+            \/ log[i][k] = log[j][k]
+
+\* Log order matches execution_cmds, allowing NilCmd for missing entries.
+LogOrderMatchesExecution ==
+    /\ MaxLogExecLen >= 0
+    /\ \A i \in Server :
+         \A k \in 1..MaxLogExecLen :
+            LET lc == LogCmdAt(i, k)
+                ec == ExecAt(k)
+            IN \/ lc = ec
+               \/ lc = NilCmd
+               \/ ec = NilCmd
+
+Safety == [](CommittedLogAgreement /\ ActiveProposerBound /\ LogOrderMatchesExecution)
 
 SpecSafety == Spec => Safety
 

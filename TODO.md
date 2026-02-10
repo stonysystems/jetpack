@@ -125,7 +125,8 @@ Properties to prove in `jetpack.tla` (refer to `jetpack_raft.tla` for reference)
 - ExecutionDedupMatches
 
 Properties for original base protocols (`raft.tla`, `copilot.tla`, `mencius.tla`):
-- LogAgreement (adapted per protocol)
+- CommittedLogAgreement (the base protocol form of LogAgreement — unrestricted LogAgreement
+  does not hold because logs temporarily diverge before committed entries are reconciled)
 - LogOrderMatchesExecution (pairwise conflict-ordering as above)
 
 ### Specifications
@@ -162,10 +163,16 @@ than abstraction at this stage.
   - Safety = [](LogAgreement /\ SlotAgreement /\ LogOrderMatchesExecution /\ ExecutionDedupMatches)
   - Partial: 281M+ states, 28.8M+ distinct, depth 16, no violations (3 servers, 1 cmd, SmallStateConstraint)
   - Note: Mencius composition state space too large for exhaustive checking
-- [ ] Add LogAgreement and LogOrderMatchesExecution to each base protocol
-  - [ ] `raft.tla`: add/verify LogAgreement + LogOrderMatchesExecution
-  - [ ] `copilot.tla`: add/verify LogAgreement + LogOrderMatchesExecution
-  - [ ] `mencius.tla`: add/verify LogAgreement + LogOrderMatchesExecution
+- [x] Add CommittedLogAgreement and LogOrderMatchesExecution to each base protocol
+  - [x] `raft.tla`: added LogOrderMatchesExecution (CommittedLogAgreement already existed)
+    - Exhaustive: 40M states, 2.8M distinct, depth 56 (3 servers, 1 cmd, SmallStateConstraint)
+  - [x] `copilot.tla`: added LogOrderMatchesExecution (CommittedLogAgreement already existed)
+    - Exhaustive: 186K states, 21K distinct, depth 16 (3 servers, 1 cmd, SmallStateConstraint)
+  - [x] `mencius.tla`: added CommittedLogAgreement + LogOrderMatchesExecution to Safety
+    - Partial: 104M+ states, 11.6M+ distinct, depth 15, no violations (3 servers, 1 cmd, SmallStateConstraint)
+  - Note: unrestricted LogAgreement (all entries at same index match) was tested but
+    does not hold for base protocols — CoPilot violates it when terms differ across
+    replicas for uncommitted entries. CommittedLogAgreement is the correct adaptation.
 
 ### Final goal: direct composition without wrapper modules
 
@@ -187,14 +194,14 @@ Requires N-sequence log abstraction:
 
 All TLC logs saved to `tla/log/<protocol>_<timestamp>.log`.
 
-- [x] `raft.tla`: TLC model check (CommittedLogAgreement, ElectionSafety)
+- [x] `raft.tla`: TLC model check (CommittedLogAgreement, ElectionSafety, LogOrderMatchesExecution)
   - Exhaustive: 40M states, 2.8M distinct, depth 56 (3 servers, 1 cmd, SmallStateConstraint)
   - Partial: 145M+ states, 20M+ distinct, no violations (3 servers, 2 cmds, StateConstraint)
-- [x] `copilot.tla`: TLC model check (CommittedLogAgreement, ActiveProposerBound)
-  - Exhaustive: 186K states, 21K distinct, depth 15 (3 servers, 1 cmd, SmallStateConstraint)
+- [x] `copilot.tla`: TLC model check (CommittedLogAgreement, ActiveProposerBound, LogOrderMatchesExecution)
+  - Exhaustive: 186K states, 21K distinct, depth 16 (3 servers, 1 cmd, SmallStateConstraint)
   - Partial: 114M+ states, 21M+ distinct, no violations (3 servers, 2 cmds, StateConstraint)
-- [x] `mencius.tla`: TLC model check (SlotAgreement)
-  - Partial: 119M+ states, 17M+ distinct, no violations (3 servers, 1 cmd, SmallStateConstraint)
+- [x] `mencius.tla`: TLC model check (SlotAgreement, CommittedLogAgreement, LogOrderMatchesExecution)
+  - Partial: 104M+ states, 11.6M+ distinct, no violations (3 servers, 1 cmd, SmallStateConstraint)
   - Note: Mencius slot state space is too large for exhaustive checking in bounded time
 - [x] `jetpack.tla`: SANY parse check (not standalone, needs base protocol to run)
 - [x] `jetpack_raft.tla`: SANY parse check (original combined spec preserved)
