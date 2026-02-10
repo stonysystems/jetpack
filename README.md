@@ -8,7 +8,21 @@ Jetpack is a plugin consensus protocol that sits on top of a base protocol (e.g.
 
 - C++14 compiler (g++ or clang++)
 - Python 3 (< 3.12 for WAF build system)
-- Docker (for TLA+ model checking and integration tests)
+- Docker Engine >= 17.05 (for multi-stage builds in Dockerfiles)
+- Docker Compose V2 >= 2.0 (the `docker compose` CLI plugin, not the legacy standalone `docker-compose`)
+
+Docker Compose V2 is required because the compose files use the modern format (no
+`version:` field) with `depends_on: condition: service_healthy`. Verify your
+installation with:
+
+```bash
+docker --version          # Docker Engine 17.05+
+docker compose version    # Docker Compose V2.0+
+```
+
+Some tests require additional Docker flags:
+- `--network=host` during `docker build` (so the builder can fetch third-party dependencies)
+- `--privileged` at runtime for multi-process tests (tc/netem latency simulation) and TLA+ model checking (cgroup access)
 
 ### Build RPC
 
@@ -269,6 +283,59 @@ docker compose -f docker/zookeeper/docker-compose.yml run --rm jetpack-zookeeper
 ```bash
 docker compose -f docker/zookeeper/docker-compose.yml down -v
 ```
+
+## Benchmark Results
+
+See [`result.md`](result.md) for detailed performance and recovery benchmark data.
+
+### Quick benchmark commands
+
+Run single-client benchmarks (1 client, 3 replicas, 30s) inside Docker:
+
+```bash
+# MongoDB
+docker run --rm --entrypoint bash jetpack-mongodb -c '
+  mongod --dbpath /tmp/mongodb --bind_ip 127.0.0.1 --port 27017 --fork --logpath /tmp/mongod.log
+  sleep 2
+  timeout 120 /jetpack/build/deptran_server \
+    -f /jetpack/config/1c1s3r1p.yml -f /jetpack/config/none_mongodb.yml \
+    -f /jetpack/config/rw_fixed.yml -f /jetpack/config/client_closed.yml \
+    -f /jetpack/config/concurrent_1.yml -d 30 -m 100 -P localhost 2>&1 \
+    | grep -E "All-efficient-attempts|Total throughtput|Mid throughput"
+'
+
+# etcd
+docker run --rm --entrypoint bash jetpack-etcd -c '
+  etcd --name etcd-test --listen-client-urls http://127.0.0.1:2379 \
+    --advertise-client-urls http://127.0.0.1:2379 \
+    --listen-peer-urls http://127.0.0.1:2380 \
+    --initial-advertise-peer-urls http://127.0.0.1:2380 \
+    --initial-cluster "etcd-test=http://127.0.0.1:2380" \
+    --data-dir /tmp/etcd-data > /tmp/etcd.log 2>&1 &
+  sleep 2
+  timeout 120 /jetpack/build/deptran_server \
+    -f /jetpack/config/1c1s3r1p.yml -f /jetpack/config/none_etcd.yml \
+    -f /jetpack/config/rw_fixed.yml -f /jetpack/config/client_closed.yml \
+    -f /jetpack/config/concurrent_1.yml -d 30 -m 100 -P localhost 2>&1 \
+    | grep -E "All-efficient-attempts|Total throughtput|Mid throughput"
+'
+
+# ZooKeeper
+docker run --rm -v $(pwd)/config/none_zookeeper.yml:/jetpack/config/none_zookeeper.yml:ro \
+  --entrypoint bash jetpack-zookeeper -c '
+  mkdir -p /tmp/zookeeper-data
+  echo -e "tickTime=2000\ndataDir=/tmp/zookeeper-data\nclientPort=2181\nadmin.enableServer=false" > /tmp/zoo.cfg
+  ${ZOOKEEPER_HOME:-/opt/zookeeper}/bin/zkServer.sh start /tmp/zoo.cfg > /tmp/zk.log 2>&1
+  sleep 2
+  timeout 120 /jetpack/build/deptran_server \
+    -f /jetpack/config/1c1s3r1p.yml -f /jetpack/config/none_zookeeper.yml \
+    -f /jetpack/config/rw_fixed.yml -f /jetpack/config/client_closed.yml \
+    -f /jetpack/config/concurrent_1.yml -d 30 -m 100 -P localhost 2>&1 \
+    | grep -E "All-efficient-attempts|Total throughtput|Mid throughput"
+'
+```
+
+For multi-client benchmarks, use `12c1s3r1p.yml` and `concurrent_12.yml` instead.
 
 ## Failure simulation structure
 

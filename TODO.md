@@ -418,10 +418,14 @@ For realistic multi-node backend recovery, use Docker test scripts (`run-*-test.
 
 ## Priority 1 (High): README Documentation
 
-- [ ] Document Docker and Docker Compose version requirements in README
-- [ ] For every completed task above, document the command(s) to run and verify it in
+- [x] Document Docker and Docker Compose version requirements in README
+  - Docker Engine >= 17.05 (multi-stage builds), Docker Compose V2 >= 2.0 (modern format)
+  - Documented `--network=host` (build) and `--privileged` (runtime) requirements
+  - Added verification commands: `docker --version`, `docker compose version`
+- [x] For every completed task above, document the command(s) to run and verify it in
       the project README.md (clean up README as needed)
   - [x] TLA+ model checking: how to build Docker image and run TLC for each spec
   - [x] MongoDB integration: how to build, run single/multi/recovery tests
   - [x] etcd integration: how to build, run single/multi/recovery tests
   - [x] ZooKeeper integration: how to build, run single/multi/recovery tests
+  - [x] Benchmark results: quick benchmark commands and link to `result.md`
