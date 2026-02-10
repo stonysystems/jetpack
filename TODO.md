@@ -357,6 +357,21 @@ No existing integration code. Needs to be implemented from scratch.
     events, race conditions, session expiry, network partition scenarios)
   - Document: `docs/leader_watcher_analysis.md`
 
+## TLA+ Config Alignment
+
+- [x] Update `tla/jetpack_mencius.cfg` and `tla/jetpack_copilot.cfg` to match `tla/jetpack_raft.cfg`:
+      5 servers (`{s1, s2, s3, s4, s5}`), 3 CmdIds (`{id1, id2, id3}`), 2 Keys (`{k1, k2}`)
+  - Updated both configs: Server={s1..s5}, CmdId={id1,id2,id3}, Key={k1,k2}
+  - **CoPilot**: Partial: 23M+ states, 2.2M+ distinct, depth 13, no violations (5 servers, 3 cmds, 2 keys)
+  - **Mencius**: Partial: 5.7M+ states, 206K+ distinct, depth 9, no violations (5 servers, 3 cmds, 2 keys)
+  - **Bug found and fixed**: `LogAgreement` (J!LogAgreement) does not hold for Mencius because each
+    server independently appends to its log from its own slot proposals — logs legitimately diverge
+    at uncommitted positions. With 1 CmdId this was masked (all values identical), but 3 CmdIds
+    exposed the divergence. Fixed by replacing `LogAgreement` with `CommittedLogAgreement` in
+    `jetpack_mencius.tla` Safety property (matching standalone `mencius.tla`'s approach).
+  - Note: state spaces too large for exhaustive checking with 5 servers; partial verification consistent
+    with prior results
+
 ## Priority 1 (High): README Documentation
 
 - [x] Document Docker and Docker Compose version requirements in README

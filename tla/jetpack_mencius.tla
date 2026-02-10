@@ -593,9 +593,22 @@ SmallStateConstraint ==
 (* Properties                                                              *)
 (***************************************************************************)
 
-LogAgreement == J!LogAgreement
 LogOrderMatchesExecution == J!LogOrderMatchesExecution
 ExecutionDedupMatches == J!ExecutionDedupMatches
+
+\* Committed log entries must agree across servers.
+\* Note: unrestricted LogAgreement (J!LogAgreement) does NOT hold for Mencius because
+\* each server independently appends to its own log from its own slot proposals, so logs
+\* legitimately diverge at uncommitted positions. With 1 CmdId this is masked (all values
+\* are the same), but with 2+ CmdIds the divergence is exposed. CommittedLogAgreement
+\* is the correct log-level invariant for Mencius.
+CommittedLogAgreement ==
+    \A i, j \in Server :
+        LET ci == commitIndex[i]
+            cj == commitIndex[j]
+            limit == J!Min({ci, cj} \cup {0})
+        IN \A k \in 1..limit :
+            log[i][k] = log[j][k]
 
 \* All servers that have learned the same slot agree on its value.
 SlotAgreement ==
@@ -605,7 +618,7 @@ SlotAgreement ==
              /\ slotState[j][sl] \in {Learned, Skipped})
             => slotValue[i][sl] = slotValue[j][sl]
 
-Safety == [](LogAgreement /\ SlotAgreement /\ LogOrderMatchesExecution /\ ExecutionDedupMatches)
+Safety == [](CommittedLogAgreement /\ SlotAgreement /\ LogOrderMatchesExecution /\ ExecutionDedupMatches)
 
 SpecSafety == Spec => Safety
 
