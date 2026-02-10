@@ -290,22 +290,26 @@ See [`result.md`](result.md) for detailed performance and recovery benchmark dat
 
 ### Quick benchmark commands
 
-Run single-client benchmarks (1 client, 3 replicas, 30s) inside Docker:
+Run single-client benchmarks (1 client, 5 replicas, 30s) inside Docker:
 
 ```bash
-# MongoDB
-docker run --rm --entrypoint bash jetpack-mongodb -c '
+# MongoDB (1 client, 5 replicas, concurrency=1)
+docker run --rm \
+  -v $(pwd)/config/1c1s5r1p.yml:/jetpack/config/1c1s5r1p.yml:ro \
+  --entrypoint bash jetpack-mongodb -c '
   mongod --dbpath /tmp/mongodb --bind_ip 127.0.0.1 --port 27017 --fork --logpath /tmp/mongod.log
   sleep 2
   timeout 120 /jetpack/build/deptran_server \
-    -f /jetpack/config/1c1s3r1p.yml -f /jetpack/config/none_mongodb.yml \
+    -f /jetpack/config/1c1s5r1p.yml -f /jetpack/config/none_mongodb.yml \
     -f /jetpack/config/rw_fixed.yml -f /jetpack/config/client_closed.yml \
     -f /jetpack/config/concurrent_1.yml -d 30 -m 100 -P localhost 2>&1 \
     | grep -E "All-efficient-attempts|Total throughtput|Mid throughput"
 '
 
-# etcd
-docker run --rm --entrypoint bash jetpack-etcd -c '
+# etcd (1 client, 5 replicas, concurrency=1)
+docker run --rm \
+  -v $(pwd)/config/1c1s5r1p.yml:/jetpack/config/1c1s5r1p.yml:ro \
+  --entrypoint bash jetpack-etcd -c '
   etcd --name etcd-test --listen-client-urls http://127.0.0.1:2379 \
     --advertise-client-urls http://127.0.0.1:2379 \
     --listen-peer-urls http://127.0.0.1:2380 \
@@ -314,28 +318,32 @@ docker run --rm --entrypoint bash jetpack-etcd -c '
     --data-dir /tmp/etcd-data > /tmp/etcd.log 2>&1 &
   sleep 2
   timeout 120 /jetpack/build/deptran_server \
-    -f /jetpack/config/1c1s3r1p.yml -f /jetpack/config/none_etcd.yml \
+    -f /jetpack/config/1c1s5r1p.yml -f /jetpack/config/none_etcd.yml \
     -f /jetpack/config/rw_fixed.yml -f /jetpack/config/client_closed.yml \
     -f /jetpack/config/concurrent_1.yml -d 30 -m 100 -P localhost 2>&1 \
     | grep -E "All-efficient-attempts|Total throughtput|Mid throughput"
 '
 
-# ZooKeeper
-docker run --rm -v $(pwd)/config/none_zookeeper.yml:/jetpack/config/none_zookeeper.yml:ro \
+# ZooKeeper (1 client, 5 replicas, concurrency=1)
+docker run --rm \
+  -v $(pwd)/config/1c1s5r1p.yml:/jetpack/config/1c1s5r1p.yml:ro \
+  -v $(pwd)/config/none_zookeeper.yml:/jetpack/config/none_zookeeper.yml:ro \
   --entrypoint bash jetpack-zookeeper -c '
   mkdir -p /tmp/zookeeper-data
   echo -e "tickTime=2000\ndataDir=/tmp/zookeeper-data\nclientPort=2181\nadmin.enableServer=false" > /tmp/zoo.cfg
   ${ZOOKEEPER_HOME:-/opt/zookeeper}/bin/zkServer.sh start /tmp/zoo.cfg > /tmp/zk.log 2>&1
   sleep 2
   timeout 120 /jetpack/build/deptran_server \
-    -f /jetpack/config/1c1s3r1p.yml -f /jetpack/config/none_zookeeper.yml \
+    -f /jetpack/config/1c1s5r1p.yml -f /jetpack/config/none_zookeeper.yml \
     -f /jetpack/config/rw_fixed.yml -f /jetpack/config/client_closed.yml \
     -f /jetpack/config/concurrent_1.yml -d 30 -m 100 -P localhost 2>&1 \
     | grep -E "All-efficient-attempts|Total throughtput|Mid throughput"
 '
 ```
 
-For multi-client benchmarks, use `12c1s3r1p.yml` and `concurrent_12.yml` instead.
+For multi-client benchmarks (12 clients, 5 replicas, concurrency=10), use `12c1s5r1p.yml`
+and `concurrent_10.yml` instead. For 3-replica baselines, use `1c1s3r1p.yml` /
+`12c1s3r1p.yml`.
 
 ## Failure simulation structure
 

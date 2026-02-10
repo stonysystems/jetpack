@@ -7,9 +7,37 @@
 - **Mode**: Single-process (`-P localhost`) — all replicas and clients share one process
 - **Benchmark**: `rw_fixed.yml` (100% writes to backend KV store)
 - **Duration**: 30 seconds per test
-- **Replicas**: 3 server replicas, 1 partition
+- **Replicas**: 3 or 5 server replicas, 1 partition
 
-## Performance Results
+## Performance Results (5 replicas)
+
+### Single-client tests (1 client, 5 replicas, concurrency=1)
+
+| Backend | Median Latency (ms) | Average Latency (ms) | Throughput (txn/s) |
+|---------|--------------------:|---------------------:|-------------------:|
+| MongoDB | 141.74 | 141.24 | 7.10 |
+| etcd | 87.82 | 90.04 | 11.20 |
+| ZooKeeper | 84.01 | 83.90 | 11.90 |
+
+### Multi-client tests (12 clients, 5 replicas, concurrency=10)
+
+| Backend | Median Latency (ms) | Average Latency (ms) | Throughput (txn/s) |
+|---------|--------------------:|---------------------:|-------------------:|
+| MongoDB | 166.30 | 167.23 | 716.50 |
+| etcd | 86.98 | 87.55 | 1368.20 |
+| ZooKeeper | 85.69 | 86.05 | 1393.20 |
+
+### Observations (5 replicas)
+
+- **Ranking is consistent** with the 3-replica results: ZooKeeper < etcd < MongoDB for latency.
+- **MongoDB latency increases significantly** with 5 replicas (106→142ms single-client, 116→166ms
+  multi-client), reflecting the cost of replicating to more Jetpack replicas before responding.
+- **etcd and ZooKeeper latency is nearly unchanged** (~84-88ms), suggesting their backend
+  round-trip dominates and the Jetpack overhead per additional replica is minimal.
+- **Throughput drops** for MongoDB (1234→717 multi-client) due to higher per-request latency,
+  while etcd (1593→1368) and ZooKeeper (1736→1393) see moderate decreases.
+
+## Performance Results (3 replicas, baseline)
 
 ### Single-client tests (1 client, 3 replicas)
 
@@ -42,57 +70,115 @@
 
 ## Failure Recovery Results
 
-Recovery tests use Jetpack's soft failover mechanism: the leader server is paused internally
-via `svr_workers_g[idx].Pause()` after a 5-second run interval (configurable via
-`failover.yml`). The client monitors for a `failure_triggered` signal and pauses until
-recovery completes.
+### Recovery Architecture
+
+Recovery testing measures two phases:
+1. **Original protocol downtime**: from triggering failure to the original protocol
+   completing leader election (signal file written)
+2. **Jetpack downtime**: from signal file written to Jetpack finishing its own recovery
+
+Jetpack recovery is triggered via `server_failover_co()` which calls `Pause()` on the
+leader server and writes a `failure_triggered` signal. The client detects this signal
+(~50-90ms latency) and pauses until `recovery_finish_after_failure` is signaled.
 
 ### Test Configuration
 
-- **Config**: `failover.yml` / `failover_etcd.yml` / `failover_zookeeper.yml`
-- **Run interval**: 5s (normal operation before triggering failure) for etcd/ZooKeeper, 15s for MongoDB
+- **Config**: `failover_mongodb.yml` / `failover_etcd.yml` / `failover_zookeeper.yml`
+- **Run interval**: 5s (normal operation before triggering failure)
 - **Stop interval**: 10s (pause duration for recovery)
 - **Fail target**: leader (locale_id=0)
 
-### Recovery Metrics
+### Recovery Test Results
 
-| Backend | Total Throughput (txn/s) | Mid Throughput (txn/s) | Median Latency (ms) | Notes |
-|---------|------------------------:|----------------------:|--------------------:|-------|
-| MongoDB | 5.00 | 4.90 | 99.97 | `KillMongodbPrimary()` executed; MongoDB not running (Docker permission issue) |
-| etcd | 1.93 | 0.00 | N/A | `KillEtcdPrimary()` killed single-node etcd; no recovery possible (single node) |
-| ZooKeeper | 1.97 | 0.00 | N/A | Soft failover only (`JETPACK_ZOOKEEPER_RECOVERY` not defined in `constants.h`) |
+Recovery tests were attempted in both single-process and multi-process Docker modes.
 
-### Recovery Sequence
+**Single-process mode** (5 replicas, `-P localhost`): Soft failover triggers correctly
+(leader Pause + failure_triggered signal), but Jetpack recovery never completes because
+no backend protocol leader election occurs — `Pause()` is internal and the backend
+(MongoDB/etcd/ZooKeeper) continues running. Without a real leader change signal, the
+`recovery_finish_after_failure` signal is never written and the client stays paused.
 
-1. Jetpack runs normally for `run_interval` seconds
-2. `server_failover_co()` triggers:
-   - Sets `failover_triggers[i] = true` for all clients
-   - Writes `failure_triggered` signal via `jm_signal::set_key()`
-   - Pauses leader server: `svr_workers_g[idx].Pause()`
-   - For MongoDB: calls `KillMongodbPrimary()` (pkill mongod)
-   - For etcd: calls `KillEtcdPrimary()` (pkill etcd)
-3. Client detects `failure_triggered` signal (~30-80ms after trigger)
-4. System is paused for `stop_interval` seconds
-5. After stop_interval, test ends (failover runs once per test)
+**Multi-process mode** (`--privileged`, 3-node backend clusters): Backend clusters start
+successfully (MongoDB replica set, etcd 3-node, ZooKeeper ensemble) but Jetpack servers
+fail to establish inter-replica communication over loopback interfaces, resulting in no
+transactions flowing through and no failover data.
 
-### Limitations
+| Backend | Mode | Original Protocol Downtime | Jetpack Downtime | Notes |
+|---------|------|---------------------------:|-----------------:|-------|
+| MongoDB | single-process | N/A | N/A | Failover triggered; recovery incomplete (no MongoDB leader election) |
+| MongoDB | multi-process | N/A | N/A | 3-node replica set up; Jetpack inter-replica connectivity failed |
+| etcd | single-process | N/A | N/A | Failover triggered; recovery incomplete (etcd still running) |
+| etcd | multi-process | N/A | N/A | 3-node cluster up; Jetpack inter-replica connectivity failed |
+| ZooKeeper | single-process | N/A | N/A | Failover triggered; recovery incomplete (ZK still running) |
+| ZooKeeper | multi-process | N/A | N/A | Ensemble failed to elect leader within 30s |
 
-- **Single-process mode**: All replicas share one process, so Pause() affects internal
-  threads rather than simulating true network partitions. For realistic failure recovery
-  testing, use the Docker test scripts with multi-process mode (`run-mongodb-test.sh recovery`,
-  `run-etcd-test.sh recovery`, `run-zookeeper-test.sh recovery`) which create multi-node
-  backend clusters.
-- **MongoDB**: Docker container had `Permission denied` starting mongod; failover triggered
-  but MongoDB wasn't actually running. The throughput reflects Jetpack's internal processing only.
-- **etcd**: Single-node etcd was killed — no quorum to re-elect a leader. Use `run-etcd-test.sh
-  recovery` for 3-node cluster with proper recovery.
-- **ZooKeeper**: `JETPACK_ZOOKEEPER_RECOVERY` is not defined in `constants.h`, so no
-  `KillZookeeperPrimary()` is called and no Jetpack recovery is triggered. The server stays
-  paused for the entire stop_interval.
+### What Works
+
+- Jetpack's soft failover mechanism triggers correctly in single-process mode
+- `server_failover_co()` pauses the leader and signals clients within 50-90ms
+- The recovery code path (`JetpackRecovery()`, `JetpackRecoveryEntry()`) is implemented
+  and logs timestamps with millisecond precision
+
+### What Needs Work
+
+- **Multi-process networking**: Jetpack servers need proper inter-replica connectivity
+  in Docker containers (currently loopback-based addressing doesn't fully work for
+  multi-process Jetpack + multi-node backend clusters in a single container)
+- **Recovery signal chain**: The full chain (backend leader election → signal file →
+  Jetpack recovery trigger → recovery complete) needs a multi-node backend deployment
+  where the backend actually fails over
 
 ## Raw Metrics
 
-### Performance test output format
+### Performance test output format (5 replicas)
+
+#### Single-client raw output (1 client, 5 replicas, concurrency=1, 30s)
+
+**MongoDB**:
+```
+All-efficient-attempts  statistics  count 71  0pct 109.88  50pct 141.74  90pct 157.59  99pct 171.30  ave 141.24
+Total throughtput is 7.00
+Mid throughput is 7.10
+```
+
+**etcd**:
+```
+All-efficient-attempts  statistics  count 112  0pct 84.14  50pct 87.82  90pct 93.40  99pct 110.55  ave 90.04
+Total throughtput is 10.60
+Mid throughput is 11.20
+```
+
+**ZooKeeper**:
+```
+All-efficient-attempts  statistics  count 119  0pct 82.06  50pct 84.01  90pct 84.73  99pct 85.03  ave 83.90
+Total throughtput is 11.93
+Mid throughput is 11.90
+```
+
+#### Multi-client raw output (12 clients, 5 replicas, concurrency=10, 30s)
+
+**MongoDB**:
+```
+All-efficient-attempts  statistics  count 7165  0pct 117.09  50pct 166.30  90pct 192.55  99pct 211.03  ave 167.23
+Total throughtput is 701.97
+Mid throughput is 716.50
+```
+
+**etcd**:
+```
+All-efficient-attempts  statistics  count 13682  0pct 82.28  50pct 86.98  90pct 90.65  99pct 97.09  ave 87.55
+Total throughtput is 1359.73
+Mid throughput is 1368.20
+```
+
+**ZooKeeper**:
+```
+All-efficient-attempts  statistics  count 13932  0pct 81.51  50pct 85.69  90pct 88.97  99pct 93.63  ave 86.05
+Total throughtput is 1405.53
+Mid throughput is 1393.20
+```
+
+### Performance test output format (3 replicas, baseline)
 
 From `src/deptran/s_main.cc`:
 ```

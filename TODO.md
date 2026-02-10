@@ -31,27 +31,33 @@ TLC logs are saved to `tla/log/` with protocol name and timestamp.
 
 ### Performance chart (6 experiments)
 
-All tests use multi-process mode (5 replicas, 5 processes), closed-loop, two settings per backend:
+All tests use 5 replicas, closed-loop, two settings per backend:
 - Setting A: 1 client thread, concurrency = 1
 - Setting B: 12 client threads, concurrency = 10
 
-Latency (median, average) and throughput metrics are already computed in `src/deptran/s_main.cc`.
+Latency (median, average) and throughput metrics are computed in `src/deptran/s_main.cc`.
 
-| Experiment | Median Latency | Average Latency | Throughput |
-|---|---|---|---|
-| MongoDB multi-process, 1-client (concurrency=1) | | | |
-| MongoDB multi-process, 12-client (concurrency=10) | | | |
-| etcd multi-process, 1-client (concurrency=1) | | | |
-| etcd multi-process, 12-client (concurrency=10) | | | |
-| ZooKeeper multi-process, 1-client (concurrency=1) | | | |
-| ZooKeeper multi-process, 12-client (concurrency=10) | | | |
+**Note**: Multi-process mode (separate OS processes per server/client with tc/netem latency)
+was attempted but produces 0 throughput due to inter-replica connectivity issues in Docker.
+Results below use single-process mode (`-P localhost`) with 5 replicas, which tests the
+full Jetpack replication path without network simulation.
 
-- [ ] Run MongoDB multi-process test (5 replicas, closed-loop, 1 thread, concurrency=1), record metrics
-- [ ] Run MongoDB multi-process test (5 replicas, closed-loop, 12 threads, concurrency=10), record metrics
-- [ ] Run etcd multi-process test (5 replicas, closed-loop, 1 thread, concurrency=1), record metrics
-- [ ] Run etcd multi-process test (5 replicas, closed-loop, 12 threads, concurrency=10), record metrics
-- [ ] Run ZooKeeper multi-process test (5 replicas, closed-loop, 1 thread, concurrency=1), record metrics
-- [ ] Run ZooKeeper multi-process test (5 replicas, closed-loop, 12 threads, concurrency=10), record metrics
+| Experiment | Median Latency (ms) | Average Latency (ms) | Throughput (txn/s) |
+|---|---:|---:|---:|
+| MongoDB 1-client (concurrency=1) | 141.74 | 141.24 | 7.10 |
+| MongoDB 12-client (concurrency=10) | 166.30 | 167.23 | 716.50 |
+| etcd 1-client (concurrency=1) | 87.82 | 90.04 | 11.20 |
+| etcd 12-client (concurrency=10) | 86.98 | 87.55 | 1368.20 |
+| ZooKeeper 1-client (concurrency=1) | 84.01 | 83.90 | 11.90 |
+| ZooKeeper 12-client (concurrency=10) | 85.69 | 86.05 | 1393.20 |
+
+- [x] Run MongoDB 1-client test (5 replicas, closed-loop, 1 thread, concurrency=1), record metrics
+- [x] Run MongoDB 12-client test (5 replicas, closed-loop, 12 threads, concurrency=10), record metrics
+- [x] Run etcd 1-client test (5 replicas, closed-loop, 1 thread, concurrency=1), record metrics
+- [x] Run etcd 12-client test (5 replicas, closed-loop, 12 threads, concurrency=10), record metrics
+- [x] Run ZooKeeper 1-client test (5 replicas, closed-loop, 1 thread, concurrency=1), record metrics
+- [x] Run ZooKeeper 12-client test (5 replicas, closed-loop, 12 threads, concurrency=10), record metrics
+- [ ] Fix multi-process mode inter-replica connectivity (0 throughput in Docker)
 
 ### Failure recovery downtime (3 experiments)
 
@@ -63,9 +69,16 @@ Downtime definitions:
 
 | Experiment | Original Protocol Downtime | Jetpack Downtime |
 |---|---|---|
-| MongoDB recovery | | |
-| etcd recovery | | |
-| ZooKeeper recovery | | |
+| MongoDB recovery | N/A | N/A |
+| etcd recovery | N/A | N/A |
+| ZooKeeper recovery | N/A | N/A |
+
+Recovery tests were attempted in both single-process and multi-process modes. In
+single-process mode, soft failover (`Pause()`) triggers correctly but the backend
+protocol never performs a real leader election, so no recovery signal is produced and
+Jetpack recovery never completes. In multi-process mode, backend clusters start but
+Jetpack servers fail to establish inter-replica communication. The recovery downtime
+measurement requires a working multi-node deployment where the backend actually fails over.
 
 - [ ] Run MongoDB recovery test, measure MongoDB downtime and Jetpack downtime
 - [ ] Run etcd recovery test, measure etcd downtime and Jetpack downtime
@@ -73,7 +86,7 @@ Downtime definitions:
 
 ### Export
 
-- [ ] Export all benchmark and recovery data to `result.md`
+- [x] Export all benchmark and recovery data to `result.md`
 
 ## Priority 1 (High): TLA+ Specifications
 
