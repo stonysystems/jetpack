@@ -1008,11 +1008,21 @@ ExecutionDedupMatches ==
     \/ IsPrefix(Dedup(original_execution_cmds), execution_cmds)
     \/ IsPrefix(Dedup(execution_cmds), original_execution_cmds)
 
+\* Committed log entries agree across servers at each index.
+\* Use length guards to avoid comparing records with Nil (TLC type error).
+LogAgreement ==
+    /\ MaxLogLen >= 0
+    /\ \A i, j \in Server :
+         \A k \in 1..MaxLogLen :
+            \/ k > Len(log[i])
+            \/ k > Len(log[j])
+            \/ log[i][k] = log[j][k]
+
 \* At most two active proposers (pilot + copilot) at any time.
 ActiveProposerBound ==
     Cardinality({i \in Server : role[i] \in {Pilot, Copilot}}) <= 2
 
-Safety == [](LogOrderMatchesExecution /\ ExecutionDedupMatches /\ ActiveProposerBound)
+Safety == [](LogAgreement /\ LogOrderMatchesExecution /\ ExecutionDedupMatches /\ ActiveProposerBound)
 
 SpecSafety == Spec => Safety
 

@@ -152,9 +152,16 @@ than abstraction at this stage.
 - [x] Add LogAgreement, LogOrderMatchesExecution, ExecutionDedupMatches to jetpack.tla properties
   - Added LogAgreement + LogEntryAt helper to jetpack.tla (was missing; LogOrderMatchesExecution and ExecutionDedupMatches already existed)
   - SANY parse check passed; TLC verification of jetpack_raft.tla (small) passed: 82K states, 6K distinct, depth 26
-- [ ] TLC verification of `jetpack_raft.tla` with full Jetpack properties
-- [ ] TLC verification of `jetpack_copilot.tla` with full Jetpack properties
-- [ ] TLC verification of `jetpack_mencius.tla` with full Jetpack properties
+- [x] TLC verification of `jetpack_raft.tla` with full Jetpack properties
+  - Safety = [](LogAgreement /\ LogOrderMatchesExecution /\ ExecutionDedupMatches)
+  - Exhaustive: 82,375 states, 6,029 distinct, depth 26 (3 servers, 1 cmd, SmallStateConstraint)
+- [x] TLC verification of `jetpack_copilot.tla` with full Jetpack properties
+  - Safety = [](LogAgreement /\ LogOrderMatchesExecution /\ ExecutionDedupMatches /\ ActiveProposerBound)
+  - Exhaustive: 515 states, 70 distinct, depth 7 (3 servers, 1 cmd, SmallStateConstraint)
+- [x] TLC verification of `jetpack_mencius.tla` with full Jetpack properties
+  - Safety = [](LogAgreement /\ SlotAgreement /\ LogOrderMatchesExecution /\ ExecutionDedupMatches)
+  - Partial: 281M+ states, 28.8M+ distinct, depth 16, no violations (3 servers, 1 cmd, SmallStateConstraint)
+  - Note: Mencius composition state space too large for exhaustive checking
 - [ ] Add LogAgreement and LogOrderMatchesExecution to each base protocol
   - [ ] `raft.tla`: add/verify LogAgreement + LogOrderMatchesExecution
   - [ ] `copilot.tla`: add/verify LogAgreement + LogOrderMatchesExecution

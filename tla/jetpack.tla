@@ -690,16 +690,14 @@ JetpackNext ==
 (***************************************************************************)
 
 \* Committed log entries agree across servers at each index.
-\* Entries may be missing (shorter logs), but where they exist they must match.
+\* Use length guards to avoid comparing records with Nil (TLC type error).
 LogAgreement ==
     /\ MaxLogLen >= 0
     /\ \A i, j \in Server :
          \A k \in 1..MaxLogLen :
-            LET li == LogEntryAt(i, k)
-                lj == LogEntryAt(j, k)
-            IN \/ li = lj
-               \/ li = Nil
-               \/ lj = Nil
+            \/ k > Len(log[i])
+            \/ k > Len(log[j])
+            \/ log[i][k] = log[j][k]
 
 \* Log order matches execution_cmds (allowing NilCmd for missing).
 LogOrderMatchesExecution ==

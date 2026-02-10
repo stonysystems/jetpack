@@ -58,3 +58,5 @@ prof
 *.pdf
 .vscode/settings.json
 /src/deptran/lab_solution_raft
+tla/states/
+tla/*_TTrace_*.tla
