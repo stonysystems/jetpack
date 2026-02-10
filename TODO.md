@@ -347,7 +347,7 @@ No existing integration code. Needs to be implemented from scratch.
 
 ## Priority 2 (Medium): Leader Watcher Analysis Doc
 
-- [ ] Write a doc (`docs/leader_watcher_analysis.md`) explaining how each leader watcher
+- [x] Write a doc (`docs/leader_watcher_analysis.md`) explaining how each leader watcher
       detects leader election, and what problems each approach may have:
   - `src/deptran/etcd_leader_watcher.h`: how does it watch etcd leader changes?
   - `src/deptran/mongodb_leader_watcher.h`: how does it watch MongoDB primary changes?
@@ -355,6 +355,7 @@ No existing integration code. Needs to be implemented from scratch.
   - For each: describe the detection mechanism (API/callback/polling), timing characteristics,
     potential problems (e.g. detection delay vs source-code signal, false positives, missed
     events, race conditions, session expiry, network partition scenarios)
+  - Document: `docs/leader_watcher_analysis.md`
 
 ## Priority 1 (High): README Documentation
 
