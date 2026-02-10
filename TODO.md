@@ -202,9 +202,19 @@ Requires N-sequence log abstraction:
   - Rewrote jetpack_mencius.tla as thin wrapper using INSTANCE (1124→612 lines, ~46% reduction)
   - Each wrapper: J == INSTANCE jetpack, wraps Jetpack actions with UNCHANGED protocolExtraVars
   - TLC re-verified: Raft 82K states, CoPilot 515 states, Mencius 5M+ states (all no errors)
-- [ ] Verify `jetpack.tla` + `raft.tla` direct composition (no wrapper)
-- [ ] Verify `jetpack.tla` + `copilot.tla` direct composition (no wrapper)
-- [ ] Verify `jetpack.tla` + `mencius.tla` direct composition (no wrapper)
+- [x] ~~Verify `jetpack.tla` + `raft.tla` direct composition (no wrapper)~~ N/A
+- [x] ~~Verify `jetpack.tla` + `copilot.tla` direct composition (no wrapper)~~ N/A
+- [x] ~~Verify `jetpack.tla` + `mencius.tla` direct composition (no wrapper)~~ N/A
+  - Analysis: direct composition without a wrapper is infeasible in TLA+ due to 7 blockers:
+    (1) INSTANCE requires explicit variable mappings via WITH clauses,
+    (2) UNCHANGED clauses don't automatically inherit across module boundaries,
+    (3) Init predicates must be manually composed,
+    (4) message type routing requires a custom dispatcher,
+    (5) BecomeLeader interception (ToBeLeader state) requires wrapper-level override,
+    (6) ApplyCommitted has conflicting guard conditions between raft.tla and jetpack.tla,
+    (7) Next relations cannot be directly OR'd together
+  - The thin INSTANCE-based wrappers (jetpack_raft.tla, etc.) ARE the correct and
+    near-minimal TLA+ pattern for plugin composition
 
 ### TLA+ Verification (via Docker)
 
