@@ -37,15 +37,25 @@ TLC logs are saved to `tla/log/` with protocol name and timestamp.
     `zookeeper_integration_notes.md`
   - Existing `docs/` file: `Jetpack_Failure_Recovery_and_MongoDB_Integration.md`
   - After merge, remove `doc/` folder
-- [ ] Write a doc (`docs/leader_election_signal.md`) explaining: to enable Jetpack failure
-      recovery, the original protocol (MongoDB/etcd/ZooKeeper) code needs to write a signal
-      file after leader election completes. Document where this is implemented:
-  - MongoDB: `src/deptran/mongodb_leader_watcher.h` — `MongodbLeaderWatcher` uses mongocxx
-    APM `on_topology_changed` callback, signals via `jm_signal::set_key("mongo", "primary_elected", host)`
-  - etcd: `src/deptran/etcd_leader_watcher.h` — `EtcdLeaderWatcher` watches `JetPack/leader`
-    key for PUT events, signals via `jm_signal::set_key("etcd", "primary_elected", host)`
-  - ZooKeeper: `src/deptran/zookeeper_leader_watcher.h` — `ZookeeperLeaderWatcher` watches
-    `/JetPack/leader` ephemeral znode, signals via `jm_signal::set_key("zookeeper", "primary_elected", host)`
+- [ ] Write a doc (`docs/leader_election_signal.md`) explaining the leader election signal
+      mechanism for Jetpack failure recovery. Key points to document:
+  - **The problem**: After the original protocol (MongoDB/etcd/ZooKeeper) completes leader
+    election, Jetpack needs to know so it can trigger its own recovery. The new leader of
+    the original protocol must write a signal file after its recovery finishes.
+  - **Current approach (client-side detection)**: The current `*_leader_watcher.h` files in
+    `src/deptran/` detect leader changes from the client side (watching topology/keys/znodes).
+    This does NOT modify the original protocol source code — it observes externally.
+    - `mongodb_leader_watcher.h`: watches mongocxx APM topology changes
+    - `etcd_leader_watcher.h`: watches `JetPack/leader` key for PUT events
+    - `zookeeper_leader_watcher.h`: watches `/JetPack/leader` ephemeral znode
+  - **What's missing**: No source code modifications have been made to MongoDB, etcd, or
+    ZooKeeper themselves. For accurate recovery timing, we need to modify the original
+    protocol's source code so the **new leader itself** writes the signal file immediately
+    after finishing its own recovery/election — not detected indirectly from the client side.
+  - **TODO: Source code modifications needed** (in `third_party/` cloned repos):
+    - [ ] MongoDB: find where new primary finishes step-up, add signal file write
+    - [ ] etcd: find where new leader finishes Raft election, add signal file write
+    - [ ] ZooKeeper: find where new leader finishes ZAB election, add signal file write
   - Signal mechanism: `src/deptran/jm_file_signal.h` (file-based IPC)
   - Jetpack-side hookers: `src/deptran/mongodb/server.h`, `src/deptran/etcd/server.h`,
     `src/deptran/zookeeper/server.h` — poll for signal, trigger `JetpackRecoveryEntry()`
