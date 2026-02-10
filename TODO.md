@@ -105,21 +105,25 @@ Downtime definitions:
   to Jetpack finishing its own recovery
 
 | Experiment | Original Protocol Downtime | Jetpack Downtime |
-|---|---|---|
-| MongoDB recovery | N/A | N/A |
-| etcd recovery | N/A | N/A |
-| ZooKeeper recovery | N/A | N/A |
+|---|---:|---:|
+| MongoDB recovery | ~10.6s | ~159-281ms |
+| etcd recovery | ~6.0-6.3s | ~106-107ms |
+| ZooKeeper recovery | ~0.5-1.1s | ~106ms |
 
-Recovery tests were attempted in both single-process and multi-process modes. In
-single-process mode, soft failover (`Pause()`) triggers correctly but the backend
-protocol never performs a real leader election, so no recovery signal is produced and
-Jetpack recovery never completes. In multi-process mode, backend clusters start but
-Jetpack servers fail to establish inter-replica communication. The recovery downtime
-measurement requires a working multi-node deployment where the backend actually fails over.
+Recovery uses external kill: script kills backend leader by PID, writes signal files
+to `/tmp/JM_Jetpack_0.0.0.0`, and Jetpack's recovery hooker polls for the signal and
+triggers `JetpackRecoveryEntry()`. Jetpack internal recovery duration is 123-184ms
+across all backends (logged with ms precision). The "Jetpack downtime" column above
+measures from signal file write to `recovery_finish_after_failure` detection.
 
-- [ ] Run MongoDB recovery test, measure MongoDB downtime and Jetpack downtime
-- [ ] Run etcd recovery test, measure etcd downtime and Jetpack downtime
-- [ ] Run ZooKeeper recovery test, measure ZooKeeper downtime and Jetpack downtime
+- [x] Run MongoDB recovery test, measure MongoDB downtime and Jetpack downtime
+  - MongoDB downtime: ~10.6s (replica set election), Jetpack downtime: ~159-281ms
+  - Fixed: added `replicaSet=jetpack-rs` to MongoDB URI for automatic failover
+- [x] Run etcd recovery test, measure etcd downtime and Jetpack downtime
+  - etcd downtime: ~6.0-6.3s (Raft leader election), Jetpack downtime: ~106-107ms
+- [x] Run ZooKeeper recovery test, measure ZooKeeper downtime and Jetpack downtime
+  - ZooKeeper downtime: ~0.5-1.1s (ZAB leader election), Jetpack downtime: ~106ms
+  - Fixed: enabled `JETPACK_ZOOKEEPER_RECOVERY` in constants.h
 
 ### Export
 

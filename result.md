@@ -99,60 +99,82 @@ not site names (the KEY).
 
 ### Recovery Architecture
 
-Recovery testing measures two phases:
-1. **Original protocol downtime**: from triggering failure to the original protocol
-   completing leader election (signal file written)
-2. **Jetpack downtime**: from signal file written to Jetpack finishing its own recovery
+Recovery testing uses an **external kill approach**: the test script (not Jetpack's
+internal `server_failover_co()`) kills the backend leader by PID and writes signal
+files. This simulates a real backend failure with actual leader election.
 
-Jetpack recovery is triggered via `server_failover_co()` which calls `Pause()` on the
-leader server and writes a `failure_triggered` signal. The client detects this signal
-(~50-90ms latency) and pauses until `recovery_finish_after_failure` is signaled.
+Recovery measures two phases:
+1. **Original protocol downtime**: from SIGKILL of the leader to the new leader being
+   elected (detected by the test script polling the backend cluster)
+2. **Jetpack downtime**: from `primary_elected` signal file write to Jetpack finishing
+   its own recovery (`recovery_finish_after_failure` signal detected)
+
+Signal file path: `/tmp/JM_Jetpack_0.0.0.0` (due to `#define AWS` in constants.h).
+Non-leader Jetpack servers poll this file every 10ms and trigger `JetpackRecoveryEntry()`
+when the signal is detected.
 
 ### Test Configuration
 
-- **Config**: `failover_mongodb.yml` / `failover_etcd.yml` / `failover_zookeeper.yml`
-- **Run interval**: 5s (normal operation before triggering failure)
-- **Stop interval**: 10s (pause duration for recovery)
-- **Fail target**: leader (locale_id=0)
+- **Mode**: Single-process (`-P localhost`), 3 server replicas, 1 client
+- **Backend clusters**: 3-node (MongoDB replica set / etcd cluster / ZooKeeper ensemble)
+- **Run interval**: 5s normal operation before triggering failure
+- **Kill method**: SIGKILL on backend leader PID (external, not Jetpack-initiated)
+- **Signal chain**: script writes `failure_triggered` → kills leader → waits for new
+  leader → writes `primary_elected` → Jetpack detects signal → runs recovery
 
 ### Recovery Test Results
 
-Recovery tests were attempted in both single-process and multi-process Docker modes.
+| Backend | Protocol Downtime | Jetpack Downtime | Recovery Duration (internal) | Status |
+|---------|------------------:|----------------:|----------------------------:|--------|
+| MongoDB | ~10.6s | ~159-281ms | ~162-184ms | PASSED |
+| etcd | ~6.0-6.3s | ~106-107ms | ~124-128ms | PASSED |
+| ZooKeeper | ~0.5-1.1s | ~106ms | ~123-124ms | PASSED |
 
-**Single-process mode** (5 replicas, `-P localhost`): Soft failover triggers correctly
-(leader Pause + failure_triggered signal), but Jetpack recovery never completes because
-no backend protocol leader election occurs — `Pause()` is internal and the backend
-(MongoDB/etcd/ZooKeeper) continues running. Without a real leader change signal, the
-`recovery_finish_after_failure` signal is never written and the client stays paused.
+### Observations
 
-**Multi-process mode** (`--privileged`, 3-node backend clusters): The inter-replica
-connectivity issue has been fixed (the `-P` flag bug), and normal multi-process throughput
-now works. Recovery tests in multi-process mode have not yet been re-attempted with the fix.
+- **ZooKeeper has the fastest leader election** (~0.5-1.1s), consistent with ZAB's
+  fast leader election algorithm designed for low-latency failover.
+- **etcd leader election takes ~6s**, reflecting Raft's election timeout (default
+  1000ms) plus randomized backoff with 3-node quorum.
+- **MongoDB replica set election is slowest** (~10.6s), as MongoDB's election protocol
+  includes a longer heartbeat timeout (default 10s `electionTimeoutMillis`) before
+  triggering step-down and new election.
+- **Jetpack recovery is consistently fast** (~106-281ms across all backends). The
+  internal recovery duration (logged by `JetpackRecovery()`) is 123-184ms, which
+  includes the 4-phase Paxos-like recovery protocol. The measured "Jetpack downtime"
+  includes signal detection latency (polling every 10ms) plus recovery execution.
+- **MongoDB required a URI fix**: the original code built a comma-separated URI without
+  `replicaSet=jetpack-rs`, so the mongocxx driver couldn't failover to surviving nodes.
+  Adding the `replicaSet` parameter enabled automatic failover.
+- **ZooKeeper required enabling recovery**: `JETPACK_ZOOKEEPER_RECOVERY` was not defined
+  in `constants.h`. Adding the define enabled the signal polling code in
+  `zookeeper/server.h`.
 
-| Backend | Mode | Original Protocol Downtime | Jetpack Downtime | Notes |
-|---------|------|---------------------------:|-----------------:|-------|
-| MongoDB | single-process | N/A | N/A | Failover triggered; recovery incomplete (no MongoDB leader election) |
-| MongoDB | multi-process | N/A | N/A | Inter-replica connectivity fixed; recovery test not yet re-attempted |
-| etcd | single-process | N/A | N/A | Failover triggered; recovery incomplete (etcd still running) |
-| etcd | multi-process | N/A | N/A | Inter-replica connectivity fixed; recovery test not yet re-attempted |
-| ZooKeeper | single-process | N/A | N/A | Failover triggered; recovery incomplete (ZK still running) |
-| ZooKeeper | multi-process | N/A | N/A | Inter-replica connectivity fixed; recovery test not yet re-attempted |
+### Recovery Test Raw Output
 
-### What Works
+#### MongoDB Recovery
+```
+MongoDB downtime: 10569ms (new primary: 127.0.0.3)
+Jetpack recovery detected (159ms after signal)
+Jetpack recovery completed (duration=162ms)
+MongoDB replica set: 2/3 nodes healthy
+```
 
-- Jetpack's soft failover mechanism triggers correctly in single-process mode
-- `server_failover_co()` pauses the leader and signals clients within 50-90ms
-- The recovery code path (`JetpackRecovery()`, `JetpackRecoveryEntry()`) is implemented
-  and logs timestamps with millisecond precision
+#### etcd Recovery
+```
+etcd downtime: 6282ms (new leader: 127.0.0.3)
+Jetpack recovery detected (107ms after signal)
+Jetpack recovery completed (duration=124ms)
+etcd cluster: 2/3 nodes healthy
+```
 
-### What Needs Work
-
-- **Multi-process networking**: Fixed. The `-P` flag bug (site names vs process names)
-  was the root cause of 0 throughput. All three backends now work in multi-process mode.
-- **Recovery signal chain**: The full chain (backend leader election → signal file →
-  Jetpack recovery trigger → recovery complete) needs a multi-node backend deployment
-  where the backend actually fails over. Now that multi-process connectivity is fixed,
-  recovery tests should be re-attempted.
+#### ZooKeeper Recovery
+```
+ZooKeeper downtime: 538ms (new leader: 127.0.0.3:2183)
+Jetpack recovery detected (106ms after signal)
+Jetpack recovery completed (duration=123ms)
+ZooKeeper ensemble: 2/3 nodes healthy
+```
 
 ## Raw Metrics
 

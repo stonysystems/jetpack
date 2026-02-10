@@ -261,7 +261,7 @@ wait_etcd_new_leader() {
 run_recovery_test() {
     log_info "=== Failure Recovery Test: kill etcd leader, measure recovery ==="
     log_info "Config: 3 server replicas, 1 client, 3-node etcd cluster"
-    log_info "Failover: run 5s, then kill etcd leader, wait 10s for recovery"
+    log_info "External kill: script kills etcd leader after 5s, measures recovery"
     log_info "Duration: ${TEST_DURATION}s"
 
     # Start 3-node etcd cluster
@@ -273,7 +273,6 @@ run_recovery_test() {
     local config_site="${JETPACK_DIR}/config/1c1s3r1p.yml"
     local config_mode="${JETPACK_DIR}/config/none_etcd.yml"
     local config_bench="${JETPACK_DIR}/config/rw_fixed.yml"
-    local config_failover="${JETPACK_DIR}/config/failover_etcd.yml"
     local server_bin="${JETPACK_DIR}/build/deptran_server"
 
     if [ ! -x "$server_bin" ]; then
@@ -281,7 +280,7 @@ run_recovery_test() {
         return 1
     fi
 
-    for cfg in "$config_site" "$config_mode" "$config_bench" "$config_failover"; do
+    for cfg in "$config_site" "$config_mode" "$config_bench"; do
         if [ ! -f "$cfg" ]; then
             log_error "Config file not found: $cfg"
             return 1
@@ -294,131 +293,141 @@ run_recovery_test() {
     # Clean any stale signal files
     rm -f /tmp/JM_Jetpack_* 2>/dev/null || true
 
-    # Single-process mode with failover: all servers + client in one process.
-    local pids=()
-    local proc_names=("localhost")
-
-    log_info "Starting Jetpack (all servers + client in one process, with failover)"
+    # Start Jetpack WITHOUT failover config — the script handles the kill externally.
+    # JETPACK_ETCD_RECOVERY is compiled in, so non-leader servers poll for
+    # primary_elected signal and trigger JetpackRecoveryEntry() when found.
+    local jetpack_pid
+    log_info "Starting Jetpack (single-process, no failover config)"
     "$server_bin" \
         -f "$config_site" \
         -f "$config_mode" \
         -f "$config_bench" \
-        -f "$config_failover" \
         -f "${JETPACK_DIR}/config/client_closed.yml" \
         -f "${JETPACK_DIR}/config/concurrent_1.yml" \
         -P localhost \
         -d "$TEST_DURATION" \
         -r "$LOG_DIR" \
         > "$LOG_DIR/proc-localhost.log" 2>&1 &
-    pids+=($!)
+    jetpack_pid=$!
 
-    log_info "Waiting for ${#pids[@]} processes to complete (timeout: $((TEST_DURATION + 60))s)..."
+    # Let Jetpack run normally for 5 seconds
+    log_info "Letting Jetpack run for 5 seconds..."
+    sleep 5
 
-    # Wait for all Jetpack processes
-    local exit_code=0
-    for i in "${!pids[@]}"; do
-        if ! wait "${pids[$i]}" 2>/dev/null; then
-            log_warn "Process ${proc_names[$i]} (PID ${pids[$i]}) exited with non-zero status"
-            exit_code=1
+    # Determine etcd leader
+    local leader_ip
+    leader_ip=$(get_etcd_leader_ip)
+    log_info "Current etcd leader: $leader_ip"
+
+    # Kill etcd leader by PID (targeted kill, not pkill which kills all nodes)
+    local kill_ns
+    kill_ns=$(date +%s%N)
+    kill_etcd_node "$leader_ip"
+
+    # Write failure_triggered signal so Jetpack clients pause
+    echo "failure:failure_triggered" > /tmp/JM_Jetpack_failure_triggered
+    log_info "Wrote failure_triggered signal"
+
+    # Wait for new etcd leader.
+    # wait_etcd_new_leader outputs ms value on stdout and log_info messages on stdout too.
+    # We capture all output and extract just the numeric ms value.
+    local wait_output
+    wait_output=$(wait_etcd_new_leader "$leader_ip" 10 2>&1) || true
+    echo "$wait_output" | grep -v "^[0-9]*$"  # Print log lines (non-numeric)
+    local etcd_downtime_ms
+    etcd_downtime_ms=$(echo "$wait_output" | grep "^[0-9]*$" | tail -1)
+    etcd_downtime_ms="${etcd_downtime_ms:-N/A}"
+    local new_leader_ip
+    new_leader_ip=$(get_etcd_leader_ip 2>/dev/null || echo "")
+
+    if [ "$etcd_downtime_ms" != "-1" ] && [ -n "$new_leader_ip" ]; then
+        log_info "etcd downtime: ${etcd_downtime_ms}ms (new leader: $new_leader_ip)"
+
+        # Write primary_elected signal for Jetpack servers to detect.
+        # The Jetpack binary (with AWS defined in constants.h) polls for
+        # JM_Jetpack_0.0.0.0, so write the signal there.
+        echo "etcd:primary_elected" > /tmp/JM_Jetpack_0.0.0.0
+        log_info "Wrote primary_elected signal to /tmp/JM_Jetpack_0.0.0.0"
+
+        # Also update the JetPack/leader key in etcd
+        etcdctl --endpoints="http://${new_leader_ip}:2379" put JetPack/leader "$new_leader_ip" >/dev/null 2>&1 || true
+    else
+        log_error "No new etcd leader within 10 seconds"
+        etcd_downtime_ms="N/A"
+    fi
+
+    # Wait for Jetpack recovery — poll for recovery_finish_after_failure signal
+    # or JETPACK-RECOVERY COMPLETED in logs
+    local jetpack_downtime_ms="N/A"
+    local signal_write_ns
+    signal_write_ns=$(date +%s%N)
+    for attempt in $(seq 1 200); do
+        if [ -f /tmp/JM_Jetpack_recovery_finish_after_failure ] || \
+           grep -q "JETPACK-RECOVERY.*COMPLETED" "$LOG_DIR/proc-localhost.log" 2>/dev/null; then
+            local recovery_ns
+            recovery_ns=$(date +%s%N)
+            jetpack_downtime_ms=$(( (recovery_ns - signal_write_ns) / 1000000 ))
+            log_info "Jetpack recovery detected (${jetpack_downtime_ms}ms after signal)"
+            break
         fi
+        sleep 0.1
     done
 
-    # Phase 2: Validate recovery results from logs
+    # Let Jetpack finish naturally
+    log_info "Waiting for Jetpack to finish..."
+    local exit_code=0
+    if ! wait "$jetpack_pid" 2>/dev/null; then
+        log_warn "Jetpack exited with non-zero status"
+        exit_code=1
+    fi
+
+    # Phase 2: Report results
     log_info "--- Recovery Result Validation ---"
 
-    # Check for etcd failover signals in logs
-    local failover_triggered=false
-    local recovery_completed=false
-    local etcd_recovery_ms=""
-    local jetpack_recovery_ms=""
-
-    for proc in "${proc_names[@]}"; do
-        local logfile="$LOG_DIR/proc-${proc}.log"
-        [ -f "$logfile" ] || continue
-
-        # Check for failover trigger
-        if grep -q "failure_triggered\|ETCD-FAILOVER\|KillEtcdPrimary" "$logfile" 2>/dev/null; then
-            failover_triggered=true
-            log_info "  $proc: failover triggered"
+    local logfile="$LOG_DIR/proc-localhost.log"
+    if [ -f "$logfile" ]; then
+        if grep -q "JETPACK-RECOVERY.*STARTING" "$logfile" 2>/dev/null; then
+            log_info "  Jetpack recovery started (found in logs)"
         fi
-
-        # Check for Jetpack recovery completion
-        if grep -q "JETPACK-RECOVERY.*COMPLETED\|RECOVERY.*COMPLETED\|recovery.*completed" "$logfile" 2>/dev/null; then
-            recovery_completed=true
-            # Extract recovery duration from log
+        if grep -q "JETPACK-RECOVERY.*COMPLETED" "$logfile" 2>/dev/null; then
             local dur
-            dur=$(grep -o "duration=[0-9]*ms\|duration=[0-9]*" "$logfile" 2>/dev/null | tail -1)
-            if [ -n "$dur" ]; then
-                jetpack_recovery_ms="$dur"
-                log_info "  $proc: Jetpack recovery $dur"
-            else
-                log_info "  $proc: Jetpack recovery completed (duration not parsed)"
-            fi
+            dur=$(grep -o "duration=[0-9]*ms" "$logfile" 2>/dev/null | tail -1)
+            log_info "  Jetpack recovery completed ${dur:+(}${dur}${dur:+)}"
         fi
-
-        # Check for etcd leader change detection
-        if grep -q "ETCD-HOOKER.*Leader change\|Leader change detected\|primary_elected" "$logfile" 2>/dev/null; then
-            log_info "  $proc: etcd leader change detected"
+        if grep -q "ETCD-FAILOVER\|primary_elected" "$logfile" 2>/dev/null; then
+            log_info "  etcd leader change detected in Jetpack logs"
         fi
-
-        # Check for crashes
         if grep -qi "segfault\|segmentation fault\|abort\|FATAL" "$logfile" 2>/dev/null; then
-            log_error "  $proc: crash detected in log"
+            log_error "  Crash detected in log"
             exit_code=1
         fi
-    done
+    fi
 
-    # Check if etcd cluster survived (2 of 3 nodes should be healthy)
+    # Check surviving etcd cluster
     local surviving_nodes=0
     for ip in "${ETCD_CLUSTER_IPS[@]}"; do
         if etcdctl endpoint health --endpoints="http://${ip}:2379" >/dev/null 2>&1; then
             surviving_nodes=$((surviving_nodes + 1))
         fi
     done
-    log_info "  etcd cluster: $surviving_nodes/3 nodes healthy after test"
-
-    # Check etcd keys
-    local endpoint=""
-    for ip in "${ETCD_CLUSTER_IPS[@]}"; do
-        if etcdctl endpoint health --endpoints="http://${ip}:2379" >/dev/null 2>&1; then
-            endpoint="http://${ip}:2379"
-            break
-        fi
-    done
-    local etcd_keys=0
-    if [ -n "$endpoint" ]; then
-        etcd_keys=$(etcdctl --endpoints="$endpoint" get "JetPack/" --prefix --keys-only 2>/dev/null | wc -l)
-        log_info "  etcd keys under JetPack/: $etcd_keys"
-    fi
+    log_info "  etcd cluster: $surviving_nodes/3 nodes healthy"
 
     # Check signal files
-    local signal_files
-    signal_files=$(ls /tmp/JM_Jetpack_* 2>/dev/null | wc -l)
-    log_info "  Signal files created: $signal_files"
+    log_info "  Signal files:"
+    ls -1 /tmp/JM_Jetpack_* 2>/dev/null | while read -r f; do
+        log_info "    $(basename "$f"): $(cat "$f" 2>/dev/null | head -1)"
+    done
 
     # Final verdict
     echo ""
+    log_info "=== Recovery Timing ==="
+    log_info "  Original protocol (etcd) downtime: ${etcd_downtime_ms}ms"
+    log_info "  Jetpack downtime: ${jetpack_downtime_ms}ms"
+
     if [ $exit_code -eq 0 ]; then
         log_info "=== Failure Recovery Test PASSED ==="
-        log_info "  - All Jetpack processes exited cleanly"
-        log_info "  - etcd cluster: $surviving_nodes/3 nodes healthy"
-        log_info "  - etcd keys: $etcd_keys"
-        if $failover_triggered; then
-            log_info "  - Failover was triggered"
-        else
-            log_warn "  - Failover was NOT triggered (test duration may be too short)"
-        fi
-        if $recovery_completed; then
-            log_info "  - Jetpack recovery completed ($jetpack_recovery_ms)"
-        else
-            log_warn "  - Jetpack recovery not detected in logs (may need JETPACK_ETCD_RECOVERY build)"
-        fi
     else
         log_error "=== Failure Recovery Test FAILED ==="
-        log_info "Check logs in $LOG_DIR for details:"
-        for proc in "${proc_names[@]}"; do
-            log_info "  $LOG_DIR/proc-${proc}.log"
-        done
     fi
 
     return $exit_code

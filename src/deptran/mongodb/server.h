@@ -78,6 +78,7 @@ class MongodbServer : public TxLogServer {
           oss << hosts[i] << ":27017";
         }
       }
+      oss << "/?replicaSet=jetpack-rs";
       mongo_uri_ = oss.str();
     }
     Log_info("mongo_uri_:%s", mongo_uri_.c_str());

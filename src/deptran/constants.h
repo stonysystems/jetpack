@@ -189,6 +189,8 @@ namespace janus {
 // Jetpack-etcd failover
 #define JETPACK_ETCD_RECOVERY
 // #define JETPACK_ETCD_SIMULATION
+// Jetpack-zookeeper failover
+#define JETPACK_ZOOKEEPER_RECOVERY
 
 #define COMMAND_POOL_ON_DISK
 

@@ -439,13 +439,26 @@ run_multi_process_test() {
 }
 
 run_recovery_test() {
-    log_info "=== Recovery test ==="
+    log_info "=== Failure Recovery Test: kill ZooKeeper leader, measure recovery ==="
+    log_info "Config: 3 server replicas, 1 client, 3-node ZooKeeper ensemble"
+    log_info "External kill: script kills ZooKeeper leader after 5s, measures recovery"
+    log_info "Duration: ${TEST_DURATION}s"
+
     start_zookeeper_ensemble
 
     mkdir -p "$LOG_DIR"
     local config="${JETPACK_DIR}/config/1c1s3r1p.yml"
-    local failover_config="${JETPACK_DIR}/config/failover_zookeeper.yml"
+    local config_mode="${JETPACK_DIR}/config/none_zookeeper.yml"
+    local config_bench="${JETPACK_DIR}/config/rw_fixed.yml"
     local binary="${JETPACK_DIR}/build/deptran_server"
+
+    if [ ! -x "$binary" ]; then
+        log_error "Jetpack server binary not found at $binary"
+        return 1
+    fi
+
+    # Clean any stale signal files
+    rm -f /tmp/JM_Jetpack_* 2>/dev/null || true
 
     # Get the current leader
     local leader
@@ -453,16 +466,12 @@ run_recovery_test() {
     local leader_ip="${leader%%:*}"
     log_info "Current ZooKeeper leader: $leader"
 
-    # Start Jetpack with failover config — single-process mode.
-    local config_mode="${JETPACK_DIR}/config/none_zookeeper.yml"
-    local config_bench="${JETPACK_DIR}/config/rw_fixed.yml"
-
-    log_info "Starting Jetpack with failover config..."
+    # Start Jetpack WITHOUT failover config — external kill handles recovery.
+    log_info "Starting Jetpack (single-process, no failover config)"
     "$binary" \
         -f "$config" \
         -f "$config_mode" \
         -f "$config_bench" \
-        -f "$failover_config" \
         -f "${JETPACK_DIR}/config/client_closed.yml" \
         -f "${JETPACK_DIR}/config/concurrent_1.yml" \
         -P localhost \
@@ -471,24 +480,77 @@ run_recovery_test() {
         > "$LOG_DIR/proc-localhost.log" 2>&1 &
     local jetpack_pid=$!
 
-    # Let Jetpack run for the configured run_interval
+    # Let Jetpack run for 5 seconds
+    log_info "Letting Jetpack run for 5 seconds..."
     sleep 5
 
     # Kill the ZooKeeper leader
+    local kill_ns
+    kill_ns=$(date +%s%N)
     kill_zookeeper_node "$leader_ip"
 
-    # Wait for new leader
-    wait_zookeeper_new_leader "$leader_ip"
+    # Write failure_triggered signal so Jetpack clients pause
+    echo "failure:failure_triggered" > /tmp/JM_Jetpack_failure_triggered
+    log_info "Wrote failure_triggered signal"
+
+    # Wait for new ZooKeeper leader
+    local zk_downtime_ms="N/A"
+    local new_leader_start_ns
+    new_leader_start_ns=$(date +%s%N)
+    if wait_zookeeper_new_leader "$leader_ip"; then
+        local new_leader_ns
+        new_leader_ns=$(date +%s%N)
+        zk_downtime_ms=$(( (new_leader_ns - kill_ns) / 1000000 ))
+
+        # Write primary_elected signal (AWS mode uses 0.0.0.0)
+        echo "zookeeper:primary_elected" > /tmp/JM_Jetpack_0.0.0.0
+        log_info "Wrote primary_elected signal to /tmp/JM_Jetpack_0.0.0.0"
+        log_info "ZooKeeper downtime: ${zk_downtime_ms}ms"
+    else
+        log_error "No new ZooKeeper leader within timeout"
+    fi
+
+    # Wait for Jetpack recovery
+    local jetpack_downtime_ms="N/A"
+    local signal_write_ns
+    signal_write_ns=$(date +%s%N)
+    for attempt in $(seq 1 200); do
+        if [ -f /tmp/JM_Jetpack_recovery_finish_after_failure ] || \
+           grep -q "JETPACK-RECOVERY.*COMPLETED" "$LOG_DIR/proc-localhost.log" 2>/dev/null; then
+            local recovery_ns
+            recovery_ns=$(date +%s%N)
+            jetpack_downtime_ms=$(( (recovery_ns - signal_write_ns) / 1000000 ))
+            log_info "Jetpack recovery detected (${jetpack_downtime_ms}ms after signal)"
+            break
+        fi
+        sleep 0.1
+    done
 
     # Wait for Jetpack to finish
-    wait "$jetpack_pid" 2>/dev/null
-    local exit_code=$?
+    log_info "Waiting for Jetpack to finish..."
+    local exit_code=0
+    if ! wait "$jetpack_pid" 2>/dev/null; then
+        log_warn "Jetpack exited with non-zero status"
+        exit_code=1
+    fi
 
-    # Check for recovery completion in logs
-    if grep -q "JetpackRecoveryEntry\|JETPACK-RECOVERY" "$LOG_DIR/proc-localhost.log" 2>/dev/null; then
-        log_info "Jetpack recovery detected in logs"
-    else
-        log_warn "No Jetpack recovery entry found in logs"
+    # Phase 2: Report results
+    log_info "--- Recovery Result Validation ---"
+
+    local logfile="$LOG_DIR/proc-localhost.log"
+    if [ -f "$logfile" ]; then
+        if grep -q "JETPACK-RECOVERY.*STARTING" "$logfile" 2>/dev/null; then
+            log_info "  Jetpack recovery started (found in logs)"
+        fi
+        if grep -q "JETPACK-RECOVERY.*COMPLETED" "$logfile" 2>/dev/null; then
+            local dur
+            dur=$(grep -o "duration=[0-9]*ms" "$logfile" 2>/dev/null | tail -1)
+            log_info "  Jetpack recovery completed ${dur:+(}${dur}${dur:+)}"
+        fi
+        if grep -qi "segfault\|segmentation fault\|abort\|FATAL" "$logfile" 2>/dev/null; then
+            log_error "  Crash detected in log"
+            exit_code=1
+        fi
     fi
 
     # Check surviving ZooKeeper nodes
@@ -499,12 +561,24 @@ run_recovery_test() {
             surviving=$((surviving + 1))
         fi
     done
-    log_info "Surviving ZooKeeper nodes: $surviving/3"
+    log_info "  ZooKeeper ensemble: $surviving/3 nodes healthy"
 
-    if [ "$exit_code" -eq 0 ]; then
-        log_info "=== Recovery test PASSED ==="
+    # Check signal files
+    log_info "  Signal files:"
+    ls -1 /tmp/JM_Jetpack_* 2>/dev/null | while read -r f; do
+        log_info "    $(basename "$f"): $(head -1 "$f" 2>/dev/null)"
+    done
+
+    # Final verdict
+    echo ""
+    log_info "=== Recovery Timing ==="
+    log_info "  Original protocol (ZooKeeper) downtime: ${zk_downtime_ms}ms"
+    log_info "  Jetpack downtime: ${jetpack_downtime_ms}ms"
+
+    if [ $exit_code -eq 0 ]; then
+        log_info "=== Failure Recovery Test PASSED ==="
     else
-        log_error "=== Recovery test FAILED (exit=$exit_code) ==="
+        log_error "=== Failure Recovery Test FAILED ==="
     fi
     return "$exit_code"
 }
