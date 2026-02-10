@@ -1,13 +1,28 @@
 ------------------------------ MODULE jetpack ------------------------------
-\* Jetpack plugin consensus protocol.
-\* This module defines Jetpack's own variables and transitions.
-\* It cannot run standalone — it must be composed with a base protocol
-\* (raft.tla, copilot.tla, or mencius.tla) that provides:
-\*   - Server, messages, log, commitIndex, ostate, currentTerm
-\*   - Quorum, Commands, Send/Discard/Reply helpers
-\*   - Base protocol Init, Next, and a BecomeLeader action
+\* Jetpack plugin consensus protocol — reusable module.
 \*
-\* Composition is done through wrapper modules such as jetpack_raft.tla.
+\* This module defines Jetpack's own variables and transitions. It is designed
+\* to be INSTANCE'd by a wrapper module that composes it with a base protocol.
+\*
+\* Variables declared here (the "Jetpack interface"):
+\*   Base protocol interface: messages, currentTerm, ostate, log, commitIndex
+\*   Jetpack-own: jstate, jepoch, oepoch, old_view, new_view, jpool,
+\*                recovery_set, chosen_value, br_responses, prep_responses,
+\*                accept_responses
+\*   Client: client_view, client_pending, client_successes
+\*   Execution: original_execution_cmds, execution_cmds
+\*
+\* The wrapper must:
+\*   1. Declare all variables (shared + protocol-specific)
+\*   2. INSTANCE jetpack WITH <variable mappings>
+\*   3. Define protocol-specific actions: BecomeToBeLeader, ApplyCommitted,
+\*      Restart, etc.
+\*   4. Wrap each J!<action> with UNCHANGED <protocolSpecificVars>
+\*   5. Wire Init, Next, Spec
+\*
+\* Protocol-specific actions NOT defined here (wrapper provides them):
+\*   - BecomeToBeLeader(i): intercepts base protocol leader promotion
+\*   - ApplyCommitted(i): applies next committed log entry to execution_cmds
 \*
 \* ---- N-Sequence Log Abstraction Design ----
 \*
@@ -20,41 +35,20 @@
 \*
 \* Abstract interface each base protocol wrapper must provide:
 \*
-\*   Variables:
+\*   Variables (mapped via INSTANCE):
 \*     log[i]          - per-server replicated log (sequence of [term, value])
 \*     commitIndex[i]  - per-server commit progress
 \*     ostate[i]       - per-server role (must include Follower, Leader)
 \*     currentTerm[i]  - per-server epoch/term
 \*     messages         - shared message bag
 \*
-\*   Predicates (implemented as operators in the wrapper):
-\*     IsProposer(i)   - can server i propose new commands right now?
-\*                        Raft: ostate[i] = Leader
-\*                        CoPilot: role[i] \in {Pilot, Copilot}
-\*                        Mencius: TRUE (all servers are leaders)
-\*
-\*   Actions (implemented in the wrapper's Next):
-\*     BecomeToBeLeader(i)  - intercept base protocol's leader promotion:
-\*                             Raft: Candidate -> ToBeLeader (replaces BecomeLeader)
-\*                             CoPilot: role assignment -> ToBeLeader
-\*                             Mencius: no-op (always a leader, no election)
-\*     ProposeToLog(i, cmd) - append cmd to base protocol's log at server i
-\*                             (currently: log' = [log EXCEPT ![i] = Append(@, entry)])
-\*     ApplyCommitted(i)    - apply next committed entry to execution_cmds
-\*                             (reads log[i][k].value up to commitIndex[i])
-\*
 \*   The six coupling seams between jetpack.tla and the base protocol:
 \*     1. Log entry format: [term |-> currentTerm[i], value |-> cmd]
-\*     2. Leader election interception: BecomeToBeLeader
+\*     2. Leader election interception: BecomeToBeLeader (wrapper-defined)
 \*     3. ostate state machine: {Follower, Candidate, ToBeLeader, Leader}
 \*     4. Log append on preaccept (leader-only)
 \*     5. CommittedCmds/ChosenExecutedInView (reads commitIndex + log)
-\*     6. ApplyCommitted (reads leader's log sequentially)
-\*
-\*   Current status: wrapper modules (jetpack_raft.tla, jetpack_copilot.tla,
-\*   jetpack_mencius.tla) implement this interface by inlining both the base
-\*   protocol and Jetpack code. Direct composition via INSTANCE would require
-\*   refactoring the protocol-specific actions out of jetpack.tla.
+\*     6. ApplyCommitted (wrapper-defined, reads leader's log sequentially)
 
 EXTENDS Naturals, FiniteSets, Sequences, TLC
 
@@ -92,6 +86,12 @@ JetpackAcceptRequest  == "JetpackAcceptRequest"
 JetpackAcceptResponse == "JetpackAcceptResponse"
 FinishRecoveryRequest == "FinishRecoveryRequest"
 
+JetpackMessageTypes == {PreacceptRequest, PreacceptResponse,
+                        BeginRecoveryRequest, BeginRecoveryResponse,
+                        JetpackPrepareRequest, JetpackPrepareResponse,
+                        JetpackAcceptRequest, JetpackAcceptResponse,
+                        FinishRecoveryRequest}
+
 (***************************************************************************)
 (* Shared data types                                                       *)
 (***************************************************************************)
@@ -123,24 +123,20 @@ JPoolCommands(p) == {p.pool[k] : k \in Key} \ {NilCmd}
 PrepResp == [accepted_ballot: Nat, accepted_value: SUBSET Commands]
 
 (***************************************************************************)
-(* Variables — Jetpack only                                                *)
-(* Base protocol variables (messages, log, commitIndex, ostate,            *)
-(* currentTerm, etc.) are supplied by the wrapper module.                  *)
+(* Variables                                                               *)
+(* Only the variables Jetpack reads/writes are declared here.              *)
+(* Protocol-specific variables (votedFor, votesGranted, nextIndex, etc.)   *)
+(* are declared by the wrapper and handled via UNCHANGED there.            *)
 (***************************************************************************)
 
 VARIABLES
     messages,
 
-    \* Base protocol variables (needed for read access).
+    \* Base protocol variables (Jetpack reads/writes these).
     currentTerm,
     ostate,
-    votedFor,
     log,
     commitIndex,
-    votesResponded,
-    votesGranted,
-    nextIndex,
-    matchIndex,
 
     \* Jetpack per-server variables.
     jstate,
@@ -164,18 +160,12 @@ VARIABLES
     original_execution_cmds,
     execution_cmds
 
-serverVars == <<currentTerm, ostate, votedFor>>
-logVars == <<log, commitIndex>>
-candidateVars == <<votesResponded, votesGranted>>
-leaderVars == <<nextIndex, matchIndex>>
+baseVars == <<currentTerm, ostate, log, commitIndex>>
 jetpackVars == <<jstate, jepoch, oepoch, old_view, new_view, jpool,
                  recovery_set, chosen_value, br_responses,
                  prep_responses, accept_responses>>
 clientVars == <<client_view, client_pending, client_successes>>
 executionVars == <<original_execution_cmds, execution_cmds>>
-
-vars == <<messages, serverVars, candidateVars, leaderVars,
-          logVars, jetpackVars, clientVars, executionVars>>
 
 (***************************************************************************)
 (* Helpers                                                                 *)
@@ -309,6 +299,9 @@ InitExecutionVars ==
 
 (***************************************************************************)
 (* Jetpack transitions                                                     *)
+(* NOTE: These actions only specify UNCHANGED for variables declared in    *)
+(* this module. The wrapper must add UNCHANGED for protocol-specific       *)
+(* variables (e.g., copilotVars, menciusVars) when using these actions.    *)
 (***************************************************************************)
 
 \* Client sends a Preaccept to all replicas in its view.
@@ -326,8 +319,7 @@ ClientSendPreaccept(c) ==
           IN /\ messages' = AddMessages(msgSet, messages)
              /\ client_pending' = [client_pending EXCEPT ![c] = cmd]
              /\ client_successes' = [client_successes EXCEPT ![c] = {}]
-             /\ UNCHANGED <<serverVars, candidateVars, leaderVars, logVars,
-                            jetpackVars, client_view, executionVars>>
+             /\ UNCHANGED <<baseVars, jetpackVars, client_view, executionVars>>
 
 \* Server handles Preaccept from client.
 HandlePreacceptRequest(i, m) ==
@@ -354,7 +346,7 @@ HandlePreacceptRequest(i, m) ==
                     THEN [log EXCEPT ![i] = newLog]
                     ELSE log
           /\ Reply(reply, m)
-          /\ UNCHANGED <<serverVars, candidateVars, leaderVars, commitIndex,
+          /\ UNCHANGED <<currentTerm, ostate, commitIndex,
                          jstate, jepoch, oepoch, old_view, new_view,
                          recovery_set, chosen_value, br_responses,
                          prep_responses, accept_responses,
@@ -388,20 +380,7 @@ HandlePreacceptResponse(c, m) ==
               ELSE execution_cmds
           /\ original_execution_cmds' = original_execution_cmds
           /\ Discard(m)
-          /\ UNCHANGED <<serverVars, candidateVars, leaderVars,
-                         logVars, jetpackVars>>
-
-\* Override BecomeLeader: Candidate → ToBeLeader (recovery must finish first).
-BecomeToBeLeader(i) ==
-    /\ ostate[i] = Candidate
-    /\ votesGranted[i] \in Quorum
-    /\ ostate' = [ostate EXCEPT ![i] = ToBeLeader]
-    /\ nextIndex' = [nextIndex EXCEPT ![i] =
-                        [j \in Server |-> Len(log[i]) + 1]]
-    /\ matchIndex' = [matchIndex EXCEPT ![i] =
-                        [j \in Server |-> 0]]
-    /\ UNCHANGED <<messages, currentTerm, votedFor, candidateVars, logVars,
-                   jetpackVars, clientVars, executionVars>>
+          /\ UNCHANGED <<baseVars, jetpackVars>>
 
 \* Recovery Phase 1: BeginRecovery.
 SendBeginRecovery(i) ==
@@ -416,7 +395,7 @@ SendBeginRecovery(i) ==
        IN /\ messages' = AddMessages(msgSet, messages)
           /\ jstate' = [jstate EXCEPT ![i] = Recovery]
           /\ br_responses' = [br_responses EXCEPT ![i] = [s \in Server |-> NilJPool]]
-          /\ UNCHANGED <<serverVars, candidateVars, leaderVars, logVars,
+          /\ UNCHANGED <<baseVars,
                          jepoch, oepoch, old_view, new_view, jpool,
                          recovery_set, chosen_value, prep_responses,
                          accept_responses, clientVars, executionVars>>
@@ -433,7 +412,7 @@ HandleBeginRecoveryRequest(i, m) ==
               msource |-> i,
               mdest |-> m.msource],
               m)
-    /\ UNCHANGED <<serverVars, candidateVars, leaderVars, logVars,
+    /\ UNCHANGED <<baseVars,
                    jepoch, jpool, recovery_set, chosen_value,
                    br_responses, prep_responses, accept_responses,
                    clientVars, executionVars>>
@@ -444,7 +423,7 @@ HandleBeginRecoveryResponse(i, m) ==
     /\ jstate[i] = Recovery
     /\ br_responses' = [br_responses EXCEPT ![i][m.msource] = m.mjpool]
     /\ Discard(m)
-    /\ UNCHANGED <<serverVars, candidateVars, leaderVars, logVars,
+    /\ UNCHANGED <<baseVars,
                    jstate, jepoch, oepoch, old_view, new_view, jpool,
                    recovery_set, chosen_value, prep_responses, accept_responses,
                    clientVars, executionVars>>
@@ -457,7 +436,7 @@ CompleteBeginRecovery(i) ==
             IN /\ recovery_set' = [recovery_set EXCEPT ![i] = rec]
                /\ chosen_value' = [chosen_value EXCEPT ![i] = rec]
                /\ jstate' = [jstate EXCEPT ![i] = AfterBeginRecovery]
-    /\ UNCHANGED <<messages, serverVars, candidateVars, leaderVars, logVars,
+    /\ UNCHANGED <<messages, baseVars,
                    jepoch, oepoch, old_view, new_view, jpool,
                    br_responses, prep_responses, accept_responses,
                    clientVars, executionVars>>
@@ -474,7 +453,7 @@ SendPrepare(i) ==
                         mdest |-> s] : s \in view.replica_ids }
        IN /\ messages' = AddMessages(msgSet, messages)
           /\ prep_responses' = [prep_responses EXCEPT ![i] = [s \in Server |-> NilPrepResp]]
-          /\ UNCHANGED <<serverVars, candidateVars, leaderVars, logVars,
+          /\ UNCHANGED <<baseVars,
                          jstate, jepoch, oepoch, old_view, new_view, jpool,
                          recovery_set, chosen_value, br_responses,
                          accept_responses, clientVars, executionVars>>
@@ -513,7 +492,7 @@ HandlePrepareRequest(i, m) ==
                         [jpool EXCEPT ![i].max_seen_ballot = m.mmax_seen_ballot]
                       ELSE jpool
           /\ Reply(reply, m)
-          /\ UNCHANGED <<serverVars, candidateVars, leaderVars, logVars,
+          /\ UNCHANGED <<baseVars,
                          jstate, old_view, new_view, recovery_set, chosen_value,
                          br_responses, prep_responses, accept_responses,
                          clientVars, executionVars>>
@@ -534,7 +513,7 @@ HandlePrepareResponse(i, m) ==
           /\ jpool' = [jpool EXCEPT ![i].max_seen_ballot =
                            Max({jpool[i].max_seen_ballot, m.mmax_seen_ballot})]
     /\ Discard(m)
-    /\ UNCHANGED <<serverVars, candidateVars, leaderVars, logVars,
+    /\ UNCHANGED <<baseVars,
                    jstate, old_view, new_view, recovery_set, chosen_value,
                    br_responses, accept_responses, clientVars, executionVars>>
 
@@ -552,7 +531,7 @@ CompletePrepare(i) ==
                         ELSE CHOOSE v \in bestVals : TRUE
             IN /\ chosen_value' = [chosen_value EXCEPT ![i] = pick]
                /\ jstate' = [jstate EXCEPT ![i] = AfterPrepare]
-    /\ UNCHANGED <<messages, serverVars, candidateVars, leaderVars, logVars,
+    /\ UNCHANGED <<messages, baseVars,
                    jepoch, oepoch, old_view, new_view, jpool,
                    recovery_set, br_responses, prep_responses,
                    accept_responses, clientVars, executionVars>>
@@ -570,7 +549,7 @@ SendAccept(i) ==
                         mdest |-> s] : s \in view.replica_ids }
        IN /\ messages' = AddMessages(msgSet, messages)
           /\ accept_responses' = [accept_responses EXCEPT ![i] = [s \in Server |-> FALSE]]
-          /\ UNCHANGED <<serverVars, candidateVars, leaderVars, logVars,
+          /\ UNCHANGED <<baseVars,
                          jstate, jepoch, oepoch, old_view, new_view, jpool,
                          recovery_set, chosen_value, br_responses,
                          prep_responses, clientVars, executionVars>>
@@ -603,7 +582,7 @@ HandleAcceptRequest(i, m) ==
                                          ![i].accepted_value = m.mvalue]
                       ELSE jpool
           /\ Reply(reply, m)
-          /\ UNCHANGED <<serverVars, candidateVars, leaderVars, logVars,
+          /\ UNCHANGED <<baseVars,
                          jstate, old_view, new_view, recovery_set, chosen_value,
                          br_responses, prep_responses, accept_responses,
                          clientVars, executionVars>>
@@ -621,7 +600,7 @@ HandleAcceptResponse(i, m) ==
                           Max({jpool[i].max_seen_ballot, m.mmax_seen_ballot})]
           /\ UNCHANGED <<oepoch, jepoch>>
     /\ Discard(m)
-    /\ UNCHANGED <<serverVars, candidateVars, leaderVars, logVars,
+    /\ UNCHANGED <<baseVars,
                    jstate, old_view, new_view, recovery_set, chosen_value,
                    br_responses, prep_responses, clientVars, executionVars>>
 
@@ -630,7 +609,7 @@ CompleteAccept(i) ==
     /\ \E qs \in JQuorum(new_view[i]) :
          /\ \A s \in qs : accept_responses[i][s] = TRUE
          /\ jstate' = [jstate EXCEPT ![i] = AfterAccept]
-    /\ UNCHANGED <<messages, serverVars, candidateVars, leaderVars, logVars,
+    /\ UNCHANGED <<messages, baseVars,
                    jepoch, oepoch, old_view, new_view, jpool,
                    recovery_set, chosen_value, br_responses,
                    prep_responses, accept_responses, clientVars, executionVars>>
@@ -647,7 +626,7 @@ Resubmit(i) ==
                         mcmd |-> cmd] :
                         s \in proposers, cmd \in chosen_value[i] }
        IN /\ messages' = AddMessages(msgSet, messages)
-          /\ UNCHANGED <<serverVars, candidateVars, leaderVars, logVars,
+          /\ UNCHANGED <<baseVars,
                          jstate, jepoch, oepoch, old_view, new_view, jpool,
                          recovery_set, chosen_value, br_responses,
                          prep_responses, accept_responses, clientVars, executionVars>>
@@ -656,7 +635,7 @@ CompleteResubmit(i) ==
     /\ jstate[i] = AfterAccept
     /\ ChosenExecutedInView(i)
     /\ jstate' = [jstate EXCEPT ![i] = AfterResubmit]
-    /\ UNCHANGED <<messages, serverVars, candidateVars, leaderVars, logVars,
+    /\ UNCHANGED <<messages, baseVars,
                    jepoch, oepoch, old_view, new_view, jpool,
                    recovery_set, chosen_value, br_responses,
                    prep_responses, accept_responses, clientVars, executionVars>>
@@ -682,9 +661,8 @@ FinishRecovery(i) ==
           /\ prep_responses' = [prep_responses EXCEPT ![i] = [s \in Server |-> NilPrepResp]]
           /\ accept_responses' = [accept_responses EXCEPT ![i] = [s \in Server |-> FALSE]]
           /\ ostate' = [ostate EXCEPT ![i] = Leader]
-    /\ UNCHANGED <<currentTerm, votedFor, votesResponded,
-                   votesGranted, nextIndex, matchIndex,
-                   logVars, clientVars, executionVars>>
+    /\ UNCHANGED <<currentTerm, log, commitIndex,
+                   clientVars, executionVars>>
 
 HandleFinishRecovery(i, m) ==
     /\ m.mtype = FinishRecoveryRequest
@@ -699,9 +677,8 @@ HandleFinishRecovery(i, m) ==
     /\ chosen_value' = [chosen_value EXCEPT ![i] = {}]
     /\ ostate' = [ostate EXCEPT ![i] = IF ostate[i] = ToBeLeader THEN Leader ELSE ostate[i]]
     /\ Discard(m)
-    /\ UNCHANGED <<currentTerm, votedFor, votesResponded,
-                   votesGranted, nextIndex, matchIndex,
-                   logVars, br_responses, prep_responses,
+    /\ UNCHANGED <<currentTerm, log, commitIndex,
+                   br_responses, prep_responses,
                    accept_responses, clientVars, executionVars>>
 
 \* Leader executes the next committed log entry.
@@ -713,8 +690,7 @@ ApplyCommitted(i) ==
        IN /\ original_execution_cmds' =
               Append(original_execution_cmds, nextCmd)
           /\ execution_cmds' = Append(execution_cmds, nextCmd)
-    /\ UNCHANGED <<messages, serverVars, candidateVars, leaderVars, logVars,
-                   jetpackVars, clientVars>>
+    /\ UNCHANGED <<messages, baseVars, jetpackVars, clientVars>>
 
 (***************************************************************************)
 (* Jetpack-only Next (to be composed with base protocol Next)              *)

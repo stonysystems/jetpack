@@ -1,99 +1,20 @@
 ------------------------------- MODULE jetpack_raft -------------------------------
-\* NOTE: This file is named jetpack+raft.tla. TLA+ module names cannot contain
-\* '+', so the module name uses an underscore. Rename the file if your tooling
-\* requires an exact match.
+\* Composition of Jetpack plugin with Raft base protocol.
+\*
+\* This wrapper module:
+\*   1. Declares all variables (shared + Raft-specific)
+\*   2. INSTANCE's jetpack.tla (maps shared variables)
+\*   3. Defines Raft-specific actions inline
+\*   4. Wraps J!<action> with UNCHANGED raftVars for Jetpack actions
+\*   5. Wires Init, Next, Spec, and properties
 
 EXTENDS Naturals, FiniteSets, Sequences, TLC
 
 \* Basic universe sets.
 CONSTANTS Server, Client, CmdId, Key
 
-\* Reserved value used as a "nil" placeholder.
+\* Reserved value for Raft votedFor.
 Nil == "Nil"
-\* Typed nils for record values (avoid record vs. non-record equality).
-NilCmd == [tag |-> "NilCmd"]
-NilJPool == [tag |-> "NilJPool"]
-NilPrepResp == [tag |-> "NilPrepResp"]
-
-\* Raft roles.
-Follower   == "Follower"
-Candidate  == "Candidate"
-ToBeLeader == "ToBeLeader"
-Leader     == "Leader"
-
-\* Jetpack states.
-Ready            == "Ready"
-Recovery         == "Recovery"
-AfterBeginRecovery == "AfterBeginRecovery"
-AfterPrepare     == "AfterPrepare"
-AfterAccept      == "AfterAccept"
-AfterResubmit    == "AfterResubmit"
-
-\* Raft message types.
-RequestVoteRequest   == "RequestVoteRequest"
-RequestVoteResponse  == "RequestVoteResponse"
-AppendEntriesRequest == "AppendEntriesRequest"
-AppendEntriesResponse == "AppendEntriesResponse"
-
-\* Jetpack message types.
-PreacceptRequest      == "PreacceptRequest"
-PreacceptResponse     == "PreacceptResponse"
-BeginRecoveryRequest  == "BeginRecoveryRequest"
-BeginRecoveryResponse == "BeginRecoveryResponse"
-JetpackPrepareRequest == "JetpackPrepareRequest"
-JetpackPrepareResponse == "JetpackPrepareResponse"
-JetpackAcceptRequest  == "JetpackAcceptRequest"
-JetpackAcceptResponse == "JetpackAcceptResponse"
-FinishRecoveryRequest == "FinishRecoveryRequest"
-
-RaftMessageTypes == {RequestVoteRequest, RequestVoteResponse,
-                     AppendEntriesRequest, AppendEntriesResponse}
-JetpackMessageTypes == {PreacceptRequest, PreacceptResponse,
-                        BeginRecoveryRequest, BeginRecoveryResponse,
-                        JetpackPrepareRequest, JetpackPrepareResponse,
-                        JetpackAcceptRequest, JetpackAcceptResponse,
-                        FinishRecoveryRequest}
-
-(***************************************************************************)
-(* Shared data types                                                       *)
-(***************************************************************************)
-
-\* Commands are identified by cmd_id and apply to a key.
-Commands == { [cmd_id |-> id, key |-> k] : id \in CmdId, k \in Key }
-
-\* Views include an epoch and the replicas that participate.
-View == [epoch: Nat,
-         proposing_replica_ids: SUBSET Server,
-         replica_ids: SUBSET Server]
-
-IsView(v) ==
-    /\ v \in View
-    /\ v.replica_ids /= {}
-    /\ v.proposing_replica_ids \subseteq v.replica_ids
-
-DefaultView ==
-    [epoch |-> 1,
-     proposing_replica_ids |-> Server,
-     replica_ids |-> Server]
-
-\* Log entries store Raft term and a command.
-LogEntry == { [term |-> t, value |-> v] : t \in Nat, v \in Commands }
-
-\* Jetpack pool record.
-JPool == [max_seen_ballot: Nat,
-          accepted_ballot: Nat,
-          accepted_value: SUBSET Commands,
-          pool: [Key -> Commands \cup {NilCmd}]]
-
-EmptyJPool ==
-    [max_seen_ballot |-> 0,
-     accepted_ballot |-> 0,
-     accepted_value |-> {},
-     pool |-> [k \in Key |-> NilCmd]]
-
-JPoolCommands(p) == {p.pool[k] : k \in Key} \ {NilCmd}
-
-PrepResp == [accepted_ballot: Nat, accepted_value: SUBSET Commands]
 
 (***************************************************************************)
 (* Variables                                                               *)
@@ -101,42 +22,34 @@ PrepResp == [accepted_ballot: Nat, accepted_value: SUBSET Commands]
 
 VARIABLES
     messages,
-    \* elections,
-\*    allLogs,
 
-    \* Raft per-server variables.
+    \* Base protocol interface (shared with Jetpack).
     currentTerm,
     ostate,
-    votedFor,
     log,
     commitIndex,
+
+    \* Raft-specific variables.
+    votedFor,
     votesResponded,
     votesGranted,
-    \* voterLog,
     nextIndex,
     matchIndex,
 
     \* Jetpack per-server variables.
-    jstate,
-    jepoch,
-    oepoch,
-    old_view,
-    new_view,
-    jpool,
-    recovery_set,
-    chosen_value,
-    br_responses,
-    prep_responses,
-    accept_responses,
+    jstate, jepoch, oepoch, old_view, new_view, jpool,
+    recovery_set, chosen_value, br_responses, prep_responses, accept_responses,
 
     \* Client-side variables.
-    client_view,
-    client_pending,
-    client_successes,
-    \* Execution tracking variables.
-    original_execution_cmds,
-    execution_cmds
+    client_view, client_pending, client_successes,
 
+    \* Execution tracking.
+    original_execution_cmds, execution_cmds
+
+\* Raft-specific variable tuple (for UNCHANGED in Jetpack actions).
+raftVars == <<votedFor, votesResponded, votesGranted, nextIndex, matchIndex>>
+
+\* Variable groups for Raft actions' UNCHANGED clauses.
 serverVars == <<currentTerm, ostate, votedFor>>
 logVars == <<log, commitIndex>>
 candidateVars == <<votesResponded, votesGranted>>
@@ -151,200 +64,62 @@ vars == <<messages, serverVars, candidateVars, leaderVars,
           logVars, jetpackVars, clientVars, executionVars>>
 
 (***************************************************************************)
-(* Helpers                                                                 *)
+(* INSTANCE Jetpack module                                                 *)
 (***************************************************************************)
 
-\* Symmetry reduction over servers.
+J == INSTANCE jetpack
+
+(***************************************************************************)
+(* Raft helpers and constants                                              *)
+(***************************************************************************)
+
+Follower   == J!Follower
+Candidate  == J!Candidate
+ToBeLeader == J!ToBeLeader
+Leader     == J!Leader
+
+\* Raft message types.
+RequestVoteRequest   == "RequestVoteRequest"
+RequestVoteResponse  == "RequestVoteResponse"
+AppendEntriesRequest == "AppendEntriesRequest"
+AppendEntriesResponse == "AppendEntriesResponse"
+
+RaftMessageTypes == {RequestVoteRequest, RequestVoteResponse,
+                     AppendEntriesRequest, AppendEntriesResponse}
+
 Symmetry == Permutations(Server)
 
-\* Simple majority quorum over all servers.
-Quorum == {q \in SUBSET(Server) : Cardinality(q) * 2 > Cardinality(Server)}
+Quorum == J!Quorum
 
-\* Quorum for a given view.
-JQuorum(v) == {q \in SUBSET(v.replica_ids) :
-                   Cardinality(q) * 2 > Cardinality(v.replica_ids)}
-
-\* Fast-path quorum must include all proposers and any two fast-path quorums
-\* must intersect in a quorum.
-FastpathQuorum(v) ==
-    {q \in JQuorum(v) :
-        /\ v.proposing_replica_ids \subseteq q
-        /\ \A q2 \in JQuorum(v) :
-             v.proposing_replica_ids \subseteq q2 => (q \cap q2) \in JQuorum(v)}
-
-\* Term of the last entry in a log.
 LastTerm(xlog) == IF Len(xlog) = 0 THEN 0 ELSE xlog[Len(xlog)].term
-
-\* Return min/max from a set (undefined for empty set).
-Min(s) == CHOOSE x \in s : \A y \in s : x <= y
-Max(s) == CHOOSE x \in s : \A y \in s : x >= y
-
-\* Convert a sequence into the set of its elements.
-SeqToSet(s) == {s[i] : i \in 1..Len(s)}
-
-\* Message bag helpers.
-WithMessage(m, msgs) ==
-    IF m \in DOMAIN msgs THEN
-        [msgs EXCEPT ![m] = msgs[m] + 1]
-    ELSE
-        msgs @@ (m :> 1)
-
-WithoutMessage(m, msgs) ==
-    IF m \in DOMAIN msgs THEN
-        IF msgs[m] <= 1 THEN [i \in DOMAIN msgs \ {m} |-> msgs[i]]
-        ELSE [msgs EXCEPT ![m] = msgs[m] - 1]
-    ELSE
-        msgs
-
-Send(m) == messages' = WithMessage(m, messages)
-Discard(m) == messages' = WithoutMessage(m, messages)
-Reply(response, request) ==
-    messages' = WithoutMessage(request, WithMessage(response, messages))
-
-RECURSIVE AddMessages(_,_)
-AddMessages(ms, msgs) ==
-    IF ms = {} THEN msgs
-    ELSE LET m == CHOOSE x \in ms : TRUE
-         IN AddMessages(ms \ {m}, WithMessage(m, msgs))
-
-RECURSIVE RemoveCmd(_,_)
-RemoveCmd(seq, cmd) ==
-    IF seq = <<>> THEN <<>>
-    ELSE LET head == seq[1]
-             tail == SubSeq(seq, 2, Len(seq))
-         IN IF head = cmd
-            THEN RemoveCmd(tail, cmd)
-            ELSE <<head>> \o RemoveCmd(tail, cmd)
-
-RECURSIVE Dedup(_)
-Dedup(seq) ==
-    IF seq = <<>> THEN <<>>
-    ELSE LET head == seq[1]
-             tail == SubSeq(seq, 2, Len(seq))
-         IN <<head>> \o Dedup(RemoveCmd(tail, head))
-
-\* Uniqueness helper for commands.
-LogCmdIds ==
-    UNION { {log[i][k].value.cmd_id : k \in 1..Len(log[i])} : i \in Server }
-
-ExecCmdIds ==
-    {cmd.cmd_id : cmd \in SeqToSet(execution_cmds)}
-
-OriginalExecCmdIds ==
-    {cmd.cmd_id : cmd \in SeqToSet(original_execution_cmds)}
-
-UsedCmdIds ==
-    LogCmdIds \cup
-    ExecCmdIds \cup
-    OriginalExecCmdIds
-
-AvailableCommands == {cmd \in Commands : cmd.cmd_id \notin UsedCmdIds}
-
-\* Key conflict check for a command in a pool.
-HasConflict(pool, cmd) ==
-    /\ pool[cmd.key] /= NilCmd
-    /\ pool[cmd.key] /= cmd
-
-\* Compute recovery set from a quorum of BeginRecovery responses.
-RecoveryCommands(i, qs) ==
-    {cmd \in Commands :
-        Cardinality({s \in qs : cmd \in JPoolCommands(br_responses[i][s])}) * 2
-            > Cardinality(qs)}
-
-\* Read the "kth" executed command or NilCmd if out of range.
-ExecAt(k) == IF k <= Len(execution_cmds) THEN execution_cmds[k] ELSE NilCmd
-
-MaxExecLen == Len(execution_cmds)
-
-CommittedCmds(i) ==
-    IF commitIndex[i] = 0 THEN <<>>
-    ELSE [k \in 1..commitIndex[i] |-> log[i][k].value]
-
-LogEntryAt(i, k) == IF k <= Len(log[i]) THEN log[i][k] ELSE Nil
-LogCmdAt(i, k) == IF k <= Len(log[i]) THEN log[i][k].value ELSE NilCmd
-
-MaxLogLen == Max({Len(log[i]) : i \in Server} \cup {0})
-MaxLogExecLen == Max({MaxLogLen, Len(execution_cmds)})
-
-IsPrefix(p, s) ==
-    /\ Len(p) <= Len(s)
-    /\ \A k \in 1..Len(p) : p[k] = s[k]
-
-\* All commands in chosen_value are executed by every replica in the view.
-ChosenExecutedInView(i) ==
-    \A cmd \in chosen_value[i] :
-        \A s \in new_view[i].replica_ids :
-            cmd \in SeqToSet(CommittedCmds(s))
 
 (***************************************************************************)
 (* Initialization                                                          *)
 (***************************************************************************)
 
-InitHistoryVars ==
-    \* /\ elections = {}
-    \* /\ allLogs = {}
-    /\ TRUE
-
-InitServerVars ==
+Init ==
+    /\ messages = [m \in {} |-> 0]
     /\ currentTerm = [i \in Server |-> 1]
     /\ ostate = [i \in Server |-> Follower]
     /\ votedFor = [i \in Server |-> Nil]
-
-InitCandidateVars ==
-    /\ votesResponded = [i \in Server |-> {}]
-    /\ votesGranted = [i \in Server |-> {}]
-    \* /\ voterLog = [i \in Server |-> [j \in Server |-> <<>>]]
-
-InitLeaderVars ==
-    /\ nextIndex = [i \in Server |-> [j \in Server |-> 1]]
-    /\ matchIndex = [i \in Server |-> [j \in Server |-> 0]]
-
-InitLogVars ==
     /\ log = [i \in Server |-> <<>>]
     /\ commitIndex = [i \in Server |-> 0]
-
-InitJetpackVars ==
-    /\ jstate = [i \in Server |-> Ready]
-    /\ jepoch = [i \in Server |-> DefaultView.epoch]
-    /\ oepoch = [i \in Server |-> DefaultView.epoch]
-    /\ old_view = [i \in Server |-> DefaultView]
-    /\ new_view = [i \in Server |-> DefaultView]
-    /\ jpool = [i \in Server |-> EmptyJPool]
-    /\ recovery_set = [i \in Server |-> {}]
-    /\ chosen_value = [i \in Server |-> {}]
-    /\ br_responses = [i \in Server |-> [j \in Server |-> NilJPool]]
-    /\ prep_responses = [i \in Server |-> [j \in Server |-> NilPrepResp]]
-    /\ accept_responses = [i \in Server |-> [j \in Server |-> FALSE]]
-
-InitClientVars ==
-    /\ client_view = [c \in Client |-> DefaultView]
-    /\ client_pending = [c \in Client |-> NilCmd]
-    /\ client_successes = [c \in Client |-> {}]
-
-InitExecutionVars ==
-    /\ original_execution_cmds = <<>>
-    /\ execution_cmds = <<>>
-
-Init ==
-    /\ messages = [m \in {} |-> 0]
-    /\ InitHistoryVars
-    /\ InitServerVars
-    /\ InitCandidateVars
-    /\ InitLeaderVars
-    /\ InitLogVars
-    /\ InitJetpackVars
-    /\ InitClientVars
-    /\ InitExecutionVars
+    /\ votesResponded = [i \in Server |-> {}]
+    /\ votesGranted = [i \in Server |-> {}]
+    /\ nextIndex = [i \in Server |-> [j \in Server |-> 1]]
+    /\ matchIndex = [i \in Server |-> [j \in Server |-> 0]]
+    /\ J!InitJetpackVars
+    /\ J!InitClientVars
+    /\ J!InitExecutionVars
 
 (***************************************************************************)
-(* Raft transitions                                                        *)
+(* Raft transitions (protocol-specific)                                    *)
 (***************************************************************************)
 
 Restart(i) ==
     /\ ostate' = [ostate EXCEPT ![i] = Follower]
     /\ votesResponded' = [votesResponded EXCEPT ![i] = {}]
     /\ votesGranted' = [votesGranted EXCEPT ![i] = {}]
-    \* /\ voterLog' = [voterLog EXCEPT ![i] = [j \in Server |-> <<>>]]
     /\ nextIndex' = [nextIndex EXCEPT ![i] = [j \in Server |-> 1]]
     /\ matchIndex' = [matchIndex EXCEPT ![i] = [j \in Server |-> 0]]
     /\ commitIndex' = [commitIndex EXCEPT ![i] = 0]
@@ -358,19 +133,18 @@ Timeout(i) ==
     /\ votedFor' = [votedFor EXCEPT ![i] = i]
     /\ votesResponded' = [votesResponded EXCEPT ![i] = {i}]
     /\ votesGranted' = [votesGranted EXCEPT ![i] = {i}]
-    \* /\ voterLog' = [voterLog EXCEPT ![i] = [j \in Server |-> IF j = i THEN log[i] ELSE <<>>]]
     /\ UNCHANGED <<messages, leaderVars, logVars, jetpackVars, clientVars, executionVars>>
 
 RequestVote(i, j) ==
     /\ ostate[i] = Candidate
     /\ i /= j
     /\ j \notin votesResponded[i]
-    /\ Send([mtype         |-> RequestVoteRequest,
-             mterm         |-> currentTerm[i],
-             mlastLogTerm  |-> LastTerm(log[i]),
-             mlastLogIndex |-> Len(log[i]),
-             msource       |-> i,
-             mdest         |-> j])
+    /\ J!Send([mtype         |-> RequestVoteRequest,
+               mterm         |-> currentTerm[i],
+               mlastLogTerm  |-> LastTerm(log[i]),
+               mlastLogIndex |-> Len(log[i]),
+               msource       |-> i,
+               mdest         |-> j])
     /\ UNCHANGED <<serverVars, candidateVars, leaderVars, logVars,
                    jetpackVars, clientVars, executionVars>>
 
@@ -382,17 +156,17 @@ AppendEntries(i, j) ==
                               log[i][prevLogIndex].term
                           ELSE
                               0
-           lastEntry == Min({Len(log[i]), nextIndex[i][j]})
+           lastEntry == J!Min({Len(log[i]), nextIndex[i][j]})
            entries == SubSeq(log[i], nextIndex[i][j], lastEntry)
-       IN Send([mtype          |-> AppendEntriesRequest,
-                mterm          |-> currentTerm[i],
-                mprevLogIndex  |-> prevLogIndex,
-                mprevLogTerm   |-> prevLogTerm,
-                mentries       |-> entries,
-                mlog           |-> log[i],
-                mcommitIndex   |-> Min({commitIndex[i], lastEntry}),
-                msource        |-> i,
-                mdest          |-> j])
+       IN J!Send([mtype          |-> AppendEntriesRequest,
+                  mterm          |-> currentTerm[i],
+                  mprevLogIndex  |-> prevLogIndex,
+                  mprevLogTerm   |-> prevLogTerm,
+                  mentries       |-> entries,
+                  mlog           |-> log[i],
+                  mcommitIndex   |-> J!Min({commitIndex[i], lastEntry}),
+                  msource        |-> i,
+                  mdest          |-> j])
     /\ UNCHANGED <<serverVars, candidateVars, leaderVars, logVars,
                    jetpackVars, clientVars, executionVars>>
 
@@ -406,18 +180,12 @@ BecomeToBeLeader(i) ==
                         [j \in Server |-> Len(log[i]) + 1]]
     /\ matchIndex' = [matchIndex EXCEPT ![i] =
                         [j \in Server |-> 0]]
-    \* /\ elections' = elections \cup
-    \*                     {[eterm     |-> currentTerm[i],
-    \*                       eleader   |-> i,
-    \*                       elog      |-> log[i],
-    \*                       evotes    |-> votesGranted[i],
-    \*                       evoterLog |-> voterLog[i]]}
     /\ UNCHANGED <<messages, currentTerm, votedFor, candidateVars, logVars,
                    jetpackVars, clientVars, executionVars>>
 
 ClientRequest(i, v) ==
     /\ ostate[i] = Leader
-    /\ v \in Commands
+    /\ v \in J!Commands
     /\ LET entry == [term |-> currentTerm[i], value |-> v]
        IN log' = [log EXCEPT ![i] = Append(log[i], entry)]
     /\ UNCHANGED <<messages, serverVars, candidateVars, leaderVars,
@@ -429,9 +197,9 @@ AdvanceCommitIndex(i) ==
            agreeIndexes == {index \in 1..Len(log[i]) : Agree(index) \in Quorum}
            newCommitIndex ==
               IF /\ agreeIndexes /= {}
-                 /\ log[i][Max(agreeIndexes)].term = currentTerm[i]
+                 /\ log[i][J!Max(agreeIndexes)].term = currentTerm[i]
               THEN
-                  Max(agreeIndexes)
+                  J!Max(agreeIndexes)
               ELSE
                   commitIndex[i]
        IN commitIndex' = [commitIndex EXCEPT ![i] = newCommitIndex]
@@ -440,15 +208,8 @@ AdvanceCommitIndex(i) ==
 
 \* Leader executes the next committed log entry.
 ApplyCommitted(i) ==
-    /\ ostate[i] = Leader
-    /\ commitIndex[i] > Len(original_execution_cmds)
-    /\ LET nextExecIndex == Len(original_execution_cmds) + 1
-           nextCmd == log[i][nextExecIndex].value
-       IN /\ original_execution_cmds' =
-              Append(original_execution_cmds, nextCmd)
-          /\ execution_cmds' = Append(execution_cmds, nextCmd)
-    /\ UNCHANGED <<messages, serverVars, candidateVars, leaderVars, logVars,
-                   jetpackVars, clientVars>>
+    /\ J!ApplyCommitted(i)
+    /\ UNCHANGED raftVars
 
 HandleRequestVoteRequest(i, j, m) ==
     LET logOk == \/ m.mlastLogTerm > LastTerm(log[i])
@@ -460,13 +221,13 @@ HandleRequestVoteRequest(i, j, m) ==
     IN /\ m.mterm <= currentTerm[i]
        /\ \/ grant  /\ votedFor' = [votedFor EXCEPT ![i] = j]
           \/ ~grant /\ UNCHANGED votedFor
-       /\ Reply([mtype        |-> RequestVoteResponse,
-                 mterm        |-> currentTerm[i],
-                 mvoteGranted |-> grant,
-                 mlog         |-> log[i],
-                 msource      |-> i,
-                 mdest        |-> j],
-                 m)
+       /\ J!Reply([mtype        |-> RequestVoteResponse,
+                   mterm        |-> currentTerm[i],
+                   mvoteGranted |-> grant,
+                   mlog         |-> log[i],
+                   msource      |-> i,
+                   mdest        |-> j],
+                   m)
        /\ UNCHANGED <<ostate, currentTerm, candidateVars, leaderVars, logVars,
                       jetpackVars, clientVars, executionVars>>
 
@@ -477,10 +238,9 @@ HandleRequestVoteResponse(i, j, m) ==
     /\ \/ /\ m.mvoteGranted
           /\ votesGranted' = [votesGranted EXCEPT ![i] =
                                   votesGranted[i] \cup {j}]
-          \* /\ voterLog' = [voterLog EXCEPT ![i][j] = m.mlog]
        \/ /\ ~m.mvoteGranted
           /\ UNCHANGED votesGranted
-    /\ Discard(m)
+    /\ J!Discard(m)
     /\ UNCHANGED <<serverVars, leaderVars, logVars, jetpackVars, clientVars, executionVars>>
 
 HandleAppendEntriesRequest(i, j, m) ==
@@ -494,13 +254,13 @@ HandleAppendEntriesRequest(i, j, m) ==
                 \/ /\ m.mterm = currentTerm[i]
                    /\ ostate[i] = Follower
                    /\ \lnot logOk
-             /\ Reply([mtype       |-> AppendEntriesResponse,
-                       mterm       |-> currentTerm[i],
-                       msuccess    |-> FALSE,
-                       mmatchIndex |-> 0,
-                       msource     |-> i,
-                       mdest       |-> j],
-                       m)
+             /\ J!Reply([mtype       |-> AppendEntriesResponse,
+                         mterm       |-> currentTerm[i],
+                         msuccess    |-> FALSE,
+                         mmatchIndex |-> 0,
+                         msource     |-> i,
+                         mdest       |-> j],
+                         m)
              /\ UNCHANGED <<serverVars, logVars>>
           \/ \* return to follower state
              /\ m.mterm = currentTerm[i]
@@ -519,14 +279,14 @@ HandleAppendEntriesRequest(i, j, m) ==
                              /\ log[i][index].term = m.mentries[1].term
                        /\ commitIndex' = [commitIndex EXCEPT ![i] =
                                               m.mcommitIndex]
-                       /\ Reply([mtype       |-> AppendEntriesResponse,
-                                 mterm       |-> currentTerm[i],
-                                 msuccess    |-> TRUE,
-                                 mmatchIndex |-> m.mprevLogIndex +
-                                                 Len(m.mentries),
-                                 msource     |-> i,
-                                 mdest       |-> j],
-                                 m)
+                       /\ J!Reply([mtype       |-> AppendEntriesResponse,
+                                   mterm       |-> currentTerm[i],
+                                   msuccess    |-> TRUE,
+                                   mmatchIndex |-> m.mprevLogIndex +
+                                                   Len(m.mentries),
+                                   msource     |-> i,
+                                   mdest       |-> j],
+                                   m)
                        /\ UNCHANGED <<serverVars, log>>
                    \/ \* conflict: remove 1 entry
                        /\ m.mentries /= <<>>
@@ -551,9 +311,9 @@ HandleAppendEntriesResponse(i, j, m) ==
           /\ matchIndex' = [matchIndex EXCEPT ![i][j] = m.mmatchIndex]
        \/ /\ \lnot m.msuccess
           /\ nextIndex' = [nextIndex EXCEPT ![i][j] =
-                               Max({nextIndex[i][j] - 1, 1})]
+                               J!Max({nextIndex[i][j] - 1, 1})]
           /\ UNCHANGED <<matchIndex>>
-    /\ Discard(m)
+    /\ J!Discard(m)
     /\ UNCHANGED <<serverVars, candidateVars, logVars, jetpackVars, clientVars, executionVars>>
 
 UpdateTerm(i, j, m) ==
@@ -566,7 +326,7 @@ UpdateTerm(i, j, m) ==
 
 DropStaleResponse(i, j, m) ==
     /\ m.mterm < currentTerm[i]
-    /\ Discard(m)
+    /\ J!Discard(m)
     /\ UNCHANGED <<serverVars, candidateVars, leaderVars, logVars,
                    jetpackVars, clientVars, executionVars>>
 
@@ -586,388 +346,84 @@ RaftReceive(m) ==
              \/ HandleAppendEntriesResponse(i, j, m)
 
 (***************************************************************************)
-(* Jetpack transitions                                                     *)
+(* Wrapped Jetpack transitions (add UNCHANGED raftVars)                    *)
 (***************************************************************************)
 
-\* Client sends a Preaccept to all replicas in its view.
-ClientSendPreaccept(c) ==
-    /\ client_pending[c] = NilCmd
-    /\ AvailableCommands /= {}
-    /\ \E cmd \in AvailableCommands :
-          LET view == client_view[c]
-              msgSet == { [mtype  |-> PreacceptRequest,
-                            msource |-> c,
-                            mdest |-> s,
-                            mepoch |-> view.epoch,
-                            mview |-> view,
-                            mcmd |-> cmd] : s \in view.replica_ids }
-          IN /\ messages' = AddMessages(msgSet, messages)
-             /\ client_pending' = [client_pending EXCEPT ![c] = cmd]
-             /\ client_successes' = [client_successes EXCEPT ![c] = {}]
-             /\ UNCHANGED <<serverVars, candidateVars, leaderVars, logVars,
-                            jetpackVars, client_view, executionVars>>
+WClientSendPreaccept(c) ==
+    /\ J!ClientSendPreaccept(c)
+    /\ UNCHANGED raftVars
 
-\* Server handles Preaccept from client or another server.
-HandlePreacceptRequest(i, m) ==
-    /\ m.mtype = PreacceptRequest
-    /\ i = m.mdest
-    /\ LET cmd == m.mcmd
-           epochOk == m.mepoch = jepoch[i]
-           readyOk == jstate[i] = Ready
-           noConflict == \lnot HasConflict(jpool[i].pool, cmd)
-           accept == epochOk /\ readyOk /\ noConflict
-           reply == [mtype   |-> PreacceptResponse,
-                     msuccess |-> accept,
-                     mjepoch |-> jepoch[i],
-                     mview   |-> new_view[i],
-                     mcmd    |-> cmd,
-                     msource |-> i,
-                     mdest   |-> m.msource]
-           newLog == Append(log[i], [term |-> currentTerm[i], value |-> cmd])
-       IN /\ jpool' = IF accept THEN
-                          [jpool EXCEPT ![i].pool[cmd.key] = cmd]
-                      ELSE
-                          jpool
-          /\ log' = IF epochOk /\ readyOk /\ ostate[i] = Leader
-                    THEN [log EXCEPT ![i] = newLog]
-                    ELSE log
-          /\ Reply(reply, m)
-          /\ UNCHANGED <<serverVars, candidateVars, leaderVars, commitIndex,
-                         jstate, jepoch, oepoch, old_view, new_view,
-                         recovery_set, chosen_value, br_responses,
-                         prep_responses, accept_responses,
-                         clientVars, executionVars>>
+WHandlePreacceptRequest(i, m) ==
+    /\ J!HandlePreacceptRequest(i, m)
+    /\ UNCHANGED raftVars
 
-\* Client handles Preaccept responses (fast-path success or view update).
-HandlePreacceptResponse(c, m) ==
-    /\ m.mtype = PreacceptResponse
-    /\ m.mdest = c
-    /\ client_pending[c] = m.mcmd
-    /\ LET view == client_view[c]
-           newSuccesses == IF m.msuccess
-                           THEN client_successes[c] \cup {m.msource}
-                           ELSE client_successes[c]
-           fastOk == newSuccesses \in FastpathQuorum(view)
-       IN /\ client_successes' =
-              IF fastOk \/ \lnot m.msuccess
-              THEN [client_successes EXCEPT ![c] = {}]
-              ELSE [client_successes EXCEPT ![c] = newSuccesses]
-          /\ client_pending' =
-              IF fastOk \/ \lnot m.msuccess
-              THEN [client_pending EXCEPT ![c] = NilCmd]
-              ELSE [client_pending EXCEPT ![c] = client_pending[c]]
-          /\ client_view' =
-              IF \lnot m.msuccess
-              THEN [client_view EXCEPT ![c] = m.mview]
-              ELSE client_view
-          /\ execution_cmds' =
-              IF fastOk
-              THEN Append(execution_cmds, m.mcmd)
-              ELSE execution_cmds
-          /\ original_execution_cmds' = original_execution_cmds
-          /\ Discard(m)
-          /\ UNCHANGED <<serverVars, candidateVars, leaderVars,
-                         logVars, jetpackVars>>
+WHandlePreacceptResponse(c, m) ==
+    /\ J!HandlePreacceptResponse(c, m)
+    /\ UNCHANGED raftVars
 
-\* Candidate (now ToBeLeader) starts recovery.
-SendBeginRecovery(i) ==
-    /\ ostate[i] = ToBeLeader
-    /\ jstate[i] = Ready
-    /\ LET view == new_view[i]
-           msgSet == { [mtype |-> BeginRecoveryRequest,
-                        msource |-> i,
-                        mdest |-> s,
-                        mold_view |-> old_view[i],
-                        mnew_view |-> new_view[i]] : s \in view.replica_ids }
-       IN /\ messages' = AddMessages(msgSet, messages)
-          /\ jstate' = [jstate EXCEPT ![i] = Recovery]
-          /\ br_responses' = [br_responses EXCEPT ![i] = [s \in Server |-> NilJPool]]
-          /\ UNCHANGED <<serverVars, candidateVars, leaderVars, logVars,
-                         jepoch, oepoch, old_view, new_view, jpool,
-                         recovery_set, chosen_value, prep_responses,
-                         accept_responses, clientVars, executionVars>>
+WSendBeginRecovery(i) ==
+    /\ J!SendBeginRecovery(i)
+    /\ UNCHANGED raftVars
 
-HandleBeginRecoveryRequest(i, m) ==
-    /\ m.mtype = BeginRecoveryRequest
-    /\ i = m.mdest
-    /\ old_view' = [old_view EXCEPT ![i] = m.mold_view]
-    /\ new_view' = [new_view EXCEPT ![i] = m.mnew_view]
-    /\ oepoch' = [oepoch EXCEPT ![i] = m.mnew_view.epoch]
-    /\ jstate' = [jstate EXCEPT ![i] = Recovery]
-    /\ Reply([mtype |-> BeginRecoveryResponse,
-              mjpool |-> jpool[i],
-              msource |-> i,
-              mdest |-> m.msource],
-              m)
-    /\ UNCHANGED <<serverVars, candidateVars, leaderVars, logVars,
-                   jepoch, jpool, recovery_set, chosen_value,
-                   br_responses, prep_responses, accept_responses,
-                   clientVars, executionVars>>
+WHandleBeginRecoveryRequest(i, m) ==
+    /\ J!HandleBeginRecoveryRequest(i, m)
+    /\ UNCHANGED raftVars
 
-HandleBeginRecoveryResponse(i, m) ==
-    /\ m.mtype = BeginRecoveryResponse
-    /\ i = m.mdest
-    /\ jstate[i] = Recovery
-    /\ br_responses' = [br_responses EXCEPT ![i][m.msource] = m.mjpool]
-    /\ Discard(m)
-    /\ UNCHANGED <<serverVars, candidateVars, leaderVars, logVars,
-                   jstate, jepoch, oepoch, old_view, new_view, jpool,
-                   recovery_set, chosen_value, prep_responses, accept_responses,
-                   clientVars, executionVars>>
+WHandleBeginRecoveryResponse(i, m) ==
+    /\ J!HandleBeginRecoveryResponse(i, m)
+    /\ UNCHANGED raftVars
 
-CompleteBeginRecovery(i) ==
-    /\ jstate[i] = Recovery
-    /\ \E qs \in JQuorum(new_view[i]) :
-         /\ \A s \in qs : br_responses[i][s] /= NilJPool
-         /\ LET rec == RecoveryCommands(i, qs)
-            IN /\ recovery_set' = [recovery_set EXCEPT ![i] = rec]
-               /\ chosen_value' = [chosen_value EXCEPT ![i] = rec]
-               /\ jstate' = [jstate EXCEPT ![i] = AfterBeginRecovery]
-    /\ UNCHANGED <<messages, serverVars, candidateVars, leaderVars, logVars,
-                   jepoch, oepoch, old_view, new_view, jpool,
-                   br_responses, prep_responses, accept_responses,
-                   clientVars, executionVars>>
+WCompleteBeginRecovery(i) ==
+    /\ J!CompleteBeginRecovery(i)
+    /\ UNCHANGED raftVars
 
-SendPrepare(i) ==
-    /\ jstate[i] = AfterBeginRecovery
-    /\ LET view == new_view[i]
-           msgSet == { [mtype |-> JetpackPrepareRequest,
-                        moepoch |-> oepoch[i],
-                        mjepoch |-> jepoch[i],
-                        mmax_seen_ballot |-> jpool[i].max_seen_ballot,
-                        msource |-> i,
-                        mdest |-> s] : s \in view.replica_ids }
-       IN /\ messages' = AddMessages(msgSet, messages)
-          /\ prep_responses' = [prep_responses EXCEPT ![i] = [s \in Server |-> NilPrepResp]]
-          /\ UNCHANGED <<serverVars, candidateVars, leaderVars, logVars,
-                         jstate, jepoch, oepoch, old_view, new_view, jpool,
-                         recovery_set, chosen_value, br_responses,
-                         accept_responses, clientVars, executionVars>>
+WSendPrepare(i) ==
+    /\ J!SendPrepare(i)
+    /\ UNCHANGED raftVars
 
-HandlePrepareRequest(i, m) ==
-    /\ m.mtype = JetpackPrepareRequest
-    /\ i = m.mdest
-    /\ LET ok == /\ m.moepoch >= oepoch[i]
-                 /\ m.mjepoch >= jepoch[i]
-                 /\ m.mmax_seen_ballot >= jpool[i].max_seen_ballot
-           reply == IF ok THEN
-                       [mtype |-> JetpackPrepareResponse,
-                        mok |-> TRUE,
-                        maccepted_ballot |-> jpool[i].accepted_ballot,
-                        maccepted_value |-> jpool[i].accepted_value,
-                        moepoch |-> oepoch[i],
-                        mjepoch |-> jepoch[i],
-                        mmax_seen_ballot |-> m.mmax_seen_ballot,
-                        msource |-> i,
-                        mdest |-> m.msource]
-                   ELSE
-                       [mtype |-> JetpackPrepareResponse,
-                        mok |-> FALSE,
-                        maccepted_ballot |-> jpool[i].accepted_ballot,
-                        maccepted_value |-> jpool[i].accepted_value,
-                        moepoch |-> oepoch[i],
-                        mjepoch |-> jepoch[i],
-                        mmax_seen_ballot |-> jpool[i].max_seen_ballot,
-                        msource |-> i,
-                        mdest |-> m.msource]
-       IN /\ oepoch' = IF ok THEN [oepoch EXCEPT ![i] = Max({oepoch[i], m.moepoch})]
-                       ELSE oepoch
-          /\ jepoch' = IF ok THEN [jepoch EXCEPT ![i] = Max({jepoch[i], m.mjepoch})]
-                       ELSE jepoch
-          /\ jpool' = IF ok THEN
-                        [jpool EXCEPT ![i].max_seen_ballot = m.mmax_seen_ballot]
-                      ELSE jpool
-          /\ Reply(reply, m)
-          /\ UNCHANGED <<serverVars, candidateVars, leaderVars, logVars,
-                         jstate, old_view, new_view, recovery_set, chosen_value,
-                         br_responses, prep_responses, accept_responses,
-                         clientVars, executionVars>>
+WHandlePrepareRequest(i, m) ==
+    /\ J!HandlePrepareRequest(i, m)
+    /\ UNCHANGED raftVars
 
-HandlePrepareResponse(i, m) ==
-    /\ m.mtype = JetpackPrepareResponse
-    /\ i = m.mdest
-    /\ IF m.mok THEN
-          /\ prep_responses' =
-                 [prep_responses EXCEPT ![i][m.msource] =
-                     [accepted_ballot |-> m.maccepted_ballot,
-                      accepted_value |-> m.maccepted_value]]
-          /\ UNCHANGED <<oepoch, jepoch, jpool>>
-       ELSE
-          /\ prep_responses' = prep_responses
-          /\ oepoch' = [oepoch EXCEPT ![i] = Max({oepoch[i], m.moepoch})]
-          /\ jepoch' = [jepoch EXCEPT ![i] = Max({jepoch[i], m.mjepoch})]
-          /\ jpool' = [jpool EXCEPT ![i].max_seen_ballot =
-                           Max({jpool[i].max_seen_ballot, m.mmax_seen_ballot})]
-    /\ Discard(m)
-    /\ UNCHANGED <<serverVars, candidateVars, leaderVars, logVars,
-                   jstate, old_view, new_view, recovery_set, chosen_value,
-                   br_responses, accept_responses, clientVars, executionVars>>
+WHandlePrepareResponse(i, m) ==
+    /\ J!HandlePrepareResponse(i, m)
+    /\ UNCHANGED raftVars
 
-CompletePrepare(i) ==
-    /\ jstate[i] = AfterBeginRecovery
-    /\ \E qs \in JQuorum(new_view[i]) :
-         /\ \A s \in qs : prep_responses[i][s] /= NilPrepResp
-         /\ LET respVals == {prep_responses[i][s] : s \in qs}
-                ballots == {r.accepted_ballot : r \in respVals}
-                maxb == IF ballots = {} THEN 0 ELSE Max(ballots)
-                topVals == {r \in respVals : r.accepted_ballot = maxb}
-                bestVals == {r.accepted_value : r \in topVals}
-                pick == IF maxb = 0 \/ bestVals = {}
-                        THEN chosen_value[i]
-                        ELSE CHOOSE v \in bestVals : TRUE
-            IN /\ chosen_value' = [chosen_value EXCEPT ![i] = pick]
-               /\ jstate' = [jstate EXCEPT ![i] = AfterPrepare]
-    /\ UNCHANGED <<messages, serverVars, candidateVars, leaderVars, logVars,
-                   jepoch, oepoch, old_view, new_view, jpool,
-                   recovery_set, br_responses, prep_responses,
-                   accept_responses, clientVars, executionVars>>
+WCompletePrepare(i) ==
+    /\ J!CompletePrepare(i)
+    /\ UNCHANGED raftVars
 
-SendAccept(i) ==
-    /\ jstate[i] = AfterPrepare
-    /\ LET view == new_view[i]
-           msgSet == { [mtype |-> JetpackAcceptRequest,
-                        moepoch |-> oepoch[i],
-                        mjepoch |-> jepoch[i],
-                        mmax_seen_ballot |-> jpool[i].max_seen_ballot,
-                        mvalue |-> chosen_value[i],
-                        msource |-> i,
-                        mdest |-> s] : s \in view.replica_ids }
-       IN /\ messages' = AddMessages(msgSet, messages)
-          /\ accept_responses' = [accept_responses EXCEPT ![i] = [s \in Server |-> FALSE]]
-          /\ UNCHANGED <<serverVars, candidateVars, leaderVars, logVars,
-                         jstate, jepoch, oepoch, old_view, new_view, jpool,
-                         recovery_set, chosen_value, br_responses,
-                         prep_responses, clientVars, executionVars>>
+WSendAccept(i) ==
+    /\ J!SendAccept(i)
+    /\ UNCHANGED raftVars
 
-HandleAcceptRequest(i, m) ==
-    /\ m.mtype = JetpackAcceptRequest
-    /\ i = m.mdest
-    /\ LET ok == /\ m.moepoch >= oepoch[i]
-                 /\ m.mjepoch >= jepoch[i]
-                 /\ m.mmax_seen_ballot >= jpool[i].max_seen_ballot
-           reply == IF ok THEN
-                       [mtype |-> JetpackAcceptResponse,
-                        mok |-> TRUE,
-                        mmax_seen_ballot |-> m.mmax_seen_ballot,
-                        msource |-> i,
-                        mdest |-> m.msource]
-                   ELSE
-                       [mtype |-> JetpackAcceptResponse,
-                        mok |-> FALSE,
-                        mmax_seen_ballot |-> jpool[i].max_seen_ballot,
-                        msource |-> i,
-                        mdest |-> m.msource]
-       IN /\ oepoch' = IF ok THEN [oepoch EXCEPT ![i] = Max({oepoch[i], m.moepoch})]
-                       ELSE oepoch
-          /\ jepoch' = IF ok THEN [jepoch EXCEPT ![i] = Max({jepoch[i], m.mjepoch})]
-                       ELSE jepoch
-          /\ jpool' = IF ok THEN
-                        [jpool EXCEPT ![i].max_seen_ballot = m.mmax_seen_ballot,
-                                         ![i].accepted_ballot = m.mmax_seen_ballot,
-                                         ![i].accepted_value = m.mvalue]
-                      ELSE jpool
-          /\ Reply(reply, m)
-          /\ UNCHANGED <<serverVars, candidateVars, leaderVars, logVars,
-                         jstate, old_view, new_view, recovery_set, chosen_value,
-                         br_responses, prep_responses, accept_responses,
-                         clientVars, executionVars>>
+WHandleAcceptRequest(i, m) ==
+    /\ J!HandleAcceptRequest(i, m)
+    /\ UNCHANGED raftVars
 
-HandleAcceptResponse(i, m) ==
-    /\ m.mtype = JetpackAcceptResponse
-    /\ i = m.mdest
-    /\ IF m.mok THEN
-          /\ accept_responses' =
-                 [accept_responses EXCEPT ![i][m.msource] = TRUE]
-          /\ UNCHANGED <<oepoch, jepoch, jpool>>
-       ELSE
-          /\ accept_responses' = accept_responses
-          /\ jpool' = [jpool EXCEPT ![i].max_seen_ballot =
-                          Max({jpool[i].max_seen_ballot, m.mmax_seen_ballot})]
-          /\ UNCHANGED <<oepoch, jepoch>>
-    /\ Discard(m)
-    /\ UNCHANGED <<serverVars, candidateVars, leaderVars, logVars,
-                   jstate, old_view, new_view, recovery_set, chosen_value,
-                   br_responses, prep_responses, clientVars, executionVars>>
+WHandleAcceptResponse(i, m) ==
+    /\ J!HandleAcceptResponse(i, m)
+    /\ UNCHANGED raftVars
 
-CompleteAccept(i) ==
-    /\ jstate[i] = AfterPrepare
-    /\ \E qs \in JQuorum(new_view[i]) :
-         /\ \A s \in qs : accept_responses[i][s] = TRUE
-         /\ jstate' = [jstate EXCEPT ![i] = AfterAccept]
-    /\ UNCHANGED <<messages, serverVars, candidateVars, leaderVars, logVars,
-                   jepoch, oepoch, old_view, new_view, jpool,
-                   recovery_set, chosen_value, br_responses,
-                   prep_responses, accept_responses, clientVars, executionVars>>
+WCompleteAccept(i) ==
+    /\ J!CompleteAccept(i)
+    /\ UNCHANGED raftVars
 
-\* Resubmit chosen_value via Preaccept to proposers (does not advance state).
-Resubmit(i) ==
-    /\ jstate[i] = AfterAccept
-    /\ LET proposers == new_view[i].proposing_replica_ids
-           msgSet == { [mtype |-> PreacceptRequest,
-                        msource |-> i,
-                        mdest |-> s,
-                        mepoch |-> jepoch[i],
-                        mview |-> new_view[i],
-                        mcmd |-> cmd] :
-                        s \in proposers, cmd \in chosen_value[i] }
-       IN /\ messages' = AddMessages(msgSet, messages)
-          /\ UNCHANGED <<serverVars, candidateVars, leaderVars, logVars,
-                         jstate, jepoch, oepoch, old_view, new_view, jpool,
-                         recovery_set, chosen_value, br_responses,
-                         prep_responses, accept_responses, clientVars, executionVars>>
+WResubmit(i) ==
+    /\ J!Resubmit(i)
+    /\ UNCHANGED raftVars
 
-\* Advance to AfterResubmit once chosen_value has been executed in Raft.
-CompleteResubmit(i) ==
-    /\ jstate[i] = AfterAccept
-    /\ ChosenExecutedInView(i)
-    /\ jstate' = [jstate EXCEPT ![i] = AfterResubmit]
-    /\ UNCHANGED <<messages, serverVars, candidateVars, leaderVars, logVars,
-                   jepoch, oepoch, old_view, new_view, jpool,
-                   recovery_set, chosen_value, br_responses,
-                   prep_responses, accept_responses, clientVars, executionVars>>
+WCompleteResubmit(i) ==
+    /\ J!CompleteResubmit(i)
+    /\ UNCHANGED raftVars
 
-FinishRecovery(i) ==
-    /\ jstate[i] = AfterResubmit
-    /\ LET view == new_view[i]
-           msgSet == { [mtype |-> FinishRecoveryRequest,
-                        moepoch |-> oepoch[i],
-                        mnew_view |-> view,
-                        msource |-> i,
-                        mdest |-> s] : s \in view.replica_ids }
-       IN /\ messages' = AddMessages(msgSet, messages)
-          /\ jepoch' = [jepoch EXCEPT ![i] = oepoch[i]]
-          /\ oepoch' = [oepoch EXCEPT ![i] = oepoch[i]]
-          /\ old_view' = [old_view EXCEPT ![i] = view]
-          /\ new_view' = [new_view EXCEPT ![i] = view]
-          /\ jpool' = [jpool EXCEPT ![i] = EmptyJPool]
-          /\ jstate' = [jstate EXCEPT ![i] = Ready]
-          /\ recovery_set' = [recovery_set EXCEPT ![i] = {}]
-          /\ chosen_value' = [chosen_value EXCEPT ![i] = {}]
-          /\ br_responses' = [br_responses EXCEPT ![i] = [s \in Server |-> NilJPool]]
-          /\ prep_responses' = [prep_responses EXCEPT ![i] = [s \in Server |-> NilPrepResp]]
-          /\ accept_responses' = [accept_responses EXCEPT ![i] = [s \in Server |-> FALSE]]
-          /\ ostate' = [ostate EXCEPT ![i] = Leader]
-    /\ UNCHANGED <<currentTerm, votedFor, votesResponded,
-                   votesGranted, nextIndex, matchIndex,
-                   logVars, clientVars, executionVars>>
+WFinishRecovery(i) ==
+    /\ J!FinishRecovery(i)
+    /\ UNCHANGED raftVars
 
-HandleFinishRecovery(i, m) ==
-    /\ m.mtype = FinishRecoveryRequest
-    /\ i = m.mdest
-    /\ jepoch' = [jepoch EXCEPT ![i] = m.moepoch]
-    /\ oepoch' = [oepoch EXCEPT ![i] = m.moepoch]
-    /\ old_view' = [old_view EXCEPT ![i] = m.mnew_view]
-    /\ new_view' = [new_view EXCEPT ![i] = m.mnew_view]
-    /\ jpool' = [jpool EXCEPT ![i] = EmptyJPool]
-    /\ jstate' = [jstate EXCEPT ![i] = Ready]
-    /\ recovery_set' = [recovery_set EXCEPT ![i] = {}]
-    /\ chosen_value' = [chosen_value EXCEPT ![i] = {}]
-    /\ ostate' = [ostate EXCEPT ![i] = IF ostate[i] = ToBeLeader THEN Leader ELSE ostate[i]]
-    /\ Discard(m)
-    /\ UNCHANGED <<currentTerm, votedFor, votesResponded,
-                   votesGranted, nextIndex, matchIndex,
-                   logVars, br_responses, prep_responses,
-                   accept_responses, clientVars, executionVars>>
+WHandleFinishRecovery(i, m) ==
+    /\ J!HandleFinishRecovery(i, m)
+    /\ UNCHANGED raftVars
 
 (***************************************************************************)
 (* Message receive plumbing                                                *)
@@ -977,39 +433,39 @@ ServerReceive(m) ==
     /\ m.mdest \in Server
     /\ \/ /\ m.mtype \in RaftMessageTypes
           /\ RaftReceive(m)
-       \/ /\ m.mtype = PreacceptRequest
-          /\ HandlePreacceptRequest(m.mdest, m)
-       \/ /\ m.mtype = PreacceptResponse
-          /\ Discard(m)
+       \/ /\ m.mtype = J!PreacceptRequest
+          /\ WHandlePreacceptRequest(m.mdest, m)
+       \/ /\ m.mtype = J!PreacceptResponse
+          /\ J!Discard(m)
           /\ UNCHANGED <<serverVars, candidateVars, leaderVars, logVars,
                          jetpackVars, clientVars, executionVars>>
-       \/ /\ m.mtype = BeginRecoveryRequest
-          /\ HandleBeginRecoveryRequest(m.mdest, m)
-       \/ /\ m.mtype = BeginRecoveryResponse
-          /\ HandleBeginRecoveryResponse(m.mdest, m)
-       \/ /\ m.mtype = JetpackPrepareRequest
-          /\ HandlePrepareRequest(m.mdest, m)
-       \/ /\ m.mtype = JetpackPrepareResponse
-          /\ HandlePrepareResponse(m.mdest, m)
-       \/ /\ m.mtype = JetpackAcceptRequest
-          /\ HandleAcceptRequest(m.mdest, m)
-       \/ /\ m.mtype = JetpackAcceptResponse
-          /\ HandleAcceptResponse(m.mdest, m)
-       \/ /\ m.mtype = FinishRecoveryRequest
-          /\ HandleFinishRecovery(m.mdest, m)
+       \/ /\ m.mtype = J!BeginRecoveryRequest
+          /\ WHandleBeginRecoveryRequest(m.mdest, m)
+       \/ /\ m.mtype = J!BeginRecoveryResponse
+          /\ WHandleBeginRecoveryResponse(m.mdest, m)
+       \/ /\ m.mtype = J!JetpackPrepareRequest
+          /\ WHandlePrepareRequest(m.mdest, m)
+       \/ /\ m.mtype = J!JetpackPrepareResponse
+          /\ WHandlePrepareResponse(m.mdest, m)
+       \/ /\ m.mtype = J!JetpackAcceptRequest
+          /\ WHandleAcceptRequest(m.mdest, m)
+       \/ /\ m.mtype = J!JetpackAcceptResponse
+          /\ WHandleAcceptResponse(m.mdest, m)
+       \/ /\ m.mtype = J!FinishRecoveryRequest
+          /\ WHandleFinishRecovery(m.mdest, m)
 
 ClientReceive(m) ==
     /\ m.mdest \in Client
-    /\ m.mtype = PreacceptResponse
-    /\ HandlePreacceptResponse(m.mdest, m)
+    /\ m.mtype = J!PreacceptResponse
+    /\ WHandlePreacceptResponse(m.mdest, m)
 
 DuplicateMessage(m) ==
-    /\ Send(m)
+    /\ J!Send(m)
     /\ UNCHANGED <<serverVars, candidateVars, leaderVars, logVars,
                    jetpackVars, clientVars, executionVars>>
 
 DropMessage(m) ==
-    /\ Discard(m)
+    /\ J!Discard(m)
     /\ UNCHANGED <<serverVars, candidateVars, leaderVars, logVars,
                    jetpackVars, clientVars, executionVars>>
 
@@ -1025,25 +481,23 @@ Next ==
        \/ \E i \in Server : AdvanceCommitIndex(i)
        \/ \E i \in Server : ApplyCommitted(i)
        \/ \E i, j \in Server : AppendEntries(i, j)
-       \/ \E i \in Server, v \in Commands : ClientRequest(i, v)
+       \/ \E i \in Server, v \in J!Commands : ClientRequest(i, v)
 
-       \/ \E c \in Client : ClientSendPreaccept(c)
-       \/ \E i \in Server : SendBeginRecovery(i)
-       \/ \E i \in Server : CompleteBeginRecovery(i)
-       \/ \E i \in Server : SendPrepare(i)
-       \/ \E i \in Server : CompletePrepare(i)
-       \/ \E i \in Server : SendAccept(i)
-       \/ \E i \in Server : CompleteAccept(i)
-       \/ \E i \in Server : Resubmit(i)
-       \/ \E i \in Server : CompleteResubmit(i)
-       \/ \E i \in Server : FinishRecovery(i)
+       \/ \E c \in Client : WClientSendPreaccept(c)
+       \/ \E i \in Server : WSendBeginRecovery(i)
+       \/ \E i \in Server : WCompleteBeginRecovery(i)
+       \/ \E i \in Server : WSendPrepare(i)
+       \/ \E i \in Server : WCompletePrepare(i)
+       \/ \E i \in Server : WSendAccept(i)
+       \/ \E i \in Server : WCompleteAccept(i)
+       \/ \E i \in Server : WResubmit(i)
+       \/ \E i \in Server : WCompleteResubmit(i)
+       \/ \E i \in Server : WFinishRecovery(i)
 
        \/ \E m \in DOMAIN messages : ServerReceive(m)
        \/ \E m \in DOMAIN messages : ClientReceive(m)
        \/ \E m \in DOMAIN messages : DuplicateMessage(m)
        \/ \E m \in DOMAIN messages : DropMessage(m)
-
-\*    /\ allLogs' = allLogs \cup {log[i] : i \in Server}
 
 Spec == Init /\ [][Next]_vars
 
@@ -1068,38 +522,12 @@ SmallStateConstraint ==
 (* Properties                                                              *)
 (***************************************************************************)
 
-\* Logs agree at each index (or are missing).
-\* Use length guards to avoid comparing records with Nil (TLC type error).
-LogAgreement ==
-    /\ MaxLogLen >= 0
-    /\ \A i, j \in Server :
-         \A k \in 1..MaxLogLen :
-            \/ k > Len(log[i])
-            \/ k > Len(log[j])
-            \/ log[i][k] = log[j][k]
+LogAgreement == J!LogAgreement
+LogOrderMatchesExecution == J!LogOrderMatchesExecution
+ExecutionDedupMatches == J!ExecutionDedupMatches
 
-\* Log order matches execution_cmds, allowing NilCmd for missing entries.
-LogOrderMatchesExecution ==
-    /\ MaxLogExecLen >= 0
-    /\ \A i \in Server :
-         \A k \in 1..MaxLogExecLen :
-            LET lc == LogCmdAt(i, k)
-                ec == ExecAt(k)
-            IN \/ lc = ec
-               \/ lc = NilCmd
-               \/ ec = NilCmd
-
-\* Deduplicated original executions match execution_cmds.
-ExecutionDedupMatches ==
-    \/ IsPrefix(Dedup(original_execution_cmds), execution_cmds)
-    \/ IsPrefix(Dedup(execution_cmds), original_execution_cmds)
-
-\* Temporal wrappers for TLC configs.
 Safety == [](LogAgreement /\ LogOrderMatchesExecution /\ ExecutionDedupMatches)
-\* Liveness == Durability
 
-\* Implication forms (useful for theorem statements or properties).
 SpecSafety == Spec => Safety
-\* SpecLiveness == Spec => Liveness
 
 =============================================================================

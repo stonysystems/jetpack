@@ -193,7 +193,15 @@ Requires N-sequence log abstraction:
   - Analysis shows wrapper modules are the correct TLA+ pattern for composition;
     direct INSTANCE composition would require extracting protocol-specific actions
     from jetpack.tla, which is a larger refactoring effort
-- [ ] Refactor base protocols to expose N-sequence log interface
+- [x] Refactor base protocols to expose N-sequence log interface
+  - Refactored jetpack.tla: removed 5 protocol-specific variables (votedFor, votesResponded,
+    votesGranted, nextIndex, matchIndex), removed BecomeToBeLeader action, added baseVars tuple,
+    added InitJetpackVars/InitClientVars/InitExecutionVars for wrapper use
+  - Rewrote jetpack_raft.tla as thin wrapper using INSTANCE (1105→533 lines, ~52% reduction)
+  - Rewrote jetpack_copilot.tla as thin wrapper using INSTANCE (1029→508 lines, ~51% reduction)
+  - Rewrote jetpack_mencius.tla as thin wrapper using INSTANCE (1124→612 lines, ~46% reduction)
+  - Each wrapper: J == INSTANCE jetpack, wraps Jetpack actions with UNCHANGED protocolExtraVars
+  - TLC re-verified: Raft 82K states, CoPilot 515 states, Mencius 5M+ states (all no errors)
 - [ ] Verify `jetpack.tla` + `raft.tla` direct composition (no wrapper)
 - [ ] Verify `jetpack.tla` + `copilot.tla` direct composition (no wrapper)
 - [ ] Verify `jetpack.tla` + `mencius.tla` direct composition (no wrapper)
