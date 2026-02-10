@@ -160,6 +160,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     python3-yaml \
     wget \
     curl \
+    netcat-openbsd \
     procps \
     iproute2 \
     # ZooKeeper server (Java-based)

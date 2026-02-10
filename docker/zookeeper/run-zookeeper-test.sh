@@ -70,15 +70,27 @@ tickTime=2000
 dataDir=$ZOOKEEPER_DATA_DIR
 clientPort=$ZOOKEEPER_PORT
 admin.enableServer=false
+4lw.commands.whitelist=ruok,srvr,stat,mntr
 EOF
 
     # Start ZooKeeper server
     "${ZOOKEEPER_HOME}/bin/zkServer.sh" start /tmp/zoo.cfg > "$ZOOKEEPER_LOG" 2>&1
 
-    # Wait for ZooKeeper to be ready
+    # Wait for ZooKeeper to be ready (try nc first, fall back to bash /dev/tcp)
     for i in $(seq 1 30); do
-        if echo ruok | nc -w 2 127.0.0.1 "$ZOOKEEPER_PORT" 2>/dev/null | grep -q imok; then
+        local response=""
+        if command -v nc &>/dev/null; then
+            response=$(echo ruok | nc -w 2 127.0.0.1 "$ZOOKEEPER_PORT" 2>/dev/null || true)
+        else
+            response=$(echo ruok | timeout 2 bash -c "cat > /dev/tcp/127.0.0.1/$ZOOKEEPER_PORT; cat" 2>/dev/null || true)
+        fi
+        if echo "$response" | grep -q imok; then
             log_info "ZooKeeper is ready (port=$ZOOKEEPER_PORT)"
+            return 0
+        fi
+        # Also try zkServer.sh status as a fallback
+        if "${ZOOKEEPER_HOME}/bin/zkServer.sh" status /tmp/zoo.cfg 2>&1 | grep -q "Mode: standalone"; then
+            log_info "ZooKeeper is ready (port=$ZOOKEEPER_PORT, mode=standalone)"
             return 0
         fi
         sleep 0.5
@@ -138,6 +150,7 @@ syncLimit=2
 dataDir=$data_dir
 clientPort=$client_port
 admin.enableServer=false
+4lw.commands.whitelist=ruok,srvr,stat,mntr
 server.1=${ENSEMBLE_IPS[0]}:${base_peer_port}:${base_election_port}
 server.2=${ENSEMBLE_IPS[1]}:$((base_peer_port + 1)):$((base_election_port + 1))
 server.3=${ENSEMBLE_IPS[2]}:$((base_peer_port + 2)):$((base_election_port + 2))
@@ -237,58 +250,190 @@ wait_zookeeper_new_leader() {
 # --- Test modes ---
 
 run_single_process_test() {
-    log_info "=== Single-process test ==="
+    log_info "=== Single-Process Test: basic read/write through Jetpack + ZooKeeper ==="
+    log_info "Config: 1 client, 3 server replicas, 1 partition, rw benchmark"
+    log_info "Duration: ${TEST_DURATION}s"
+
     start_embedded_zookeeper
 
     mkdir -p "$LOG_DIR"
-    local config="${JETPACK_DIR}/config/1c1s3r1p.yml"
-    local binary="${JETPACK_DIR}/build/deptran_server"
 
-    log_info "Starting Jetpack (zookeeper mode, config=$config, duration=${TEST_DURATION}s)..."
-    "$binary" \
-        -f "$config" \
+    local config_site="${JETPACK_DIR}/config/1c1s3r1p.yml"
+    local config_mode="${JETPACK_DIR}/config/none_zookeeper.yml"
+    local config_bench="${JETPACK_DIR}/config/rw_fixed.yml"
+    local server_bin="${JETPACK_DIR}/build/deptran_server"
+
+    if [ ! -x "$server_bin" ]; then
+        log_error "Jetpack server binary not found at $server_bin"
+        return 1
+    fi
+
+    for cfg in "$config_site" "$config_mode" "$config_bench"; do
+        if [ ! -f "$cfg" ]; then
+            log_error "Config file not found: $cfg"
+            return 1
+        fi
+    done
+
+    # Single-process mode: all servers + clients in one process.
+    # The config 1c1s3r1p.yml maps all sites to process "localhost",
+    # so -P localhost runs everything in one process.
+    local pids=()
+    local proc_names=("localhost")
+
+    log_info "Starting Jetpack (all servers + client in one process)"
+    "$server_bin" \
+        -f "$config_site" \
+        -f "$config_mode" \
+        -f "$config_bench" \
+        -f "${JETPACK_DIR}/config/client_closed.yml" \
+        -f "${JETPACK_DIR}/config/concurrent_1.yml" \
+        -P localhost \
         -d "$TEST_DURATION" \
-        -t 30 \
-        -T 2 \
-        -P "zookeeper" \
-        -r "zookeeper" \
-        2>&1 | tee "$LOG_DIR/jetpack-single.log"
+        -r "$LOG_DIR" \
+        > "$LOG_DIR/proc-localhost.log" 2>&1 &
+    pids+=($!)
 
-    local exit_code=${PIPESTATUS[0]}
-    if [ "$exit_code" -eq 0 ]; then
-        log_info "=== Single-process test PASSED ==="
+    log_info "Waiting for process to complete (timeout: $((TEST_DURATION + 30))s)..."
+
+    local exit_code=0
+    for i in "${!pids[@]}"; do
+        if ! wait "${pids[$i]}" 2>/dev/null; then
+            log_warn "Process ${proc_names[$i]} (PID ${pids[$i]}) exited with non-zero status"
+            exit_code=1
+        fi
+    done
+
+    # Validate results
+    log_info "--- Result Validation ---"
+
+    local throughput_found=false
+    for proc in "${proc_names[@]}"; do
+        local logfile="$LOG_DIR/proc-${proc}.log"
+        if [ -f "$logfile" ]; then
+            if grep -qi "throughput" "$logfile" 2>/dev/null; then
+                throughput_found=true
+                local tp_line
+                tp_line=$(grep -i "Mid throughput" "$logfile" | tail -1)
+                if [ -n "$tp_line" ]; then
+                    log_info "  $proc: $tp_line"
+                fi
+            fi
+            if grep -qi "segfault\|segmentation fault\|abort\|FATAL" "$logfile" 2>/dev/null; then
+                log_error "  $proc: crash detected in log"
+                exit_code=1
+            fi
+        fi
+    done
+
+    echo ""
+    if [ $exit_code -eq 0 ]; then
+        log_info "=== Single-Process Test PASSED ==="
+        if $throughput_found; then
+            log_info "  - Throughput metrics found in logs"
+        fi
     else
-        log_error "=== Single-process test FAILED (exit=$exit_code) ==="
+        log_error "=== Single-Process Test FAILED ==="
     fi
     return "$exit_code"
 }
 
 run_multi_process_test() {
-    log_info "=== Multi-process test ==="
+    log_info "=== Multi-Process Test: 5 servers + 5 clients with network latency ==="
+    log_info "Config: 5 clients, 5 server replicas, 1 partition, rw benchmark"
+    log_info "Latency: ${LATENCY_MS}ms +/- ${LATENCY_JITTER}ms between servers"
+    log_info "Duration: ${TEST_DURATION}s"
+
     start_embedded_zookeeper
     setup_latency
 
     mkdir -p "$LOG_DIR"
-    local config="${JETPACK_DIR}/config/5c1s5r1p_zookeeper.yml"
-    local binary="${JETPACK_DIR}/build/deptran_server"
 
-    log_info "Starting Jetpack (zookeeper mode, 5 servers + 5 clients, latency=${LATENCY_MS}ms)..."
-    "$binary" \
-        -f "$config" \
-        -d "$TEST_DURATION" \
-        -t 30 \
-        -T 2 \
-        -P "zookeeper" \
-        -r "zookeeper" \
-        2>&1 | tee "$LOG_DIR/jetpack-multi.log"
+    local config_site="${JETPACK_DIR}/config/5c1s5r1p_zookeeper.yml"
+    local config_mode="${JETPACK_DIR}/config/none_zookeeper.yml"
+    local config_bench="${JETPACK_DIR}/config/rw_fixed.yml"
+    local server_bin="${JETPACK_DIR}/build/deptran_server"
 
-    local exit_code=${PIPESTATUS[0]}
+    if [ ! -x "$server_bin" ]; then
+        log_error "Jetpack server binary not found at $server_bin"
+        return 1
+    fi
+
+    for cfg in "$config_site" "$config_mode" "$config_bench"; do
+        if [ ! -f "$cfg" ]; then
+            log_error "Config file not found: $cfg"
+            return 1
+        fi
+    done
+
+    # Phase 1: Launch 5 processes (each hosts a server + client).
+    # The -P flag takes the process name from the config's "process:" section,
+    # NOT the site name. In 5c1s5r1p_zookeeper.yml: s101→h1, s201→h2, etc.
+    local host_procs=("h1" "h2" "h3" "h4" "h5")
+    local pids=()
+    local proc_names=()
+
+    for i in "${!host_procs[@]}"; do
+        local proc="${host_procs[$i]}"
+        log_info "Starting process $proc (server + client)"
+        "$server_bin" \
+            -f "$config_site" \
+            -f "$config_mode" \
+            -f "$config_bench" \
+            -P "$proc" \
+            -d "$TEST_DURATION" \
+            -r "$LOG_DIR" \
+            > "$LOG_DIR/proc-${proc}.log" 2>&1 &
+        pids+=($!)
+        proc_names+=("$proc")
+    done
+
+    log_info "Waiting for ${#pids[@]} processes to complete (timeout: $((TEST_DURATION + 60))s)..."
+
+    # Wait for all processes
+    local exit_code=0
+    for i in "${!pids[@]}"; do
+        if ! wait "${pids[$i]}" 2>/dev/null; then
+            log_warn "Process ${proc_names[$i]} (PID ${pids[$i]}) exited with non-zero status"
+            exit_code=1
+        fi
+    done
+
     remove_latency
 
-    if [ "$exit_code" -eq 0 ]; then
-        log_info "=== Multi-process test PASSED ==="
+    # Phase 2: Validate results
+    log_info "--- Result Validation ---"
+
+    local throughput_found=false
+    for proc in "${proc_names[@]}"; do
+        local logfile="$LOG_DIR/proc-${proc}.log"
+        if [ -f "$logfile" ]; then
+            if grep -qi "throughput" "$logfile" 2>/dev/null; then
+                throughput_found=true
+                local tp_line
+                tp_line=$(grep -i "throughput" "$logfile" | tail -1)
+                if [ -n "$tp_line" ]; then
+                    log_info "  $proc: $tp_line"
+                fi
+            fi
+            if grep -qi "segfault\|segmentation fault\|abort\|FATAL" "$logfile" 2>/dev/null; then
+                log_error "  $proc: crash detected in log"
+                exit_code=1
+            fi
+        else
+            log_warn "  $proc: log file missing"
+        fi
+    done
+
+    echo ""
+    if [ $exit_code -eq 0 ]; then
+        log_info "=== Multi-Process Test PASSED ==="
+        if $throughput_found; then
+            log_info "  - Throughput metrics found in logs"
+        fi
     else
-        log_error "=== Multi-process test FAILED (exit=$exit_code) ==="
+        log_error "=== Multi-Process Test FAILED ==="
+        log_info "Check logs in $LOG_DIR for details"
     fi
     return "$exit_code"
 }
@@ -308,17 +453,22 @@ run_recovery_test() {
     local leader_ip="${leader%%:*}"
     log_info "Current ZooKeeper leader: $leader"
 
-    # Start Jetpack with failover config
+    # Start Jetpack with failover config — single-process mode.
+    local config_mode="${JETPACK_DIR}/config/none_zookeeper.yml"
+    local config_bench="${JETPACK_DIR}/config/rw_fixed.yml"
+
     log_info "Starting Jetpack with failover config..."
     "$binary" \
         -f "$config" \
+        -f "$config_mode" \
+        -f "$config_bench" \
         -f "$failover_config" \
+        -f "${JETPACK_DIR}/config/client_closed.yml" \
+        -f "${JETPACK_DIR}/config/concurrent_1.yml" \
+        -P localhost \
         -d "$TEST_DURATION" \
-        -t 30 \
-        -T 2 \
-        -P "zookeeper" \
-        -r "zookeeper" \
-        2>&1 | tee "$LOG_DIR/jetpack-recovery.log" &
+        -r "$LOG_DIR" \
+        > "$LOG_DIR/proc-localhost.log" 2>&1 &
     local jetpack_pid=$!
 
     # Let Jetpack run for the configured run_interval
@@ -335,7 +485,7 @@ run_recovery_test() {
     local exit_code=$?
 
     # Check for recovery completion in logs
-    if grep -q "JetpackRecoveryEntry" "$LOG_DIR/jetpack-recovery.log" 2>/dev/null; then
+    if grep -q "JetpackRecoveryEntry\|JETPACK-RECOVERY" "$LOG_DIR/proc-localhost.log" 2>/dev/null; then
         log_info "Jetpack recovery detected in logs"
     else
         log_warn "No Jetpack recovery entry found in logs"

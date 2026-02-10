@@ -38,9 +38,9 @@ All tests use 5 replicas, closed-loop, two settings per backend:
 Latency (median, average) and throughput metrics are computed in `src/deptran/s_main.cc`.
 
 **Note**: Multi-process mode (separate OS processes per server/client with tc/netem latency)
-was attempted but produces 0 throughput due to inter-replica connectivity issues in Docker.
-Results below use single-process mode (`-P localhost`) with 5 replicas, which tests the
-full Jetpack replication path without network simulation.
+is now working after fixing the `-P` flag bug (scripts passed site names instead of process
+names). Results below use single-process mode for latency/throughput metrics. Multi-process
+mode validates inter-replica communication with simulated 5ms network latency.
 
 | Experiment | Median Latency (ms) | Average Latency (ms) | Throughput (txn/s) |
 |---|---:|---:|---:|
@@ -57,7 +57,11 @@ full Jetpack replication path without network simulation.
 - [x] Run etcd 12-client test (5 replicas, closed-loop, 12 threads, concurrency=10), record metrics
 - [x] Run ZooKeeper 1-client test (5 replicas, closed-loop, 1 thread, concurrency=1), record metrics
 - [x] Run ZooKeeper 12-client test (5 replicas, closed-loop, 12 threads, concurrency=10), record metrics
-- [ ] Fix multi-process mode inter-replica connectivity (0 throughput in Docker)
+- [x] Fix multi-process mode inter-replica connectivity (0 throughput in Docker)
+  - Root cause: run scripts passed site names (`-P s101`) instead of process names (`-P h1`)
+  - Fixed all three backends' run scripts (mongodb, etcd, zookeeper)
+  - Also fixed ZooKeeper 4-letter word whitelist and added netcat to Docker image
+  - Verified: MongoDB 9.4-9.6 txn/s, etcd 11.4-11.5 txn/s, ZooKeeper 9.0 txn/s per process
 
 ### Failure recovery downtime (3 experiments)
 

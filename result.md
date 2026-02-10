@@ -37,6 +37,33 @@
 - **Throughput drops** for MongoDB (1234→717 multi-client) due to higher per-request latency,
   while etcd (1593→1368) and ZooKeeper (1736→1393) see moderate decreases.
 
+## Multi-Process Results (5 replicas, 5ms network latency)
+
+Multi-process mode runs each server+client pair as a separate OS process, with tc/netem
+simulating 5ms +/- 2ms network latency between loopback addresses (127.0.0.1-5).
+
+Previously this mode produced 0 throughput due to a `-P` flag bug: run scripts passed
+site names (`-P s101`) instead of process names (`-P h1`). The `SitesByProcessName()`
+function in `config.cc` matches process names (the VALUE in the config's `process:` map),
+not site names (the KEY).
+
+### Multi-process throughput (5 replicas, 1 client per process, 30s)
+
+| Backend | Per-process throughput (txn/s) | Status |
+|---------|----:|---|
+| MongoDB | 9.4-9.6 | PASSED |
+| etcd | 11.4-11.5 | PASSED |
+| ZooKeeper | 9.0 | PASSED |
+
+### Observations (multi-process)
+
+- **All three backends produce non-zero throughput**, confirming inter-replica communication
+  works correctly with the `-P` flag fix.
+- **etcd** achieves the highest per-process throughput, consistent with single-process results.
+- **MongoDB** and **ZooKeeper** are close at ~9-9.6 txn/s per process.
+- **Throughput is lower** than single-process mode because each process only has 1 client
+  (concurrency=1) and network latency adds ~5ms per inter-replica message.
+
 ## Performance Results (3 replicas, baseline)
 
 ### Single-client tests (1 client, 3 replicas)
@@ -98,19 +125,18 @@ no backend protocol leader election occurs — `Pause()` is internal and the bac
 (MongoDB/etcd/ZooKeeper) continues running. Without a real leader change signal, the
 `recovery_finish_after_failure` signal is never written and the client stays paused.
 
-**Multi-process mode** (`--privileged`, 3-node backend clusters): Backend clusters start
-successfully (MongoDB replica set, etcd 3-node, ZooKeeper ensemble) but Jetpack servers
-fail to establish inter-replica communication over loopback interfaces, resulting in no
-transactions flowing through and no failover data.
+**Multi-process mode** (`--privileged`, 3-node backend clusters): The inter-replica
+connectivity issue has been fixed (the `-P` flag bug), and normal multi-process throughput
+now works. Recovery tests in multi-process mode have not yet been re-attempted with the fix.
 
 | Backend | Mode | Original Protocol Downtime | Jetpack Downtime | Notes |
 |---------|------|---------------------------:|-----------------:|-------|
 | MongoDB | single-process | N/A | N/A | Failover triggered; recovery incomplete (no MongoDB leader election) |
-| MongoDB | multi-process | N/A | N/A | 3-node replica set up; Jetpack inter-replica connectivity failed |
+| MongoDB | multi-process | N/A | N/A | Inter-replica connectivity fixed; recovery test not yet re-attempted |
 | etcd | single-process | N/A | N/A | Failover triggered; recovery incomplete (etcd still running) |
-| etcd | multi-process | N/A | N/A | 3-node cluster up; Jetpack inter-replica connectivity failed |
+| etcd | multi-process | N/A | N/A | Inter-replica connectivity fixed; recovery test not yet re-attempted |
 | ZooKeeper | single-process | N/A | N/A | Failover triggered; recovery incomplete (ZK still running) |
-| ZooKeeper | multi-process | N/A | N/A | Ensemble failed to elect leader within 30s |
+| ZooKeeper | multi-process | N/A | N/A | Inter-replica connectivity fixed; recovery test not yet re-attempted |
 
 ### What Works
 
@@ -121,12 +147,12 @@ transactions flowing through and no failover data.
 
 ### What Needs Work
 
-- **Multi-process networking**: Jetpack servers need proper inter-replica connectivity
-  in Docker containers (currently loopback-based addressing doesn't fully work for
-  multi-process Jetpack + multi-node backend clusters in a single container)
+- **Multi-process networking**: Fixed. The `-P` flag bug (site names vs process names)
+  was the root cause of 0 throughput. All three backends now work in multi-process mode.
 - **Recovery signal chain**: The full chain (backend leader election → signal file →
   Jetpack recovery trigger → recovery complete) needs a multi-node backend deployment
-  where the backend actually fails over
+  where the backend actually fails over. Now that multi-process connectivity is fixed,
+  recovery tests should be re-attempted.
 
 ## Raw Metrics
 

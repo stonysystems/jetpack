@@ -136,53 +136,25 @@ run_single_process_test() {
         fi
     done
 
-    # Phase 1: Start 3 server replicas first, then client.
-    # Servers need to be up before the client connects.
-    local server_procs=("s101" "s201" "s301")
-    local client_procs=("c01")
+    # Single-process mode: all servers + clients in one process.
+    # The config 1c1s3r1p.yml maps all sites to process "localhost",
+    # so -P localhost runs everything in one process.
     local pids=()
-    local proc_names=()
+    local proc_names=("localhost")
 
-    # Launch servers
-    for proc in "${server_procs[@]}"; do
-        local port
-        case "$proc" in
-            s101) port=38200 ;;
-            s201) port=38201 ;;
-            s301) port=38202 ;;
-        esac
-        log_info "Starting server $proc on port $port"
-        "$server_bin" \
-            -f "$config_site" \
-            -f "$config_mode" \
-            -f "$config_bench" \
-            -P "$proc" \
-            -p "$port" \
-            -d "$TEST_DURATION" \
-            -r "$LOG_DIR" \
-            > "$LOG_DIR/proc-${proc}.log" 2>&1 &
-        pids+=($!)
-        proc_names+=("$proc")
-    done
+    log_info "Starting Jetpack (all servers + client in one process)"
+    "$server_bin" \
+        -f "$config_site" \
+        -f "$config_mode" \
+        -f "$config_bench" \
+        -f "${JETPACK_DIR}/config/client_closed.yml" \
+        -f "${JETPACK_DIR}/config/concurrent_1.yml" \
+        -P localhost \
+        -d "$TEST_DURATION" \
+        -r "$LOG_DIR" \
+        > "$LOG_DIR/proc-localhost.log" 2>&1 &
+    pids+=($!)
 
-    # Brief delay for servers to initialize before starting client
-    sleep 1
-
-    # Launch client
-    for proc in "${client_procs[@]}"; do
-        log_info "Starting client $proc on port 38203"
-        "$server_bin" \
-            -f "$config_site" \
-            -f "$config_mode" \
-            -f "$config_bench" \
-            -P "$proc" \
-            -p 38203 \
-            -d "$TEST_DURATION" \
-            -r "$LOG_DIR" \
-            > "$LOG_DIR/proc-${proc}.log" 2>&1 &
-        pids+=($!)
-        proc_names+=("$proc")
-    done
 
     log_info "Waiting for ${#pids[@]} processes to complete (timeout: $((TEST_DURATION + 30))s)..."
 
@@ -335,46 +307,22 @@ run_multi_process_test() {
     # Set up simulated network latency between server IPs
     setup_latency "$LATENCY_MS" "$LATENCY_JITTER"
 
-    # Phase 1: Launch 5 server replicas, then 5 clients.
-    local server_procs=("s101" "s201" "s301" "s401" "s501")
-    local server_ports=(18000 18001 18002 18003 18004)
-    local client_procs=("c101" "c201" "c301" "c401" "c501")
-    local client_ports=(18010 18011 18012 18013 18014)
+    # Phase 1: Launch 5 processes (each hosts a server + client).
+    # The -P flag takes the process name from the config's "process:" section,
+    # NOT the site name. In 5c1s5r1p_mongodb.yml: s101→h1, s201→h2, etc.
+    local host_procs=("h1" "h2" "h3" "h4" "h5")
     local pids=()
     local proc_names=()
 
-    # Launch servers
-    for i in "${!server_procs[@]}"; do
-        local proc="${server_procs[$i]}"
-        local port="${server_ports[$i]}"
-        log_info "Starting server $proc on port $port"
+    # Launch each process (server + client co-located)
+    for i in "${!host_procs[@]}"; do
+        local proc="${host_procs[$i]}"
+        log_info "Starting process $proc (server + client)"
         "$server_bin" \
             -f "$config_site" \
             -f "$config_mode" \
             -f "$config_bench" \
             -P "$proc" \
-            -p "$port" \
-            -d "$TEST_DURATION" \
-            -r "$LOG_DIR" \
-            > "$LOG_DIR/proc-${proc}.log" 2>&1 &
-        pids+=($!)
-        proc_names+=("$proc")
-    done
-
-    # Stagger: let servers initialize before starting clients
-    sleep 2
-
-    # Launch clients
-    for i in "${!client_procs[@]}"; do
-        local proc="${client_procs[$i]}"
-        local port="${client_ports[$i]}"
-        log_info "Starting client $proc on port $port"
-        "$server_bin" \
-            -f "$config_site" \
-            -f "$config_mode" \
-            -f "$config_bench" \
-            -P "$proc" \
-            -p "$port" \
             -d "$TEST_DURATION" \
             -r "$LOG_DIR" \
             > "$LOG_DIR/proc-${proc}.log" 2>&1 &
@@ -635,51 +583,23 @@ run_recovery_test() {
     # Clean any stale signal files
     rm -f /tmp/JM_Jetpack_* 2>/dev/null || true
 
-    # Launch Jetpack servers (with failover config)
-    local server_procs=("s101" "s201" "s301")
-    local client_procs=("c01")
+    # Single-process mode with failover: all servers + client in one process.
     local pids=()
-    local proc_names=()
+    local proc_names=("localhost")
 
-    for proc in "${server_procs[@]}"; do
-        local port
-        case "$proc" in
-            s101) port=38200 ;;
-            s201) port=38201 ;;
-            s301) port=38202 ;;
-        esac
-        log_info "Starting server $proc on port $port (with failover)"
-        "$server_bin" \
-            -f "$config_site" \
-            -f "$config_mode" \
-            -f "$config_bench" \
-            -f "$config_failover" \
-            -P "$proc" \
-            -p "$port" \
-            -d "$TEST_DURATION" \
-            -r "$LOG_DIR" \
-            > "$LOG_DIR/proc-${proc}.log" 2>&1 &
-        pids+=($!)
-        proc_names+=("$proc")
-    done
-
-    sleep 1
-
-    for proc in "${client_procs[@]}"; do
-        log_info "Starting client $proc on port 38203 (with failover)"
-        "$server_bin" \
-            -f "$config_site" \
-            -f "$config_mode" \
-            -f "$config_bench" \
-            -f "$config_failover" \
-            -P "$proc" \
-            -p 38203 \
-            -d "$TEST_DURATION" \
-            -r "$LOG_DIR" \
-            > "$LOG_DIR/proc-${proc}.log" 2>&1 &
-        pids+=($!)
-        proc_names+=("$proc")
-    done
+    log_info "Starting Jetpack (all servers + client in one process, with failover)"
+    "$server_bin" \
+        -f "$config_site" \
+        -f "$config_mode" \
+        -f "$config_bench" \
+        -f "$config_failover" \
+        -f "${JETPACK_DIR}/config/client_closed.yml" \
+        -f "${JETPACK_DIR}/config/concurrent_1.yml" \
+        -P localhost \
+        -d "$TEST_DURATION" \
+        -r "$LOG_DIR" \
+        > "$LOG_DIR/proc-localhost.log" 2>&1 &
+    pids+=($!)
 
     log_info "Waiting for ${#pids[@]} processes to complete (timeout: $((TEST_DURATION + 60))s)..."
 
