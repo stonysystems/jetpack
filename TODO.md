@@ -27,6 +27,29 @@ All TLA+ related work (specifications, configs, Docker environment) lives in the
 All TLA+ model checking runs in Docker (`tla/Dockerfile`).
 TLC logs are saved to `tla/log/` with protocol name and timestamp.
 
+## Priority 0 (Top): Documentation Cleanup
+
+- [ ] Merge `doc/` files into `docs/` (single documentation folder)
+  - Existing `doc/` files: `build.md`, `run.md`, `plot.md`, `ec2.md`, `paxos.md`, `profile.md`,
+    `Open-loop-vs-Closed-loop-clients.md`, `README.md`,
+    `etcd_integration_review.md`, `etcd_integration_notes.md`,
+    `mongodb_integration_review.md`, `mongodb_integration_notes.md`,
+    `zookeeper_integration_notes.md`
+  - Existing `docs/` file: `Jetpack_Failure_Recovery_and_MongoDB_Integration.md`
+  - After merge, remove `doc/` folder
+- [ ] Write a doc (`docs/leader_election_signal.md`) explaining: to enable Jetpack failure
+      recovery, the original protocol (MongoDB/etcd/ZooKeeper) code needs to write a signal
+      file after leader election completes. Document where this is implemented:
+  - MongoDB: `src/deptran/mongodb_leader_watcher.h` — `MongodbLeaderWatcher` uses mongocxx
+    APM `on_topology_changed` callback, signals via `jm_signal::set_key("mongo", "primary_elected", host)`
+  - etcd: `src/deptran/etcd_leader_watcher.h` — `EtcdLeaderWatcher` watches `JetPack/leader`
+    key for PUT events, signals via `jm_signal::set_key("etcd", "primary_elected", host)`
+  - ZooKeeper: `src/deptran/zookeeper_leader_watcher.h` — `ZookeeperLeaderWatcher` watches
+    `/JetPack/leader` ephemeral znode, signals via `jm_signal::set_key("zookeeper", "primary_elected", host)`
+  - Signal mechanism: `src/deptran/jm_file_signal.h` (file-based IPC)
+  - Jetpack-side hookers: `src/deptran/mongodb/server.h`, `src/deptran/etcd/server.h`,
+    `src/deptran/zookeeper/server.h` — poll for signal, trigger `JetpackRecoveryEntry()`
+
 ## Priority 0 (Top): Benchmark Data Collection (`result.md`)
 
 ### Performance chart (6 experiments)
