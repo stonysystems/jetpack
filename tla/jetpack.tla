@@ -8,6 +8,53 @@
 \*   - Base protocol Init, Next, and a BecomeLeader action
 \*
 \* Composition is done through wrapper modules such as jetpack_raft.tla.
+\*
+\* ---- N-Sequence Log Abstraction Design ----
+\*
+\* Goal: compose jetpack.tla with any base protocol without writing a new
+\* monolithic wrapper for each combination. The base protocols differ in
+\* leadership model:
+\*   - Raft: 1 sequence (single leader per term)
+\*   - CoPilot: 2 sequences (pilot + copilot)
+\*   - Mencius: N sequences (round-robin, one per server)
+\*
+\* Abstract interface each base protocol wrapper must provide:
+\*
+\*   Variables:
+\*     log[i]          - per-server replicated log (sequence of [term, value])
+\*     commitIndex[i]  - per-server commit progress
+\*     ostate[i]       - per-server role (must include Follower, Leader)
+\*     currentTerm[i]  - per-server epoch/term
+\*     messages         - shared message bag
+\*
+\*   Predicates (implemented as operators in the wrapper):
+\*     IsProposer(i)   - can server i propose new commands right now?
+\*                        Raft: ostate[i] = Leader
+\*                        CoPilot: role[i] \in {Pilot, Copilot}
+\*                        Mencius: TRUE (all servers are leaders)
+\*
+\*   Actions (implemented in the wrapper's Next):
+\*     BecomeToBeLeader(i)  - intercept base protocol's leader promotion:
+\*                             Raft: Candidate -> ToBeLeader (replaces BecomeLeader)
+\*                             CoPilot: role assignment -> ToBeLeader
+\*                             Mencius: no-op (always a leader, no election)
+\*     ProposeToLog(i, cmd) - append cmd to base protocol's log at server i
+\*                             (currently: log' = [log EXCEPT ![i] = Append(@, entry)])
+\*     ApplyCommitted(i)    - apply next committed entry to execution_cmds
+\*                             (reads log[i][k].value up to commitIndex[i])
+\*
+\*   The six coupling seams between jetpack.tla and the base protocol:
+\*     1. Log entry format: [term |-> currentTerm[i], value |-> cmd]
+\*     2. Leader election interception: BecomeToBeLeader
+\*     3. ostate state machine: {Follower, Candidate, ToBeLeader, Leader}
+\*     4. Log append on preaccept (leader-only)
+\*     5. CommittedCmds/ChosenExecutedInView (reads commitIndex + log)
+\*     6. ApplyCommitted (reads leader's log sequentially)
+\*
+\*   Current status: wrapper modules (jetpack_raft.tla, jetpack_copilot.tla,
+\*   jetpack_mencius.tla) implement this interface by inlining both the base
+\*   protocol and Jetpack code. Direct composition via INSTANCE would require
+\*   refactoring the protocol-specific actions out of jetpack.tla.
 
 EXTENDS Naturals, FiniteSets, Sequences, TLC
 

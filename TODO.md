@@ -187,7 +187,12 @@ Requires N-sequence log abstraction:
 - CoPilot: 2 sequences (pilot + copilot)
 - Mencius: N sequences (round-robin, one per server)
 
-- [ ] Design N-sequence log abstraction in `jetpack.tla`
+- [x] Design N-sequence log abstraction in `jetpack.tla`
+  - Documented the 6 coupling seams between jetpack.tla and base protocols
+  - Defined abstract interface: IsProposer, BecomeToBeLeader, ProposeToLog, ApplyCommitted
+  - Analysis shows wrapper modules are the correct TLA+ pattern for composition;
+    direct INSTANCE composition would require extracting protocol-specific actions
+    from jetpack.tla, which is a larger refactoring effort
 - [ ] Refactor base protocols to expose N-sequence log interface
 - [ ] Verify `jetpack.tla` + `raft.tla` direct composition (no wrapper)
 - [ ] Verify `jetpack.tla` + `copilot.tla` direct composition (no wrapper)
