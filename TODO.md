@@ -15,10 +15,83 @@ plugin layer assumes certain base protocol properties without embedding base pro
 variables or transitions. The original combined spec `jetpack_raft.tla` is preserved
 as reference but the separated specs are the primary artifacts going forward.
 
+The **final goal** for TLA+ is that `jetpack.tla` can be composed directly with any
+base protocol (`raft.tla`, `copilot.tla`, `mencius.tla`) without writing a new
+monolithic spec for each combination. This requires a log abstraction: an N-sequence
+log where each proposer leads a sequence (Raft: 1 sequence, CoPilot: 2 sequences,
+Mencius: N sequences). The mid-step is wrapper modules (`jetpack_raft.tla`,
+`jetpack_copilot.tla`, `jetpack_mencius.tla`) that run through successfully — abstraction
+comes after the mid-step works.
+
 All TLA+ related work (specifications, configs, Docker environment) lives in the `tla/` folder.
 All TLA+ model checking runs in Docker (`tla/Dockerfile`).
+TLC logs are saved to `tla/log/` with protocol name and timestamp.
+
+## Priority 0 (Top): Benchmark Data Collection (`result.md`)
+
+### Performance chart (6 experiments)
+
+All tests use multi-process mode (5 replicas, 5 processes), closed-loop, two settings per backend:
+- Setting A: 1 client thread, concurrency = 1
+- Setting B: 12 client threads, concurrency = 10
+
+Latency (median, average) and throughput metrics are already computed in `src/deptran/s_main.cc`.
+
+| Experiment | Median Latency | Average Latency | Throughput |
+|---|---|---|---|
+| MongoDB multi-process, 1-client (concurrency=1) | | | |
+| MongoDB multi-process, 12-client (concurrency=10) | | | |
+| etcd multi-process, 1-client (concurrency=1) | | | |
+| etcd multi-process, 12-client (concurrency=10) | | | |
+| ZooKeeper multi-process, 1-client (concurrency=1) | | | |
+| ZooKeeper multi-process, 12-client (concurrency=10) | | | |
+
+- [ ] Run MongoDB multi-process test (5 replicas, closed-loop, 1 thread, concurrency=1), record metrics
+- [ ] Run MongoDB multi-process test (5 replicas, closed-loop, 12 threads, concurrency=10), record metrics
+- [ ] Run etcd multi-process test (5 replicas, closed-loop, 1 thread, concurrency=1), record metrics
+- [ ] Run etcd multi-process test (5 replicas, closed-loop, 12 threads, concurrency=10), record metrics
+- [ ] Run ZooKeeper multi-process test (5 replicas, closed-loop, 1 thread, concurrency=1), record metrics
+- [ ] Run ZooKeeper multi-process test (5 replicas, closed-loop, 12 threads, concurrency=10), record metrics
+
+### Failure recovery downtime (3 experiments)
+
+Downtime definitions:
+- **Original protocol downtime**: from triggering original protocol failure to the original
+  protocol writing the signal file (recovery/election complete)
+- **Jetpack downtime**: from the signal file being written (original protocol recovery finished)
+  to Jetpack finishing its own recovery
+
+| Experiment | Original Protocol Downtime | Jetpack Downtime |
+|---|---|---|
+| MongoDB recovery | | |
+| etcd recovery | | |
+| ZooKeeper recovery | | |
+
+- [ ] Run MongoDB recovery test, measure MongoDB downtime and Jetpack downtime
+- [ ] Run etcd recovery test, measure etcd downtime and Jetpack downtime
+- [ ] Run ZooKeeper recovery test, measure ZooKeeper downtime and Jetpack downtime
+
+### Export
+
+- [ ] Export all benchmark and recovery data to `result.md`
 
 ## Priority 1 (High): TLA+ Specifications
+
+### Properties
+
+Properties to prove in `jetpack.tla` (refer to `jetpack_raft.tla` for reference):
+- LogAgreement
+- LogOrderMatchesExecution: for every pair of commands in the log, if A and B conflict
+  and A is before B, then in the execution log A is still before B. This pairwise
+  conflict-ordering check adapts to multi-sequence protocols (CoPilot: 2 sequences,
+  Mencius: N sequences).
+- ExecutionDedupMatches
+
+Properties for original base protocols (`raft.tla`, `copilot.tla`, `mencius.tla`):
+- LogAgreement (adapted per protocol)
+- LogOrderMatchesExecution (pairwise conflict-ordering as above)
+
+### Specifications
 
 - [x] Docker environment for TLA+ model checking (`tla/Dockerfile`, `tla/run-tlc.sh`)
 - [x] Separate `tla/jetpack_raft.tla` into `tla/raft.tla` and `tla/jetpack.tla`
@@ -30,7 +103,43 @@ All TLA+ model checking runs in Docker (`tla/Dockerfile`).
   - `jetpack_copilot.tla`: Jetpack + CoPilot composition (SANY verified)
   - `jetpack_mencius.tla`: Jetpack + Mencius composition (SANY verified)
 
-## Priority 1 (High): TLA+ Verification (via Docker)
+### Mid-step: wrapper module verification
+
+<!-- "composed jetpack + X" means running jetpack.tla together with X.tla as the base
+     protocol (e.g. via a wrapper module). This is NOT the same as jetpack_raft.tla,
+     which is the original monolithic spec. The same applies to copilot and mencius. -->
+
+Run wrapper modules through TLC successfully. Getting them to pass is more important
+than abstraction at this stage.
+
+- [ ] Add LogAgreement, LogOrderMatchesExecution, ExecutionDedupMatches to jetpack.tla properties
+- [ ] TLC verification of `jetpack_raft.tla` with full Jetpack properties
+- [ ] TLC verification of `jetpack_copilot.tla` with full Jetpack properties
+- [ ] TLC verification of `jetpack_mencius.tla` with full Jetpack properties
+- [ ] Add LogAgreement and LogOrderMatchesExecution to each base protocol
+  - [ ] `raft.tla`: add/verify LogAgreement + LogOrderMatchesExecution
+  - [ ] `copilot.tla`: add/verify LogAgreement + LogOrderMatchesExecution
+  - [ ] `mencius.tla`: add/verify LogAgreement + LogOrderMatchesExecution
+
+### Final goal: direct composition without wrapper modules
+
+Achieve `jetpack.tla` + `raft.tla` / `copilot.tla` / `mencius.tla` composition
+without writing a new monolithic `jetpack_<protocol>.tla` for each combination.
+
+Requires N-sequence log abstraction:
+- Raft: 1 sequence (single leader)
+- CoPilot: 2 sequences (pilot + copilot)
+- Mencius: N sequences (round-robin, one per server)
+
+- [ ] Design N-sequence log abstraction in `jetpack.tla`
+- [ ] Refactor base protocols to expose N-sequence log interface
+- [ ] Verify `jetpack.tla` + `raft.tla` direct composition (no wrapper)
+- [ ] Verify `jetpack.tla` + `copilot.tla` direct composition (no wrapper)
+- [ ] Verify `jetpack.tla` + `mencius.tla` direct composition (no wrapper)
+
+### TLA+ Verification (via Docker)
+
+All TLC logs saved to `tla/log/<protocol>_<timestamp>.log`.
 
 - [x] `raft.tla`: TLC model check (CommittedLogAgreement, ElectionSafety)
   - Exhaustive: 40M states, 2.8M distinct, depth 56 (3 servers, 1 cmd, SmallStateConstraint)
@@ -43,9 +152,6 @@ All TLA+ model checking runs in Docker (`tla/Dockerfile`).
   - Note: Mencius slot state space is too large for exhaustive checking in bounded time
 - [x] `jetpack.tla`: SANY parse check (not standalone, needs base protocol to run)
 - [x] `jetpack_raft.tla`: SANY parse check (original combined spec preserved)
-<!-- "composed jetpack + X" means running jetpack.tla together with X.tla as the base
-     protocol (e.g. via a wrapper module). This is NOT the same as jetpack_raft.tla,
-     which is the original monolithic spec. The same applies to copilot and mencius. -->
 - [x] TLC verification of composed jetpack + raft (`jetpack_raft.tla`)
   - Exhaustive: 82K states, 6K distinct, depth 26 (3 servers, 1 cmd, SmallStateConstraint)
   - Partial: 47M+ states, 5M+ distinct, no violations (3 servers, 2 cmds, StateConstraint)
@@ -84,104 +190,25 @@ Existing integration code: `src/deptran/mongodb/`, `src/deptran/mongodb_*.h`
   - Replicas do not execute transactions — only leader writes to MongoDB
   - Detailed review: `doc/mongodb_integration_review.md`
 - [x] Verify/fix Jetpack calling MongoDB API for read/write commands
-  - Verified all mongocxx v3 API calls against r3.10.1 driver headers:
-    - `collection.update_one(filter, update, options::update{}.upsert(true))` → returns `stdx::optional<result::update>` (correct)
-    - `collection.find_one(filter)` → returns `stdx::optional<bsoncxx::document::value>` (correct)
-    - `collection.create_index(index)` → returns `bsoncxx::document::value` (handler wraps in optional, harmless implicit conversion)
-    - `db.drop()` for Clear operation (correct)
-    - BSON construction via `bsoncxx::builder::stream::document` with `$set` operator (correct)
-  - Verified SimpleRWCommand parsing correctly extracts key/value from TPC commands
-    - Handles CMD_TPC_COMMIT, CMD_TPC_BATCH, CMD_VEC_PIECE, CONTAINER_CMD kinds
-    - `IsRead()` checks RW_BENCHMARK_R_TXN / RW_BENCHMARK_R_TXN_0
-    - `IsWrite()` checks RW_BENCHMARK_W_TXN / RW_BENCHMARK_W_TXN_0
-  - Verified thread pool completion signaling: `cmd_content->mongodb_finished->Set(1)` matches
-    `cmd_content->mongodb_finished->Wait()` in server.h Submit() (ThreadSafeIntEvent pattern)
-  - Verified coordinator dispatches correctly: Submit → Server()->Submit(cmd) → BroadcastCommit
-  - URI handling: recovery mode builds from config hosts (same pattern as etcd); legacy URIs
-    only used in non-recovery mode (intentional, matches etcd behavior)
-  - Read results used directly (unlike etcd which discards results — MongoDB acts as data store)
-  - Notes: `finished_queue_` in thread pool is commented out (orphaned from abandoned ExecutionHandler);
-    error handling logs to stderr (adequate for current use)
 - [x] Use async MongoDB API where available, sync API otherwise
-  - mongocxx r3.10.1 has NO native async API (no futures, no callbacks, no coroutine support)
-  - Unlike etcd (which has `pplx::task`-based async via `etcd::Client`), mongocxx is sync-only
-  - Async behavior already implemented via `MongodbConnectionThreadPool`:
-    - N persistent worker threads, each owning a dedicated `mongocxx::client` (thread-safety requirement)
-    - Main thread pushes commands into per-worker `CommandQueue` (non-blocking, round-robin)
-    - Workers execute sync mongocxx operations and signal completion via `ThreadSafeIntEvent`
-  - Thread pool approach is superior to detached-thread fallback for mongocxx because:
-    - Each `mongocxx::client` must be used by a single thread (driver constraint)
-    - Persistent connections avoid per-request client creation overhead
-    - This is the official mongocxx recommended pattern for concurrent access
-  - No code changes needed — current implementation is already the correct async pattern
 
 #### Failure Recovery
 - [x] MongoDB hooker: detect when new MongoDB leader finishes recovery/election,
       write a signal file with the new term/view_id for Jetpack to read
-  - Created `MongodbLeaderWatcher` (`src/deptran/mongodb_leader_watcher.h`)
-  - Uses mongocxx APM `on_topology_changed` callback (SDAM background monitoring)
-  - Detects topology transitions: "ReplicaSetNoPrimary" → "ReplicaSetWithPrimary"
-  - Finds the new primary by iterating server descriptions for "RSPrimary" type
-  - On new primary: calls `jm_signal::set_key("mongo", "primary_elected", host)`
-  - Integrated into `KillMongodbPrimary()` in `s_main.cc` (non-simulation path)
-  - Pattern: create `mongocxx::client` with APM options → driver's SDAM thread
-    monitors replica set → topology_changed callback fires → signals Jetpack
 - [x] Jetpack hooker: monitor signal from MongoDB, trigger Jetpack failure recovery
       when MongoDB view change is detected
-  - Already implemented in `MongodbServer::Setup()` (`src/deptran/mongodb/server.h`)
-  - Non-leader replicas run coroutine polling for `mongo:primary_elected` signal
-  - On signal: calls `JetpackRecoveryEntry()` to run 3-phase Paxos recovery
 
 #### Testing (in Docker)
 - [x] Docker environment for MongoDB integration testing (create Dockerfile if needed)
-  - `docker/mongodb/Dockerfile`: Multi-stage build (Ubuntu 22.04, Python 3.10 for WAF compatibility)
-    - Stage 1: Builds mongo-c-driver + mongo-cxx-driver from `third_party/`, then Jetpack via WAF
-    - Stage 2: Runtime image with MongoDB 7.0 server (mongod + mongosh from official apt repo)
-    - Copies built mongocxx/bsoncxx libraries and Jetpack binaries
-  - `docker/mongodb/docker-compose.yml`: Orchestration for external MongoDB + Jetpack testing
-  - `docker/mongodb/run-mongodb-test.sh`: Entrypoint script with modes: single, mongodb-only, bash
-  - `docker/mongodb/test-mongodb-setup.sh`: Infrastructure validation test (58 checks)
-  - Uses existing config: `config/1c1s3r1p.yml` + `config/none_mongodb.yml` + `config/rw_fixed.yml`
 - [x] Single-process test: basic read/write through Jetpack + MongoDB
-  - Implemented in `run-mongodb-test.sh single` mode
-  - Starts embedded mongod (standalone), verifies MongoDB R/W via mongosh
-  - Launches 3 server replicas (s101, s201, s301) + 1 client (c01)
-  - Uses `rw_fixed.yml` benchmark (100% writes via JetPack.KVTable collection)
-  - Validates: process exit codes, MongoDB document count, throughput in logs, no crashes
-  - Servers start before client (1s stagger) for proper initialization
-  - Infrastructure validation: 64 checks pass (test-mongodb-setup.sh)
 - [x] Multi-process test: 5 servers, 5 processes, simulated network latency between servers
-  - Implemented in `run-mongodb-test.sh multi` mode
-  - Config: `config/5c1s5r1p_mongodb.yml` — 5 servers on separate loopback IPs (127.0.0.1-5)
-  - Launches 5 server replicas + 5 clients with 2s stagger
-  - Network latency via `tc`/`netem` on loopback (per-IP filtering, default 5ms +/- 2ms)
-  - Configurable via `LATENCY_MS` and `LATENCY_JITTER` environment variables
-  - Dockerfile already includes `iproute2` for `tc` support (requires `--privileged` or `NET_ADMIN`)
-  - Validates: process exit codes, MongoDB document count, throughput, crash detection
-  - Infrastructure validation: 79 checks pass (test-mongodb-setup.sh)
 - [x] Failure recovery test: run normal procedure, kill MongoDB leader, let MongoDB
       leader-elect and trigger Jetpack leader-elect, measure recovery duration of both
       MongoDB and Jetpack
-  - Implemented in `run-mongodb-test.sh recovery` mode
-  - Creates 3-member MongoDB replica set on separate loopback IPs (127.0.0.1-3)
-  - Config: `config/failover_mongodb.yml` (run 5s, then soft-kill primary, wait 10s)
-  - Jetpack uses `JETPACK_MONGODB_RECOVERY` build flag to enable real recovery path
-  - Recovery sequence: kill MongoDB primary → `MongodbLeaderWatcher` detects topology
-    change via APM → signals via jm_file_signal → `MongodbServer` recovery coroutine
-    triggers `JetpackRecoveryEntry()` → 3-phase Paxos recovery
-  - Validates: failover triggered, Jetpack recovery completed, recovery duration,
-    MongoDB replica set survival (2/3 healthy), signal files created, no crashes
-  - Helper functions: `start_mongodb_replset()`, `get_mongodb_primary()`,
-    `kill_mongodb_node()`, `wait_mongodb_new_primary()`
-  - Infrastructure validation: 95 checks pass (test-mongodb-setup.sh)
 
 #### Documentation
 - [x] Write integration notes for anything interesting/noteworthy/suitable for the paper
   - Document: `doc/mongodb_integration_notes.md`
-  - Key findings: MongoDB as data store (not ordering oracle like etcd), thread pool as
-    canonical async pattern for mongocxx, SDAM APM topology monitoring for leader detection,
-    blocking Submit for durability guarantees, unified 3-phase Paxos recovery across backends,
-    Docker test harness (3 modes), ~10s MongoDB election timeout vs ~1-3s etcd
 
 ### 2b. Jetpack + etcd (higher priority within this section)
 
@@ -189,87 +216,27 @@ Existing integration code: `src/deptran/etcd/`, `src/deptran/etcd_*.h`
 
 #### Integration (without failure recovery)
 - [x] Set up `third_party/` folder and clone etcd source
-  - `third_party/etcd-cpp-apiv3` (v0.2.14): C++ client for etcd v3 API
-  - `third_party/build_etcd.sh`: Build script
 - [x] Review existing etcd integration (`src/deptran/etcd/`)
-  - 11 files: frame, coordinator, server, commo, service, kv_handler, thread_pool
-  - Integration is functionally complete for basic read/write path
-  - Uses etcd-cpp-apiv3 with dual async (pplx) / sync API support
-  - Failure recovery via file-based signaling (`jm_file_signal.h`)
-  - Issues: hardcoded URIs, no server.cc, AWS-specific connection counts
-  - Detailed review: `doc/etcd_integration_review.md`
 - [x] Verify/fix Jetpack calling etcd API for read/write commands
-  - Verified all etcd-cpp-apiv3 API calls (put/get/rmdir) match library signatures
-  - Verified SimpleRWCommand parsing correctly extracts key/value from TPC commands
-  - Verified async (pplx) and sync (std::thread) paths both signal completion correctly
-  - Fixed: etcd URI now built from config hosts in recovery mode (was hardcoded)
-  - Read results intentionally discarded (etcd serves as ordering/AB layer, not data store)
 - [x] Use async etcd API where available, sync API otherwise
-  - Already implemented: compile-time `JANUS_ETCD_HAS_PPLX` auto-detection via `__has_include`
-  - Async path uses `pplx::task` with `.then()` continuations
-  - Sync fallback uses `std::thread(...).detach()` per request
 
 #### Failure Recovery
 - [x] etcd hooker: detect when new etcd leader finishes recovery/election,
       write a signal file with the new term/view_id for Jetpack to read
-  - Created `EtcdLeaderWatcher` (`src/deptran/etcd_leader_watcher.h`)
-  - Watches `JetPack/leader` key in etcd for PUT events (leader changes)
-  - Async path: uses `etcd::Watcher` callback API (when pplx available)
-  - Sync fallback: polls key every 100ms via `etcd::SyncClient`
-  - On leader change: calls `jm_signal::set_key("etcd", "primary_elected", host)`
-  - Integrated into `KillEtcdPrimary()` in `s_main.cc` (non-simulation path)
 - [x] Jetpack hooker: monitor signal from etcd, trigger Jetpack failure recovery
       when etcd view change is detected
-  - Already implemented in `EtcdServer::Setup()` (`src/deptran/etcd/server.h`)
-  - Non-leader replicas run coroutine polling for `etcd:primary_elected` signal
-  - On signal: calls `JetpackRecoveryEntry()` to run 3-phase Paxos recovery
 
 #### Testing (in Docker)
 - [x] Docker environment for etcd integration testing (create Dockerfile if needed)
-  - `docker/etcd/Dockerfile`: Multi-stage build (Ubuntu 22.04, Python 3.10 for WAF compatibility)
-    - Stage 1: Builds etcd-cpp-apiv3 + Jetpack from source
-    - Stage 2: Runtime image with etcd v3.5.17 server binary + Jetpack binaries
-  - `docker/etcd/docker-compose.yml`: Orchestration for external etcd + Jetpack testing
-  - `docker/etcd/run-etcd-test.sh`: Entrypoint script with modes: single, etcd-only, bash
-  - `docker/etcd/test-etcd-setup.sh`: Infrastructure validation test (39 checks)
-  - Uses existing config: `config/1c1s3r1p.yml` + `config/none_etcd.yml` + `config/rw_fixed.yml`
 - [x] Single-process test: basic read/write through Jetpack + etcd
-  - Implemented in `run-etcd-test.sh single` mode
-  - Starts embedded etcd, verifies etcd R/W, launches 3 server replicas + 1 client
-  - Uses `rw_fixed.yml` benchmark (100% writes to etcd via JetPack/KVTable/ prefix)
-  - Validates: process exit codes, etcd key count, throughput in logs, no crashes
-  - Servers start before client (1s stagger) for proper initialization
 - [x] Multi-process test: 5 servers, 5 processes, simulated network latency between servers
-  - Implemented in `run-etcd-test.sh multi` mode
-  - Config: `config/5c1s5r1p_etcd.yml` — 5 servers on separate loopback IPs (127.0.0.1-5)
-  - Launches 5 server replicas + 5 clients with 2s stagger
-  - Network latency via `tc`/`netem` on loopback (per-IP filtering, default 5ms +/- 2ms)
-  - Configurable via `LATENCY_MS` and `LATENCY_JITTER` environment variables
-  - Dockerfile updated with `iproute2` for `tc` support (requires `--privileged` or `NET_ADMIN`)
-  - Validates: process exit codes, etcd key count, throughput, crash detection
-  - Infrastructure validation: 53 checks pass (test-etcd-setup.sh)
 - [x] Failure recovery test: run normal procedure, kill etcd leader, let etcd
       leader-elect and trigger Jetpack leader-elect, measure recovery duration of both
       etcd and Jetpack
-  - Implemented in `run-etcd-test.sh recovery` mode
-  - Creates 3-node etcd cluster on separate loopback IPs (127.0.0.1-3)
-  - Config: `config/failover_etcd.yml` (run 5s, then soft-kill leader, wait 10s)
-  - Jetpack uses `JETPACK_ETCD_RECOVERY` build flag to enable real recovery path
-  - Recovery sequence: kill etcd primary → EtcdLeaderWatcher detects new leader →
-    signals via jm_file_signal → EtcdServer recovery coroutine triggers
-    JetpackRecoveryEntry() → 3-phase Paxos recovery
-  - Validates: failover triggered, Jetpack recovery completed, recovery duration,
-    etcd cluster survival (2/3 healthy), signal files created, no crashes
-  - Helper functions: `start_etcd_cluster()`, `get_etcd_leader_ip()`,
-    `kill_etcd_node()`, `wait_etcd_new_leader()`
-  - Infrastructure validation: 68 checks pass (test-etcd-setup.sh)
 
 #### Documentation
 - [x] Write integration notes for anything interesting/noteworthy/suitable for the paper
   - Document: `doc/etcd_integration_notes.md`
-  - Key findings: etcd as ordering oracle (not data store), dual async/sync API,
-    non-leader throttling, fire-and-forget replication, file-based IPC for failover,
-    3-phase Paxos recovery protocol, Docker test harness (3 modes)
 
 ### 2c. Jetpack + ZooKeeper
 
@@ -277,151 +244,31 @@ No existing integration code. Needs to be implemented from scratch.
 
 #### Integration (without failure recovery)
 - [x] Set up `third_party/` folder and clone ZooKeeper source
-      Done: Added apache/zookeeper as git submodule at third_party/zookeeper/
-      (tag release-3.9.4). C client at zookeeper-client/zookeeper-client-c/
-      with CMake build (WANT_SYNCAPI=ON for sync+async zookeeper_mt library).
-      Created build_zookeeper.sh (Maven jute generation + CMake build).
-      Updated third_party/README.md with ZooKeeper documentation.
 - [x] Create `src/deptran/zookeeper/` integration module (frame, coordinator, server, commo, service)
-      Done: Created full integration module following etcd/MongoDB patterns:
-      - ZookeeperFrame (factory registration with MODE_ZOOKEEPER/0x9002)
-      - ZookeeperServer (connection pool, Submit with ThreadSafeIntEvent sync)
-      - CoordinatorZookeeper (dispatch + BroadcastCommit)
-      - ZookeeperCommo (fire-and-forget replication)
-      - ZookeeperServiceImpl (RPC Commit handler)
-      Supporting files: zookeeper_kv_table_handler.h (ZooKeeper C API: zoo_get/zoo_set/zoo_create),
-      zookeeper_connection_thread_pool.h (inflight tracking, thread-per-request).
-      Added MODE_ZOOKEEPER constant, zookeeper_finished event in TxPieceData,
-      Zookeeper RPC service in rcc_rpc.rpc, frame name mapping in frame.cc.
 - [x] Implement Jetpack calling ZooKeeper API for read/write commands
-      Done: ZookeeperKVTableHandler uses zoo_get() for reads, zoo_exists()+zoo_create()/zoo_set()
-      for upsert writes. Data stored as znodes under /JetPack/KVTable/{key} with integer values.
 - [x] Use async ZooKeeper API where available, sync API otherwise
-      Done: Added ReadAsync()/WriteAsync() to ZookeeperKVTableHandler using
-      zoo_aget/zoo_aset/zoo_acreate callbacks. WriteAsync uses zoo_aset with
-      ZNONODE fallback to zoo_acreate (async upsert). Connection thread pool
-      uses async API by default — callbacks fire on ZooKeeper's internal I/O
-      thread (zookeeper_mt), avoiding per-request thread creation. Sync API
-      (zoo_get/zoo_set) retained for Setup() and Clear() operations.
 
 #### Failure Recovery
 - [x] ZooKeeper hooker: detect when new ZooKeeper leader finishes recovery/election,
       write a signal file with the new epoch/view_id for Jetpack to read
-      Done: Created ZookeeperLeaderWatcher (zookeeper_leader_watcher.h) using
-      ZooKeeper's native watch mechanism. Watches /JetPack/leader ephemeral
-      znode via zoo_wexists() with re-registering one-shot watches. Detects
-      leader loss (ZOO_DELETED_EVENT) and new leader (ZOO_CREATED_EVENT),
-      signals via jm_signal::set_key("zookeeper", "primary_elected", host).
-      Handles session expiry with automatic reconnection.
 - [x] Jetpack hooker: monitor signal from ZooKeeper, trigger Jetpack failure recovery
       when ZooKeeper view change is detected
-      Done: Already wired in ZookeeperServer::Setup() under JETPACK_ZOOKEEPER_RECOVERY.
-      Non-leader replicas poll jm_signal::exists_key("zookeeper", "primary_elected")
-      every 10ms via coroutine, trigger JetpackRecoveryEntry() on detection.
 
 #### Testing (in Docker)
 - [x] Docker environment for ZooKeeper integration testing (create Dockerfile if needed)
-  - `docker/zookeeper/Dockerfile`: Multi-stage build (Ubuntu 22.04, Python 3.10 for WAF compatibility)
-    - Stage 1: Builds ZooKeeper C client (Maven jute generation + CMake), then Jetpack via WAF
-    - Stage 2: Runtime image with Apache ZooKeeper 3.9.4 server (Java-based from Apache downloads)
-    - Copies built libzookeeper libraries and Jetpack binaries
-  - `docker/zookeeper/docker-compose.yml`: Orchestration for external ZooKeeper + Jetpack testing
-  - `docker/zookeeper/run-zookeeper-test.sh`: Entrypoint script with modes: single, multi, recovery, zookeeper-only, bash
-  - `docker/zookeeper/test-zookeeper-setup.sh`: Infrastructure validation test (81 checks)
-  - Uses existing config: `config/1c1s3r1p.yml` for single-process tests
 - [x] Single-process test: basic read/write through Jetpack + ZooKeeper
-  - Implemented in `run-zookeeper-test.sh single` mode
-  - Starts embedded ZooKeeper (via `zkServer.sh`), verifies ZooKeeper health via `ruok`
-  - Launches Jetpack with `1c1s3r1p.yml` config and `-P zookeeper -r zookeeper` flags
-  - Data stored as znodes under `/JetPack/KVTable/{key}` via ZooKeeper C API
-  - Validates: process exit codes, ZooKeeper availability, no crashes
 - [x] Multi-process test: 5 servers, 5 processes, simulated network latency between servers
-  - Implemented in `run-zookeeper-test.sh multi` mode
-  - Config: `config/5c1s5r1p_zookeeper.yml` — 5 servers on separate loopback IPs (127.0.0.1-5)
-  - Network latency via `tc`/`netem` on loopback (per-IP filtering, default 5ms +/- 2ms)
-  - Configurable via `LATENCY_MS` and `LATENCY_JITTER` environment variables
-  - Validates: process exit codes, latency simulation active, no crashes
 - [x] Failure recovery test: run normal procedure, kill ZooKeeper leader, let ZooKeeper
       leader-elect and trigger Jetpack leader-elect, measure recovery duration of both
       ZooKeeper and Jetpack
-  - Implemented in `run-zookeeper-test.sh recovery` mode
-  - Creates 3-node ZooKeeper ensemble on separate loopback IPs (127.0.0.1-3)
-  - Config: `config/failover_zookeeper.yml` (run 5s, then soft-kill leader, wait 10s)
-  - Detects ZooKeeper leader via `srvr` four-letter command, kills with SIGKILL
-  - Measures new leader election time (nanosecond precision)
-  - Jetpack uses `JETPACK_ZOOKEEPER_RECOVERY` build flag to enable real recovery path
-  - Recovery sequence: kill ZooKeeper leader → new leader elected by ensemble →
-    `ZookeeperLeaderWatcher` detects via watch on `/JetPack/leader` znode →
-    signals via jm_file_signal → `ZookeeperServer` recovery coroutine triggers
-    `JetpackRecoveryEntry()` → 3-phase Paxos recovery
-  - Validates: failover triggered, `JetpackRecoveryEntry` in logs, recovery duration,
-    ZooKeeper ensemble survival (2/3 healthy), no crashes
-  - Helper functions: `start_zookeeper_ensemble()`, `get_zookeeper_leader()`,
-    `kill_zookeeper_node()`, `wait_zookeeper_new_leader()`
-  - Infrastructure validation: 81 checks pass (test-zookeeper-setup.sh)
 
 #### Documentation
 - [x] Write integration notes for anything interesting/noteworthy/suitable for the paper
   - Document: `doc/zookeeper_integration_notes.md`
-  - Key findings: ZooKeeper as ordering oracle (like etcd, unlike MongoDB), native C callback
-    async API (no thread pool needed), two-phase async upsert with ZNONODE fallback, ephemeral
-    znode + watch mechanism for automatic leader crash detection, ZAB election (~2-10s) slower
-    than Raft (~1-3s) but watch-based detection faster than SDAM heartbeat, heavyweight build
-    chain (Maven+Java+CMake), unified 3-phase Paxos recovery across all three backends,
-    Docker test harness (3 modes), 81 infrastructure validation checks
-
-## Priority 2 (Medium): Benchmark Results (`result.md`)
-
-Collect benchmark data from all integration tests and export to `result.md`.
-Latency (median, average) and throughput metrics are already computed in `src/deptran/s_main.cc`.
-
-### Performance chart (6 experiments)
-
-Run single-client (1 client) and multi-client (12 clients) tests for all 3 backends.
-All tests use `-P localhost` single-process mode (3 replicas, 1 partition, 30s duration).
-
-| Experiment | Median Latency | Average Latency | Throughput |
-|---|---|---|---|
-| MongoDB single-client | 106.45 ms | 106.24 ms | 9.50 txn/s |
-| MongoDB multi-client (12) | 115.72 ms | 116.35 ms | 1234.10 txn/s |
-| etcd single-client | 88.64 ms | 89.97 ms | 11.10 txn/s |
-| etcd multi-client (12) | 89.47 ms | 90.09 ms | 1593.10 txn/s |
-| ZooKeeper single-client | 82.98 ms | 83.14 ms | 12.10 txn/s |
-| ZooKeeper multi-client (12) | 82.78 ms | 82.85 ms | 1736.30 txn/s |
-
-- [x] Run MongoDB single-process test, record median latency, average latency, throughput
-- [x] Run MongoDB multi-client test, record median latency, average latency, throughput
-- [x] Run etcd single-process test, record median latency, average latency, throughput
-- [x] Run etcd multi-client test, record median latency, average latency, throughput
-- [x] Run ZooKeeper single-process test, record median latency, average latency, throughput
-- [x] Run ZooKeeper multi-client test, record median latency, average latency, throughput
-
-### Failure recovery downtime (3 experiments)
-
-Run failure recovery test for all 3 combinations using soft failover (Pause/Resume).
-Single-process mode (`-P localhost`) tests internal Jetpack failover mechanism only.
-For realistic multi-node backend recovery, use Docker test scripts (`run-*-test.sh recovery`).
-
-| Experiment | Total Throughput | Mid Throughput | Notes |
-|---|---|---|---|
-| MongoDB recovery | 5.00 txn/s | 4.90 txn/s | Soft failover + KillMongodbPrimary |
-| etcd recovery | 1.93 txn/s | 0.00 txn/s | KillEtcdPrimary killed single-node etcd |
-| ZooKeeper recovery | 1.97 txn/s | 0.00 txn/s | Soft failover only (no kill) |
-
-- [x] Run MongoDB recovery test, record MongoDB downtime and Jetpack downtime
-- [x] Run etcd recovery test, record etcd downtime and Jetpack downtime
-- [x] Run ZooKeeper recovery test, record ZooKeeper downtime and Jetpack downtime
-
-### Export
-
-- [x] Export all data above to `result.md`
 
 ## Priority 1 (High): README Documentation
 
 - [x] Document Docker and Docker Compose version requirements in README
-  - Docker Engine >= 17.05 (multi-stage builds), Docker Compose V2 >= 2.0 (modern format)
-  - Documented `--network=host` (build) and `--privileged` (runtime) requirements
-  - Added verification commands: `docker --version`, `docker compose version`
 - [x] For every completed task above, document the command(s) to run and verify it in
       the project README.md (clean up README as needed)
   - [x] TLA+ model checking: how to build Docker image and run TLC for each spec
