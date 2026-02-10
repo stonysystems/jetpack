@@ -345,6 +345,17 @@ No existing integration code. Needs to be implemented from scratch.
 - [x] Write integration notes for anything interesting/noteworthy/suitable for the paper
   - Document: `docs/zookeeper_integration_notes.md`
 
+## Priority 2 (Medium): Leader Watcher Analysis Doc
+
+- [ ] Write a doc (`docs/leader_watcher_analysis.md`) explaining how each leader watcher
+      detects leader election, and what problems each approach may have:
+  - `src/deptran/etcd_leader_watcher.h`: how does it watch etcd leader changes?
+  - `src/deptran/mongodb_leader_watcher.h`: how does it watch MongoDB primary changes?
+  - `src/deptran/zookeeper_leader_watcher.h`: how does it watch ZooKeeper leader changes?
+  - For each: describe the detection mechanism (API/callback/polling), timing characteristics,
+    potential problems (e.g. detection delay vs source-code signal, false positives, missed
+    events, race conditions, session expiry, network partition scenarios)
+
 ## Priority 1 (High): README Documentation
 
 - [x] Document Docker and Docker Compose version requirements in README
