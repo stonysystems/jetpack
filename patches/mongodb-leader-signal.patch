@@ -1,0 +1,39 @@
+--- a/src/mongo/db/repl/replication_coordinator_impl.cpp
++++ b/src/mongo/db/repl/replication_coordinator_impl.cpp
+@@ -37,6 +37,8 @@
+ #include <algorithm>
++#include <cstdlib>
+ #include <fmt/format.h>
++#include <fstream>
+ #include <functional>
+ #include <limits>
+@@ -1438,6 +1440,28 @@
+     LOGV2(21331,
+           "Transition to primary complete; database writes are now permitted",
+           "term"_attr = _termShadow.load());
++
++    // Jetpack signal: notify that MongoDB primary step-up is complete.
++    // Write "mongodb:primary_elected" to /tmp/JM_Jetpack_<host> so
++    // Jetpack servers can detect the new primary and trigger recovery.
++    {
++        const char* signalDir = std::getenv("JM_SIGNAL_DIR");
++        std::string dir = (signalDir && *signalDir) ? signalDir : "/tmp";
++        const char* signalHost = std::getenv("JM_SIGNAL_HOST");
++        std::string host = (signalHost && *signalHost) ? signalHost : "0.0.0.0";
++        std::string signalPath = dir + "/JM_Jetpack_" + host;
++        std::ofstream out(signalPath, std::ios::app);
++        if (out.is_open()) {
++            out << "mongodb:primary_elected\n";
++            out.flush();
++            LOGV2(9999901,
++                  "Jetpack signal written",
++                  "signal"_attr = "mongodb:primary_elected",
++                  "path"_attr = signalPath);
++        } else {
++            LOGV2_WARNING(9999902,
++                          "Failed to write Jetpack signal file",
++                          "path"_attr = signalPath);
++        }
++    }
++
+     _externalState->startNoopWriter(_getMyLastAppliedOpTime_inlock());

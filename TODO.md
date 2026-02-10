@@ -38,10 +38,13 @@ TLC logs are saved to `tla/log/` with protocol name and timestamp.
   - Documented: signal mechanism (jm_file_signal.h), signal chain, three detection
     approaches (client-side watcher, external script, source code modification),
     server polling code, recovery procedure, timing results, key files
-  - **TODO: Source code modifications needed** (in `third_party/` cloned repos):
-    - [ ] MongoDB: find where new primary finishes step-up, add signal file write
-    - [ ] etcd: find where new leader finishes Raft election, add signal file write
-    - [ ] ZooKeeper: find where new leader finishes ZAB election, add signal file write
+  - **Source code modifications** (in `third_party/` cloned repos):
+    - [x] MongoDB: signal write in `replication_coordinator_impl.cpp:signalDrainComplete()`
+      after "Transition to primary complete" log message (`third_party/mongo/`)
+    - [x] etcd: signal write in `server/etcdserver/server.go:updateLeadership()` callback
+      when `newLeader && isLeader()` (`third_party/etcd/`)
+    - [x] ZooKeeper: signal write in `Leader.java:lead()` after `setZabState(BROADCAST)`
+      (`third_party/zookeeper/`)
 
 ## Priority 0 (Top): Benchmark Data Collection (`result.md`)
 

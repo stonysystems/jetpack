@@ -121,17 +121,34 @@ This approach is simpler for testing but introduces latency from the bash
 polling loop. The client-side watcher approach (A) is more accurate for
 production timing.
 
-#### Approach C: Source code modification (not yet implemented)
+#### Approach C: Source code modification (implemented)
 
 For the most accurate recovery timing, the base protocol's source code
-(in `third_party/`) could be modified so the **new leader itself** writes
+(in `third_party/`) is modified so the **new leader itself** writes
 the signal file immediately after completing its election/recovery. This
 eliminates any detection latency from approaches A and B.
 
-Locations where signal writes could be added:
-- **MongoDB**: Where the new primary finishes step-up in the replication code
-- **etcd**: Where the new leader finishes Raft election
-- **ZooKeeper**: Where the new leader finishes ZAB election
+Signal writes are added at the following locations:
+
+- **MongoDB** (`third_party/mongo/src/mongo/db/repl/replication_coordinator_impl.cpp`):
+  In `signalDrainComplete()`, after `completeTransitionToPrimary()` and the
+  "Transition to primary complete; database writes are now permitted" log message.
+  This is when the primary has finished draining, applied all pending ops, and is
+  ready to accept client writes.
+
+- **etcd** (`third_party/etcd/server/etcdserver/server.go`):
+  In the `updateLeadership()` callback within `EtcdServer.run()`, inside the
+  `newLeader && isLeader()` branch. This fires when the raft state machine
+  transitions to `StateLeader` and the server begins serving as leader.
+
+- **ZooKeeper** (`third_party/zookeeper/zookeeper-server/src/main/java/org/apache/zookeeper/server/quorum/Leader.java`):
+  In `lead()`, after `setZabState(QuorumPeer.ZabState.BROADCAST)`. This is when
+  the leader has completed ZAB discovery, synchronization, and is ready to
+  broadcast proposals.
+
+All three write `<backend>:primary_elected` to the signal file. The signal
+host defaults to `0.0.0.0` but can be overridden via `JM_SIGNAL_HOST` env var.
+The signal directory defaults to `/tmp` but can be overridden via `JM_SIGNAL_DIR`.
 
 ### Step 4-5: Jetpack Server Polling
 

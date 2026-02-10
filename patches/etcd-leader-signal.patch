@@ -1,0 +1,36 @@
+--- a/server/etcdserver/server.go
++++ b/server/etcdserver/server.go
+@@ -1080,6 +1080,25 @@
+ 			if newLeader {
+ 				t := time.Now()
+ 				s.leadTimeMu.Lock()
+ 				s.leadElectedTime = t
+ 				s.leadTimeMu.Unlock()
++
++				// Jetpack signal: notify that etcd leader election is complete.
++				// Write "etcd:primary_elected" to /tmp/JM_Jetpack_<host> so
++				// Jetpack servers can detect the new leader and trigger recovery.
++				func() {
++					signalDir := os.Getenv("JM_SIGNAL_DIR")
++					if signalDir == "" {
++						signalDir = "/tmp"
++					}
++					signalHost := os.Getenv("JM_SIGNAL_HOST")
++					if signalHost == "" {
++						signalHost = "0.0.0.0"
++					}
++					signalPath := signalDir + "/JM_Jetpack_" + signalHost
++					f, err := os.OpenFile(signalPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
++					if err != nil {
++						s.Logger().Warn(fmt.Sprintf("failed to open Jetpack signal file %s: %v", signalPath, err))
++						return
++					}
++					defer f.Close()
++					if _, err := f.WriteString("etcd:primary_elected\n"); err != nil {
++						s.Logger().Warn(fmt.Sprintf("failed to write Jetpack signal: %v", err))
++						return
++					}
++					s.Logger().Info(fmt.Sprintf("Jetpack signal written: etcd:primary_elected -> %s", signalPath))
++				}()
+ 			}
+ 			setSyncC(s.SyncTicker.C)

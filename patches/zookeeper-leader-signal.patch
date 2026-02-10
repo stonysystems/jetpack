@@ -1,0 +1,36 @@
+--- a/zookeeper-server/src/main/java/org/apache/zookeeper/server/quorum/Leader.java
++++ b/zookeeper-server/src/main/java/org/apache/zookeeper/server/quorum/Leader.java
+@@ -25,6 +25,8 @@
+ import java.io.DataInputStream;
+ import java.io.DataOutputStream;
++import java.io.FileWriter;
+ import java.io.IOException;
++import java.io.PrintWriter;
+ import java.net.InetSocketAddress;
+ import java.net.ServerSocket;
+@@ -765,6 +767,23 @@
+             self.setZabState(QuorumPeer.ZabState.BROADCAST);
+             self.adminServer.setZooKeeperServer(zk);
+
++            // Jetpack signal: notify that ZooKeeper leader election is complete.
++            // Write "zookeeper:primary_elected" to /tmp/JM_Jetpack_<host> so
++            // Jetpack servers can detect the new leader and trigger recovery.
++            try {
++                String signalDir = System.getenv("JM_SIGNAL_DIR");
++                if (signalDir == null || signalDir.isEmpty()) {
++                    signalDir = "/tmp";
++                }
++                String signalHost = System.getenv("JM_SIGNAL_HOST");
++                if (signalHost == null || signalHost.isEmpty()) {
++                    signalHost = "0.0.0.0";
++                }
++                String signalPath = signalDir + "/JM_Jetpack_" + signalHost;
++                try (PrintWriter pw = new PrintWriter(new FileWriter(signalPath, true))) {
++                    pw.println("zookeeper:primary_elected");
++                }
++                LOG.info("Jetpack signal written: zookeeper:primary_elected -> {}", signalPath);
++            } catch (Exception e) {
++                LOG.warn("Failed to write Jetpack signal file", e);
++            }
++
+             // We ping twice a tick, so we only update the tick every other
