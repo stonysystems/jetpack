@@ -41,6 +41,7 @@ services:
     build:
       context: ../..
       dockerfile: docker/etcd/Dockerfile
+    privileged: true
     depends_on:
       etcd:
         condition: service_healthy

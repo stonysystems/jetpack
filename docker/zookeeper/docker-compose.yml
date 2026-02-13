@@ -32,6 +32,7 @@ services:
     build:
       context: ../..
       dockerfile: docker/zookeeper/Dockerfile
+    privileged: true
     depends_on:
       zookeeper:
         condition: service_healthy

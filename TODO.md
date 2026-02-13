@@ -63,8 +63,38 @@ Jetpack off = `config/none_<protocol>.yml` (cc: none), Jetpack on = `config/rule
 **Config files needed**:
 - [x] `config/none_mongodb.yml`, `config/none_etcd.yml`, `config/none_zookeeper.yml` (exist)
 - [x] `config/rule_mongodb.yml` (exists)
-- [x] `config/rule_etcd.yml` — create from `rule_mongodb.yml`, change `ab: etcd`
-- [x] `config/rule_zookeeper.yml` — create from `rule_mongodb.yml`, change `ab: zookeeper`
+- [x] `config/rule_etcd.yml` — created from `rule_mongodb.yml`, change `ab: etcd`
+- [x] `config/rule_zookeeper.yml` — created from `rule_mongodb.yml`, change `ab: zookeeper`
+
+**Site configs for benchmarks**:
+- `config/1c1s5r5p.yml` — 1 client, 5 servers, 5 processes (Setting A/C)
+- `config/60c1s5r5p.yml` — 60 clients (12/process), 5 servers, 5 processes (Setting B/D)
+- Note: 1-client config hangs because server-only processes never exit. Use
+  `5c1s5r1p_<protocol>.yml` (5 clients) with `concurrent_1.yml` as workaround for Setting A/C.
+
+**Benchmark mode**: All three run scripts (`run-{mongodb,etcd,zookeeper}-test.sh`) support
+a `benchmark` mode with configurable environment variables:
+```bash
+# Example: MongoDB Setting A (1 client-equivalent, concurrency=1, Jetpack off)
+docker run --rm --privileged \
+  -e SITE_CONFIG=5c1s5r1p_mongodb.yml \
+  -e MODE_CONFIG=none_mongodb.yml \
+  -e CLIENT_CONFIG=client_open.yml \
+  -e CONCURRENT_CONFIG=concurrent_1.yml \
+  -e LATENCY_MS=20 -e LATENCY_JITTER=0 -e TEST_DURATION=30 \
+  -v $(pwd)/config:/jetpack/config:ro \
+  mongodb-jetpack-mongodb benchmark
+
+# Example: MongoDB Setting B (60 clients, concurrency=200, Jetpack off)
+docker run --rm --privileged \
+  -e SITE_CONFIG=60c1s5r5p.yml \
+  -e MODE_CONFIG=none_mongodb.yml \
+  -e CLIENT_CONFIG=client_open.yml \
+  -e CONCURRENT_CONFIG=concurrent_200.yml \
+  -e LATENCY_MS=20 -e LATENCY_JITTER=0 -e TEST_DURATION=30 \
+  -v $(pwd)/config:/jetpack/config:ro \
+  mongodb-jetpack-mongodb benchmark
+```
 
 Latency (median, average) and throughput metrics are computed in `src/deptran/s_main.cc`.
 

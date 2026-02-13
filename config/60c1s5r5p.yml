@@ -1,0 +1,91 @@
+
+# 60 clients, 1 site, 5 replicas, 5 processes — multi-process Docker benchmark.
+#
+# Each server is mapped to a separate loopback address (127.0.0.1 - 127.0.0.5)
+# so that tc/netem can apply per-server latency to simulate network delays.
+# 12 clients co-located per process (60 total client threads).
+
+site:
+  server: # each line is a partition, the first is the master site_name:port
+    - ["s101:18000", "s201:18001", "s301:18002", "s401:18003", "s501:18004"]
+  client: # each line is a partition
+    - ["c01", "c02", "c03", "c04", "c05", "c06", "c07", "c08", "c09", "c10",
+       "c11", "c12", "c13", "c14", "c15", "c16", "c17", "c18", "c19", "c20",
+       "c21", "c22", "c23", "c24", "c25", "c26", "c27", "c28", "c29", "c30",
+       "c31", "c32", "c33", "c34", "c35", "c36", "c37", "c38", "c39", "c40",
+       "c41", "c42", "c43", "c44", "c45", "c46", "c47", "c48", "c49", "c50",
+       "c51", "c52", "c53", "c54", "c55", "c56", "c57", "c58", "c59", "c60"]
+
+process:
+  s101: h1
+  s201: h2
+  s301: h3
+  s401: h4
+  s501: h5
+  c01: h1
+  c02: h1
+  c03: h1
+  c04: h1
+  c05: h1
+  c06: h1
+  c07: h1
+  c08: h1
+  c09: h1
+  c10: h1
+  c11: h1
+  c12: h1
+  c13: h2
+  c14: h2
+  c15: h2
+  c16: h2
+  c17: h2
+  c18: h2
+  c19: h2
+  c20: h2
+  c21: h2
+  c22: h2
+  c23: h2
+  c24: h2
+  c25: h3
+  c26: h3
+  c27: h3
+  c28: h3
+  c29: h3
+  c30: h3
+  c31: h3
+  c32: h3
+  c33: h3
+  c34: h3
+  c35: h3
+  c36: h3
+  c37: h4
+  c38: h4
+  c39: h4
+  c40: h4
+  c41: h4
+  c42: h4
+  c43: h4
+  c44: h4
+  c45: h4
+  c46: h4
+  c47: h4
+  c48: h4
+  c49: h5
+  c50: h5
+  c51: h5
+  c52: h5
+  c53: h5
+  c54: h5
+  c55: h5
+  c56: h5
+  c57: h5
+  c58: h5
+  c59: h5
+  c60: h5
+
+host:
+  h1: 127.0.0.1
+  h2: 127.0.0.2
+  h3: 127.0.0.3
+  h4: 127.0.0.4
+  h5: 127.0.0.5

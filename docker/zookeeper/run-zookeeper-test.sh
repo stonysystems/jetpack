@@ -18,9 +18,9 @@
 set -euo pipefail
 
 JETPACK_DIR="${JETPACK_DIR:-/jetpack}"
-TEST_DURATION="${TEST_DURATION:-10}"
-LATENCY_MS="${LATENCY_MS:-5}"
-LATENCY_JITTER="${LATENCY_JITTER:-2}"
+TEST_DURATION="${TEST_DURATION:-30}"
+LATENCY_MS="${LATENCY_MS:-20}"
+LATENCY_JITTER="${LATENCY_JITTER:-0}"
 ZOOKEEPER_PORT="${ZOOKEEPER_PORT:-2181}"
 ZOOKEEPER_HOME="${ZOOKEEPER_HOME:-/opt/zookeeper}"
 ZOOKEEPER_DATA_DIR="/tmp/zookeeper-data"
@@ -583,6 +583,120 @@ run_recovery_test() {
     return "$exit_code"
 }
 
+# ---------------------------------------------------------------------------
+# Configurable benchmark mode for performance chart experiments.
+#
+# Environment variables:
+#   SITE_CONFIG       - Site config file name (default: 5c1s5r1p_zookeeper.yml)
+#   MODE_CONFIG       - Mode config file name (default: none_zookeeper.yml)
+#   CLIENT_CONFIG     - Client config file name (default: client_open.yml)
+#   CONCURRENT_CONFIG - Concurrency config file name (default: concurrent_1.yml)
+#   LATENCY_MS        - One-way latency in ms (default: 20)
+#   LATENCY_JITTER    - Latency jitter in ms (default: 0)
+#   TEST_DURATION     - Test duration in seconds (default: 30)
+# ---------------------------------------------------------------------------
+run_benchmark() {
+    local site_config="${SITE_CONFIG:-5c1s5r1p_zookeeper.yml}"
+    local mode_config="${MODE_CONFIG:-none_zookeeper.yml}"
+    local client_config="${CLIENT_CONFIG:-client_open.yml}"
+    local concurrent_config="${CONCURRENT_CONFIG:-concurrent_1.yml}"
+
+    log_info "=== Benchmark Mode ==="
+    log_info "Site config:       $site_config"
+    log_info "Mode config:       $mode_config"
+    log_info "Client config:     $client_config"
+    log_info "Concurrent config: $concurrent_config"
+    log_info "Latency:           ${LATENCY_MS}ms +/- ${LATENCY_JITTER}ms"
+    log_info "Duration:          ${TEST_DURATION}s"
+
+    start_embedded_zookeeper
+
+    mkdir -p "$LOG_DIR"
+
+    local config_site="${JETPACK_DIR}/config/${site_config}"
+    local config_mode="${JETPACK_DIR}/config/${mode_config}"
+    local config_bench="${JETPACK_DIR}/config/rw_fixed.yml"
+    local config_client="${JETPACK_DIR}/config/${client_config}"
+    local config_concurrent="${JETPACK_DIR}/config/${concurrent_config}"
+    local server_bin="${JETPACK_DIR}/build/deptran_server"
+
+    if [ ! -x "$server_bin" ]; then
+        log_error "Jetpack server binary not found at $server_bin"
+        return 1
+    fi
+
+    for cfg in "$config_site" "$config_mode" "$config_bench" "$config_client" "$config_concurrent"; do
+        if [ ! -f "$cfg" ]; then
+            log_error "Config file not found: $cfg"
+            return 1
+        fi
+    done
+
+    setup_latency "$LATENCY_MS" "$LATENCY_JITTER"
+
+    local host_procs
+    host_procs=($(grep -oP '^\s+h\d+' "$config_site" | sort -u | tr -d ' ' || echo "h1 h2 h3 h4 h5"))
+    if [ ${#host_procs[@]} -eq 0 ]; then
+        host_procs=("h1" "h2" "h3" "h4" "h5")
+    fi
+
+    local pids=()
+    local proc_names=()
+
+    for proc in "${host_procs[@]}"; do
+        log_info "Starting process $proc"
+        "$server_bin" \
+            -f "$config_site" \
+            -f "$config_mode" \
+            -f "$config_bench" \
+            -f "$config_client" \
+            -f "$config_concurrent" \
+            -P "$proc" \
+            -d "$TEST_DURATION" \
+            -r "$LOG_DIR" \
+            > "$LOG_DIR/proc-${proc}.log" 2>&1 &
+        pids+=($!)
+        proc_names+=("$proc")
+    done
+
+    log_info "Waiting for ${#pids[@]} processes to complete (timeout: $((TEST_DURATION + 60))s)..."
+
+    local exit_code=0
+    for i in "${!pids[@]}"; do
+        if ! wait "${pids[$i]}" 2>/dev/null; then
+            log_warn "Process ${proc_names[$i]} (PID ${pids[$i]}) exited with non-zero status"
+            exit_code=1
+        fi
+    done
+
+    remove_latency
+
+    log_info "--- Benchmark Results ---"
+    for proc in "${proc_names[@]}"; do
+        local logfile="$LOG_DIR/proc-${proc}.log"
+        if [ -f "$logfile" ]; then
+            local stats_line
+            stats_line=$(grep "All-efficient-attempts" "$logfile" 2>/dev/null | tail -1)
+            if [ -n "$stats_line" ]; then
+                log_info "  $proc: $stats_line"
+            fi
+            local tp_line
+            tp_line=$(grep -i "throughput" "$logfile" 2>/dev/null | tail -1)
+            if [ -n "$tp_line" ]; then
+                log_info "  $proc: $tp_line"
+            fi
+        fi
+    done
+
+    if [ $exit_code -eq 0 ]; then
+        log_info "=== Benchmark PASSED ==="
+    else
+        log_error "=== Benchmark FAILED ==="
+    fi
+
+    return $exit_code
+}
+
 # --- Main ---
 
 MODE="${1:-single}"
@@ -597,6 +711,9 @@ case "$MODE" in
     recovery)
         run_recovery_test
         ;;
+    benchmark)
+        run_benchmark
+        ;;
     zookeeper-only)
         start_embedded_zookeeper
         log_info "ZooKeeper running on port $ZOOKEEPER_PORT. Press Ctrl+C to stop."
@@ -608,7 +725,7 @@ case "$MODE" in
         ;;
     *)
         log_error "Unknown mode: $MODE"
-        log_error "Usage: $0 {single|multi|recovery|zookeeper-only|bash}"
+        log_error "Usage: $0 {single|multi|recovery|benchmark|zookeeper-only|bash}"
         exit 1
         ;;
 esac

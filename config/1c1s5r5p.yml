@@ -1,0 +1,27 @@
+
+# 1 client, 1 site, 5 replicas, 5 processes — multi-process Docker benchmark.
+#
+# Each server is mapped to a separate loopback address (127.0.0.1 - 127.0.0.5)
+# so that tc/netem can apply per-server latency to simulate network delays.
+# Single client co-located with server on h1.
+
+site:
+  server: # each line is a partition, the first is the master site_name:port
+    - ["s101:18000", "s201:18001", "s301:18002", "s401:18003", "s501:18004"]
+  client: # each line is a partition
+    - ["c101"]
+
+process:
+  s101: h1
+  s201: h2
+  s301: h3
+  s401: h4
+  s501: h5
+  c101: h1
+
+host:
+  h1: 127.0.0.1
+  h2: 127.0.0.2
+  h3: 127.0.0.3
+  h4: 127.0.0.4
+  h5: 127.0.0.5
