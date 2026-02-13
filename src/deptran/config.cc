@@ -939,6 +939,7 @@ int32_t Config::get_num_leaders(parid_t partition_id) {
       break;
     case MODE_MONGODB:
     case MODE_ETCD:
+    case MODE_ZOOKEEPER:
       return 1;
       break;
     default:

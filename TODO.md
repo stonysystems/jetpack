@@ -105,31 +105,44 @@ Latency (median, average) and throughput metrics are computed in `src/deptran/s_
 
 | Experiment | Median Latency (ms) | Avg Latency (ms) | Throughput (txn/s) |
 |---|---:|---:|---:|
-| MongoDB Setting A (1c, c=1, Jetpack off) | | | |
-| MongoDB Setting B (60c, c=200, Jetpack off) | | | |
-| MongoDB Setting C (1c, c=1, Jetpack on) | | | |
-| MongoDB Setting D (60c, c=200, Jetpack on) | | | |
-| etcd Setting A (1c, c=1, Jetpack off) | | | |
-| etcd Setting B (60c, c=200, Jetpack off) | | | |
-| etcd Setting C (1c, c=1, Jetpack on) | | | |
-| etcd Setting D (60c, c=200, Jetpack on) | | | |
-| ZooKeeper Setting A (1c, c=1, Jetpack off) | | | |
-| ZooKeeper Setting B (60c, c=200, Jetpack off) | | | |
-| ZooKeeper Setting C (1c, c=1, Jetpack on) | | | |
-| ZooKeeper Setting D (60c, c=200, Jetpack on) | | | |
+| MongoDB Setting A (1c, c=1, Jetpack off) | 133.60 | 133.60 | 3.20 |
+| MongoDB Setting B (60c, c=200, Jetpack off) | 7,099.85 | 7,099.85 | 1,667.90 |
+| MongoDB Setting C (1c, c=1, Jetpack on) | 87.64 | 87.64 | 3.40 |
+| MongoDB Setting D (60c, c=200, Jetpack on) | 5,538.99 | 5,538.99 | 1,647.60 |
+| etcd Setting A (1c, c=1, Jetpack off) | 86.54 | 86.54 | 3.30 |
+| etcd Setting B (60c, c=200, Jetpack off) | 1,133.92 | 1,133.92 | 9,063.00 |
+| etcd Setting C (1c, c=1, Jetpack on) | 81.79 | 81.79 | 3.40 |
+| etcd Setting D (60c, c=200, Jetpack on) | 1,243.64 | 1,243.64 | 8,752.20 |
+| ZooKeeper Setting A (1c, c=1, Jetpack off) | 172.09 | 172.09 | 3.20 |
+| ZooKeeper Setting B (60c, c=200, Jetpack off) | 3,904.14 | 3,904.14 | 2,985.70 |
+| ZooKeeper Setting C (1c, c=1, Jetpack on) | 81.90 | 81.90 | 3.60 |
+| ZooKeeper Setting D (60c, c=200, Jetpack on) | 4,990.83 | 4,990.83 | 2,191.30 |
 
-- [ ] Run MongoDB Setting A (open-loop, 1 thread, concurrency=1, Jetpack off), record metrics
-- [ ] Run MongoDB Setting B (open-loop, 60 threads, concurrency=200, Jetpack off), record metrics
-- [ ] Run MongoDB Setting C (open-loop, 1 thread, concurrency=1, Jetpack on), record metrics
-- [ ] Run MongoDB Setting D (open-loop, 60 threads, concurrency=200, Jetpack on), record metrics
-- [ ] Run etcd Setting A (open-loop, 1 thread, concurrency=1, Jetpack off), record metrics
-- [ ] Run etcd Setting B (open-loop, 60 threads, concurrency=200, Jetpack off), record metrics
-- [ ] Run etcd Setting C (open-loop, 1 thread, concurrency=1, Jetpack on), record metrics
-- [ ] Run etcd Setting D (open-loop, 60 threads, concurrency=200, Jetpack on), record metrics
-- [ ] Run ZooKeeper Setting A (open-loop, 1 thread, concurrency=1, Jetpack off), record metrics
-- [ ] Run ZooKeeper Setting B (open-loop, 60 threads, concurrency=200, Jetpack off), record metrics
-- [ ] Run ZooKeeper Setting C (open-loop, 1 thread, concurrency=1, Jetpack on), record metrics
-- [ ] Run ZooKeeper Setting D (open-loop, 60 threads, concurrency=200, Jetpack on), record metrics
+- [x] Run MongoDB Setting A (open-loop, 1 thread, concurrency=1, Jetpack off), record metrics
+  - Median 133.60ms, throughput 3.20 txn/s (5 processes, avg across h1-h5)
+- [x] Run MongoDB Setting B (open-loop, 60 threads, concurrency=200, Jetpack off), record metrics
+  - Median 7,099.85ms, throughput 1,667.90 txn/s
+- [x] Run MongoDB Setting C (open-loop, 1 thread, concurrency=1, Jetpack on), record metrics
+  - Median 87.64ms, throughput 3.40 txn/s (35% latency reduction vs Setting A)
+- [x] Run MongoDB Setting D (open-loop, 60 threads, concurrency=200, Jetpack on), record metrics
+  - Median 5,538.99ms, throughput 1,647.60 txn/s (22% latency reduction vs Setting B)
+- [x] Run etcd Setting A (open-loop, 1 thread, concurrency=1, Jetpack off), record metrics
+  - Median 86.54ms, throughput 3.30 txn/s
+- [x] Run etcd Setting B (open-loop, 60 threads, concurrency=200, Jetpack off), record metrics
+  - Median 1,133.92ms, throughput 9,063.00 txn/s
+- [x] Run etcd Setting C (open-loop, 1 thread, concurrency=1, Jetpack on), record metrics
+  - Median 81.79ms, throughput 3.40 txn/s (5% latency reduction vs Setting A)
+- [x] Run etcd Setting D (open-loop, 60 threads, concurrency=200, Jetpack on), record metrics
+  - Median 1,243.64ms, throughput 8,752.20 txn/s (similar to Setting B under high load)
+- [x] Run ZooKeeper Setting A (open-loop, 1 thread, concurrency=1, Jetpack off), record metrics
+  - Median 172.09ms, throughput 3.20 txn/s
+- [x] Run ZooKeeper Setting B (open-loop, 60 threads, concurrency=200, Jetpack off), record metrics
+  - Median 3,904.14ms, throughput 2,985.70 txn/s
+- [x] Run ZooKeeper Setting C (open-loop, 1 thread, concurrency=1, Jetpack on), record metrics
+  - Median 81.90ms, throughput 3.60 txn/s (52% latency reduction vs Setting A)
+  - Fixed: added MODE_ZOOKEEPER to rule mode switch in commo.cc and config.cc
+- [x] Run ZooKeeper Setting D (open-loop, 60 threads, concurrency=200, Jetpack on), record metrics
+  - Median 4,990.83ms, throughput 2,191.30 txn/s
 
 ### Maximum throughput search (6 cases)
 
