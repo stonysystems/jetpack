@@ -149,12 +149,27 @@ Latency (median, average) and throughput metrics are computed in `src/deptran/s_
 Use 60 client threads, vary concurrency to find the maximum throughput for each case
 (3 protocols x Jetpack on/off = 6 cases). Increase concurrency until throughput saturates.
 
-- [ ] MongoDB max throughput (Jetpack off): sweep concurrency with 60 threads
-- [ ] MongoDB max throughput (Jetpack on): sweep concurrency with 60 threads
-- [ ] etcd max throughput (Jetpack off): sweep concurrency with 60 threads
-- [ ] etcd max throughput (Jetpack on): sweep concurrency with 60 threads
-- [ ] ZooKeeper max throughput (Jetpack off): sweep concurrency with 60 threads
-- [ ] ZooKeeper max throughput (Jetpack on): sweep concurrency with 60 threads
+| Case | Best Concurrency | Max Throughput (txn/s) |
+|---|---:|---:|
+| MongoDB (Jetpack off) | c=70 | 2,226 |
+| MongoDB (Jetpack on) | c=70 | 1,871 |
+| etcd (Jetpack off) | c=200 | 9,063 |
+| etcd (Jetpack on) | c=200 | 8,752 |
+| ZooKeeper (Jetpack off) | c=300 | 3,006 |
+| ZooKeeper (Jetpack on) | c=100 | 2,816 |
+
+- [x] MongoDB max throughput (Jetpack off): sweep concurrency with 60 threads
+  - Sweep: c=20→1,160, c=50→2,067, **c=70→2,226** (peak), c=200→1,668
+- [x] MongoDB max throughput (Jetpack on): sweep concurrency with 60 threads
+  - Sweep: c=50→1,591, **c=70→1,871** (peak), c=200→1,648
+- [x] etcd max throughput (Jetpack off): sweep concurrency with 60 threads
+  - Sweep: c=50→2,963, c=150→8,913, **c=200→9,063** (peak), c=500→8,102
+- [x] etcd max throughput (Jetpack on): sweep concurrency with 60 threads
+  - Sweep: c=150→8,573, **c=200→8,752** (peak)
+- [x] ZooKeeper max throughput (Jetpack off): sweep concurrency with 60 threads
+  - Sweep: c=200→2,986, **c=300→3,006** (peak), c=500→2,591
+- [x] ZooKeeper max throughput (Jetpack on): sweep concurrency with 60 threads
+  - Sweep: **c=100→2,816** (peak), c=200→2,191, c=300→2,548
 
 ### Failure recovery downtime (3 experiments)
 
