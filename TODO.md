@@ -103,6 +103,26 @@ Latency (median, average) and throughput metrics are computed in `src/deptran/s_
 - Jetpack ON (fast path): expect ~1 RTT latency ≈ 40ms
 - If numbers deviate significantly from this, investigate the cause.
 
+**SANITY CHECK FAILED** — results from the first run do not match expectations:
+
+| Setting | Expected | Actual | Status |
+|---|---|---|---|
+| MongoDB A (off, 1c) | ~80ms | 133.60ms | FAIL — ~67% too high |
+| MongoDB C (on, 1c) | ~40ms | 87.64ms | FAIL — ~119% too high |
+| etcd A (off, 1c) | ~80ms | 86.54ms | OK (close) |
+| etcd C (on, 1c) | ~40ms | 81.79ms | FAIL — ~105% too high, Jetpack barely helped |
+| ZooKeeper A (off, 1c) | ~80ms | 172.09ms | FAIL — ~115% too high |
+| ZooKeeper C (on, 1c) | ~40ms | 81.90ms | FAIL — ~105% too high |
+
+Key issues to investigate:
+- [ ] MongoDB off: 133ms is ~1.7x expected; check if MongoDB adds extra round trips
+- [ ] Jetpack on latency is ~80ms across all protocols instead of ~40ms; fast path may
+      not be taking effect, or there is an extra RTT somewhere in the Jetpack path
+- [ ] ZooKeeper off: 172ms is ~2.1x expected; check if ZooKeeper has additional phases
+- [ ] All "Jetpack on" results are ~80ms (≈ 2 RTT), suggesting Jetpack fast path is NOT
+      reducing the number of round trips — investigate whether `rule_<protocol>.yml` is
+      actually enabling the fast path correctly
+
 | Experiment | Median Latency (ms) | Avg Latency (ms) | Throughput (txn/s) |
 |---|---:|---:|---:|
 | MongoDB Setting A (1c, c=1, Jetpack off) | 133.60 | 133.60 | 3.20 |
@@ -118,29 +138,37 @@ Latency (median, average) and throughput metrics are computed in `src/deptran/s_
 | ZooKeeper Setting C (1c, c=1, Jetpack on) | 81.90 | 81.90 | 3.60 |
 | ZooKeeper Setting D (60c, c=200, Jetpack on) | 4,990.83 | 4,990.83 | 2,191.30 |
 
+Results below are from the first run but **failed sanity check** — need to investigate
+and re-run after fixing the underlying issues.
+
 - [x] Run MongoDB Setting A (open-loop, 1 thread, concurrency=1, Jetpack off), record metrics
   - Median 133.60ms, throughput 3.20 txn/s (5 processes, avg across h1-h5)
+  - **SANITY FAIL**: expected ~80ms, got 133ms
 - [x] Run MongoDB Setting B (open-loop, 60 threads, concurrency=200, Jetpack off), record metrics
   - Median 7,099.85ms, throughput 1,667.90 txn/s
 - [x] Run MongoDB Setting C (open-loop, 1 thread, concurrency=1, Jetpack on), record metrics
   - Median 87.64ms, throughput 3.40 txn/s (35% latency reduction vs Setting A)
+  - **SANITY FAIL**: expected ~40ms, got 87ms
 - [x] Run MongoDB Setting D (open-loop, 60 threads, concurrency=200, Jetpack on), record metrics
   - Median 5,538.99ms, throughput 1,647.60 txn/s (22% latency reduction vs Setting B)
 - [x] Run etcd Setting A (open-loop, 1 thread, concurrency=1, Jetpack off), record metrics
-  - Median 86.54ms, throughput 3.30 txn/s
+  - Median 86.54ms, throughput 3.30 txn/s — OK (close to expected ~80ms)
 - [x] Run etcd Setting B (open-loop, 60 threads, concurrency=200, Jetpack off), record metrics
   - Median 1,133.92ms, throughput 9,063.00 txn/s
 - [x] Run etcd Setting C (open-loop, 1 thread, concurrency=1, Jetpack on), record metrics
   - Median 81.79ms, throughput 3.40 txn/s (5% latency reduction vs Setting A)
+  - **SANITY FAIL**: expected ~40ms, got 81ms — Jetpack barely helped
 - [x] Run etcd Setting D (open-loop, 60 threads, concurrency=200, Jetpack on), record metrics
   - Median 1,243.64ms, throughput 8,752.20 txn/s (similar to Setting B under high load)
 - [x] Run ZooKeeper Setting A (open-loop, 1 thread, concurrency=1, Jetpack off), record metrics
   - Median 172.09ms, throughput 3.20 txn/s
+  - **SANITY FAIL**: expected ~80ms, got 172ms
 - [x] Run ZooKeeper Setting B (open-loop, 60 threads, concurrency=200, Jetpack off), record metrics
   - Median 3,904.14ms, throughput 2,985.70 txn/s
 - [x] Run ZooKeeper Setting C (open-loop, 1 thread, concurrency=1, Jetpack on), record metrics
   - Median 81.90ms, throughput 3.60 txn/s (52% latency reduction vs Setting A)
   - Fixed: added MODE_ZOOKEEPER to rule mode switch in commo.cc and config.cc
+  - **SANITY FAIL**: expected ~40ms, got 81ms
 - [x] Run ZooKeeper Setting D (open-loop, 60 threads, concurrency=200, Jetpack on), record metrics
   - Median 4,990.83ms, throughput 2,191.30 txn/s
 
