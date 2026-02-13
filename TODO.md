@@ -48,39 +48,70 @@ TLC logs are saved to `tla/log/` with protocol name and timestamp.
 
 ## Priority 0 (Top): Benchmark Data Collection (`result.md`)
 
-### Performance chart (6 experiments)
+### Performance chart (12 experiments)
 
-All tests use 5 replicas, closed-loop, two settings per backend:
-- Setting A: 1 client thread, concurrency = 1
-- Setting B: 12 client threads, concurrency = 10
+All tests use 5 replicas, **open-loop**, multi-process mode with 20ms one-way simulated
+network latency (tc/netem). Four settings per backend (3 protocols x 4 settings = 12):
+
+- Setting A: 1 client thread, concurrency = 1, Jetpack off (`none_<protocol>.yml`)
+- Setting B: 60 client threads, concurrency = 200, Jetpack off (`none_<protocol>.yml`)
+- Setting C: 1 client thread, concurrency = 1, Jetpack on (`rule_<protocol>.yml`)
+- Setting D: 60 client threads, concurrency = 200, Jetpack on (`rule_<protocol>.yml`)
+
+Jetpack off = `config/none_<protocol>.yml` (cc: none), Jetpack on = `config/rule_<protocol>.yml` (cc: rule).
+
+**Config files needed**:
+- [x] `config/none_mongodb.yml`, `config/none_etcd.yml`, `config/none_zookeeper.yml` (exist)
+- [x] `config/rule_mongodb.yml` (exists)
+- [x] `config/rule_etcd.yml` — create from `rule_mongodb.yml`, change `ab: etcd`
+- [x] `config/rule_zookeeper.yml` — create from `rule_mongodb.yml`, change `ab: zookeeper`
 
 Latency (median, average) and throughput metrics are computed in `src/deptran/s_main.cc`.
 
-**Note**: Multi-process mode (separate OS processes per server/client with tc/netem latency)
-is now working after fixing the `-P` flag bug (scripts passed site names instead of process
-names). Results below use single-process mode for latency/throughput metrics. Multi-process
-mode validates inter-replica communication with simulated 5ms network latency.
+**Sanity check**: With 20ms one-way latency, for the 1-client/concurrency=1 setting:
+- Jetpack OFF (original protocol): expect ~2 RTT latency ≈ 80ms
+- Jetpack ON (fast path): expect ~1 RTT latency ≈ 40ms
+- If numbers deviate significantly from this, investigate the cause.
 
-| Experiment | Median Latency (ms) | Average Latency (ms) | Throughput (txn/s) |
+| Experiment | Median Latency (ms) | Avg Latency (ms) | Throughput (txn/s) |
 |---|---:|---:|---:|
-| MongoDB 1-client (concurrency=1) | 141.74 | 141.24 | 7.10 |
-| MongoDB 12-client (concurrency=10) | 166.30 | 167.23 | 716.50 |
-| etcd 1-client (concurrency=1) | 87.82 | 90.04 | 11.20 |
-| etcd 12-client (concurrency=10) | 86.98 | 87.55 | 1368.20 |
-| ZooKeeper 1-client (concurrency=1) | 84.01 | 83.90 | 11.90 |
-| ZooKeeper 12-client (concurrency=10) | 85.69 | 86.05 | 1393.20 |
+| MongoDB Setting A (1c, c=1, Jetpack off) | | | |
+| MongoDB Setting B (60c, c=200, Jetpack off) | | | |
+| MongoDB Setting C (1c, c=1, Jetpack on) | | | |
+| MongoDB Setting D (60c, c=200, Jetpack on) | | | |
+| etcd Setting A (1c, c=1, Jetpack off) | | | |
+| etcd Setting B (60c, c=200, Jetpack off) | | | |
+| etcd Setting C (1c, c=1, Jetpack on) | | | |
+| etcd Setting D (60c, c=200, Jetpack on) | | | |
+| ZooKeeper Setting A (1c, c=1, Jetpack off) | | | |
+| ZooKeeper Setting B (60c, c=200, Jetpack off) | | | |
+| ZooKeeper Setting C (1c, c=1, Jetpack on) | | | |
+| ZooKeeper Setting D (60c, c=200, Jetpack on) | | | |
 
-- [x] Run MongoDB 1-client test (5 replicas, closed-loop, 1 thread, concurrency=1), record metrics
-- [x] Run MongoDB 12-client test (5 replicas, closed-loop, 12 threads, concurrency=10), record metrics
-- [x] Run etcd 1-client test (5 replicas, closed-loop, 1 thread, concurrency=1), record metrics
-- [x] Run etcd 12-client test (5 replicas, closed-loop, 12 threads, concurrency=10), record metrics
-- [x] Run ZooKeeper 1-client test (5 replicas, closed-loop, 1 thread, concurrency=1), record metrics
-- [x] Run ZooKeeper 12-client test (5 replicas, closed-loop, 12 threads, concurrency=10), record metrics
-- [x] Fix multi-process mode inter-replica connectivity (0 throughput in Docker)
-  - Root cause: run scripts passed site names (`-P s101`) instead of process names (`-P h1`)
-  - Fixed all three backends' run scripts (mongodb, etcd, zookeeper)
-  - Also fixed ZooKeeper 4-letter word whitelist and added netcat to Docker image
-  - Verified: MongoDB 9.4-9.6 txn/s, etcd 11.4-11.5 txn/s, ZooKeeper 9.0 txn/s per process
+- [ ] Run MongoDB Setting A (open-loop, 1 thread, concurrency=1, Jetpack off), record metrics
+- [ ] Run MongoDB Setting B (open-loop, 60 threads, concurrency=200, Jetpack off), record metrics
+- [ ] Run MongoDB Setting C (open-loop, 1 thread, concurrency=1, Jetpack on), record metrics
+- [ ] Run MongoDB Setting D (open-loop, 60 threads, concurrency=200, Jetpack on), record metrics
+- [ ] Run etcd Setting A (open-loop, 1 thread, concurrency=1, Jetpack off), record metrics
+- [ ] Run etcd Setting B (open-loop, 60 threads, concurrency=200, Jetpack off), record metrics
+- [ ] Run etcd Setting C (open-loop, 1 thread, concurrency=1, Jetpack on), record metrics
+- [ ] Run etcd Setting D (open-loop, 60 threads, concurrency=200, Jetpack on), record metrics
+- [ ] Run ZooKeeper Setting A (open-loop, 1 thread, concurrency=1, Jetpack off), record metrics
+- [ ] Run ZooKeeper Setting B (open-loop, 60 threads, concurrency=200, Jetpack off), record metrics
+- [ ] Run ZooKeeper Setting C (open-loop, 1 thread, concurrency=1, Jetpack on), record metrics
+- [ ] Run ZooKeeper Setting D (open-loop, 60 threads, concurrency=200, Jetpack on), record metrics
+
+### Maximum throughput search (6 cases)
+
+Use 60 client threads, vary concurrency to find the maximum throughput for each case
+(3 protocols x Jetpack on/off = 6 cases). Increase concurrency until throughput saturates.
+
+- [ ] MongoDB max throughput (Jetpack off): sweep concurrency with 60 threads
+- [ ] MongoDB max throughput (Jetpack on): sweep concurrency with 60 threads
+- [ ] etcd max throughput (Jetpack off): sweep concurrency with 60 threads
+- [ ] etcd max throughput (Jetpack on): sweep concurrency with 60 threads
+- [ ] ZooKeeper max throughput (Jetpack off): sweep concurrency with 60 threads
+- [ ] ZooKeeper max throughput (Jetpack on): sweep concurrency with 60 threads
 
 ### Failure recovery downtime (3 experiments)
 
