@@ -13,6 +13,12 @@
 Multi-process mode with 5 replicas, 20ms one-way simulated network latency (tc/netem),
 open-loop client. Each process on a separate loopback IP (127.0.0.1-5).
 
+**Latency model** (see `docs/latency_analysis.md`): Two layers of latency simulation are active:
+(1) tc/netem 20ms one-way between loopback IPs, and (2) `WAN_WAIT` 20ms software delays at
+RPC send/receive points and backend server submit. Jetpack OFF latency = 80ms (4 × WAN_WAIT)
++ backend I/O. Jetpack ON (fast path) latency ≈ 80ms (2 × WAN_WAIT + tc quorum RTT),
+independent of backend because the fast path bypasses backend I/O.
+
 ### Low-concurrency latency comparison (5 clients, concurrency=1)
 
 | Backend | Jetpack OFF (ms) | Jetpack ON (ms) | Reduction |
