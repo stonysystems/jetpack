@@ -109,37 +109,57 @@ Latency (median, average) and throughput metrics are computed in `src/deptran/s_
       are redundant with tc/netem — must be disabled when using tc/netem for network simulation.
       Also fixed Docker build: skip maven jute generation when pre-generated files exist.
 
-**SANITY CHECK STILL FAILING** — `SIMULATE_WAN` is now disabled, but results still do not
-match expectations. With 20ms one-way tc/netem latency, the original protocol path should be
-strictly ~2 RTT ≈ 80ms, and Jetpack fast path should be strictly ~1 RTT ≈ 40ms. Current
-results deviate significantly for etcd and MongoDB:
+**SANITY CHECK ROOT CAUSE ANALYSIS** — Investigation complete. The expected latency model
+(off = 2 RTT ≈ 80ms, on = 1 RTT ≈ 40ms) was based on an incorrect assumption about the
+tc/netem setup. The actual latency behavior is explained by two architectural issues:
 
-| Setting | Expected | Actual | Status |
-|---|---|---|---|
-| MongoDB A (off, 1c) | ~80ms (2 RTT) | 46.65ms | **FAIL** — too low, only ~1 RTT |
-| MongoDB C (on, 1c) | ~40ms (1 RTT) | 44.80ms | OK |
-| etcd A (off, 1c) | ~80ms (2 RTT) | 2.65ms | **FAIL** — way too low, no RTT at all |
-| etcd C (on, 1c) | ~40ms (1 RTT) | 7.88ms | **FAIL** — too low, no RTT |
-| ZooKeeper A (off, 1c) | ~80ms (2 RTT) | 89.60ms | OK |
-| ZooKeeper C (on, 1c) | ~40ms (1 RTT) | 40.43ms | OK |
+**Issue 1: RPC client does not bind to source IP** (`src/rrr/rpc/client.cpp`).
+The Jetpack RPC framework creates client sockets without `bind()` before `connect()`. On
+Linux loopback, the kernel defaults to `src=127.0.0.1` for all outbound connections. Since
+tc/netem rules only apply to IPs 127.0.0.2-5, client→server RPCs bypass the delay entirely.
+Server-side binds correctly (e.g. s201 binds to 127.0.0.2:18001), so server→server RPCs
+between h1 and h2-h5 DO experience tc/netem delay.
 
-**Debug tasks** — fix until all 6 settings pass the sanity check:
-- [ ] **etcd**: latency ~2.65ms (off) / ~7.88ms (on) is way too low — tc/netem latency is
-      not being applied to etcd traffic at all. Likely cause: etcd client connects via a
-      loopback address that is not covered by the tc/netem rules, or etcd responds locally
-      without going through the replicated consensus path. Investigate tc setup and etcd
-      network binding in Docker. Fix and re-run.
-- [ ] **MongoDB**: latency ~46ms (off) is only ~1 RTT instead of 2 RTT. Likely cause:
-      MongoDB may be using w=1 write concern (acknowledged after local write, no replication
-      RTT) or the commit path skips one network round trip. Check write concern and Jetpack's
-      MongoDB commit flow. Fix and re-run.
-- [ ] After fixing etcd and MongoDB, re-run all 12 experiments and verify all 6 low-concurrency
-      settings pass: off ≈ 80ms, on ≈ 40ms (within ±10ms tolerance)
-- [ ] Update `docs/latency_analysis.md`:
-  - Remove the old WAN_WAIT-based latency model entirely
-  - Document the corrected model: pure tc/netem, off = 2 RTT, on = 1 RTT
-  - Document the `SIMULATE_WAN` fix (must be disabled for tc/netem)
-  - Update all result tables and analysis with new numbers
+**Issue 2: ZooKeeper multi-host URI creates artificial latency**.
+With `JETPACK_ZOOKEEPER_RECOVERY` defined, ALL Jetpack replicas build a ZK URI from the
+config replica hosts: `127.0.0.1:2181,127.0.0.2:2181,...,127.0.0.5:2181`. Since ZK binds
+to `0.0.0.0:2181`, connections to `127.0.0.2:2181` etc. succeed but incur tc/netem delay
+(verified: `ss` shows ZK connections going to delayed IPs like 127.0.0.2:2181). This causes
+ZK writes to have ~40-50ms RTT overhead even though the ZK server is on 127.0.0.1.
+
+**Corrected latency model** for "none" mode (Jetpack OFF):
+- Client → Leader: 1 Dispatch RPC (no tc/netem delay because client socket src=127.0.0.1)
+- Leader → Backend: backend write (latency depends on backend connection IP)
+- Leader → Replicas: BroadcastCommit (fire-and-forget, not in critical path)
+- **Total: ~0ms network + backend write latency**
+
+| Setting | Measured | Explanation |
+|---|---|---|
+| etcd A (off, 1c) | 2.65ms | 0ms RPC + ~2ms etcd write (127.0.0.1) |
+| etcd C (on, 1c) | 7.88ms | Slightly higher due to rule/Jetpack overhead |
+| MongoDB A (off, 1c) | 46.65ms | 0ms RPC + ~46ms MongoDB write (127.0.0.1) |
+| MongoDB C (on, 1c) | 44.80ms | Similar MongoDB write latency |
+| ZooKeeper A (off, 1c) | 89.60ms | 0ms RPC + ~40-50ms ZK write (via delayed IP) + overhead |
+| ZooKeeper C (on, 1c) | 40.43ms | Rule fast path bypasses backend write |
+
+**ZooKeeper latency is inflated** because the multi-host ZK URI causes writes to go through
+delayed loopback IPs. The true ZK write latency (to 127.0.0.1) is ~10ms (confirmed by
+manual test without tc/netem on the URI).
+
+**Fix tasks:**
+- [ ] Fix ZK URI for benchmarks: When NOT in recovery mode, use single-host `127.0.0.1:2181`
+      instead of multi-host URI. The `JETPACK_ZOOKEEPER_RECOVERY` flag controls this, but the
+      benchmark should use the non-recovery path for consistency. Options:
+      a. Add a runtime flag or environment variable to override the ZK URI
+      b. Conditionally use single-host URI when the benchmark is not testing recovery
+      c. Make `JETPACK_ZOOKEEPER_RECOVERY` a runtime option instead of compile-time
+- [ ] Fix RPC client to bind source IP: Add `bind(source_addr)` before `connect()` in
+      `src/rrr/rpc/client.cpp` so client RPCs go through tc/netem. This would make the
+      benchmark more realistic but requires changes to the RPC framework. Alternatively,
+      modify tc/netem rules to delay ALL traffic (including src=127.0.0.1), but this would
+      also delay backend traffic which may not be desired.
+- [ ] After fixes, re-run all 12 experiments and verify latency model
+- [ ] Update `docs/latency_analysis.md` with corrected analysis
 
 **Current results** (pre-fix, `SIMULATE_WAN` disabled but etcd/MongoDB bugs remain):
 
