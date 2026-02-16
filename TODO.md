@@ -103,15 +103,45 @@ Latency (median, average) and throughput metrics are computed in `src/deptran/s_
 - Jetpack ON (fast path): expect ~1 RTT latency ≈ 40ms
 - If numbers deviate significantly from this, investigate the cause.
 
-**SANITY CHECK FAILED** — previous results were inflated by `SIMULATE_WAN` software delays
-(`constants.h`) which add 20ms `WAN_WAIT` at multiple code points, **doubling** latency on top
-of tc/netem. When using tc/netem for real network simulation, `SIMULATE_WAN` must be disabled
-(comment out in `constants.h`). All benchmarks need to be re-run.
-
 **Pre-run fix**:
 - [x] Disable `SIMULATE_WAN` in `constants.h` (comment out `#define SIMULATE_WAN`) and rebuild
-      Docker images for all three backends. Also fixed Docker build: skip maven jute generation
-      when pre-generated files exist (maven fails in Docker due to Java NIO permission issues).
+      Docker images for all three backends. `SIMULATE_WAN` adds software `WAN_WAIT` delays that
+      are redundant with tc/netem — must be disabled when using tc/netem for network simulation.
+      Also fixed Docker build: skip maven jute generation when pre-generated files exist.
+
+**SANITY CHECK STILL FAILING** — `SIMULATE_WAN` is now disabled, but results still do not
+match expectations. With 20ms one-way tc/netem latency, the original protocol path should be
+strictly ~2 RTT ≈ 80ms, and Jetpack fast path should be strictly ~1 RTT ≈ 40ms. Current
+results deviate significantly for etcd and MongoDB:
+
+| Setting | Expected | Actual | Status |
+|---|---|---|---|
+| MongoDB A (off, 1c) | ~80ms (2 RTT) | 46.65ms | **FAIL** — too low, only ~1 RTT |
+| MongoDB C (on, 1c) | ~40ms (1 RTT) | 44.80ms | OK |
+| etcd A (off, 1c) | ~80ms (2 RTT) | 2.65ms | **FAIL** — way too low, no RTT at all |
+| etcd C (on, 1c) | ~40ms (1 RTT) | 7.88ms | **FAIL** — too low, no RTT |
+| ZooKeeper A (off, 1c) | ~80ms (2 RTT) | 89.60ms | OK |
+| ZooKeeper C (on, 1c) | ~40ms (1 RTT) | 40.43ms | OK |
+
+**Debug tasks** — fix until all 6 settings pass the sanity check:
+- [ ] **etcd**: latency ~2.65ms (off) / ~7.88ms (on) is way too low — tc/netem latency is
+      not being applied to etcd traffic at all. Likely cause: etcd client connects via a
+      loopback address that is not covered by the tc/netem rules, or etcd responds locally
+      without going through the replicated consensus path. Investigate tc setup and etcd
+      network binding in Docker. Fix and re-run.
+- [ ] **MongoDB**: latency ~46ms (off) is only ~1 RTT instead of 2 RTT. Likely cause:
+      MongoDB may be using w=1 write concern (acknowledged after local write, no replication
+      RTT) or the commit path skips one network round trip. Check write concern and Jetpack's
+      MongoDB commit flow. Fix and re-run.
+- [ ] After fixing etcd and MongoDB, re-run all 12 experiments and verify all 6 low-concurrency
+      settings pass: off ≈ 80ms, on ≈ 40ms (within ±10ms tolerance)
+- [ ] Update `docs/latency_analysis.md`:
+  - Remove the old WAN_WAIT-based latency model entirely
+  - Document the corrected model: pure tc/netem, off = 2 RTT, on = 1 RTT
+  - Document the `SIMULATE_WAN` fix (must be disabled for tc/netem)
+  - Update all result tables and analysis with new numbers
+
+**Current results** (pre-fix, `SIMULATE_WAN` disabled but etcd/MongoDB bugs remain):
 
 | Experiment | Median Latency (ms) | Avg Latency (ms) | Throughput (txn/s) |
 |---|---:|---:|---:|
@@ -128,23 +158,18 @@ of tc/netem. When using tc/netem for real network simulation, `SIMULATE_WAN` mus
 | ZooKeeper Setting C (1c, c=1, Jetpack on) | 40.43 | 48.50 | 3.80 |
 | ZooKeeper Setting D (60c, c=200, Jetpack on) | 4416 | 4530 | 2335 |
 
-Notes: Latency is per-request (ms). Throughput is total across all 5 processes. etcd has bimodal
-latency at low concurrency (~2.5ms local, ~8ms remote). ZooKeeper shows strongest Jetpack
-benefit: median drops from 89.6ms to 40.4ms (1 RTT saved). MongoDB has high backend I/O
-overhead (~45ms) that dominates over network latency savings.
-
-- [x] Run MongoDB Setting A (open-loop, 1 thread, concurrency=1, Jetpack off), record metrics
-- [x] Run MongoDB Setting B (open-loop, 60 threads, concurrency=200, Jetpack off), record metrics
-- [x] Run MongoDB Setting C (open-loop, 1 thread, concurrency=1, Jetpack on), record metrics
-- [x] Run MongoDB Setting D (open-loop, 60 threads, concurrency=200, Jetpack on), record metrics
-- [x] Run etcd Setting A (open-loop, 1 thread, concurrency=1, Jetpack off), record metrics
-- [x] Run etcd Setting B (open-loop, 60 threads, concurrency=200, Jetpack off), record metrics
-- [x] Run etcd Setting C (open-loop, 1 thread, concurrency=1, Jetpack on), record metrics
-- [x] Run etcd Setting D (open-loop, 60 threads, concurrency=200, Jetpack on), record metrics
-- [x] Run ZooKeeper Setting A (open-loop, 1 thread, concurrency=1, Jetpack off), record metrics
-- [x] Run ZooKeeper Setting B (open-loop, 60 threads, concurrency=200, Jetpack off), record metrics
-- [x] Run ZooKeeper Setting C (open-loop, 1 thread, concurrency=1, Jetpack on), record metrics
-- [x] Run ZooKeeper Setting D (open-loop, 60 threads, concurrency=200, Jetpack on), record metrics
+- [x] Run MongoDB Setting A — **SANITY FAIL**: 46.65ms, expected ~80ms
+- [x] Run MongoDB Setting B
+- [x] Run MongoDB Setting C — OK: 44.80ms ≈ 40ms
+- [x] Run MongoDB Setting D
+- [x] Run etcd Setting A — **SANITY FAIL**: 2.65ms, expected ~80ms
+- [x] Run etcd Setting B
+- [x] Run etcd Setting C — **SANITY FAIL**: 7.88ms, expected ~40ms
+- [x] Run etcd Setting D
+- [x] Run ZooKeeper Setting A — OK: 89.60ms ≈ 80ms
+- [x] Run ZooKeeper Setting B
+- [x] Run ZooKeeper Setting C — OK: 40.43ms ≈ 40ms
+- [x] Run ZooKeeper Setting D
 
 ### Maximum throughput search (6 cases)
 
@@ -183,8 +208,11 @@ for easier debugging and onboarding:
   - `LATENCY_MS`, `LATENCY_JITTER` — tc/netem latency parameters
   - `TEST_DURATION` — test duration in seconds
   - Document default values for each variable in the script
-- [ ] Update `docs/latency_analysis.md` to note that `SIMULATE_WAN` must be disabled
+- [x] Update `docs/latency_analysis.md` to note that `SIMULATE_WAN` must be disabled
       when running with tc/netem, and remove the old WAN_WAIT-based latency model
+  - Rewrote with corrected model: off = 2 RTT ≈ 80ms, on = 1 RTT ≈ 40ms
+  - Documented current sanity check failures (etcd, MongoDB) and known issues
+  - Moved old WAN_WAIT analysis to History section (obsolete)
 - [ ] Update README.md benchmark section with:
   - How to run each of the 4 settings (A/B/C/D) per protocol using Docker
   - How to customize number of clients, concurrency, latency, duration via env vars
