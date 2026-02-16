@@ -82,6 +82,11 @@ write latency:
 Previously, all backends ran as single-node instances, which hid the replication
 latency and produced unrealistically low write times (etcd: ~2ms, ZK: ~50ms fsync only).
 
+**Measured write latencies** (3-node clusters, Setting A, h1 — no client→leader RTT):
+- etcd: ~43.6ms (Raft replication RTT + WAL)
+- MongoDB: ~47.7ms (replication RTT + local write)
+- ZooKeeper: ~167.5ms (ZAB replication + txn log fsync + possible leader forwarding)
+
 ### Rule Mode (Jetpack ON)
 
 The Jetpack fast path broadcasts the speculative execution request to all replicas and
@@ -131,6 +136,30 @@ Before the RPC bind fix, ALL processes showed ~2.65ms because all client sockets
    of single-node instances. This ensures write latency includes the backend's own
    replication RTT (~40ms via tc/netem). MongoDB also uses `w:majority` write concern
    to wait for replication acknowledgment.
+
+### Current Results (3-node backend clusters)
+
+Low-concurrency (5 clients, concurrency=1):
+
+| Setting | h1 Avg (ms) | h2-h5 Avg (ms) | Explanation |
+|---|---:|---:|---|
+| etcd A (off) | 43.6 | 83.7 | 0/40ms RTT + ~43ms etcd Raft repl |
+| etcd C (on) | 40.4 | 40.7 | Jetpack fast path, 1 RTT |
+| MongoDB A (off) | 47.7 | 88.0 | 0/40ms RTT + ~48ms Mongo repl |
+| MongoDB C (on) | 45.2 | 45.9 | Jetpack fast path, 1 RTT |
+| ZK A (off) | 167.5 | 167.5 | ZAB repl + fsync dominates |
+| ZK C (on) | 40.6 | 40.5 | Jetpack fast path, 1 RTT |
+
+Maximum throughput (60 clients, best concurrency):
+
+| Case | Concurrency | Max (txn/s) |
+|---|---:|---:|
+| etcd (off) | c=200 | 7,753 |
+| etcd (on) | c=200 | 7,414 |
+| MongoDB (off) | c=50 | 2,304 |
+| MongoDB (on) | c=75 | 1,966 |
+| ZooKeeper (off) | c=400 | 5,879 |
+| ZooKeeper (on) | c=200 | 5,954 |
 
 ### Notes
 
