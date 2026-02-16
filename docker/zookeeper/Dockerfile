@@ -44,6 +44,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     protobuf-compiler-grpc \
     libgrpc++-dev \
     libcpprest-dev \
+    # ZooKeeper jute generation dependencies
+    default-jdk-headless \
+    maven \
     # Jetpack dependencies
     libboost-all-dev \
     libyaml-cpp-dev \
@@ -61,6 +64,20 @@ WORKDIR /build
 
 # Copy source tree
 COPY . /build/
+
+# Validate required third_party submodules are populated in build context.
+# If these directories are empty placeholders, initialize submodules on host:
+#   git submodule update --init --recursive
+RUN test -f /build/third_party/mongo-c-driver/CMakeLists.txt && \
+    test -f /build/third_party/mongo-c-driver/build/cmake/BuildVersion.cmake && \
+    test -f /build/third_party/mongo-c-driver/build/cmake/ParseVersion.cmake && \
+    test -f /build/third_party/mongo-cxx-driver/CMakeLists.txt && \
+    test -f /build/third_party/etcd-cpp-apiv3/CMakeLists.txt && \
+    test -f /build/third_party/zookeeper/zookeeper-client/zookeeper-client-c/CMakeLists.txt || \
+    (echo "ERROR: Missing third_party submodule sources in Docker build context." >&2 && \
+     echo "Also check .dockerignore does not exclude third_party/mongo-c-driver/build/cmake." >&2 && \
+     echo "Run: git submodule update --init --recursive" >&2 && \
+     exit 1)
 
 # Build mongo-c-driver (libmongoc + libbson)
 RUN cd /build/third_party/mongo-c-driver && \
@@ -81,6 +98,7 @@ RUN cd /build/third_party/mongo-cxx-driver && \
         -DCMAKE_BUILD_TYPE=Release \
         -DCMAKE_INSTALL_PREFIX=/usr/local \
         -DCMAKE_PREFIX_PATH=/usr/local \
+        -DBUILD_VERSION=3.10.1 \
         -DBSONCXX_POLY_USE_BOOST=1 \
         -DMONGOCXX_OVERRIDE_DEFAULT_INSTALL_PREFIX=OFF \
         -DENABLE_TESTS=OFF \
@@ -99,7 +117,13 @@ RUN cd /build/third_party/etcd-cpp-apiv3 && \
     cmake --build . -- -j"$(nproc)" && \
     cmake --install .
 
-# Build ZooKeeper C client (jute files must be pre-generated on host)
+# Generate ZooKeeper jute C sources required by zookeeper-client-c CMake build.
+RUN cd /build/third_party/zookeeper && \
+    mvn generate-sources -pl zookeeper-jute -q -DskipTests && \
+    test -f /build/third_party/zookeeper/zookeeper-client/zookeeper-client-c/generated/zookeeper.jute.h && \
+    test -f /build/third_party/zookeeper/zookeeper-client/zookeeper-client-c/generated/zookeeper.jute.c
+
+# Build ZooKeeper C client.
 # Note: ZooKeeper's CMakeLists.txt has no install() rules, so we manually
 # install headers and libraries after building.
 RUN cd /build/third_party/zookeeper/zookeeper-client/zookeeper-client-c && \
