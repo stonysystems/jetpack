@@ -32,24 +32,30 @@ class ZookeeperServer : public TxLogServer {
   void Setup() override {
     SimpleRWCommand::SetZeroTime();
 #ifdef JETPACK_ZOOKEEPER_RECOVERY
-    // Build ZooKeeper URI from config replica hosts for this partition.
-    auto cfg = Config::GetConfig();
-    auto hosts = cfg->GetReplicaHosts(partition_id_);
-    if (!hosts.empty()) {
-      std::ostringstream oss;
-      for (size_t i = 0; i < hosts.size(); ++i) {
-        if (i > 0) oss << ",";
-        auto pos = hosts[i].find(':');
-        if (pos != std::string::npos) {
-          oss << hosts[i].substr(0, pos) << ":2181";
-        } else {
-          oss << hosts[i] << ":2181";
+    // Leader uses default single-host URI to avoid tc/netem delay through
+    // multi-host loopback IPs. Non-leaders need multi-host URI for recovery
+    // signal detection across the ZK ensemble.
+    if (loc_id_ == 0) {
+      zk_uri_ = kZookeeperUri;
+    } else {
+      auto cfg = Config::GetConfig();
+      auto hosts = cfg->GetReplicaHosts(partition_id_);
+      if (!hosts.empty()) {
+        std::ostringstream oss;
+        for (size_t i = 0; i < hosts.size(); ++i) {
+          if (i > 0) oss << ",";
+          auto pos = hosts[i].find(':');
+          if (pos != std::string::npos) {
+            oss << hosts[i].substr(0, pos) << ":2181";
+          } else {
+            oss << hosts[i] << ":2181";
+          }
         }
+        zk_uri_ = oss.str();
       }
-      zk_uri_ = oss.str();
     }
     Log_info("zk_uri_:%s, loc_id_:%d, zk_connection_:%d", zk_uri_.c_str(), loc_id_, zk_connection_);
-    zk_ = make_shared<ZookeeperConnectionThreadPool>(zk_connection_, zk_uri_);
+    zk_ = make_shared<ZookeeperConnectionThreadPool>(loc_id_ == 0 ? zk_connection_ : 0, zk_uri_);
 #else
     zk_uri_ = kZookeeperUri;
     Log_info("zk_uri_:%s, loc_id_:%d, zk_connection_:%d", zk_uri_.c_str(), loc_id_, zk_connection_);

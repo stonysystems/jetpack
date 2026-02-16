@@ -147,12 +147,10 @@ delayed loopback IPs. The true ZK write latency (to 127.0.0.1) is ~10ms (confirm
 manual test without tc/netem on the URI).
 
 **Fix tasks:**
-- [ ] Fix ZK URI for benchmarks: When NOT in recovery mode, use single-host `127.0.0.1:2181`
-      instead of multi-host URI. The `JETPACK_ZOOKEEPER_RECOVERY` flag controls this, but the
-      benchmark should use the non-recovery path for consistency. Options:
-      a. Add a runtime flag or environment variable to override the ZK URI
-      b. Conditionally use single-host URI when the benchmark is not testing recovery
-      c. Make `JETPACK_ZOOKEEPER_RECOVERY` a runtime option instead of compile-time
+- [x] Fix ZK URI for benchmarks: Leader (loc_id_==0) now uses `kZookeeperUri` (127.0.0.1:2181)
+      even when `JETPACK_ZOOKEEPER_RECOVERY` is defined. Non-leaders keep multi-host URI for
+      recovery signal detection. Non-leaders get 0 ZK connections (they don't write to ZK).
+      Fix in `src/deptran/zookeeper/server.h:Setup()`. ZK latency dropped from ~89ms to ~10ms.
 - [ ] Fix RPC client to bind source IP: Add `bind(source_addr)` before `connect()` in
       `src/rrr/rpc/client.cpp` so client RPCs go through tc/netem. This would make the
       benchmark more realistic but requires changes to the RPC framework. Alternatively,
