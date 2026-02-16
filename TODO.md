@@ -537,3 +537,7 @@ No existing integration code. Needs to be implemented from scratch.
   - [x] etcd integration: how to build, run single/multi/recovery tests
   - [x] ZooKeeper integration: how to build, run single/multi/recovery tests
   - [x] Benchmark results: quick benchmark commands and link to `result.md`
+
+## Priority 3 (Low): TLA+ Debugging
+
+- [ ] Read `tla/jetpack_mencius.log` and debug `tla/jetpack_mencius.tla`
