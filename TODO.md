@@ -90,63 +90,88 @@ Latency (median, average) and throughput metrics are computed in `src/deptran/s_
 - Jetpack OFF, h2-h5 (client not co-located with leader): 1 RTT to leader + 1 RTT to replicate ≈ **~80ms** + backend write
 - Jetpack ON, any client: fast path 1 RTT ≈ **~40ms**
 
-**SANITY CHECK STILL FAILING** — some results do not match expectations:
+**SANITY CHECK STILL FAILING** — previous results (before backend replication fix):
+
+Note: "backend write" below is NOT a local disk write — it includes the backend's own
+replication RTT (etcd Raft / ZK ZAB / MongoDB replica set), which should be ~40ms via tc/netem.
 
 | Setting | h1 expected | h1 actual | h2-h5 expected | h2-h5 actual | Status |
 |---|---|---|---|---|---|
-| etcd A (off) | ~42ms (40+2) | 2.4ms | ~82ms (80+2) | 42ms | **FAIL** — both too low |
+| etcd A (off) | ~40ms (0 + 40ms etcd repl) | 2.4ms | ~80ms (40 + 40ms etcd repl) | 42ms | **FAIL** — etcd repl RTT missing |
 | etcd C (on) | ~40ms | 2.6ms | ~40ms | 40.5ms | **FAIL** — h1 too low |
-| MongoDB A (off) | ~47ms (40+7) | 47ms | ~87ms (80+7) | 87ms | OK |
+| MongoDB A (off) | ~47ms (0 + ~47ms Mongo repl) | 47ms | ~87ms (40 + ~47ms Mongo repl) | 87ms | OK (needs verify) |
 | MongoDB C (on) | ~40ms | 45ms | ~40ms | 45-47ms | OK |
-| ZK A (off) | ~50ms (40+10) | 89ms | ~90ms (80+10) | 86-90ms | **FAIL** — h1 too high |
+| ZK A (off) | ~40ms+ (0 + ZK ZAB repl) | 89ms | ~80ms+ (40 + ZK ZAB repl) | 86-90ms | **FAIL** — h1 has extra ~50ms |
 | ZK C (on) | ~40ms | 40.5ms | ~40ms | 40.4ms | OK |
 
 **Debug tasks** — fix until all settings pass the sanity check:
-- [x] **etcd A/C h1**: leader client shows ~2.4ms — **resolved**: BroadcastCommit is
-      fire-and-forget, so the leader only waits for local etcd write (~2ms), not replication.
-      This is correct behavior: safety relies on etcd's Raft durability. The sanity check
-      expectation was wrong; the correct model is ~0ms RTT + ~2ms etcd write for h1.
-- [x] **etcd A/C h2-h5**: non-leader clients show ~42ms (A) / ~40.5ms (C) — **resolved**:
-      1 RTT (40ms) from non-leader client to leader + ~2ms local etcd write = ~42ms. The
-      leader does NOT wait for follower replication (fire-and-forget BroadcastCommit), so
-      only 1 RTT is in the critical path. This matches the corrected model.
-- [x] **ZK A h1**: leader client shows ~89ms — **resolved**: ZK backend write latency is
-      ~50ms (not ~10ms as initially assumed). 40ms replication RTT + ~50ms ZK write ≈ 89ms.
-      The sanity check expectation was wrong; corrected model uses ~50ms ZK write.
-- [x] After fixing, re-run all 12 experiments with new settings (5c for A/C, near-peak for B/D)
-      — all 12 experiments completed, results in `result.md`
-- [x] Update `docs/latency_analysis.md` and `result.md` with final results
-      — both documents updated with corrected latency model and all sanity checks PASS
+- [ ] **etcd A/C h1 = ~2.4ms — NOT resolved**: The etcd "write" should replicate to etcd
+      followers via etcd's internal Raft, so it should include 1 RTT (~40ms) for etcd Raft
+      replication. A ~2ms write means etcd is either running as a single node (no replication)
+      or tc/netem is not applied between etcd inter-node traffic. Investigate:
+  - Is etcd running as a multi-node cluster or single node in the Docker benchmark?
+  - If single node, fix to use a proper etcd cluster (3 or 5 nodes) with tc/netem between them
+  - If multi-node, check that tc/netem rules cover etcd peer communication ports
+  - After fix, etcd h1 should show ~40ms (0ms Jetpack RTT + 40ms etcd Raft replication)
+- [ ] **etcd A/C h2-h5 = ~42ms — NOT resolved**: Only 1 RTT (client→leader). With proper etcd
+      replication, this should be ~80ms (40ms client→leader + 40ms etcd Raft replication).
+      Same root cause as h1 — etcd replication RTT is missing from the critical path.
+- [ ] **ZK A h1 = ~89ms — NOT resolved**: The 50ms "ZK write" is suspiciously high for a
+      local memory/disk write. It likely contains another network RTT — ZooKeeper replicating
+      to its ZAB followers. Investigate:
+  - Is ZooKeeper running as a multi-node ensemble or single node?
+  - If single node: a local write should be ~few ms, so h1 should be ~40ms (replication) + few ms
+  - If multi-node: ZK's ZAB replication adds ~40ms RTT, explaining the ~50ms "write".
+    In that case 89ms = 40ms (Jetpack replication) + 40ms (ZK ZAB replication) + ~9ms local =
+    correct for double-replication, but we need to document this clearly
+  - Check ZK ensemble configuration and whether ZK inter-node traffic goes through tc/netem
+- [ ] After fixing etcd and investigating ZK, re-run all 12 experiments
+- [ ] Update `docs/latency_analysis.md` and `result.md` with corrected results
+
+**Corrected expected latencies** (accounting for backend's own replication):
+
+The backend (etcd/ZK/MongoDB) itself runs as a replicated cluster. When Jetpack's leader
+writes to the backend, the backend must replicate to its own followers before acknowledging.
+So "backend write" = backend's own replication RTT (~40ms via tc/netem) + local I/O (~few ms).
+
+| Setting | h1 expected | h2-h5 expected | Notes |
+|---|---|---|---|
+| etcd A (off) | ~40ms (0 + 40ms etcd Raft) | ~80ms (40 + 40ms etcd Raft) | etcd must replicate |
+| etcd C (on) | ~40ms (Jetpack fast path) | ~40ms | |
+| MongoDB A (off) | ~40ms + MongoDB repl | ~80ms + MongoDB repl | check MongoDB write concern |
+| MongoDB C (on) | ~40ms | ~40ms | |
+| ZK A (off) | ~40ms + ZK ZAB repl | ~80ms + ZK ZAB repl | ZK must replicate via ZAB |
+| ZK C (on) | ~40ms | ~40ms | |
 
 **Results chart** (columns: h1 avg, h2-h5 avg, h1-h5 avg, throughput):
 
 | Experiment | h1 Avg (ms) | h2-h5 Avg (ms) | h1-h5 Avg (ms) | Throughput (txn/s) |
 |---|---:|---:|---:|---:|
-| etcd A (5c, c=1, off) | 2.4 | 42 | — | — |
-| etcd B (near-peak, off) | — | — | — | 6,169 |
-| etcd C (5c, c=1, on) | 2.6 | 40.5 | — | — |
-| etcd D (near-peak, on) | — | — | — | 6,165 |
-| MongoDB A (5c, c=1, off) | 47 | 87 | — | — |
-| MongoDB B (near-peak, off) | — | — | — | 2,020 |
-| MongoDB C (5c, c=1, on) | 45 | 45-47 | — | — |
-| MongoDB D (near-peak, on) | — | — | — | 1,960 |
-| ZK A (5c, c=1, off) | 89 | 86-90 | — | — |
-| ZK B (near-peak, off) | — | — | — | 6,734 |
-| ZK C (5c, c=1, on) | 40.5 | 40.4 | — | — |
-| ZK D (near-peak, on) | — | — | — | 6,858 |
+| etcd A (5c, c=1, off) | | | | |
+| etcd B (near-peak, off) | | | | |
+| etcd C (5c, c=1, on) | | | | |
+| etcd D (near-peak, on) | | | | |
+| MongoDB A (5c, c=1, off) | | | | |
+| MongoDB B (near-peak, off) | | | | |
+| MongoDB C (5c, c=1, on) | | | | |
+| MongoDB D (near-peak, on) | | | | |
+| ZK A (5c, c=1, off) | | | | |
+| ZK B (near-peak, off) | | | | |
+| ZK C (5c, c=1, on) | | | | |
+| ZK D (near-peak, on) | | | | |
 
-- [x] Run etcd Setting A (5c, c=1, Jetpack off) — 2.4ms h1, 42ms h2-h5
-- [x] Run etcd Setting B (near-peak throughput, Jetpack off) — 6,169 txn/s
-- [x] Run etcd Setting C (5c, c=1, Jetpack on) — 2.6ms h1, 40.5ms h2-h5
-- [x] Run etcd Setting D (near-peak throughput, Jetpack on) — 6,165 txn/s
-- [x] Run MongoDB Setting A (5c, c=1, Jetpack off) — 47ms h1, 87ms h2-h5
-- [x] Run MongoDB Setting B (near-peak throughput, Jetpack off) — 2,020 txn/s
-- [x] Run MongoDB Setting C (5c, c=1, Jetpack on) — 45ms h1, 45-47ms h2-h5
-- [x] Run MongoDB Setting D (near-peak throughput, Jetpack on) — 1,960 txn/s
-- [x] Run ZK Setting A (5c, c=1, Jetpack off) — 89ms h1, 86-90ms h2-h5
-- [x] Run ZK Setting B (near-peak throughput, Jetpack off) — 6,734 txn/s
-- [x] Run ZK Setting C (5c, c=1, Jetpack on) — 40.5ms h1, 40.4ms h2-h5
-- [x] Run ZK Setting D (near-peak throughput, Jetpack on) — 6,858 txn/s
+- [ ] Run etcd Setting A (5c, c=1, Jetpack off)
+- [ ] Run etcd Setting B (near-peak throughput, Jetpack off)
+- [ ] Run etcd Setting C (5c, c=1, Jetpack on)
+- [ ] Run etcd Setting D (near-peak throughput, Jetpack on)
+- [ ] Run MongoDB Setting A (5c, c=1, Jetpack off)
+- [ ] Run MongoDB Setting B (near-peak throughput, Jetpack off)
+- [ ] Run MongoDB Setting C (5c, c=1, Jetpack on)
+- [ ] Run MongoDB Setting D (near-peak throughput, Jetpack on)
+- [ ] Run ZK Setting A (5c, c=1, Jetpack off)
+- [ ] Run ZK Setting B (near-peak throughput, Jetpack off)
+- [ ] Run ZK Setting C (5c, c=1, Jetpack on)
+- [ ] Run ZK Setting D (near-peak throughput, Jetpack on)
 
 ### Maximum throughput search (6 cases)
 
@@ -156,19 +181,19 @@ The peak clients/concurrency from this search will be used for Setting B/D above
 
 | Case | Best Concurrency | Max Throughput (txn/s) |
 |---|---:|---:|
-| MongoDB (Jetpack off) | c=50 | 2,503 |
-| MongoDB (Jetpack on) | c=100 | 2,132 |
-| etcd (Jetpack off) | c=200 | 7,017 |
-| etcd (Jetpack on) | c=200 | 6,426 |
-| ZooKeeper (Jetpack off) | c=200 | 3,112 |
-| ZooKeeper (Jetpack on) | c=400 | 2,247 |
+| MongoDB (Jetpack off) | | |
+| MongoDB (Jetpack on) | | |
+| etcd (Jetpack off) | | |
+| etcd (Jetpack on) | | |
+| ZooKeeper (Jetpack off) | | |
+| ZooKeeper (Jetpack on) | | |
 
-- [x] MongoDB max throughput (Jetpack off): sweep concurrency with 60 threads — c=50, 2,503 txn/s
-- [x] MongoDB max throughput (Jetpack on): sweep concurrency with 60 threads — c=100, 2,132 txn/s
-- [x] etcd max throughput (Jetpack off): sweep concurrency with 60 threads — c=200, 7,017 txn/s
-- [x] etcd max throughput (Jetpack on): sweep concurrency with 60 threads — c=200, 6,426 txn/s
-- [x] ZooKeeper max throughput (Jetpack off): sweep concurrency with 60 threads — c=200, 3,112 txn/s
-- [x] ZooKeeper max throughput (Jetpack on): sweep concurrency with 60 threads — c=400, 2,247 txn/s
+- [ ] MongoDB max throughput (Jetpack off): sweep concurrency with 60 threads
+- [ ] MongoDB max throughput (Jetpack on): sweep concurrency with 60 threads
+- [ ] etcd max throughput (Jetpack off): sweep concurrency with 60 threads
+- [ ] etcd max throughput (Jetpack on): sweep concurrency with 60 threads
+- [ ] ZooKeeper max throughput (Jetpack off): sweep concurrency with 60 threads
+- [ ] ZooKeeper max throughput (Jetpack on): sweep concurrency with 60 threads
 
 ### Docker test script improvements
 
