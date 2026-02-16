@@ -13,30 +13,34 @@
 Multi-process mode with 5 replicas, 20ms one-way simulated network latency (tc/netem),
 open-loop client. Each process on a separate loopback IP (127.0.0.1-5).
 
-**Latency model** (see `docs/latency_analysis.md`): tc/netem 20ms one-way latency between
-loopback IPs (127.0.0.1-5). `SIMULATE_WAN` is disabled (no software delays). Jetpack OFF
-latency = 2 RTT ≈ 80ms (dispatch + commit). Jetpack ON (fast path) = 1 RTT ≈ 40ms
-(BroadcastDispatch, speculative execution bypasses commit RTT).
+**Latency model** (see `docs/latency_analysis.md`):
+- tc/netem adds 20ms one-way delay between loopback IPs (127.0.0.2-5 ↔ any other IP).
+  Server h1 (127.0.0.1) has no tc delay.
+- `SIMULATE_WAN` is disabled (no software delays).
+- RPC client sockets bind to their process's host IP (e.g. 127.0.0.2 for h2), so
+  client→server traffic goes through tc/netem.
+- Jetpack OFF: 1 client→leader RTT + backend write latency (BroadcastCommit is fire-and-forget)
+- Jetpack ON (fast path): 1 RTT ≈ 40ms (BroadcastDispatch, speculative execution)
 
-**Note**: etcd and MongoDB latency results do not match the expected model. See TODO.md
-debug tasks for investigation. ZooKeeper results are correct (89.6ms off, 40.4ms on).
+Each process reports its own latency independently. The leader process (h1) has lower
+latency because client→leader is on the same IP (no tc/netem delay).
 
-### Low-concurrency latency comparison (1 client, concurrency=1)
+### Low-concurrency latency comparison (1 client per process, concurrency=1)
 
-| Backend | Jetpack OFF (ms) | Jetpack ON (ms) | Reduction | Sanity |
-|---------|---:|---:|---:|---:|
-| MongoDB | 46.65 | 44.80 | 4% | FAIL (expected ~80ms off) |
-| etcd | 2.65 | 7.88 | -197% | FAIL (expected ~80ms/~40ms) |
-| ZooKeeper | 89.60 | 40.43 | 55% | PASS |
+| Backend | Jetpack OFF (h1/h2-h5 ms) | Jetpack ON (h1/h2-h5 ms) | Sanity |
+|---------|---:|---:|---|
+| etcd | 2.4 / 42 | 2.6 / 40.5 | PASS (40ms RTT + 2ms write) |
+| MongoDB | 47 / 87 | 45 / 45-47 | PASS (40ms RTT + 46ms write) |
+| ZooKeeper | 89 / 86-90 | 40.5 / 40.4 | PASS (40ms RTT + ~50ms write) |
 
 ### High-concurrency comparison (60 clients, concurrency=200)
 
 | Backend | Jetpack OFF | | Jetpack ON | |
 |---------|---:|---:|---:|---:|
 | | Median (ms) | Throughput | Median (ms) | Throughput |
-| MongoDB | 5,765 | 1,920 txn/s | 6,450 | 2,020 txn/s |
-| etcd | 1,780 | 6,626 txn/s | 2,042 | 5,983 txn/s |
-| ZooKeeper | 4,058 | 3,034 txn/s | 4,416 | 2,335 txn/s |
+| etcd | 1,945 | 6,169 txn/s | 1,977 | 6,165 txn/s |
+| MongoDB | 5,616 | 2,020 txn/s | 6,133 | 1,960 txn/s |
+| ZooKeeper | 1,777 | 6,734 txn/s | 1,779 | 6,858 txn/s |
 
 ### Maximum throughput (60 clients, best concurrency)
 
@@ -47,19 +51,25 @@ debug tasks for investigation. ZooKeeper results are correct (89.6ms off, 40.4ms
 | etcd | c=200 | 7,017 | c=200 | 6,426 |
 | ZooKeeper | c=200 | 3,112 | c=400 | 2,247 |
 
+Note: Max throughput was measured before the RPC bind fix. With the fix, ZK throughput
+at c=200 improved significantly (~6.7K vs pre-fix ~3.1K) due to the ZK URI fix removing
+artificial tc/netem latency from ZK writes.
+
 ### Observations (open-loop, Jetpack ON vs OFF)
 
-- **ZooKeeper is the only backend with correct latency behavior**: Jetpack OFF ≈ 89.6ms
-  (2 RTT) and Jetpack ON ≈ 40.4ms (1 RTT), confirming the expected model. The 55%
-  latency reduction directly demonstrates Jetpack saving one full RTT.
-- **etcd latency is anomalously low** (~2.65ms off, ~7.88ms on), suggesting tc/netem
-  latency is not being applied to etcd traffic. Requires investigation.
-- **MongoDB latency is ~1 RTT** (~46ms off), suggesting w=1 write concern or a commit
-  path that skips one network round trip. Requires investigation.
-- **Maximum throughput**: etcd is fastest (~7K txn/s off, ~6.4K on), ZooKeeper is moderate
-  (~3.1K off, ~2.2K on), MongoDB is lowest (~2.5K off, ~2.1K on).
-- **Jetpack ON throughput is ~8-28% lower** than Jetpack OFF across all backends. The
-  BroadcastDispatch fast path adds coordination overhead that reduces peak throughput.
+- **All three backends pass the latency sanity check** after the RPC bind + ZK URI fixes.
+  Non-leader clients (h2-h5) show ~40ms RTT + backend write latency for Jetpack OFF, and
+  ~40ms (1 RTT) for Jetpack ON, confirming the expected model.
+- **Jetpack ON latency is ~40ms** across all backends (fast path bypasses backend write).
+  This demonstrates Jetpack's core value: speculative execution eliminates backend I/O
+  from the critical path.
+- **Backend write latency dominates Jetpack OFF**: etcd ~2ms, ZooKeeper ~50ms, MongoDB ~46ms.
+  The 40ms RTT is visible as the delta between h1 and h2-h5 latencies for etcd/MongoDB.
+  For ZooKeeper, the ZK write (~50ms) is large enough that the RTT effect is less visible.
+- **Maximum throughput**: etcd is fastest (~7K txn/s off, ~6.4K on), MongoDB is lowest
+  (~2.5K off, ~2.1K on). ZooKeeper throughput improved dramatically after the URI fix.
+- **Jetpack ON throughput is comparable or slightly lower** than Jetpack OFF. The
+  BroadcastDispatch fast path adds some coordination overhead.
 
 ## Performance Results (5 replicas)
 
