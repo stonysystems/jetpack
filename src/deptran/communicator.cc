@@ -88,6 +88,15 @@ Communicator::Communicator(PollMgr* poll_mgr) {
   else
     rpc_poll_ = poll_mgr;
   auto config = Config::GetConfig();
+  auto my_servers = config->GetMyServers();
+  if (!my_servers.empty() && !my_servers[0].host.empty()) {
+    local_host_ = my_servers[0].host;
+  } else {
+    auto my_clients = config->GetMyClients();
+    if (!my_clients.empty() && !my_clients[0].host.empty()) {
+      local_host_ = my_clients[0].host;
+    }
+  }
   vector<parid_t> partitions = config->GetAllPartitionIds();
   for (auto& par_id : partitions) {
     auto site_infos = config->SitesByPartitionId(par_id);
@@ -284,7 +293,8 @@ Communicator::ConnectToClientSite(Config::SiteInfo& site,
   int attempt = 0;
   do {
     Log_debug("connect to client site: %s (attempt %d)", addr, attempt++);
-    auto connect_result = rpc_cli->connect(addr, false);
+    auto connect_result = rpc_cli->connect(addr, false,
+        local_host_.empty() ? nullptr : local_host_.c_str());
     if (connect_result == SUCCESS) {
       ClientControlProxy* rpc_proxy = new ClientControlProxy(rpc_cli);
       rpc_clients_.insert(std::make_pair(site.id, rpc_cli));
@@ -312,7 +322,8 @@ Communicator::ConnectToSite(Config::SiteInfo& site,
   int attempt = 0;
   do {
     Log_debug("connect to site: %s (attempt %d)", addr.c_str(), attempt++);
-    auto connect_result = rpc_cli->connect(addr.c_str(), false);
+    auto connect_result = rpc_cli->connect(addr.c_str(), false,
+        local_host_.empty() ? nullptr : local_host_.c_str());
     if (connect_result == SUCCESS) {
       ClassicProxy* rpc_proxy = new ClassicProxy(rpc_cli.get());
       rpc_clients_.insert(std::make_pair(site.id, rpc_cli));
@@ -325,7 +336,8 @@ Communicator::ConnectToSite(Config::SiteInfo& site,
 			}
 
 			Reactor::clients_[rpc_cli->host()].push_back(rpc_cli);
-      Log_info("connect to site: %s success!", addr.c_str());
+      Log_info("connect to site: %s success! (bind_addr=%s)", addr.c_str(),
+               local_host_.empty() ? "none" : local_host_.c_str());
       return std::make_pair(SUCCESS, rpc_proxy);
     } else {
       std::this_thread::sleep_for(std::chrono::milliseconds(CONNECT_SLEEP_MS));

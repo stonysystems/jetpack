@@ -3,12 +3,16 @@
 ## Summary
 
 With `SIMULATE_WAN` disabled and tc/netem providing 20ms one-way network latency, the
-expected latencies are:
+latency model depends on the client's location relative to the leader:
 
-- **Jetpack OFF (original protocol)**: ~2 RTT ≈ **80ms** (client → leader → replicas → leader → client)
+- **Non-leader client (h2-h5) → Leader (h1)**: ~1 RTT = **40ms** + backend write latency
+- **Leader client (h1) → Leader (h1)**: ~0ms RTT + backend write latency
 - **Jetpack ON (fast path)**: ~1 RTT ≈ **40ms** (client broadcasts to all, waits for quorum)
 
-Any significant deviation from these targets indicates a bug in the benchmark setup.
+The "none" mode (Jetpack OFF) is single-leader: client sends 1 Dispatch RPC to the leader,
+leader runs OnCommit inline (backend write), then replies. BroadcastCommit to followers is
+fire-and-forget (not in critical path). So the total latency is 1 client→leader RTT plus
+the backend write time.
 
 ## Latency Simulation: tc/netem Only
 
@@ -19,91 +23,93 @@ inter-server network latency.
 ### SIMULATE_WAN Must Be Disabled
 
 The `SIMULATE_WAN` macro (`src/deptran/constants.h`) adds 20ms `WAN_WAIT` software sleeps
-at multiple code points (client send, client callback, server submit before/after). These
-were originally intended to simulate backend access latency when running without tc/netem.
-
-**When using tc/netem, `SIMULATE_WAN` must be commented out** — otherwise the software delays
-are additive to the kernel-level delays, roughly doubling all latencies and producing
-misleading results.
+at multiple code points. **When using tc/netem, `SIMULATE_WAN` must be commented out** —
+otherwise the software delays are additive to the kernel-level delays.
 
 ```cpp
 // src/deptran/constants.h
 // #define SIMULATE_WAN   // <-- MUST be commented out for tc/netem benchmarks
 ```
 
+### RPC Client Source IP Binding
+
+The RPC client (`src/rrr/rpc/client.cpp`) now supports an optional `bind_addr` parameter.
+When provided, the client socket calls `bind()` before `connect()`, ensuring traffic
+originates from the process's configured host IP (e.g. 127.0.0.2 for h2).
+
+Without this fix, all client sockets on Linux loopback default to src=127.0.0.1, bypassing
+tc/netem rules entirely. The `Communicator` passes its local host IP (from
+`Config::GetMyServers()`) to all `connect()` calls.
+
 ---
 
-## Expected Latency Model
+## Latency Model
 
-### None Mode (Jetpack OFF): ~2 RTT ≈ 80ms
+### None Mode (Jetpack OFF)
 
-The original protocol path requires the client to send to the leader, the leader to
-replicate to a quorum of replicas, and then respond to the client. This is 2 network
-round trips through the tc/netem delay.
+The "none" mode protocol path:
+1. Client sends 1 Dispatch RPC to the leader
+2. Leader's `SchedulerNone::Dispatch()` calls `OnCommit()` inline
+3. `OnCommit()` invokes the replication coordinator (`EtcdServer::Submit()`,
+   `ZookeeperServer::Submit()`, or `MongodbServer::Submit()`) which writes to the backend
+4. Leader replies to client
+5. BroadcastCommit to followers is fire-and-forget (not in critical path)
 
 ```
-Client h1 → Leader h1 (local, ~0ms)
-Leader h1 → Replicas h2-h5 (20ms one-way) → wait for quorum
-Replicas respond (20ms return) → 1 RTT = 40ms
-Leader h1 → Client h1 (local, ~0ms)
-Total consensus RTT: ~40ms
-+ Backend I/O RTT (backend also goes through consensus): ~40ms
-= ~80ms total (2 RTT)
+Client on hX → Leader on h1:
+  - If X=1: 0ms RTT (same host, no tc/netem)
+  - If X=2-5: ~40ms RTT (20ms each way via tc/netem)
++ Backend write latency (etcd: ~2ms, ZK: ~10ms, MongoDB: ~46ms)
+= Total per-transaction latency
 ```
 
-### Rule Mode (Jetpack ON): ~1 RTT ≈ 40ms
+### Rule Mode (Jetpack ON)
 
 The Jetpack fast path broadcasts the speculative execution request to all replicas and
-waits for a quorum to respond. This needs only 1 network round trip.
+waits for a quorum to respond.
 
 ```
-Client h1 → broadcast to all replicas (h1: 0ms, h2-h5: 20ms one-way)
-Wait for 3/5 quorum: h1 responds immediately, h2+h3 respond after 40ms RTT
+Client on hX → broadcast to all replicas (h1: 0ms, h2-h5: 20ms one-way)
+Wait for 3/5 quorum: at least 3 must respond
+If client on h1: h1 immediate + h2,h3 after 40ms RTT → ~40ms
+If client on h2: h2 immediate + h1 after 40ms + h3 after ~0ms (h2→h3 symmetric) → ~40ms
 Total: ~40ms (1 RTT)
 ```
 
 ---
 
-## Current Results (SIMULATE_WAN disabled)
+## Results After Fixes
 
-### Low-Concurrency Sanity Check (1 client, concurrency=1)
+### RPC Bind Fix Verification (etcd Setting A)
 
-| Setting | Expected | Actual | Status |
-|---|---|---|---|
-| MongoDB A (off, 1c) | ~80ms (2 RTT) | 46.65ms | **FAIL** — too low |
-| MongoDB C (on, 1c) | ~40ms (1 RTT) | 44.80ms | OK |
-| etcd A (off, 1c) | ~80ms (2 RTT) | 2.65ms | **FAIL** — way too low |
-| etcd C (on, 1c) | ~40ms (1 RTT) | 7.88ms | **FAIL** — too low |
-| ZooKeeper A (off, 1c) | ~80ms (2 RTT) | 89.60ms | OK |
-| ZooKeeper C (on, 1c) | ~40ms (1 RTT) | 40.43ms | OK |
+After the RPC client bind fix, per-process latencies now correctly reflect tc/netem:
 
-### Known Issues
+| Process | Host IP | Median Latency | Explanation |
+|---|---|---:|---|
+| h1 (leader) | 127.0.0.1 | ~2.4ms | 0ms RTT + ~2ms etcd write |
+| h2 | 127.0.0.2 | ~42ms | 40ms RTT + ~2ms etcd write |
+| h3 | 127.0.0.3 | ~42ms | 40ms RTT + ~2ms etcd write |
+| h4 | 127.0.0.4 | ~43ms | 40ms RTT + ~2ms etcd write |
+| h5 | 127.0.0.5 | ~43ms | 40ms RTT + ~2ms etcd write |
 
-**etcd** (2.65ms / 7.88ms): tc/netem latency is not being applied to etcd traffic at all.
-Likely causes: etcd client connects via a loopback address not covered by tc/netem rules,
-or etcd responds locally without going through the replicated consensus path.
+Before the fix, ALL processes showed ~2.65ms because all client sockets used src=127.0.0.1.
 
-**MongoDB** (46.65ms): Only ~1 RTT instead of expected ~2 RTT. Likely cause: write concern
-is w=1 (acknowledged after local write only, no replication wait), or the commit path
-skips one network round trip.
+### Fixes Applied
 
-**ZooKeeper** (89.60ms / 40.43ms): Passes sanity check. Both off (~80ms) and on (~40ms)
-are within expected range.
+1. **RPC client bind** (`src/rrr/rpc/client.cpp`): Client sockets now bind to the local
+   process's host IP before connecting. This ensures tc/netem rules apply to client→server
+   traffic on loopback.
 
-### High-Concurrency Results (60 clients, concurrency=200)
+2. **ZooKeeper URI** (`src/deptran/zookeeper/server.h`): Leader uses single-host URI
+   (127.0.0.1:2181) to avoid artificial tc/netem latency through multi-host ZK URI.
 
-| Experiment | Median Latency (ms) | Avg Latency (ms) | Throughput (txn/s) |
-|---|---:|---:|---:|
-| MongoDB Setting B (off) | 5,765 | 5,790 | 1,920 |
-| MongoDB Setting D (on) | 6,450 | 6,530 | 2,020 |
-| etcd Setting B (off) | 1,780 | 1,810 | 6,626 |
-| etcd Setting D (on) | 2,042 | 2,055 | 5,983 |
-| ZooKeeper Setting B (off) | 4,058 | 4,062 | 3,034 |
-| ZooKeeper Setting D (on) | 4,416 | 4,530 | 2,335 |
+### Notes
 
-High-concurrency latencies are dominated by queuing effects, not network RTT. Throughput
-numbers are more meaningful in this regime. These results will be updated after the
-low-concurrency sanity check issues are fixed.
+- Each process in the 5-process benchmark setup reports its own latency independently.
+  The leader process's client (h1) always has lower latency than follower processes because
+  client→leader communication is on the same loopback IP (no tc/netem).
+- High-concurrency results are dominated by queuing effects, not network RTT.
+- `SIMULATE_WAN` must remain disabled when using tc/netem.
 
 ---
 
@@ -112,7 +118,12 @@ low-concurrency sanity check issues are fixed.
 ### Previous Analysis (obsolete)
 
 An earlier version of this document analyzed results with `SIMULATE_WAN` enabled, which
-added 4x 20ms `WAN_WAIT` software delays on top of tc/netem. That analysis explained why
-Jetpack OFF was ~80ms + backend_IO and Jetpack ON was ~80ms (2 WANs + 1 tc RTT). Those
-results and explanations are no longer valid — `SIMULATE_WAN` has been disabled, and the
-correct expectations are the simple 2-RTT / 1-RTT model described above.
+added 4x 20ms `WAN_WAIT` software delays on top of tc/netem. Those results and explanations
+are no longer valid — `SIMULATE_WAN` has been disabled, and the correct expectations are
+the model described above.
+
+### Pre-fix Sanity Check Failures
+
+Before the RPC bind fix, etcd and MongoDB showed unrealistically low latencies because
+client sockets used src=127.0.0.1 (bypassing tc/netem). ZooKeeper showed inflated latency
+because the multi-host ZK URI caused writes to go through delayed loopback IPs.

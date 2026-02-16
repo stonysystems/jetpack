@@ -192,7 +192,7 @@ public:
     }
 
 		void set_valid(bool valid);
-    int connect(const char* addr, bool client = true);
+    int connect(const char* addr, bool client = true, const char* bind_addr = nullptr);
 
     void close_and_release() {
         close();

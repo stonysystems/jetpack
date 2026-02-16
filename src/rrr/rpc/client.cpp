@@ -107,7 +107,7 @@ void Client::close() {
   invalidate_pending_futures();
 }
 
-int Client::connect(const char* addr, bool client) {
+int Client::connect(const char* addr, bool client, const char* bind_addr) {
   verify(status_ != CONNECTED);
   string addr_str(addr);
   size_t idx = addr_str.find(":");
@@ -160,6 +160,21 @@ int Client::connect(const char* addr, bool client) {
     int buf_len = 1024 * 1024;
     setsockopt(sock_, SOL_SOCKET, SO_RCVBUF, &buf_len, sizeof(buf_len));
     setsockopt(sock_, SOL_SOCKET, SO_SNDBUF, &buf_len, sizeof(buf_len));
+
+    if (bind_addr != nullptr) {
+      struct addrinfo bind_hints, *bind_result;
+      memset(&bind_hints, 0, sizeof(struct addrinfo));
+      bind_hints.ai_family = AF_INET;
+      bind_hints.ai_socktype = SOCK_STREAM;
+      int br = getaddrinfo(bind_addr, nullptr, &bind_hints, &bind_result);
+      if (br == 0 && bind_result != nullptr) {
+        ((struct sockaddr_in*)bind_result->ai_addr)->sin_port = 0;
+        if (::bind(sock_, bind_result->ai_addr, bind_result->ai_addrlen) != 0) {
+          Log_warn("rrr::Client: bind(%s) failed: %s", bind_addr, strerror(errno));
+        }
+        freeaddrinfo(bind_result);
+      }
+    }
 
     if (::connect(sock_, rp->ai_addr, rp->ai_addrlen) == 0) {
       break;
