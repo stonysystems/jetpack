@@ -53,6 +53,16 @@ TLC logs are saved to `tla/log/` with protocol name and timestamp.
 All tests use 5 replicas, **open-loop**, multi-process mode with 20ms one-way simulated
 network latency (tc/netem). The original protocol leader is on h1.
 
+<!-- IMPORTANT: Double check that ALL backend instances (etcd, ZooKeeper, MongoDB) run as
+     multi-node clusters (not single-node) in every experiment mode (benchmark, multi-process,
+     recovery). The backend must replicate writes to its own followers so that the write
+     latency includes the backend's replication RTT (~40ms via tc/netem). Running a single-node
+     backend hides the replication cost and produces unrealistically low latencies. Specifically:
+     - etcd: must be a 3+ node Raft cluster (start_etcd_cluster), NOT start_embedded_etcd
+     - ZooKeeper: must be a 3+ node ZAB ensemble (start_zookeeper_ensemble), NOT start_embedded_zookeeper
+     - MongoDB: must be a 3+ node replica set (start_mongodb_replset) with w:majority write concern
+     Verify this in docker/{etcd,zookeeper,mongodb}/run-*-test.sh for benchmark/multi modes. -->
+
 **Settings** (3 protocols x 4 settings = 12 experiments):
 - Setting A: 5 clients (1 per process, co-located with servers), concurrency = 1, Jetpack off
 - Setting B: near-peak-throughput clients/concurrency (from max throughput search), Jetpack off
