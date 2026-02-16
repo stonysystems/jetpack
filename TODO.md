@@ -178,19 +178,31 @@ Use 60 client threads, vary concurrency to find the maximum throughput for each 
 
 | Case | Best Concurrency | Max Throughput (txn/s) |
 |---|---:|---:|
-| MongoDB (Jetpack off) | | |
-| MongoDB (Jetpack on) | | |
-| etcd (Jetpack off) | | |
-| etcd (Jetpack on) | | |
-| ZooKeeper (Jetpack off) | | |
-| ZooKeeper (Jetpack on) | | |
+| MongoDB (Jetpack off) | 50 | ~2503 |
+| MongoDB (Jetpack on) | 100 | ~2132 |
+| etcd (Jetpack off) | 200 | ~7017 |
+| etcd (Jetpack on) | 200 | ~6426 |
+| ZooKeeper (Jetpack off) | 200 | ~3112 |
+| ZooKeeper (Jetpack on) | 400 | ~2247 |
 
-- [ ] MongoDB max throughput (Jetpack off): sweep concurrency with 60 threads
-- [ ] MongoDB max throughput (Jetpack on): sweep concurrency with 60 threads
-- [ ] etcd max throughput (Jetpack off): sweep concurrency with 60 threads
-- [ ] etcd max throughput (Jetpack on): sweep concurrency with 60 threads
-- [ ] ZooKeeper max throughput (Jetpack off): sweep concurrency with 60 threads
-- [ ] ZooKeeper max throughput (Jetpack on): sweep concurrency with 60 threads
+- [x] MongoDB max throughput (Jetpack off): sweep concurrency with 60 threads
+  - Sweep: c=10→1340, c=20→1904, c=30→2280, c=50→2503, c=100→2280, c=200→2120
+  - Peak at c=50: ~2503 txn/s total
+- [x] MongoDB max throughput (Jetpack on): sweep concurrency with 60 threads
+  - Sweep: c=10→1350, c=20→1680, c=50→1830, c=100→2132, c=200→2010
+  - Peak at c=100: ~2132 txn/s total
+- [x] etcd max throughput (Jetpack off): sweep concurrency with 60 threads
+  - Sweep: c=10→3400, c=20→5200, c=50→6590, c=100→6900, c=200→7017, c=400→6800
+  - Peak at c=200: ~7017 txn/s total
+- [x] etcd max throughput (Jetpack on): sweep concurrency with 60 threads
+  - Sweep: c=50→5400, c=100→6100, c=200→6426, c=400→6200
+  - Peak at c=200: ~6426 txn/s total
+- [x] ZooKeeper max throughput (Jetpack off): sweep concurrency with 60 threads
+  - Sweep: c=50→2304, c=100→2163, c=200→3112, c=400→3021
+  - Peak at c=200: ~3112 txn/s total
+- [x] ZooKeeper max throughput (Jetpack on): sweep concurrency with 60 threads
+  - Sweep: c=50→1915, c=100→2086, c=200→2155, c=400→2247, c=800→crash
+  - Peak at c=400: ~2247 txn/s total
 
 ### Docker test script improvements
 

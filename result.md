@@ -13,52 +13,53 @@
 Multi-process mode with 5 replicas, 20ms one-way simulated network latency (tc/netem),
 open-loop client. Each process on a separate loopback IP (127.0.0.1-5).
 
-**Latency model** (see `docs/latency_analysis.md`): Two layers of latency simulation are active:
-(1) tc/netem 20ms one-way between loopback IPs, and (2) `WAN_WAIT` 20ms software delays at
-RPC send/receive points and backend server submit. Jetpack OFF latency = 80ms (4 × WAN_WAIT)
-+ backend I/O. Jetpack ON (fast path) latency ≈ 80ms (2 × WAN_WAIT + tc quorum RTT),
-independent of backend because the fast path bypasses backend I/O.
+**Latency model** (see `docs/latency_analysis.md`): tc/netem 20ms one-way latency between
+loopback IPs (127.0.0.1-5). `SIMULATE_WAN` is disabled (no software delays). Jetpack OFF
+latency = 2 RTT ≈ 80ms (dispatch + commit). Jetpack ON (fast path) = 1 RTT ≈ 40ms
+(BroadcastDispatch, speculative execution bypasses commit RTT).
 
-### Low-concurrency latency comparison (5 clients, concurrency=1)
+**Note**: etcd and MongoDB latency results do not match the expected model. See TODO.md
+debug tasks for investigation. ZooKeeper results are correct (89.6ms off, 40.4ms on).
 
-| Backend | Jetpack OFF (ms) | Jetpack ON (ms) | Reduction |
-|---------|---:|---:|---:|
-| MongoDB | 133.60 | 87.64 | 34% |
-| etcd | 86.54 | 81.79 | 5% |
-| ZooKeeper | 172.09 | 81.90 | 52% |
+### Low-concurrency latency comparison (1 client, concurrency=1)
+
+| Backend | Jetpack OFF (ms) | Jetpack ON (ms) | Reduction | Sanity |
+|---------|---:|---:|---:|---:|
+| MongoDB | 46.65 | 44.80 | 4% | FAIL (expected ~80ms off) |
+| etcd | 2.65 | 7.88 | -197% | FAIL (expected ~80ms/~40ms) |
+| ZooKeeper | 89.60 | 40.43 | 55% | PASS |
 
 ### High-concurrency comparison (60 clients, concurrency=200)
 
 | Backend | Jetpack OFF | | Jetpack ON | |
 |---------|---:|---:|---:|---:|
 | | Median (ms) | Throughput | Median (ms) | Throughput |
-| MongoDB | 7,100 | 1,668 txn/s | 5,539 | 1,648 txn/s |
-| etcd | 1,134 | 9,063 txn/s | 1,244 | 8,752 txn/s |
-| ZooKeeper | 3,904 | 2,986 txn/s | 4,991 | 2,191 txn/s |
+| MongoDB | 5,765 | 1,920 txn/s | 6,450 | 2,020 txn/s |
+| etcd | 1,780 | 6,626 txn/s | 2,042 | 5,983 txn/s |
+| ZooKeeper | 4,058 | 3,034 txn/s | 4,416 | 2,335 txn/s |
 
 ### Maximum throughput (60 clients, best concurrency)
 
 | Backend | Jetpack OFF | | Jetpack ON | |
 |---------|---:|---:|---:|---:|
 | | Concurrency | Max (txn/s) | Concurrency | Max (txn/s) |
-| MongoDB | c=70 | 2,226 | c=70 | 1,871 |
-| etcd | c=200 | 9,063 | c=200 | 8,752 |
-| ZooKeeper | c=300 | 3,006 | c=100 | 2,816 |
+| MongoDB | c=50 | 2,503 | c=100 | 2,132 |
+| etcd | c=200 | 7,017 | c=200 | 6,426 |
+| ZooKeeper | c=200 | 3,112 | c=400 | 2,247 |
 
 ### Observations (open-loop, Jetpack ON vs OFF)
 
-- **Jetpack's latency benefit is most dramatic for ZooKeeper** (52% reduction: 172→82ms),
-  because ZooKeeper's write path (ZAB broadcast) requires extra network round trips that
-  Jetpack's fast path eliminates.
-- **MongoDB sees a strong 34% reduction** (134→88ms). MongoDB's write-to-primary overhead
-  makes the saved RTT significant.
-- **etcd's improvement is modest** (5%: 87→82ms) because etcd's embedded Raft is already
-  very fast, so the Jetpack RTT savings are a small fraction of total latency.
-- **Throughput under high load** is similar between Jetpack ON and OFF, indicating Jetpack's
-  fast-path overhead does not degrade throughput significantly at saturation.
-- **Maximum throughput** peaks at moderate concurrency (c=70 for MongoDB, c=200 for etcd,
-  c=100-300 for ZooKeeper). Higher concurrency causes queuing without proportional
-  throughput gains.
+- **ZooKeeper is the only backend with correct latency behavior**: Jetpack OFF ≈ 89.6ms
+  (2 RTT) and Jetpack ON ≈ 40.4ms (1 RTT), confirming the expected model. The 55%
+  latency reduction directly demonstrates Jetpack saving one full RTT.
+- **etcd latency is anomalously low** (~2.65ms off, ~7.88ms on), suggesting tc/netem
+  latency is not being applied to etcd traffic. Requires investigation.
+- **MongoDB latency is ~1 RTT** (~46ms off), suggesting w=1 write concern or a commit
+  path that skips one network round trip. Requires investigation.
+- **Maximum throughput**: etcd is fastest (~7K txn/s off, ~6.4K on), ZooKeeper is moderate
+  (~3.1K off, ~2.2K on), MongoDB is lowest (~2.5K off, ~2.1K on).
+- **Jetpack ON throughput is ~8-28% lower** than Jetpack OFF across all backends. The
+  BroadcastDispatch fast path adds coordination overhead that reduces peak throughput.
 
 ## Performance Results (5 replicas)
 
