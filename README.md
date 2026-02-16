@@ -287,63 +287,88 @@ docker compose -f docker/zookeeper/docker-compose.yml down -v
 ## Benchmark Results
 
 See [`result.md`](result.md) for detailed performance and recovery benchmark data.
+See [`docs/latency_analysis.md`](docs/latency_analysis.md) for the latency model explanation.
 
-### Quick benchmark commands
+### Benchmark mode
 
-Run single-client benchmarks (1 client, 5 replicas, 30s) inside Docker:
+The Docker images support a `benchmark` mode that runs 5 Jetpack processes on separate
+loopback IPs (127.0.0.1-5) with tc/netem simulated network latency. Each process runs
+a server and client, and results are printed per-process.
+
+**Requirements**: `--privileged` flag is needed for tc/netem and cgroup access.
+
+#### Quick sanity check (1 client per process, concurrency=1)
 
 ```bash
-# MongoDB (1 client, 5 replicas, concurrency=1)
-docker run --rm \
-  -v $(pwd)/config/1c1s5r1p.yml:/jetpack/config/1c1s5r1p.yml:ro \
-  --entrypoint bash jetpack-mongodb -c '
-  mongod --dbpath /tmp/mongodb --bind_ip 127.0.0.1 --port 27017 --fork --logpath /tmp/mongod.log
-  sleep 2
-  timeout 120 /jetpack/build/deptran_server \
-    -f /jetpack/config/1c1s5r1p.yml -f /jetpack/config/none_mongodb.yml \
-    -f /jetpack/config/rw_fixed.yml -f /jetpack/config/client_closed.yml \
-    -f /jetpack/config/concurrent_1.yml -d 30 -m 100 -P localhost 2>&1 \
-    | grep -E "All-efficient-attempts|Total throughtput|Mid throughput"
-'
+# etcd — Jetpack OFF (expected: ~42ms non-leader, ~2ms leader)
+docker run --rm --privileged jetpack-etcd benchmark
 
-# etcd (1 client, 5 replicas, concurrency=1)
-docker run --rm \
-  -v $(pwd)/config/1c1s5r1p.yml:/jetpack/config/1c1s5r1p.yml:ro \
-  --entrypoint bash jetpack-etcd -c '
-  etcd --name etcd-test --listen-client-urls http://127.0.0.1:2379 \
-    --advertise-client-urls http://127.0.0.1:2379 \
-    --listen-peer-urls http://127.0.0.1:2380 \
-    --initial-advertise-peer-urls http://127.0.0.1:2380 \
-    --initial-cluster "etcd-test=http://127.0.0.1:2380" \
-    --data-dir /tmp/etcd-data > /tmp/etcd.log 2>&1 &
-  sleep 2
-  timeout 120 /jetpack/build/deptran_server \
-    -f /jetpack/config/1c1s5r1p.yml -f /jetpack/config/none_etcd.yml \
-    -f /jetpack/config/rw_fixed.yml -f /jetpack/config/client_closed.yml \
-    -f /jetpack/config/concurrent_1.yml -d 30 -m 100 -P localhost 2>&1 \
-    | grep -E "All-efficient-attempts|Total throughtput|Mid throughput"
-'
+# etcd — Jetpack ON (expected: ~40ms all processes)
+docker run --rm --privileged -e MODE_CONFIG=rule_etcd.yml jetpack-etcd benchmark
 
-# ZooKeeper (1 client, 5 replicas, concurrency=1)
-docker run --rm \
-  -v $(pwd)/config/1c1s5r1p.yml:/jetpack/config/1c1s5r1p.yml:ro \
-  -v $(pwd)/config/none_zookeeper.yml:/jetpack/config/none_zookeeper.yml:ro \
-  --entrypoint bash jetpack-zookeeper -c '
-  mkdir -p /tmp/zookeeper-data
-  echo -e "tickTime=2000\ndataDir=/tmp/zookeeper-data\nclientPort=2181\nadmin.enableServer=false" > /tmp/zoo.cfg
-  ${ZOOKEEPER_HOME:-/opt/zookeeper}/bin/zkServer.sh start /tmp/zoo.cfg > /tmp/zk.log 2>&1
-  sleep 2
-  timeout 120 /jetpack/build/deptran_server \
-    -f /jetpack/config/1c1s5r1p.yml -f /jetpack/config/none_zookeeper.yml \
-    -f /jetpack/config/rw_fixed.yml -f /jetpack/config/client_closed.yml \
-    -f /jetpack/config/concurrent_1.yml -d 30 -m 100 -P localhost 2>&1 \
-    | grep -E "All-efficient-attempts|Total throughtput|Mid throughput"
-'
+# MongoDB — Jetpack OFF (expected: ~87ms non-leader, ~47ms leader)
+docker run --rm --privileged jetpack-mongodb benchmark
+
+# ZooKeeper — Jetpack OFF (expected: ~85-90ms all processes)
+docker run --rm --privileged jetpack-zookeeper benchmark
 ```
 
-For multi-client benchmarks (12 clients, 5 replicas, concurrency=10), use `12c1s5r1p.yml`
-and `concurrent_10.yml` instead. For 3-replica baselines, use `1c1s3r1p.yml` /
-`12c1s3r1p.yml`.
+#### High-concurrency throughput test (60 clients, concurrency=200)
+
+```bash
+# etcd — Jetpack OFF
+docker run --rm --privileged \
+  -e SITE_CONFIG=60c1s5r5p.yml \
+  -e CONCURRENT_CONFIG=concurrent_200.yml \
+  jetpack-etcd benchmark
+
+# MongoDB — Jetpack ON
+docker run --rm --privileged \
+  -e SITE_CONFIG=60c1s5r5p.yml \
+  -e MODE_CONFIG=rule_mongodb.yml \
+  -e CONCURRENT_CONFIG=concurrent_200.yml \
+  jetpack-mongodb benchmark
+
+# ZooKeeper — Jetpack ON
+docker run --rm --privileged \
+  -e SITE_CONFIG=60c1s5r5p.yml \
+  -e MODE_CONFIG=rule_zookeeper.yml \
+  -e CONCURRENT_CONFIG=concurrent_200.yml \
+  jetpack-zookeeper benchmark
+```
+
+#### Environment variables
+
+| Variable | Description | Default |
+|---|---|---|
+| `SITE_CONFIG` | Site/topology config | `5c1s5r1p_<proto>.yml` |
+| `MODE_CONFIG` | Protocol mode (`none_*.yml` or `rule_*.yml`) | `none_<proto>.yml` |
+| `CLIENT_CONFIG` | Client mode | `client_open.yml` |
+| `CONCURRENT_CONFIG` | Concurrency | `concurrent_1.yml` |
+| `LATENCY_MS` | One-way tc/netem delay (ms) | `20` |
+| `LATENCY_JITTER` | Latency jitter (ms) | `0` |
+| `TEST_DURATION` | Test duration (seconds) | `30` |
+
+#### Reading the output
+
+The benchmark prints per-process results in the `--- Benchmark Results ---` section:
+
+```
+[INFO]   h1: ... All-efficient-attempts  statistics  count 10  50pct 2.43  90pct 4.69  99pct 4.69  ave 3.12
+[INFO]   h1: ... All-efficient-attempts  distribution  2.41  2.41  3.73  ...
+[INFO]   h1: ... Mid throughput is 0.70
+```
+
+- **50pct**: Median latency (ms)
+- **90pct/99pct**: Tail latencies (ms)
+- **ave**: Average latency (ms)
+- **Mid throughput**: Transactions per second (steady-state)
+- h1 = leader (127.0.0.1), h2-h5 = followers (127.0.0.2-5)
+
+#### Note on SIMULATE_WAN
+
+`SIMULATE_WAN` must be disabled in `src/deptran/constants.h` (currently commented out)
+when using tc/netem for network simulation. Otherwise software delays double the latency.
 
 ## Failure simulation structure
 

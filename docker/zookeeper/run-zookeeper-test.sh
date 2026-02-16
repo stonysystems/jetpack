@@ -675,13 +675,21 @@ run_benchmark() {
     for proc in "${proc_names[@]}"; do
         local logfile="$LOG_DIR/proc-${proc}.log"
         if [ -f "$logfile" ]; then
+            # Print latency statistics (median, p90, p99, avg)
             local stats_line
-            stats_line=$(grep "All-efficient-attempts" "$logfile" 2>/dev/null | tail -1)
+            stats_line=$(grep "All-efficient-attempts.*statistics" "$logfile" 2>/dev/null | tail -1)
             if [ -n "$stats_line" ]; then
                 log_info "  $proc: $stats_line"
             fi
+            # Print latency distribution (percentiles)
+            local dist_line
+            dist_line=$(grep "All-efficient-attempts.*distribution" "$logfile" 2>/dev/null | tail -1)
+            if [ -n "$dist_line" ]; then
+                log_info "  $proc: $dist_line"
+            fi
+            # Print throughput
             local tp_line
-            tp_line=$(grep -i "throughput" "$logfile" 2>/dev/null | tail -1)
+            tp_line=$(grep "Mid throughput" "$logfile" 2>/dev/null | tail -1)
             if [ -n "$tp_line" ]; then
                 log_info "  $proc: $tp_line"
             fi

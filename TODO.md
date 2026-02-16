@@ -230,28 +230,30 @@ Use 60 client threads, vary concurrency to find the maximum throughput for each 
 Improve the Docker run scripts (`run-{mongodb,etcd,zookeeper}-test.sh`) and benchmark mode
 for easier debugging and onboarding:
 
-- [ ] Ensure Docker benchmark output includes key metrics (latency/throughput) from
-      `s_main.cc` directly in stdout — no need to grep logs manually. The output printed by
-      `s_main.cc` (median latency, average latency, throughput) should be visible by default.
-- [ ] Expose configurable args via environment variables for Docker benchmark runs:
+- [x] Ensure Docker benchmark output includes key metrics (latency/throughput) from
+      `s_main.cc` directly in stdout — no need to grep logs manually.
+      - Updated all 3 run scripts to print both statistics (median, p90, p99, avg) and
+        distribution lines for "All-efficient-attempts", plus "Mid throughput" per process.
+- [x] Expose configurable args via environment variables for Docker benchmark runs:
   - `SITE_CONFIG` — site/topology config (number of clients, servers, processes)
   - `MODE_CONFIG` — protocol mode (`none_<proto>.yml` or `rule_<proto>.yml`)
   - `CLIENT_CONFIG` — client mode (`client_open.yml` or `client_closed.yml`)
   - `CONCURRENT_CONFIG` — concurrency config (`concurrent_<N>.yml`)
   - `LATENCY_MS`, `LATENCY_JITTER` — tc/netem latency parameters
   - `TEST_DURATION` — test duration in seconds
-  - Document default values for each variable in the script
+  - Already implemented in all 3 scripts with documented defaults.
 - [x] Update `docs/latency_analysis.md` to note that `SIMULATE_WAN` must be disabled
       when running with tc/netem, and remove the old WAN_WAIT-based latency model
   - Rewrote with corrected model: off = 2 RTT ≈ 80ms, on = 1 RTT ≈ 40ms
   - Documented current sanity check failures (etcd, MongoDB) and known issues
   - Moved old WAN_WAIT analysis to History section (obsolete)
-- [ ] Update README.md benchmark section with:
+- [x] Update README.md benchmark section with:
   - How to run each of the 4 settings (A/B/C/D) per protocol using Docker
   - How to customize number of clients, concurrency, latency, duration via env vars
   - Example commands for quick sanity-check runs
   - How to read the output (which lines show latency/throughput)
   - Note about disabling `SIMULATE_WAN` for tc/netem tests
+  - Rewrote with new benchmark mode commands, environment variable table, output guide.
 
 ### Failure recovery downtime (3 experiments)
 
