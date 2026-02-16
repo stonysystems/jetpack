@@ -118,8 +118,14 @@ RUN cd /build/third_party/etcd-cpp-apiv3 && \
     cmake --install .
 
 # Generate ZooKeeper jute C sources required by zookeeper-client-c CMake build.
-RUN cd /build/third_party/zookeeper && \
-    mvn generate-sources -pl zookeeper-jute -q -DskipTests && \
+# Skip maven generation if jute files are already pre-generated on host.
+RUN if [ -f /build/third_party/zookeeper/zookeeper-client/zookeeper-client-c/generated/zookeeper.jute.h ] && \
+       [ -f /build/third_party/zookeeper/zookeeper-client/zookeeper-client-c/generated/zookeeper.jute.c ]; then \
+        echo "Jute files already exist, skipping maven generation"; \
+    else \
+        cd /build/third_party/zookeeper && \
+        mvn generate-sources -pl zookeeper-jute -q -DskipTests; \
+    fi && \
     test -f /build/third_party/zookeeper/zookeeper-client/zookeeper-client-c/generated/zookeeper.jute.h && \
     test -f /build/third_party/zookeeper/zookeeper-client/zookeeper-client-c/generated/zookeeper.jute.c
 

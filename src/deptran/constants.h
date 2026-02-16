@@ -144,7 +144,7 @@ namespace janus {
 // #define TC
 
 #define AWS
-#define SIMULATE_WAN
+// #define SIMULATE_WAN
 // #define FULL_LOG_DEBUG
 // #define LATENCY_DEBUG
 // #define LATENCY_LOG_DEBUG

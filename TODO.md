@@ -109,36 +109,42 @@ of tc/netem. When using tc/netem for real network simulation, `SIMULATE_WAN` mus
 (comment out in `constants.h`). All benchmarks need to be re-run.
 
 **Pre-run fix**:
-- [ ] Disable `SIMULATE_WAN` in `constants.h` (comment out `#define SIMULATE_WAN`) and rebuild
-      Docker images for all three backends. This is required before any benchmark re-run.
+- [x] Disable `SIMULATE_WAN` in `constants.h` (comment out `#define SIMULATE_WAN`) and rebuild
+      Docker images for all three backends. Also fixed Docker build: skip maven jute generation
+      when pre-generated files exist (maven fails in Docker due to Java NIO permission issues).
 
 | Experiment | Median Latency (ms) | Avg Latency (ms) | Throughput (txn/s) |
 |---|---:|---:|---:|
-| MongoDB Setting A (1c, c=1, Jetpack off) | | | |
-| MongoDB Setting B (60c, c=200, Jetpack off) | | | |
-| MongoDB Setting C (1c, c=1, Jetpack on) | | | |
-| MongoDB Setting D (60c, c=200, Jetpack on) | | | |
-| etcd Setting A (1c, c=1, Jetpack off) | | | |
-| etcd Setting B (60c, c=200, Jetpack off) | | | |
-| etcd Setting C (1c, c=1, Jetpack on) | | | |
-| etcd Setting D (60c, c=200, Jetpack on) | | | |
-| ZooKeeper Setting A (1c, c=1, Jetpack off) | | | |
-| ZooKeeper Setting B (60c, c=200, Jetpack off) | | | |
-| ZooKeeper Setting C (1c, c=1, Jetpack on) | | | |
-| ZooKeeper Setting D (60c, c=200, Jetpack on) | | | |
+| MongoDB Setting A (1c, c=1, Jetpack off) | 46.65 | 47.34 | 3.30 |
+| MongoDB Setting B (60c, c=200, Jetpack off) | 5765 | 5790 | 1920 |
+| MongoDB Setting C (1c, c=1, Jetpack on) | 44.80 | 45.10 | 3.20 |
+| MongoDB Setting D (60c, c=200, Jetpack on) | 6450 | 6530 | 2020 |
+| etcd Setting A (1c, c=1, Jetpack off) | 2.65 | 5.30 | 3.40 |
+| etcd Setting B (60c, c=200, Jetpack off) | 1780 | 1810 | 6626 |
+| etcd Setting C (1c, c=1, Jetpack on) | 7.88 | 6.50 | 3.30 |
+| etcd Setting D (60c, c=200, Jetpack on) | 2042 | 2055 | 5983 |
+| ZooKeeper Setting A (1c, c=1, Jetpack off) | 89.60 | 89.80 | 3.40 |
+| ZooKeeper Setting B (60c, c=200, Jetpack off) | 4058 | 4062 | 3034 |
+| ZooKeeper Setting C (1c, c=1, Jetpack on) | 40.43 | 48.50 | 3.80 |
+| ZooKeeper Setting D (60c, c=200, Jetpack on) | 4416 | 4530 | 2335 |
 
-- [ ] Run MongoDB Setting A (open-loop, 1 thread, concurrency=1, Jetpack off), record metrics
-- [ ] Run MongoDB Setting B (open-loop, 60 threads, concurrency=200, Jetpack off), record metrics
-- [ ] Run MongoDB Setting C (open-loop, 1 thread, concurrency=1, Jetpack on), record metrics
-- [ ] Run MongoDB Setting D (open-loop, 60 threads, concurrency=200, Jetpack on), record metrics
-- [ ] Run etcd Setting A (open-loop, 1 thread, concurrency=1, Jetpack off), record metrics
-- [ ] Run etcd Setting B (open-loop, 60 threads, concurrency=200, Jetpack off), record metrics
-- [ ] Run etcd Setting C (open-loop, 1 thread, concurrency=1, Jetpack on), record metrics
-- [ ] Run etcd Setting D (open-loop, 60 threads, concurrency=200, Jetpack on), record metrics
-- [ ] Run ZooKeeper Setting A (open-loop, 1 thread, concurrency=1, Jetpack off), record metrics
-- [ ] Run ZooKeeper Setting B (open-loop, 60 threads, concurrency=200, Jetpack off), record metrics
-- [ ] Run ZooKeeper Setting C (open-loop, 1 thread, concurrency=1, Jetpack on), record metrics
-- [ ] Run ZooKeeper Setting D (open-loop, 60 threads, concurrency=200, Jetpack on), record metrics
+Notes: Latency is per-request (ms). Throughput is total across all 5 processes. etcd has bimodal
+latency at low concurrency (~2.5ms local, ~8ms remote). ZooKeeper shows strongest Jetpack
+benefit: median drops from 89.6ms to 40.4ms (1 RTT saved). MongoDB has high backend I/O
+overhead (~45ms) that dominates over network latency savings.
+
+- [x] Run MongoDB Setting A (open-loop, 1 thread, concurrency=1, Jetpack off), record metrics
+- [x] Run MongoDB Setting B (open-loop, 60 threads, concurrency=200, Jetpack off), record metrics
+- [x] Run MongoDB Setting C (open-loop, 1 thread, concurrency=1, Jetpack on), record metrics
+- [x] Run MongoDB Setting D (open-loop, 60 threads, concurrency=200, Jetpack on), record metrics
+- [x] Run etcd Setting A (open-loop, 1 thread, concurrency=1, Jetpack off), record metrics
+- [x] Run etcd Setting B (open-loop, 60 threads, concurrency=200, Jetpack off), record metrics
+- [x] Run etcd Setting C (open-loop, 1 thread, concurrency=1, Jetpack on), record metrics
+- [x] Run etcd Setting D (open-loop, 60 threads, concurrency=200, Jetpack on), record metrics
+- [x] Run ZooKeeper Setting A (open-loop, 1 thread, concurrency=1, Jetpack off), record metrics
+- [x] Run ZooKeeper Setting B (open-loop, 60 threads, concurrency=200, Jetpack off), record metrics
+- [x] Run ZooKeeper Setting C (open-loop, 1 thread, concurrency=1, Jetpack on), record metrics
+- [x] Run ZooKeeper Setting D (open-loop, 60 threads, concurrency=200, Jetpack on), record metrics
 
 ### Maximum throughput search (6 cases)
 
