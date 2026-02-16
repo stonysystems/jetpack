@@ -51,14 +51,24 @@ TLC logs are saved to `tla/log/` with protocol name and timestamp.
 ### Performance chart (12 experiments)
 
 All tests use 5 replicas, **open-loop**, multi-process mode with 20ms one-way simulated
-network latency (tc/netem). Four settings per backend (3 protocols x 4 settings = 12):
+network latency (tc/netem). The original protocol leader is on h1.
 
-- Setting A: 1 client thread, concurrency = 1, Jetpack off (`none_<protocol>.yml`)
-- Setting B: 60 client threads, concurrency = 200, Jetpack off (`none_<protocol>.yml`)
-- Setting C: 1 client thread, concurrency = 1, Jetpack on (`rule_<protocol>.yml`)
-- Setting D: 60 client threads, concurrency = 200, Jetpack on (`rule_<protocol>.yml`)
+**Settings** (3 protocols x 4 settings = 12 experiments):
+- Setting A: 5 clients (1 per process, co-located with servers), concurrency = 1, Jetpack off
+- Setting B: near-peak-throughput clients/concurrency (from max throughput search), Jetpack off
+- Setting C: 5 clients (1 per process, co-located with servers), concurrency = 1, Jetpack on
+- Setting D: near-peak-throughput clients/concurrency (from max throughput search), Jetpack on
 
-Jetpack off = `config/none_<protocol>.yml` (cc: none), Jetpack on = `config/rule_<protocol>.yml` (cc: rule).
+Jetpack off = `config/none_<protocol>.yml` (cc: none),
+Jetpack on = `config/rule_<protocol>.yml` (cc: rule).
+
+For Setting A/C, use 5 clients so each client co-locates with one server (h1-h5). This lets
+us observe the leader vs non-leader latency difference directly: the h1 client is co-located
+with the original protocol leader, h2-h5 clients are not.
+
+For Setting B/D, pick client count and concurrency near the maximum throughput point found by
+the throughput sweep (below). The goal is high throughput without excessive queuing-induced
+latency surge — avoid the 60c/c=200 setting which causes multi-second latencies.
 
 **Config files needed**:
 - [x] `config/none_mongodb.yml`, `config/none_etcd.yml`, `config/none_zookeeper.yml` (exist)
@@ -66,164 +76,97 @@ Jetpack off = `config/none_<protocol>.yml` (cc: none), Jetpack on = `config/rule
 - [x] `config/rule_etcd.yml` — created from `rule_mongodb.yml`, change `ab: etcd`
 - [x] `config/rule_zookeeper.yml` — created from `rule_mongodb.yml`, change `ab: zookeeper`
 
-**Site configs for benchmarks**:
-- `config/1c1s5r5p.yml` — 1 client, 5 servers, 5 processes (Setting A/C)
-- `config/60c1s5r5p.yml` — 60 clients (12/process), 5 servers, 5 processes (Setting B/D)
-- Note: 1-client config hangs because server-only processes never exit. Use
-  `5c1s5r1p_<protocol>.yml` (5 clients) with `concurrent_1.yml` as workaround for Setting A/C.
-
-**Benchmark mode**: All three run scripts (`run-{mongodb,etcd,zookeeper}-test.sh`) support
-a `benchmark` mode with configurable environment variables:
-```bash
-# Example: MongoDB Setting A (1 client-equivalent, concurrency=1, Jetpack off)
-docker run --rm --privileged \
-  -e SITE_CONFIG=5c1s5r1p_mongodb.yml \
-  -e MODE_CONFIG=none_mongodb.yml \
-  -e CLIENT_CONFIG=client_open.yml \
-  -e CONCURRENT_CONFIG=concurrent_1.yml \
-  -e LATENCY_MS=20 -e LATENCY_JITTER=0 -e TEST_DURATION=30 \
-  -v $(pwd)/config:/jetpack/config:ro \
-  mongodb-jetpack-mongodb benchmark
-
-# Example: MongoDB Setting B (60 clients, concurrency=200, Jetpack off)
-docker run --rm --privileged \
-  -e SITE_CONFIG=60c1s5r5p.yml \
-  -e MODE_CONFIG=none_mongodb.yml \
-  -e CLIENT_CONFIG=client_open.yml \
-  -e CONCURRENT_CONFIG=concurrent_200.yml \
-  -e LATENCY_MS=20 -e LATENCY_JITTER=0 -e TEST_DURATION=30 \
-  -v $(pwd)/config:/jetpack/config:ro \
-  mongodb-jetpack-mongodb benchmark
-```
-
 Latency (median, average) and throughput metrics are computed in `src/deptran/s_main.cc`.
 
-**Sanity check**: With 20ms one-way latency, for the 1-client/concurrency=1 setting:
-- Jetpack OFF (original protocol): expect ~2 RTT latency ≈ 80ms
-- Jetpack ON (fast path): expect ~1 RTT latency ≈ 40ms
-- If numbers deviate significantly from this, investigate the cause.
+**Pre-run fixes** (completed):
+- [x] Disable `SIMULATE_WAN` in `constants.h` — must be commented out for tc/netem benchmarks
+- [x] Fix RPC client source IP binding (`src/rrr/rpc/client.cpp`) — without `bind()`, all
+      client sockets default to src=127.0.0.1, bypassing tc/netem rules
+- [x] Fix ZooKeeper single-host URI for leader (`src/deptran/zookeeper/server.h`) — multi-host
+      URI caused artificial tc/netem latency on ZK writes
 
-**Pre-run fix**:
-- [x] Disable `SIMULATE_WAN` in `constants.h` (comment out `#define SIMULATE_WAN`) and rebuild
-      Docker images for all three backends. `SIMULATE_WAN` adds software `WAN_WAIT` delays that
-      are redundant with tc/netem — must be disabled when using tc/netem for network simulation.
-      Also fixed Docker build: skip maven jute generation when pre-generated files exist.
+**Sanity check**: With 20ms one-way tc/netem latency, for the 5-client/concurrency=1 setting:
+- Jetpack OFF, h1 (client co-located with leader): 1 RTT to replicate to followers ≈ **~40ms** + backend write
+- Jetpack OFF, h2-h5 (client not co-located with leader): 1 RTT to leader + 1 RTT to replicate ≈ **~80ms** + backend write
+- Jetpack ON, any client: fast path 1 RTT ≈ **~40ms**
 
-**SANITY CHECK ROOT CAUSE ANALYSIS** — Investigation complete. The expected latency model
-(off = 2 RTT ≈ 80ms, on = 1 RTT ≈ 40ms) was based on an incorrect assumption about the
-tc/netem setup. The actual latency behavior is explained by two architectural issues:
+**SANITY CHECK STILL FAILING** — some results do not match expectations:
 
-**Issue 1: RPC client does not bind to source IP** (`src/rrr/rpc/client.cpp`).
-The Jetpack RPC framework creates client sockets without `bind()` before `connect()`. On
-Linux loopback, the kernel defaults to `src=127.0.0.1` for all outbound connections. Since
-tc/netem rules only apply to IPs 127.0.0.2-5, client→server RPCs bypass the delay entirely.
-Server-side binds correctly (e.g. s201 binds to 127.0.0.2:18001), so server→server RPCs
-between h1 and h2-h5 DO experience tc/netem delay.
+| Setting | h1 expected | h1 actual | h2-h5 expected | h2-h5 actual | Status |
+|---|---|---|---|---|---|
+| etcd A (off) | ~42ms (40+2) | 2.4ms | ~82ms (80+2) | 42ms | **FAIL** — both too low |
+| etcd C (on) | ~40ms | 2.6ms | ~40ms | 40.5ms | **FAIL** — h1 too low |
+| MongoDB A (off) | ~47ms (40+7) | 47ms | ~87ms (80+7) | 87ms | OK |
+| MongoDB C (on) | ~40ms | 45ms | ~40ms | 45-47ms | OK |
+| ZK A (off) | ~50ms (40+10) | 89ms | ~90ms (80+10) | 86-90ms | **FAIL** — h1 too high |
+| ZK C (on) | ~40ms | 40.5ms | ~40ms | 40.4ms | OK |
 
-**Issue 2: ZooKeeper multi-host URI creates artificial latency**.
-With `JETPACK_ZOOKEEPER_RECOVERY` defined, ALL Jetpack replicas build a ZK URI from the
-config replica hosts: `127.0.0.1:2181,127.0.0.2:2181,...,127.0.0.5:2181`. Since ZK binds
-to `0.0.0.0:2181`, connections to `127.0.0.2:2181` etc. succeed but incur tc/netem delay
-(verified: `ss` shows ZK connections going to delayed IPs like 127.0.0.2:2181). This causes
-ZK writes to have ~40-50ms RTT overhead even though the ZK server is on 127.0.0.1.
+**Debug tasks** — fix until all settings pass the sanity check:
+- [ ] **etcd A/C h1**: leader client shows ~2.4ms — the replication RTT to followers is missing.
+      In "none" mode the leader should replicate to a quorum of followers (1 RTT ≈ 40ms) before
+      responding to the client. Check if etcd/Jetpack commit path responds to the client before
+      replication completes (async commit?). For Jetpack ON (C), h1 shows 2.6ms instead of ~40ms
+      — fast path quorum should still require 1 RTT. Investigate.
+- [ ] **etcd A/C h2-h5**: non-leader clients show ~42ms (A) / ~40.5ms (C) — only 1 RTT instead
+      of 2 RTT for Setting A. The leader's replication round to followers seems to be missing
+      or overlapped. Check the etcd none-mode commit flow.
+- [ ] **ZK A h1**: leader client shows ~89ms — expected ~50ms (40ms replication RTT + ~10ms ZK
+      write). The ~89ms suggests ~2 RTT or ~50ms extra ZK write latency. Check if ZK write path
+      adds an extra RTT or if ZK backend write is ~50ms instead of ~10ms.
+- [ ] After fixing, re-run all 12 experiments with new settings (5c for A/C, near-peak for B/D)
+- [ ] Update `docs/latency_analysis.md` and `result.md` with final results
 
-**Corrected latency model** (after RPC bind fix):
-- Client → Leader: 1 Dispatch RPC. With bind fix, client sockets use their process's IP
-  (e.g. 127.0.0.2), so tc/netem rules apply to client→leader traffic.
-- Leader → Backend: backend write (latency depends on backend connection IP)
-- Leader → Replicas: BroadcastCommit (fire-and-forget, not in critical path)
-- **Non-leader clients**: ~40ms RTT (20ms each way via tc/netem) + backend write latency
-- **Leader client (h1)**: ~0ms RTT (same IP) + backend write latency
-- Per-process reports are separate; the leader process client has lower latency than followers.
+**Results chart** (columns: h1 avg, h2-h5 avg, h1-h5 avg, throughput):
 
-| Setting | Before fix | After fix (h1/leader) | After fix (h2-h5) | Explanation |
-|---|---|---|---|---|
-| etcd A (off) | 2.65ms | ~2.4ms | ~42ms | 40ms RTT + ~2ms etcd write |
-| ZooKeeper A (off) | 89.60ms (URI bug) | ~89ms | ~85-90ms | ~50ms ZK write dominates; RTT effect small |
-| MongoDB A (off) | 46.65ms | ~47ms | ~87ms | 40ms RTT + ~46ms MongoDB write |
+| Experiment | h1 Avg (ms) | h2-h5 Avg (ms) | h1-h5 Avg (ms) | Throughput (txn/s) |
+|---|---:|---:|---:|---:|
+| etcd A (5c, c=1, off) | | | | |
+| etcd B (near-peak, off) | | | | |
+| etcd C (5c, c=1, on) | | | | |
+| etcd D (near-peak, on) | | | | |
+| MongoDB A (5c, c=1, off) | | | | |
+| MongoDB B (near-peak, off) | | | | |
+| MongoDB C (5c, c=1, on) | | | | |
+| MongoDB D (near-peak, on) | | | | |
+| ZK A (5c, c=1, off) | | | | |
+| ZK B (near-peak, off) | | | | |
+| ZK C (5c, c=1, on) | | | | |
+| ZK D (near-peak, on) | | | | |
 
-**Fix tasks:**
-- [x] Fix ZK URI for benchmarks: Leader (loc_id_==0) now uses `kZookeeperUri` (127.0.0.1:2181)
-      even when `JETPACK_ZOOKEEPER_RECOVERY` is defined. Non-leaders keep multi-host URI for
-      recovery signal detection. Non-leaders get 0 ZK connections (they don't write to ZK).
-      Fix in `src/deptran/zookeeper/server.h:Setup()`. ZK latency dropped from ~89ms to ~10ms.
-- [x] Fix RPC client to bind source IP: Added optional `bind_addr` parameter to
-      `Client::connect()` in `src/rrr/rpc/client.cpp`. When `bind_addr` is provided,
-      the client socket calls `bind()` before `connect()` to use the local process's
-      host IP as the source address. `Communicator` now stores `local_host_` (from
-      `Config::GetMyServers()` or `GetMyClients()`) and passes it to all `connect()` calls.
-      Verified: etcd Setting A non-leader clients now show ~42ms median latency (was 2.65ms),
-      matching the expected 40ms RTT + ~2ms etcd write. Leader client (same IP) still ~2.4ms.
-      Files changed: `src/rrr/rpc/client.cpp`, `src/rrr/rpc/client.hpp`,
-      `src/deptran/communicator.cc`, `src/deptran/communicator.h`.
-- [x] After fixes, re-run all 12 experiments and verify latency model
-      - All 12 experiments re-run with both fixes (RPC bind + ZK URI). Results now match
-        the corrected latency model. Non-leader clients show ~40ms RTT + backend write.
-- [x] Update `docs/latency_analysis.md` with corrected analysis
-      - Rewrote with correct latency model: non-leader clients = 40ms RTT + backend write,
-        leader client = 0ms RTT + backend write. Documented RPC bind fix, etcd verification
-        results, and both fixes applied.
-
-**Post-fix results** (RPC bind + ZK URI fixes applied):
-
-Per-process results; h1=leader (127.0.0.1), h2-h5=followers (127.0.0.2-5).
-Low-concurrency rows show h1 vs h2-h5 medians; high-concurrency shows aggregate.
-
-| Experiment | h1 Median (ms) | h2-h5 Median (ms) | Total Throughput (txn/s) |
-|---|---:|---:|---:|
-| etcd A (1c, c=1, off) | 2.4 | 42 | 3.2 |
-| etcd B (60c, c=200, off) | 1945 | 1945-2024 | 6169 |
-| etcd C (1c, c=1, on) | 2.6 | 40.5 | 3.1 |
-| etcd D (60c, c=200, on) | 1977 | 2028-2057 | 6165 |
-| MongoDB A (1c, c=1, off) | 47 | 87 | 3.2 |
-| MongoDB B (60c, c=200, off) | 5616 | 5536-5563 | 2020 |
-| MongoDB C (1c, c=1, on) | 45 | 45-47 | 3.7 |
-| MongoDB D (60c, c=200, on) | 6133 | 6223-6597 | 1960 |
-| ZK A (1c, c=1, off) | 89 | 86-90 | 3.4 |
-| ZK B (60c, c=200, off) | 1777 | 1777 | 6734 |
-| ZK C (1c, c=1, on) | 40.5 | 40.4 | 3.4 |
-| ZK D (60c, c=200, on) | 1779 | 1779 | 6858 |
-
-Sanity check (low-concurrency, non-leader clients):
-- [x] etcd A: 42ms ≈ 40ms RTT + 2ms write — **PASS**
-- [x] etcd C: 40.5ms ≈ 40ms (Jetpack fast path) — **PASS**
-- [x] MongoDB A: 87ms ≈ 40ms RTT + 46ms write — **PASS**
-- [x] MongoDB C: 45ms ≈ 40ms (Jetpack fast path) — **PASS**
-- [x] ZK A: 86-90ms ≈ 40ms RTT + 50ms ZK write — **PASS**
-- [x] ZK C: 40.4ms ≈ 40ms (Jetpack fast path) — **PASS**
+- [ ] Run etcd Setting A (5c, c=1, Jetpack off)
+- [ ] Run etcd Setting B (near-peak throughput, Jetpack off)
+- [ ] Run etcd Setting C (5c, c=1, Jetpack on)
+- [ ] Run etcd Setting D (near-peak throughput, Jetpack on)
+- [ ] Run MongoDB Setting A (5c, c=1, Jetpack off)
+- [ ] Run MongoDB Setting B (near-peak throughput, Jetpack off)
+- [ ] Run MongoDB Setting C (5c, c=1, Jetpack on)
+- [ ] Run MongoDB Setting D (near-peak throughput, Jetpack on)
+- [ ] Run ZK Setting A (5c, c=1, Jetpack off)
+- [ ] Run ZK Setting B (near-peak throughput, Jetpack off)
+- [ ] Run ZK Setting C (5c, c=1, Jetpack on)
+- [ ] Run ZK Setting D (near-peak throughput, Jetpack on)
 
 ### Maximum throughput search (6 cases)
 
 Use 60 client threads, vary concurrency to find the maximum throughput for each case
 (3 protocols x Jetpack on/off = 6 cases). Increase concurrency until throughput saturates.
+The peak clients/concurrency from this search will be used for Setting B/D above.
 
 | Case | Best Concurrency | Max Throughput (txn/s) |
 |---|---:|---:|
-| MongoDB (Jetpack off) | 50 | ~2503 |
-| MongoDB (Jetpack on) | 100 | ~2132 |
-| etcd (Jetpack off) | 200 | ~7017 |
-| etcd (Jetpack on) | 200 | ~6426 |
-| ZooKeeper (Jetpack off) | 200 | ~3112 |
-| ZooKeeper (Jetpack on) | 400 | ~2247 |
+| MongoDB (Jetpack off) | | |
+| MongoDB (Jetpack on) | | |
+| etcd (Jetpack off) | | |
+| etcd (Jetpack on) | | |
+| ZooKeeper (Jetpack off) | | |
+| ZooKeeper (Jetpack on) | | |
 
-- [x] MongoDB max throughput (Jetpack off): sweep concurrency with 60 threads
-  - Sweep: c=10→1340, c=20→1904, c=30→2280, c=50→2503, c=100→2280, c=200→2120
-  - Peak at c=50: ~2503 txn/s total
-- [x] MongoDB max throughput (Jetpack on): sweep concurrency with 60 threads
-  - Sweep: c=10→1350, c=20→1680, c=50→1830, c=100→2132, c=200→2010
-  - Peak at c=100: ~2132 txn/s total
-- [x] etcd max throughput (Jetpack off): sweep concurrency with 60 threads
-  - Sweep: c=10→3400, c=20→5200, c=50→6590, c=100→6900, c=200→7017, c=400→6800
-  - Peak at c=200: ~7017 txn/s total
-- [x] etcd max throughput (Jetpack on): sweep concurrency with 60 threads
-  - Sweep: c=50→5400, c=100→6100, c=200→6426, c=400→6200
-  - Peak at c=200: ~6426 txn/s total
-- [x] ZooKeeper max throughput (Jetpack off): sweep concurrency with 60 threads
-  - Sweep: c=50→2304, c=100→2163, c=200→3112, c=400→3021
-  - Peak at c=200: ~3112 txn/s total
-- [x] ZooKeeper max throughput (Jetpack on): sweep concurrency with 60 threads
-  - Sweep: c=50→1915, c=100→2086, c=200→2155, c=400→2247, c=800→crash
-  - Peak at c=400: ~2247 txn/s total
+- [ ] MongoDB max throughput (Jetpack off): sweep concurrency with 60 threads
+- [ ] MongoDB max throughput (Jetpack on): sweep concurrency with 60 threads
+- [ ] etcd max throughput (Jetpack off): sweep concurrency with 60 threads
+- [ ] etcd max throughput (Jetpack on): sweep concurrency with 60 threads
+- [ ] ZooKeeper max throughput (Jetpack off): sweep concurrency with 60 threads
+- [ ] ZooKeeper max throughput (Jetpack on): sweep concurrency with 60 threads
 
 ### Docker test script improvements
 
