@@ -281,7 +281,11 @@ run_multi_process_test() {
     log_info "Latency: ${LATENCY_MS}ms +/- ${LATENCY_JITTER}ms between servers"
     log_info "Duration: ${TEST_DURATION}s"
 
-    start_embedded_mongodb
+    # Use 3-node MongoDB replica set so writes include replication latency
+    start_mongodb_replset
+    mongosh --host "127.0.0.1:27017" --eval "
+        db.adminCommand({ setDefaultRWConcern: 1, defaultWriteConcern: { w: 'majority' } })
+    " --quiet >/dev/null 2>&1 || log_warn "Could not set default write concern"
     verify_mongodb_rw
 
     mkdir -p "$LOG_DIR"
@@ -749,7 +753,14 @@ run_benchmark() {
     log_info "Latency:           ${LATENCY_MS}ms +/- ${LATENCY_JITTER}ms"
     log_info "Duration:          ${TEST_DURATION}s"
 
-    start_embedded_mongodb
+    # Use 3-node MongoDB replica set so writes include replication latency.
+    # Set w:majority so writes wait for majority ack (matching etcd/ZK behavior).
+    # tc/netem delays on 127.0.0.2-3 make replication take ~40ms RTT.
+    start_mongodb_replset
+    # Set default write concern to majority so update_one waits for replication
+    mongosh --host "127.0.0.1:27017" --eval "
+        db.adminCommand({ setDefaultRWConcern: 1, defaultWriteConcern: { w: 'majority' } })
+    " --quiet >/dev/null 2>&1 || log_warn "Could not set default write concern"
     verify_mongodb_rw
 
     mkdir -p "$LOG_DIR"

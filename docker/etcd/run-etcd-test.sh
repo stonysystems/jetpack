@@ -606,7 +606,8 @@ run_multi_process_test() {
     log_info "Latency: ${LATENCY_MS}ms +/- ${LATENCY_JITTER}ms between servers"
     log_info "Duration: ${TEST_DURATION}s"
 
-    start_embedded_etcd
+    # Use 3-node etcd cluster so writes include Raft replication RTT
+    start_etcd_cluster
     verify_etcd_rw
 
     mkdir -p "$LOG_DIR"
@@ -760,7 +761,10 @@ run_benchmark() {
     log_info "Latency:           ${LATENCY_MS}ms +/- ${LATENCY_JITTER}ms"
     log_info "Duration:          ${TEST_DURATION}s"
 
-    start_embedded_etcd
+    # Use 3-node etcd cluster so that writes include etcd Raft replication
+    # latency (majority ack required). tc/netem delays on 127.0.0.2-3 make
+    # etcd peer replication take ~40ms RTT, matching the simulated WAN.
+    start_etcd_cluster
     verify_etcd_rw
 
     mkdir -p "$LOG_DIR"

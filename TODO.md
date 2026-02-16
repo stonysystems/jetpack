@@ -105,26 +105,24 @@ replication RTT (etcd Raft / ZK ZAB / MongoDB replica set), which should be ~40m
 | ZK C (on) | ~40ms | 40.5ms | ~40ms | 40.4ms | OK |
 
 **Debug tasks** — fix until all settings pass the sanity check:
-- [ ] **etcd A/C h1 = ~2.4ms — NOT resolved**: The etcd "write" should replicate to etcd
-      followers via etcd's internal Raft, so it should include 1 RTT (~40ms) for etcd Raft
-      replication. A ~2ms write means etcd is either running as a single node (no replication)
-      or tc/netem is not applied between etcd inter-node traffic. Investigate:
-  - Is etcd running as a multi-node cluster or single node in the Docker benchmark?
-  - If single node, fix to use a proper etcd cluster (3 or 5 nodes) with tc/netem between them
-  - If multi-node, check that tc/netem rules cover etcd peer communication ports
-  - After fix, etcd h1 should show ~40ms (0ms Jetpack RTT + 40ms etcd Raft replication)
-- [ ] **etcd A/C h2-h5 = ~42ms — NOT resolved**: Only 1 RTT (client→leader). With proper etcd
-      replication, this should be ~80ms (40ms client→leader + 40ms etcd Raft replication).
-      Same root cause as h1 — etcd replication RTT is missing from the critical path.
-- [ ] **ZK A h1 = ~89ms — NOT resolved**: The 50ms "ZK write" is suspiciously high for a
-      local memory/disk write. It likely contains another network RTT — ZooKeeper replicating
-      to its ZAB followers. Investigate:
-  - Is ZooKeeper running as a multi-node ensemble or single node?
-  - If single node: a local write should be ~few ms, so h1 should be ~40ms (replication) + few ms
-  - If multi-node: ZK's ZAB replication adds ~40ms RTT, explaining the ~50ms "write".
-    In that case 89ms = 40ms (Jetpack replication) + 40ms (ZK ZAB replication) + ~9ms local =
-    correct for double-replication, but we need to document this clearly
-  - Check ZK ensemble configuration and whether ZK inter-node traffic goes through tc/netem
+- [x] **etcd A/C h1 = ~2.4ms — FIXED**: Investigation confirmed etcd was running as a
+      **single-node** instance in benchmark mode (`start_embedded_etcd` in `run_benchmark()`).
+      With no replication, etcd write = local WAL+bbolt only (~2ms). **Fix**: Changed
+      `run_benchmark()` and `run_multi_process_test()` in `docker/etcd/run-etcd-test.sh`
+      to use `start_etcd_cluster` (3-node cluster on 127.0.0.1-3). etcd Raft replication
+      traffic between nodes goes through tc/netem (20ms delay on 127.0.0.2-3), so writes
+      now include ~40ms replication RTT. Expected h1 latency: ~40ms.
+- [x] **etcd A/C h2-h5 = ~42ms — FIXED**: Same root cause as h1. With 3-node etcd cluster,
+      expected h2-h5 latency: ~80ms (40ms client→leader RTT + 40ms etcd Raft replication).
+- [x] **ZK A h1 = ~89ms — FIXED**: Investigation confirmed ZooKeeper was running as a
+      **single-node** instance in benchmark mode (`start_embedded_zookeeper`). The ~50ms
+      "write" was ZK's transactional log fsync on a single node. **Fix**: Changed
+      `run_benchmark()` and `run_multi_process_test()` in `docker/zookeeper/run-zookeeper-test.sh`
+      to use `start_zookeeper_ensemble` (3-node ensemble on 127.0.0.1-3). ZAB replication
+      traffic goes through tc/netem. Expected h1 latency with ensemble: ~40ms (ZAB repl RTT)
+      + few ms (local fsync) ≈ ~42-45ms.
+  - Also fixed MongoDB: changed to `start_mongodb_replset` (3-node replica set) with
+    `w:majority` default write concern, so MongoDB writes also wait for replication.
 - [ ] After fixing etcd and investigating ZK, re-run all 12 experiments
 - [ ] Update `docs/latency_analysis.md` and `result.md` with corrected results
 

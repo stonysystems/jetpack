@@ -344,7 +344,8 @@ run_multi_process_test() {
     log_info "Latency: ${LATENCY_MS}ms +/- ${LATENCY_JITTER}ms between servers"
     log_info "Duration: ${TEST_DURATION}s"
 
-    start_embedded_zookeeper
+    # Use 3-node ZK ensemble so writes include ZAB replication latency
+    start_zookeeper_ensemble
     setup_latency
 
     mkdir -p "$LOG_DIR"
@@ -609,7 +610,10 @@ run_benchmark() {
     log_info "Latency:           ${LATENCY_MS}ms +/- ${LATENCY_JITTER}ms"
     log_info "Duration:          ${TEST_DURATION}s"
 
-    start_embedded_zookeeper
+    # Use 3-node ZK ensemble so writes include ZAB replication latency
+    # (majority ack required). tc/netem delays on 127.0.0.2-3 make ZAB
+    # replication take ~40ms RTT, matching the simulated WAN.
+    start_zookeeper_ensemble
 
     mkdir -p "$LOG_DIR"
 
