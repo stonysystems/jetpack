@@ -103,79 +103,42 @@ Latency (median, average) and throughput metrics are computed in `src/deptran/s_
 - Jetpack ON (fast path): expect ~1 RTT latency ≈ 40ms
 - If numbers deviate significantly from this, investigate the cause.
 
-**SANITY CHECK RESOLVED** — all results explained by WAN_WAIT analysis (see `docs/latency_analysis.md`):
+**SANITY CHECK FAILED** — previous results were inflated by `SIMULATE_WAN` software delays
+(`constants.h`) which add 20ms `WAN_WAIT` at multiple code points, **doubling** latency on top
+of tc/netem. When using tc/netem for real network simulation, `SIMULATE_WAN` must be disabled
+(comment out in `constants.h`). All benchmarks need to be re-run.
 
-| Setting | Corrected Expected | Actual | Status |
-|---|---|---|---|
-| MongoDB A (off, 1c) | ~130ms (80ms WAN + 50ms MongoDB I/O) | 133.60ms | OK |
-| MongoDB C (on, 1c) | ~80ms (40ms WAN + 40ms tc quorum) | 87.64ms | OK |
-| etcd A (off, 1c) | ~85ms (80ms WAN + 5ms etcd I/O) | 86.54ms | OK |
-| etcd C (on, 1c) | ~80ms (40ms WAN + 40ms tc quorum) | 81.79ms | OK |
-| ZooKeeper A (off, 1c) | ~170ms (80ms WAN + 90ms ZK I/O) | 172.09ms | OK |
-| ZooKeeper C (on, 1c) | ~80ms (40ms WAN + 40ms tc quorum) | 81.90ms | OK |
-
-Key issues investigated — **all explained** (see `docs/latency_analysis.md`):
-- [x] MongoDB off: 133ms is ~1.7x expected → Explained: 80ms (4 × WAN_WAIT) + ~50ms MongoDB I/O
-- [x] Jetpack on latency is ~80ms across all protocols instead of ~40ms → Explained: fast path
-      works correctly but has 2 sequential WAN_WAITs (40ms) + tc quorum RTT (40ms) = ~80ms.
-      The fast path bypasses backend I/O, achieving backend-independent latency.
-- [x] ZooKeeper off: 172ms is ~2.1x expected → Explained: 80ms (4 × WAN_WAIT) + ~90ms ZK I/O
-- [x] All "Jetpack on" results are ~80ms — fast path IS working correctly. It's 80ms because
-      of 2 WAN_WAITs + 1 tc RTT, not 2 protocol RTTs. Jetpack reduces latency for slow
-      backends: MongoDB 34%, ZooKeeper 52%, etcd 5% (etcd is already fast).
-
-Root cause: The `SIMULATE_WAN` macro (`constants.h:147`) adds 20ms `WAN_WAIT` software delays
-at multiple points (client send, client callback, server submit before/after). These are
-**additive** to tc/netem delays. The initial expectation of ~80ms/~40ms only counted tc RTTs.
+**Pre-run fix**:
+- [ ] Disable `SIMULATE_WAN` in `constants.h` (comment out `#define SIMULATE_WAN`) and rebuild
+      Docker images for all three backends. This is required before any benchmark re-run.
 
 | Experiment | Median Latency (ms) | Avg Latency (ms) | Throughput (txn/s) |
 |---|---:|---:|---:|
-| MongoDB Setting A (1c, c=1, Jetpack off) | 133.60 | 133.60 | 3.20 |
-| MongoDB Setting B (60c, c=200, Jetpack off) | 7,099.85 | 7,099.85 | 1,667.90 |
-| MongoDB Setting C (1c, c=1, Jetpack on) | 87.64 | 87.64 | 3.40 |
-| MongoDB Setting D (60c, c=200, Jetpack on) | 5,538.99 | 5,538.99 | 1,647.60 |
-| etcd Setting A (1c, c=1, Jetpack off) | 86.54 | 86.54 | 3.30 |
-| etcd Setting B (60c, c=200, Jetpack off) | 1,133.92 | 1,133.92 | 9,063.00 |
-| etcd Setting C (1c, c=1, Jetpack on) | 81.79 | 81.79 | 3.40 |
-| etcd Setting D (60c, c=200, Jetpack on) | 1,243.64 | 1,243.64 | 8,752.20 |
-| ZooKeeper Setting A (1c, c=1, Jetpack off) | 172.09 | 172.09 | 3.20 |
-| ZooKeeper Setting B (60c, c=200, Jetpack off) | 3,904.14 | 3,904.14 | 2,985.70 |
-| ZooKeeper Setting C (1c, c=1, Jetpack on) | 81.90 | 81.90 | 3.60 |
-| ZooKeeper Setting D (60c, c=200, Jetpack on) | 4,990.83 | 4,990.83 | 2,191.30 |
+| MongoDB Setting A (1c, c=1, Jetpack off) | | | |
+| MongoDB Setting B (60c, c=200, Jetpack off) | | | |
+| MongoDB Setting C (1c, c=1, Jetpack on) | | | |
+| MongoDB Setting D (60c, c=200, Jetpack on) | | | |
+| etcd Setting A (1c, c=1, Jetpack off) | | | |
+| etcd Setting B (60c, c=200, Jetpack off) | | | |
+| etcd Setting C (1c, c=1, Jetpack on) | | | |
+| etcd Setting D (60c, c=200, Jetpack on) | | | |
+| ZooKeeper Setting A (1c, c=1, Jetpack off) | | | |
+| ZooKeeper Setting B (60c, c=200, Jetpack off) | | | |
+| ZooKeeper Setting C (1c, c=1, Jetpack on) | | | |
+| ZooKeeper Setting D (60c, c=200, Jetpack on) | | | |
 
-Results below are from the first run — **sanity check resolved** (see `docs/latency_analysis.md`).
-All latencies match corrected expectations when accounting for WAN_WAIT software delays.
-
-- [x] Run MongoDB Setting A (open-loop, 1 thread, concurrency=1, Jetpack off), record metrics
-  - Median 133.60ms, throughput 3.20 txn/s (5 processes, avg across h1-h5)
-  - Explained: 80ms WAN + ~50ms MongoDB I/O
-- [x] Run MongoDB Setting B (open-loop, 60 threads, concurrency=200, Jetpack off), record metrics
-  - Median 7,099.85ms, throughput 1,667.90 txn/s
-- [x] Run MongoDB Setting C (open-loop, 1 thread, concurrency=1, Jetpack on), record metrics
-  - Median 87.64ms, throughput 3.40 txn/s (35% latency reduction vs Setting A)
-  - Explained: 40ms WAN + 40ms tc quorum (fast path bypasses MongoDB)
-- [x] Run MongoDB Setting D (open-loop, 60 threads, concurrency=200, Jetpack on), record metrics
-  - Median 5,538.99ms, throughput 1,647.60 txn/s (22% latency reduction vs Setting B)
-- [x] Run etcd Setting A (open-loop, 1 thread, concurrency=1, Jetpack off), record metrics
-  - Median 86.54ms, throughput 3.30 txn/s — OK (close to expected ~80ms)
-- [x] Run etcd Setting B (open-loop, 60 threads, concurrency=200, Jetpack off), record metrics
-  - Median 1,133.92ms, throughput 9,063.00 txn/s
-- [x] Run etcd Setting C (open-loop, 1 thread, concurrency=1, Jetpack on), record metrics
-  - Median 81.79ms, throughput 3.40 txn/s (5% latency reduction vs Setting A)
-  - Explained: 40ms WAN + 40ms tc quorum; etcd I/O only ~5ms so Jetpack gain is small
-- [x] Run etcd Setting D (open-loop, 60 threads, concurrency=200, Jetpack on), record metrics
-  - Median 1,243.64ms, throughput 8,752.20 txn/s (similar to Setting B under high load)
-- [x] Run ZooKeeper Setting A (open-loop, 1 thread, concurrency=1, Jetpack off), record metrics
-  - Median 172.09ms, throughput 3.20 txn/s
-  - Explained: 80ms WAN + ~90ms ZooKeeper I/O
-- [x] Run ZooKeeper Setting B (open-loop, 60 threads, concurrency=200, Jetpack off), record metrics
-  - Median 3,904.14ms, throughput 2,985.70 txn/s
-- [x] Run ZooKeeper Setting C (open-loop, 1 thread, concurrency=1, Jetpack on), record metrics
-  - Median 81.90ms, throughput 3.60 txn/s (52% latency reduction vs Setting A)
-  - Fixed: added MODE_ZOOKEEPER to rule mode switch in commo.cc and config.cc
-  - Explained: 40ms WAN + 40ms tc quorum (fast path bypasses ZooKeeper)
-- [x] Run ZooKeeper Setting D (open-loop, 60 threads, concurrency=200, Jetpack on), record metrics
-  - Median 4,990.83ms, throughput 2,191.30 txn/s
+- [ ] Run MongoDB Setting A (open-loop, 1 thread, concurrency=1, Jetpack off), record metrics
+- [ ] Run MongoDB Setting B (open-loop, 60 threads, concurrency=200, Jetpack off), record metrics
+- [ ] Run MongoDB Setting C (open-loop, 1 thread, concurrency=1, Jetpack on), record metrics
+- [ ] Run MongoDB Setting D (open-loop, 60 threads, concurrency=200, Jetpack on), record metrics
+- [ ] Run etcd Setting A (open-loop, 1 thread, concurrency=1, Jetpack off), record metrics
+- [ ] Run etcd Setting B (open-loop, 60 threads, concurrency=200, Jetpack off), record metrics
+- [ ] Run etcd Setting C (open-loop, 1 thread, concurrency=1, Jetpack on), record metrics
+- [ ] Run etcd Setting D (open-loop, 60 threads, concurrency=200, Jetpack on), record metrics
+- [ ] Run ZooKeeper Setting A (open-loop, 1 thread, concurrency=1, Jetpack off), record metrics
+- [ ] Run ZooKeeper Setting B (open-loop, 60 threads, concurrency=200, Jetpack off), record metrics
+- [ ] Run ZooKeeper Setting C (open-loop, 1 thread, concurrency=1, Jetpack on), record metrics
+- [ ] Run ZooKeeper Setting D (open-loop, 60 threads, concurrency=200, Jetpack on), record metrics
 
 ### Maximum throughput search (6 cases)
 
@@ -184,25 +147,44 @@ Use 60 client threads, vary concurrency to find the maximum throughput for each 
 
 | Case | Best Concurrency | Max Throughput (txn/s) |
 |---|---:|---:|
-| MongoDB (Jetpack off) | c=70 | 2,226 |
-| MongoDB (Jetpack on) | c=70 | 1,871 |
-| etcd (Jetpack off) | c=200 | 9,063 |
-| etcd (Jetpack on) | c=200 | 8,752 |
-| ZooKeeper (Jetpack off) | c=300 | 3,006 |
-| ZooKeeper (Jetpack on) | c=100 | 2,816 |
+| MongoDB (Jetpack off) | | |
+| MongoDB (Jetpack on) | | |
+| etcd (Jetpack off) | | |
+| etcd (Jetpack on) | | |
+| ZooKeeper (Jetpack off) | | |
+| ZooKeeper (Jetpack on) | | |
 
-- [x] MongoDB max throughput (Jetpack off): sweep concurrency with 60 threads
-  - Sweep: c=20→1,160, c=50→2,067, **c=70→2,226** (peak), c=200→1,668
-- [x] MongoDB max throughput (Jetpack on): sweep concurrency with 60 threads
-  - Sweep: c=50→1,591, **c=70→1,871** (peak), c=200→1,648
-- [x] etcd max throughput (Jetpack off): sweep concurrency with 60 threads
-  - Sweep: c=50→2,963, c=150→8,913, **c=200→9,063** (peak), c=500→8,102
-- [x] etcd max throughput (Jetpack on): sweep concurrency with 60 threads
-  - Sweep: c=150→8,573, **c=200→8,752** (peak)
-- [x] ZooKeeper max throughput (Jetpack off): sweep concurrency with 60 threads
-  - Sweep: c=200→2,986, **c=300→3,006** (peak), c=500→2,591
-- [x] ZooKeeper max throughput (Jetpack on): sweep concurrency with 60 threads
-  - Sweep: **c=100→2,816** (peak), c=200→2,191, c=300→2,548
+- [ ] MongoDB max throughput (Jetpack off): sweep concurrency with 60 threads
+- [ ] MongoDB max throughput (Jetpack on): sweep concurrency with 60 threads
+- [ ] etcd max throughput (Jetpack off): sweep concurrency with 60 threads
+- [ ] etcd max throughput (Jetpack on): sweep concurrency with 60 threads
+- [ ] ZooKeeper max throughput (Jetpack off): sweep concurrency with 60 threads
+- [ ] ZooKeeper max throughput (Jetpack on): sweep concurrency with 60 threads
+
+### Docker test script improvements
+
+Improve the Docker run scripts (`run-{mongodb,etcd,zookeeper}-test.sh`) and benchmark mode
+for easier debugging and onboarding:
+
+- [ ] Ensure Docker benchmark output includes key metrics (latency/throughput) from
+      `s_main.cc` directly in stdout — no need to grep logs manually. The output printed by
+      `s_main.cc` (median latency, average latency, throughput) should be visible by default.
+- [ ] Expose configurable args via environment variables for Docker benchmark runs:
+  - `SITE_CONFIG` — site/topology config (number of clients, servers, processes)
+  - `MODE_CONFIG` — protocol mode (`none_<proto>.yml` or `rule_<proto>.yml`)
+  - `CLIENT_CONFIG` — client mode (`client_open.yml` or `client_closed.yml`)
+  - `CONCURRENT_CONFIG` — concurrency config (`concurrent_<N>.yml`)
+  - `LATENCY_MS`, `LATENCY_JITTER` — tc/netem latency parameters
+  - `TEST_DURATION` — test duration in seconds
+  - Document default values for each variable in the script
+- [ ] Update `docs/latency_analysis.md` to note that `SIMULATE_WAN` must be disabled
+      when running with tc/netem, and remove the old WAN_WAIT-based latency model
+- [ ] Update README.md benchmark section with:
+  - How to run each of the 4 settings (A/B/C/D) per protocol using Docker
+  - How to customize number of clients, concurrency, latency, duration via env vars
+  - Example commands for quick sanity-check runs
+  - How to read the output (which lines show latency/throughput)
+  - Note about disabling `SIMULATE_WAN` for tc/netem tests
 
 ### Failure recovery downtime (3 experiments)
 
