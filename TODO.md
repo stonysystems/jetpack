@@ -133,6 +133,10 @@ replication RTT (etcd Raft / ZK ZAB / MongoDB replica set), which should be ~40m
       + few ms (local fsync) ≈ ~42-45ms.
   - Also fixed MongoDB: changed to `start_mongodb_replset` (3-node replica set) with
     `w:majority` default write concern, so MongoDB writes also wait for replication.
+- [ ] Verify all backends (etcd, ZK, MongoDB) run as multi-node clusters in every experiment
+      mode (benchmark, multi-process, recovery) — not single-node instances. Check
+      `docker/{etcd,zookeeper,mongodb}/run-*-test.sh` for `start_etcd_cluster`,
+      `start_zookeeper_ensemble`, `start_mongodb_replset` (not `start_embedded_*`)
 - [ ] After fixing etcd and investigating ZK, re-run all 12 experiments
 - [ ] Update `docs/latency_analysis.md` and `result.md` with corrected results
 
