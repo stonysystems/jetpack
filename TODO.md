@@ -541,3 +541,5 @@ No existing integration code. Needs to be implemented from scratch.
 ## Priority 3 (Low): TLA+ Debugging
 
 - [ ] Read `tla/jetpack_mencius.log` and debug `tla/jetpack_mencius.tla`
+- [ ] Write a report (`docs/jetpack_mencius_tla_debug.md`) documenting what went wrong in the
+      TLA+ spec, root cause analysis, and what fixes were applied
