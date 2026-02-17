@@ -540,6 +540,17 @@ No existing integration code. Needs to be implemented from scratch.
 
 ## Priority 3 (Low): TLA+ Debugging
 
-- [ ] Read `tla/jetpack_mencius.log` and debug `tla/jetpack_mencius.tla`
-- [ ] Write a report (`docs/jetpack_mencius_tla_debug.md`) documenting what went wrong in the
+- [x] Read `tla/jetpack_mencius.log` and debug `tla/jetpack_mencius.tla`
+  - Root cause: `Safety` property used `LogAgreement` (unrestricted log equality at every index),
+    which does not hold for Mencius because servers independently propose to their own round-robin
+    slots, causing uncommitted log entries to legitimately diverge across servers.
+  - The bug was masked with 1 CmdId (all proposals produce the same command value); exposed
+    when config was expanded to 3 CmdIds.
+  - Counterexample (tla/log/mencius_run.log): s2 proposes [id1,k1] to slot 2, s3 proposes
+    [id2,k1] to slot 3 — both at log index 1 but with different values.
+  - Fix (commit 9952f714): replaced `LogAgreement` with `CommittedLogAgreement` which only
+    compares entries up to `min(commitIndex[i], commitIndex[j])`.
+  - Re-verified: 6.4M+ states (3 servers, small config), no violations.
+- [x] Write a report (`docs/jetpack_mencius_tla_debug.md`) documenting what went wrong in the
       TLA+ spec, root cause analysis, and what fixes were applied
+  - Document: `docs/jetpack_mencius_tla_debug.md`
