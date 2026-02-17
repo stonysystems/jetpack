@@ -116,6 +116,17 @@ Note on ZK A: All hosts show ~167ms uniformly because ZK's ZAB leader may not be
 regardless of client location. The Jetpack leader at h1 connects to ZK node at 127.0.0.1
 which may be a follower, forwarding writes to the ZAB leader on a delayed IP.
 
+**ZK latency investigation** — ZK A is ~167ms while etcd A is ~43ms; both are 3-node clusters
+with the same tc/netem setup. This needs investigation and fixing:
+- [ ] Investigate why ZK's ZAB leader may not be at 127.0.0.1 — can we configure ZK to
+      default the leader to 127.0.0.1, or set 127.0.0.1 with higher election priority?
+- [ ] Investigate why ZK ensemble write latency is ~120ms (ZAB replication + fsync) — this
+      is much higher than etcd's ~3ms Raft replication overhead. What causes the extra cost?
+      Is it multiple ZAB rounds, fsync on every write, follower forwarding overhead?
+- [ ] Try to fix/shorten ZK write latency to be comparable with etcd (~40ms expected)
+- [ ] Write a detailed report (`docs/zk_latency_analysis.md`) explaining why ZK has this
+      latency difference vs etcd/MongoDB, root cause analysis, and any fixes applied
+
 **Debug tasks** — fix until all settings pass the sanity check:
 - [x] **etcd A/C h1 = ~2.4ms — FIXED**: Investigation confirmed etcd was running as a
       **single-node** instance in benchmark mode (`start_embedded_etcd` in `run_benchmark()`).
