@@ -276,6 +276,20 @@ measures from signal file write to `recovery_finish_after_failure` detection.
   - ZooKeeper downtime: ~0.5-1.1s (ZAB leader election), Jetpack downtime: ~106ms
   - Fixed: enabled `JETPACK_ZOOKEEPER_RECOVERY` in constants.h
 
+**Failure recovery verification**:
+- [ ] Double-check all 3 recovery tests truly kill the original protocol leader (not a
+      follower) and then wait for leader re-election before measuring recovery time.
+      Verify the kill target PID is the leader process for each backend:
+      - etcd: confirm killed process is the Raft leader (check `etcdctl endpoint status`)
+      - ZooKeeper: confirm killed process is the ZAB leader (check `srvr` four-letter command)
+      - MongoDB: confirm killed process is the replica set primary (check `rs.status()`)
+- [ ] Write notes (`docs/failure_recovery_evaluation.md`) on how to evaluate downtime —
+      methodology for measuring original protocol downtime vs Jetpack downtime, what
+      timestamps/log lines to use, how to distinguish leader kill from leader re-election
+      from Jetpack recovery completion
+- [ ] Save full logs from each recovery test run for review — keep Docker container output,
+      Jetpack server logs, and backend logs in `docs/logs/` or similar
+
 ### Export
 
 - [x] Export all benchmark and recovery data to `result.md`
