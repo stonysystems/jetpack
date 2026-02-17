@@ -277,21 +277,27 @@ measures from signal file write to `recovery_finish_after_failure` detection.
   - Fixed: enabled `JETPACK_ZOOKEEPER_RECOVERY` in constants.h
 
 **Failure recovery verification**:
-- [ ] Double-check all 3 recovery tests truly kill the original protocol leader (not a
+- [x] Double-check all 3 recovery tests truly kill the original protocol leader (not a
       follower) and then wait for leader re-election before measuring recovery time.
       Verify the kill target PID is the leader process for each backend:
       - etcd: confirm killed process is the Raft leader (check `etcdctl endpoint status`)
       - ZooKeeper: confirm killed process is the ZAB leader (check `srvr` four-letter command)
       - MongoDB: confirm killed process is the replica set primary (check `rs.status()`)
-- [ ] Write notes (`docs/failure_recovery_evaluation.md`) on how to evaluate downtime —
+      - **Verified**: All 3 scripts dynamically detect the actual leader before killing:
+        etcd uses `etcdctl endpoint status -w json` (raft_leader == member_id),
+        MongoDB uses `rs.status()` (stateStr === "PRIMARY"),
+        ZooKeeper uses `srvr` four-letter command (Mode: leader).
+        All kill by targeted PID, wait for new leader excluding killed IP.
+- [x] Write notes (`docs/failure_recovery_evaluation.md`) on how to evaluate downtime —
       methodology for measuring original protocol downtime vs Jetpack downtime, what
       timestamps/log lines to use, how to distinguish leader kill from leader re-election
       from Jetpack recovery completion
+      - Document: `docs/failure_recovery_evaluation.md`
 - [x] Save full logs from each recovery test run for review — keep Docker container output,
       Jetpack server logs, and backend logs in `docs/logs/` or similar
-      - Saved to `docs/logs/`: `etcd_recovery.log`, `mongodb_recovery.log`, `zookeeper_recovery.log`
+      - Saved to `docs/logs/`: `etcd_recovery.txt`, `mongodb_recovery.txt`, `zookeeper_recovery.txt`
       - Results: etcd 6672ms/4ms, MongoDB 11047ms/143ms, ZK 540ms/106ms (backend/Jetpack downtime)
-- [ ] Write a design doc (`docs/failure_recovery_design.md`) covering the full failure recovery
+- [x] Write a design doc (`docs/failure_recovery_design.md`) covering the full failure recovery
       architecture and integration procedure for all 3 backends:
       - Overall design: signal-file-based hooker pattern, why external kill + signal vs client
         watcher, separation of original protocol recovery vs Jetpack recovery
@@ -305,6 +311,7 @@ measures from signal file write to `recovery_finish_after_failure` detection.
           election timing (~0.5-1.1s)
       - End-to-end flow: normal operation → leader kill → backend re-election → signal file
         written → Jetpack hooker detects → `JetpackRecoveryEntry()` → recovery complete
+      - Document: `docs/failure_recovery_design.md`
 
 ### Export
 

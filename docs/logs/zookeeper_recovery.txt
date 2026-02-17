@@ -1,0 +1,36 @@
+[0;32m[INFO][0m === Failure Recovery Test: kill ZooKeeper leader, measure recovery ===
+[0;32m[INFO][0m Config: 3 server replicas, 1 client, 3-node ZooKeeper ensemble
+[0;32m[INFO][0m External kill: script kills ZooKeeper leader after 5s, measures recovery
+[0;32m[INFO][0m Duration: 30s
+[0;32m[INFO][0m Starting 3-node ZooKeeper ensemble...
+[0;32m[INFO][0m   Node 1: ip=127.0.0.1, port=2181, pid=26
+[0;32m[INFO][0m   Node 2: ip=127.0.0.2, port=2182, pid=88
+[0;32m[INFO][0m   Node 3: ip=127.0.0.3, port=2183, pid=159
+[0;32m[INFO][0m Waiting for ZooKeeper ensemble to stabilize...
+[0;32m[INFO][0m ZooKeeper ensemble ready (1 leader(s))
+[0;32m[INFO][0m Current ZooKeeper leader: 127.0.0.2:2182
+[0;32m[INFO][0m Starting Jetpack (single-process, no failover config)
+[0;32m[INFO][0m Letting Jetpack run for 5 seconds...
+[0;32m[INFO][0m Killing ZooKeeper node 2 (ip=127.0.0.2, pid=88) with SIGKILL
+[0;32m[INFO][0m Wrote failure_triggered signal
+[0;32m[INFO][0m Waiting for new ZooKeeper leader (killed: 127.0.0.2)...
+[0;32m[INFO][0m New ZooKeeper leader elected: 127.0.0.3:2183 (534ms)
+[0;32m[INFO][0m Wrote primary_elected signal to /tmp/JM_Jetpack_0.0.0.0
+[0;32m[INFO][0m ZooKeeper downtime: 540ms
+[0;32m[INFO][0m Jetpack recovery detected (106ms after signal)
+[0;32m[INFO][0m Waiting for Jetpack to finish...
+[0;32m[INFO][0m --- Recovery Result Validation ---
+[0;32m[INFO][0m   Jetpack recovery started (found in logs)
+[0;32m[INFO][0m   Jetpack recovery completed (duration=1ms)
+[0;32m[INFO][0m   ZooKeeper ensemble: 2/3 nodes healthy
+[0;32m[INFO][0m   Signal files:
+[0;32m[INFO][0m     JM_Jetpack_0.0.0.0: zookeeper:primary_elected
+[0;32m[INFO][0m     JM_Jetpack_failure_triggered: failure:failure_triggered
+[0;32m[INFO][0m     JM_Jetpack_recovery_finish: jetpack:recovery_finish
+[0;32m[INFO][0m     JM_Jetpack_recovery_finish_after_failure: jetpack:recovery_finish_after_failure
+
+[0;32m[INFO][0m === Recovery Timing ===
+[0;32m[INFO][0m   Original protocol (ZooKeeper) downtime: 540ms
+[0;32m[INFO][0m   Jetpack downtime: 106ms
+[0;32m[INFO][0m === Failure Recovery Test PASSED ===
+[0;32m[INFO][0m Cleaning up...
