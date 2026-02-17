@@ -277,29 +277,20 @@ measures from signal file write to `recovery_finish_after_failure` detection.
   - Fixed: enabled `JETPACK_ZOOKEEPER_RECOVERY` in constants.h
 
 **Failure recovery verification**:
-- [x] Double-check all 3 recovery tests truly kill the original protocol leader (not a
+- [ ] Double-check all 3 recovery tests truly kill the original protocol leader (not a
       follower) and then wait for leader re-election before measuring recovery time.
       Verify the kill target PID is the leader process for each backend:
       - etcd: confirm killed process is the Raft leader (check `etcdctl endpoint status`)
       - ZooKeeper: confirm killed process is the ZAB leader (check `srvr` four-letter command)
       - MongoDB: confirm killed process is the replica set primary (check `rs.status()`)
-      - **Verified**: All 3 scripts dynamically detect the actual leader before killing:
-        - etcd: `get_etcd_leader_ip()` uses `etcdctl endpoint status -w json`, compares
-          `raft_leader == member_id` to find the Raft leader
-        - MongoDB: `get_mongodb_primary()` queries `rs.status()` and finds the member
-          with `stateStr === "PRIMARY"`
-        - ZooKeeper: `get_zookeeper_leader()` uses `srvr` four-letter command via `nc`,
-          checks for `Mode: leader`
-        - All kill by targeted PID (not pkill), and wait for new leader excluding killed IP
-- [x] Write notes (`docs/failure_recovery_evaluation.md`) on how to evaluate downtime —
+- [ ] Write notes (`docs/failure_recovery_evaluation.md`) on how to evaluate downtime —
       methodology for measuring original protocol downtime vs Jetpack downtime, what
       timestamps/log lines to use, how to distinguish leader kill from leader re-election
       from Jetpack recovery completion
-      - Document: `docs/failure_recovery_evaluation.md`
-      - Covers: 3 recovery phases (kill → re-election → Jetpack recovery), timestamp
-        capture method, signal file protocol, key log lines, per-backend detection methods
-- [ ] Save full logs from each recovery test run for review — keep Docker container output,
+- [x] Save full logs from each recovery test run for review — keep Docker container output,
       Jetpack server logs, and backend logs in `docs/logs/` or similar
+      - Saved to `docs/logs/`: `etcd_recovery.log`, `mongodb_recovery.log`, `zookeeper_recovery.log`
+      - Results: etcd 6672ms/4ms, MongoDB 11047ms/143ms, ZK 540ms/106ms (backend/Jetpack downtime)
 - [ ] Write a design doc (`docs/failure_recovery_design.md`) covering the full failure recovery
       architecture and integration procedure for all 3 backends:
       - Overall design: signal-file-based hooker pattern, why external kill + signal vs client
