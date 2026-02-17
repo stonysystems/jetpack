@@ -107,16 +107,53 @@ setup_latency() {
     local ips=("127.0.0.1" "127.0.0.2" "127.0.0.3" "127.0.0.4" "127.0.0.5")
     log_info "Setting up latency: ${LATENCY_MS}ms +/- ${LATENCY_JITTER}ms"
 
-    # Add netem qdisc on loopback
-    tc qdisc add dev lo root handle 1: prio bands 4 priomap 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 2>/dev/null || \
-    tc qdisc replace dev lo root handle 1: prio bands 4 priomap 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
+    # Add root qdisc with prio bands so we can attach netem per-IP
+    tc qdisc add dev lo root handle 1: prio bands 16 priomap \
+        0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 2>/dev/null || \
+    tc qdisc replace dev lo root handle 1: prio bands 16 priomap \
+        0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
 
-    tc qdisc add dev lo parent 1:4 handle 40: netem delay "${LATENCY_MS}ms" "${LATENCY_JITTER}ms" 2>/dev/null || \
-    tc qdisc replace dev lo parent 1:4 handle 40: netem delay "${LATENCY_MS}ms" "${LATENCY_JITTER}ms"
-
-    for ip in "${ips[@]}"; do
-        tc filter add dev lo parent 1:0 protocol ip u32 match ip dst "$ip" flowid 1:4 2>/dev/null || true
+    # For each loopback IP (servers 2-5), add a netem delay.
+    # Server 1 (127.0.0.1) has no extra delay — it's the "local" server
+    # where the Jetpack leader and ZK leader both run.
+    # Match both src and dst so that traffic *from* delayed IPs is also delayed.
+    local band=1
+    for ip in "${ips[@]:1}"; do
+        tc qdisc add dev lo parent 1:$((band + 1)) handle $((10 + band)): \
+            netem delay "${LATENCY_MS}ms" "${LATENCY_JITTER}ms" 2>/dev/null || \
+        tc qdisc replace dev lo parent 1:$((band + 1)) handle $((10 + band)): \
+            netem delay "${LATENCY_MS}ms" "${LATENCY_JITTER}ms"
+        tc filter add dev lo parent 1:0 protocol ip prio "$band" u32 \
+            match ip dst "$ip" flowid 1:$((band + 1)) 2>/dev/null || true
+        tc filter add dev lo parent 1:0 protocol ip prio "$band" u32 \
+            match ip src "$ip" flowid 1:$((band + 1)) 2>/dev/null || true
+        log_info "  $ip: ${LATENCY_MS}ms +/- ${LATENCY_JITTER}ms delay"
+        band=$((band + 1))
     done
+
+    # ZooKeeper ZAB peer traffic workaround:
+    # On Linux loopback, all ZK peer connections use 127.0.0.1 as both src
+    # and dst (because ZK followers connect TO the leader at 127.0.0.1:2888
+    # and the kernel picks 127.0.0.1 as source for loopback aliases).
+    # The IP-based filters above don't catch this traffic.
+    # Add port-based filters for the ZK leader's peer port (2888) to simulate
+    # the replication RTT. This delays both directions of ZAB traffic:
+    #   - dst port 2888: follower → leader (ACKs, connection setup)
+    #   - src port 2888: leader → follower (proposals, commits)
+    # Combined: 20ms each way = 40ms RTT, matching the intended WAN simulation.
+    local zk_peer_port=2888
+    tc qdisc add dev lo parent 1:$((band + 1)) handle $((10 + band)): \
+        netem delay "${LATENCY_MS}ms" "${LATENCY_JITTER}ms" 2>/dev/null || \
+    tc qdisc replace dev lo parent 1:$((band + 1)) handle $((10 + band)): \
+        netem delay "${LATENCY_MS}ms" "${LATENCY_JITTER}ms"
+    # Match traffic TO the ZK leader peer port (follower→leader direction)
+    tc filter add dev lo parent 1:0 protocol ip prio "$band" u32 \
+        match ip dport "$zk_peer_port" 0xffff flowid 1:$((band + 1)) 2>/dev/null || true
+    # Match traffic FROM the ZK leader peer port (leader→follower direction)
+    tc filter add dev lo parent 1:0 protocol ip prio "$band" u32 \
+        match ip sport "$zk_peer_port" 0xffff flowid 1:$((band + 1)) 2>/dev/null || true
+    log_info "  ZK peer port $zk_peer_port: ${LATENCY_MS}ms delay (ZAB replication)"
+
     log_info "Latency simulation active on loopback"
 }
 
@@ -132,17 +169,26 @@ start_zookeeper_ensemble() {
     local base_peer_port=2888
     local base_election_port=3888
 
+    # Assign myid in reverse order so that 127.0.0.1 (ENSEMBLE_IPS[0]) gets the
+    # highest myid (3). ZooKeeper's Fast Leader Election picks the highest myid
+    # when zxids are equal (as at fresh start), so this ensures the ZAB leader
+    # is at 127.0.0.1 — the same host as the Jetpack leader. This avoids write
+    # forwarding through tc/netem-delayed IPs.
+    local myids=(3 2 1)
+
     for i in 0 1 2; do
         local ip="${ENSEMBLE_IPS[$i]}"
         local data_dir="/tmp/zk-ensemble-${i}"
         local client_port=$((base_client_port + i))
         local cfg="/tmp/zoo-${i}.cfg"
+        local myid="${myids[$i]}"
 
         rm -rf "$data_dir"
         mkdir -p "$data_dir"
-        echo "$((i + 1))" > "$data_dir/myid"
+        echo "$myid" > "$data_dir/myid"
         ENSEMBLE_DATA_DIRS+=("$data_dir")
 
+        # server.X lines use the myid as X, so server.3=127.0.0.1, server.2=127.0.0.2, etc.
         cat > "$cfg" <<EOF
 tickTime=2000
 initLimit=5
@@ -151,32 +197,34 @@ dataDir=$data_dir
 clientPort=$client_port
 admin.enableServer=false
 4lw.commands.whitelist=ruok,srvr,stat,mntr
-server.1=${ENSEMBLE_IPS[0]}:${base_peer_port}:${base_election_port}
+server.3=${ENSEMBLE_IPS[0]}:${base_peer_port}:${base_election_port}
 server.2=${ENSEMBLE_IPS[1]}:$((base_peer_port + 1)):$((base_election_port + 1))
-server.3=${ENSEMBLE_IPS[2]}:$((base_peer_port + 2)):$((base_election_port + 2))
+server.1=${ENSEMBLE_IPS[2]}:$((base_peer_port + 2)):$((base_election_port + 2))
 EOF
 
         "${ZOOKEEPER_HOME}/bin/zkServer.sh" start "$cfg" > "/tmp/zk-ensemble-${i}.log" 2>&1
         local pid
         pid=$(cat "$data_dir/zookeeper_server.pid" 2>/dev/null || echo "")
         ENSEMBLE_PIDS+=("$pid")
-        log_info "  Node $((i + 1)): ip=$ip, port=$client_port, pid=$pid"
+        log_info "  Node myid=$myid: ip=$ip, port=$client_port, pid=$pid"
     done
 
     # Wait for ensemble to elect a leader
     log_info "Waiting for ZooKeeper ensemble to stabilize..."
     for attempt in $(seq 1 30); do
         local leaders=0
+        local leader_ip=""
         for i in 0 1 2; do
             local port=$((base_client_port + i))
             local mode
             mode=$(echo srvr | nc -w 2 "${ENSEMBLE_IPS[$i]}" "$port" 2>/dev/null | grep "Mode:" | awk '{print $2}' || echo "")
             if [ "$mode" = "leader" ]; then
                 leaders=$((leaders + 1))
+                leader_ip="${ENSEMBLE_IPS[$i]}"
             fi
         done
         if [ "$leaders" -ge 1 ]; then
-            log_info "ZooKeeper ensemble ready ($leaders leader(s))"
+            log_info "ZooKeeper ensemble ready (leader at $leader_ip)"
             return 0
         fi
         sleep 1

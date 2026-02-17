@@ -108,24 +108,23 @@ Latency (median, average) and throughput metrics are computed in `src/deptran/s_
 | etcd C (on) | ~40ms | 40.4ms | ~40ms | 40.7ms | **PASS** |
 | MongoDB A (off) | ~48ms (0 + ~48ms Mongo write) | 47.7ms | ~88ms (40 + ~48ms) | 88.0ms | **PASS** |
 | MongoDB C (on) | ~40-45ms | 45.2ms | ~40-46ms | 45.9ms | **PASS** |
-| ZK A (off) | ~167ms (ZAB repl + fsync) | 167.5ms | ~167ms | 167.5ms | **PASS** (see note) |
-| ZK C (on) | ~40ms | 40.6ms | ~40ms | 40.5ms | **PASS** |
+| ZK A (off) | ~45ms (0 + ~45ms ZAB repl+fsync) | 45.5ms | ~86ms (40 + ~45ms) | 86.0ms | **PASS** |
+| ZK C (on) | ~40ms | 40.3ms | ~40ms | 40.5ms | **PASS** |
 
-Note on ZK A: All hosts show ~167ms uniformly because ZK's ZAB leader may not be at
-127.0.0.1, and ZK ensemble write latency (~120ms ZAB replication + fsync) dominates
-regardless of client location. The Jetpack leader at h1 connects to ZK node at 127.0.0.1
-which may be a follower, forwarding writes to the ZAB leader on a delayed IP.
-
-**ZK latency investigation** — ZK A is ~167ms while etcd A is ~43ms; both are 3-node clusters
-with the same tc/netem setup. This needs investigation and fixing:
-- [ ] Investigate why ZK's ZAB leader may not be at 127.0.0.1 — can we configure ZK to
-      default the leader to 127.0.0.1, or set 127.0.0.1 with higher election priority?
-- [ ] Investigate why ZK ensemble write latency is ~120ms (ZAB replication + fsync) — this
-      is much higher than etcd's ~3ms Raft replication overhead. What causes the extra cost?
-      Is it multiple ZAB rounds, fsync on every write, follower forwarding overhead?
-- [ ] Try to fix/shorten ZK write latency to be comparable with etcd (~40ms expected)
-- [ ] Write a detailed report (`docs/zk_latency_analysis.md`) explaining why ZK has this
-      latency difference vs etcd/MongoDB, root cause analysis, and any fixes applied
+**ZK latency investigation** — ZK A was ~167ms while etcd A was ~43ms; both are 3-node
+clusters with the same tc/netem setup. Three root causes found and fixed:
+- [x] Investigate why ZK's ZAB leader may not be at 127.0.0.1
+  - Root cause: ZK's Fast Leader Election picks highest myid; myid=3 was at 127.0.0.3.
+  - Fix: reversed myid assignment so 127.0.0.1 gets myid=3 (highest), wins election.
+- [x] Investigate why ZK ensemble write latency is ~120ms
+  - Root cause 1: tc/netem applied delay to 127.0.0.1 self-traffic (etcd script skips it).
+  - Root cause 2: ZK ZAB followers connect TO the leader (dst=127.0.0.1), so IP-based
+    tc filters never matched ZK peer traffic (unlike etcd where leader connects TO followers).
+  - Fix: (a) excluded 127.0.0.1 from tc delay, (b) added port-based tc filter for ZK peer
+    port 2888 to delay ZAB replication traffic in both directions.
+- [x] Try to fix/shorten ZK write latency to be comparable with etcd (~40ms expected)
+  - Result: ZK A h1=45.5ms (was 167.5ms), h2-h5=86.0ms (was 167.5ms). Comparable to etcd.
+- [x] Write a detailed report (`docs/zk_latency_analysis.md`) explaining root cause and fixes
 
 **Debug tasks** — fix until all settings pass the sanity check:
 - [x] **etcd A/C h1 = ~2.4ms — FIXED**: Investigation confirmed etcd was running as a
@@ -178,10 +177,10 @@ So "backend write" = backend's own replication RTT (~40ms via tc/netem) + local 
 | MongoDB B (near-peak c=200, off) | — | — | — | 2,135 |
 | MongoDB C (5c, c=1, on) | 45.2 | 45.9 | — | — |
 | MongoDB D (near-peak c=200, on) | — | — | — | 2,160 |
-| ZK A (5c, c=1, off) | 167.5 | 167.5 | — | — |
-| ZK B (near-peak c=200, off) | — | — | — | 5,622 |
-| ZK C (5c, c=1, on) | 40.6 | 40.5 | — | — |
-| ZK D (near-peak c=200, on) | — | — | — | 5,805 |
+| ZK A (5c, c=1, off) | 45.5 | 86.0 | — | — |
+| ZK B (near-peak c=200, off) | — | — | — | 5,743 |
+| ZK C (5c, c=1, on) | 40.3 | 40.5 | — | — |
+| ZK D (near-peak c=200, on) | — | — | — | 5,498 |
 
 - [x] Run etcd Setting A (5c, c=1, Jetpack off) — h1=43.6ms, h2-h5=83.7ms
 - [x] Run etcd Setting B (near-peak throughput, Jetpack off) — 7,927 txn/s
@@ -191,10 +190,10 @@ So "backend write" = backend's own replication RTT (~40ms via tc/netem) + local 
 - [x] Run MongoDB Setting B (near-peak throughput, Jetpack off) — 2,135 txn/s
 - [x] Run MongoDB Setting C (5c, c=1, Jetpack on) — h1=45.2ms, h2-h5=45.9ms
 - [x] Run MongoDB Setting D (near-peak throughput, Jetpack on) — 2,160 txn/s
-- [x] Run ZK Setting A (5c, c=1, Jetpack off) — all hosts ~167.5ms
-- [x] Run ZK Setting B (near-peak throughput, Jetpack off) — 5,622 txn/s
-- [x] Run ZK Setting C (5c, c=1, Jetpack on) — h1=40.6ms, h2-h5=40.5ms
-- [x] Run ZK Setting D (near-peak throughput, Jetpack on) — 5,805 txn/s
+- [x] Run ZK Setting A (5c, c=1, Jetpack off) — h1=45.5ms, h2-h5=86.0ms (re-run after fix)
+- [x] Run ZK Setting B (near-peak throughput, Jetpack off) — 5,743 txn/s (re-run after fix)
+- [x] Run ZK Setting C (5c, c=1, Jetpack on) — h1=40.3ms, h2-h5=40.5ms (re-run after fix)
+- [x] Run ZK Setting D (near-peak throughput, Jetpack on) — 5,498 txn/s (re-run after fix)
 
 ### Maximum throughput search (6 cases)
 

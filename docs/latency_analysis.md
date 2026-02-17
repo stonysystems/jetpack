@@ -85,7 +85,7 @@ latency and produced unrealistically low write times (etcd: ~2ms, ZK: ~50ms fsyn
 **Measured write latencies** (3-node clusters, Setting A, h1 — no client→leader RTT):
 - etcd: ~43.6ms (Raft replication RTT + WAL)
 - MongoDB: ~47.7ms (replication RTT + local write)
-- ZooKeeper: ~167.5ms (ZAB replication + txn log fsync + possible leader forwarding)
+- ZooKeeper: ~45.5ms (ZAB replication RTT + txn log fsync)
 
 ### Rule Mode (Jetpack ON)
 
@@ -137,6 +137,14 @@ Before the RPC bind fix, ALL processes showed ~2.65ms because all client sockets
    replication RTT (~40ms via tc/netem). MongoDB also uses `w:majority` write concern
    to wait for replication acknowledgment.
 
+4. **ZK tc/netem latency** (`docker/zookeeper/run-zookeeper-test.sh`): Three fixes:
+   (a) Excluded 127.0.0.1 from tc delay (etcd script already did this; ZK script didn't).
+   (b) Reversed myid assignment so ZK leader is at 127.0.0.1 (highest myid=3 wins election).
+   (c) Added port-based tc filter for ZK peer port 2888 to delay ZAB replication traffic.
+   ZK ZAB followers connect TO the leader (dst=127.0.0.1), so IP-based tc filters never
+   matched peer traffic. The port filter delays both directions on port 2888, simulating
+   ~40ms RTT for ZAB replication. See `docs/zk_latency_analysis.md` for details.
+
 ### Current Results (3-node backend clusters)
 
 Low-concurrency (5 clients, concurrency=1):
@@ -147,8 +155,8 @@ Low-concurrency (5 clients, concurrency=1):
 | etcd C (on) | 40.4 | 40.7 | Jetpack fast path, 1 RTT |
 | MongoDB A (off) | 47.7 | 88.0 | 0/40ms RTT + ~48ms Mongo repl |
 | MongoDB C (on) | 45.2 | 45.9 | Jetpack fast path, 1 RTT |
-| ZK A (off) | 167.5 | 167.5 | ZAB repl + fsync dominates |
-| ZK C (on) | 40.6 | 40.5 | Jetpack fast path, 1 RTT |
+| ZK A (off) | 45.5 | 86.0 | 0/40ms RTT + ~45ms ZAB repl + fsync |
+| ZK C (on) | 40.3 | 40.5 | Jetpack fast path, 1 RTT |
 
 Maximum throughput (60 clients, best concurrency):
 
