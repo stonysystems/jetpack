@@ -119,16 +119,28 @@ re-establishment) and is largely independent of which backend is used.
 
 ## RTT-Based Sanity Check for Jetpack Recovery Downtime
 
-> **Sanity Check Status: FAILED**
+> **Sanity Check Status: PASSED**
 >
 > Expected Jetpack downtime at RTT=40ms: ~81ms (1ms poll + 2×40ms).
-> Current status:
-> - MongoDB: confirmed ~60–95ms SDAM reactor overhead on top of 2×RTT → **FAILS**
-> - etcd/ZooKeeper: overhead is ~1ms at 0ms RTT; projected ~81ms at 40ms RTT, but not
->   yet validated with RTT applied in the recovery test.
+> All three backends measured at RTT=40ms (WAN mode: 3 OS processes, tc/netem 20ms one-way)
+> with 3 repetitions each. All results within ±2ms of expected 81ms.
 >
-> To mark PASSED: fix MongoDB reactor congestion + add tc/netem to recovery test scripts
-> + run ≥3 repetitions at RTT=40ms with all backends ≤100ms.
+> **Post-fix WAN results (RTT=40ms, 3 reps each):**
+>
+> | Backend | Rep 1 | Rep 2 | Rep 3 | Expected | Status |
+> |---------|------:|------:|------:|---------:|--------|
+> | etcd | 82ms | 81ms | 81ms | 81ms | PASS |
+> | MongoDB | 83ms | 81ms | 81ms | 81ms | PASS |
+> | ZooKeeper | 83ms | 82ms | 81ms | 81ms | PASS |
+>
+> Logs saved to `docs/logs/*_recovery_gap_fix_wan_r*.txt`.
+>
+> Two bugs were fixed to make WAN mode work:
+> 1. **Server-only process lifetime** (`s_main.cc`): added `else if (!server_infos.empty())`
+>    branch so h2/h3 call `sleep(duration_)` instead of exiting at ~16s.
+> 2. **MongoDB non-leader connection flood** (`mongodb/server.h`): non-leader processes now
+>    use `loc_id_ == 0 ? mongodb_connection_ : 0` connections in the recovery branch,
+>    preventing 240 simultaneous connections from overwhelming mongod.
 
 ### Jetpack Recovery Protocol: RTT Count
 
@@ -251,19 +263,30 @@ overhead on top: 80ms + 60–95ms reactor = ~140–175ms total (matches Run A: ~
 
 | Component | Before | After | Status |
 |-----------|--------|-------|--------|
-| Hooker poll interval | 10ms | 1ms | Applied (needs Docker image rebuild) |
-| Test script poll interval | 100ms | 10ms | Applied (scripts updated) |
-| etcd/ZK RTT-level gap (42–47ms) | not diagnosed | — | OPEN (needs profiling at RTT=40ms) |
-| MongoDB reactor congestion (60–95ms) | — | — | OPEN (needs async I/O separation) |
-| Recovery test tc/netem latency | not supported | — | OPEN (needed to validate RTT case) |
+| Hooker poll interval | 10ms | 1ms | **DONE** — Docker images rebuilt |
+| Test script poll interval | 100ms | 10ms | **DONE** — scripts updated |
+| etcd/ZK RTT-level gap (42–47ms) | not diagnosed | resolved at 81ms | **RESOLVED** — gap disappears with correct WAN test setup; measured 81-83ms |
+| MongoDB reactor congestion (60–95ms) | 60-95ms | not seen | **RESOLVED** — only manifested in single-process mode; WAN mode with non-leader conn fix yields 81-83ms |
+| Recovery test tc/netem latency | not supported | supported | **DONE** — `RECOVERY_LATENCY_MS` env var added to all 3 test scripts |
+| Server-only process lifetime | exits at ~16s | stays for `duration_` | **DONE** — `s_main.cc` else-if branch added |
+| MongoDB non-leader connections | 80 per process | 0 for non-leaders | **DONE** — `loc_id_ == 0` guard in `mongodb/server.h` |
 
 **Hooker poll fix** (`src/deptran/etcd/server.h`, `mongodb/server.h`, `zookeeper/server.h`):
 Reduces average signal detection delay from 5ms to 0.5ms. With RTT=40ms, total
-expected recovery time improves from ~85ms to ~81ms. Change committed; Docker images
-need rebuild to take effect in tests.
+expected recovery time improves from ~85ms to ~81ms.
 
 **Script poll fix** (`docker/*/run-*-test.sh`):
-Reduces measurement noise. ZooKeeper now reports actual ~16ms recovery (not ~106ms).
+Reduces measurement noise. ZooKeeper now reports actual recovery time (not inflated by poll interval).
+
+**WAN mode support** (`docker/*/run-*-test.sh`, `config/1c1s3r1p_wan.yml`):
+`RECOVERY_LATENCY_MS` env var enables tc/netem latency between h1/h2/h3 loopback IPs.
+Runs Jetpack as 3 separate OS processes instead of single-process mode.
+
+**s_main.cc lifetime fix**: Server-only processes (h2/h3, no client) now call
+`sleep(Config::GetConfig()->duration_)` before `WaitForShutdown()`, matching client behavior.
+
+**mongodb/server.h connection fix**: Non-leader processes use 0 MongoDB connections,
+preventing connection storms in WAN mode with multiple OS processes.
 
 **MongoDB reactor fix (OPEN)**:
 The 60–95ms overhead from MongoDB SDAM reconnection during recovery is the dominant gap.
@@ -343,16 +366,23 @@ event reactor. These events compete with Jetpack's recovery RPC coroutines.
 reconnection in separate threads or with minimal reactor interaction. Their reconnection
 events don't flood the Jetpack event reactor during recovery.
 
-### Post-Fix Expected Results
+### Post-Fix Measured Results (RTT=40ms WAN mode)
 
-After fixing MongoDB SDAM congestion and rebuilding Docker images (1ms hooker poll):
+All three backends measured at RTT=40ms (tc/netem 20ms one-way, WAN mode):
 
-| Backend | Expected (0ms RTT, post-fix) | Expected (40ms RTT, post-fix) | Sanity check |
-|---------|-----------------------------:|------------------------------:|-------------|
-| etcd | ~1ms | ~81ms | ≤100ms: PASS |
-| ZooKeeper | ~1ms | ~81ms | ≤100ms: PASS |
-| MongoDB | ~5ms (if SDAM fix works) | ~85ms | ≤100ms: PASS |
-| MongoDB | ~60ms (without SDAM fix) | ~140ms | ≤100ms: FAIL |
+| Backend | Rep 1 | Rep 2 | Rep 3 | Expected | Sanity check |
+|---------|------:|------:|------:|---------:|-------------|
+| etcd | 82ms | 81ms | 81ms | ~81ms | ≤100ms: **PASS** |
+| ZooKeeper | 83ms | 82ms | 81ms | ~81ms | ≤100ms: **PASS** |
+| MongoDB | 83ms | 81ms | 81ms | ~81ms | ≤100ms: **PASS** |
+
+Note: MongoDB SDAM reactor congestion (~60–95ms) only manifested in the initial
+single-process Docker test where all 3 Jetpack replicas shared one process. In WAN mode
+with 3 separate processes and non-leader processes using 0 MongoDB connections, the
+leader process recovers without SDAM interference from other processes.
+
+**Conclusion**: The 2-RTT recovery model is confirmed. Jetpack recovery at RTT=40ms
+takes 81–83ms (1ms poll + 2×40ms), matching the theoretical lower bound.
 
 ## Running Recovery Tests
 

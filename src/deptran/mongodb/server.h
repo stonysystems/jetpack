@@ -81,8 +81,10 @@ class MongodbServer : public TxLogServer {
       oss << "/?replicaSet=jetpack-rs";
       mongo_uri_ = oss.str();
     }
-    Log_info("mongo_uri_:%s", mongo_uri_.c_str());
-    mongodb_ = make_shared<MongodbConnectionThreadPool>(mongodb_connection_, mongo_uri_);
+    Log_info("mongo_uri_:%s, loc_id_:%d, mongodb_connection_:%d", mongo_uri_.c_str(), loc_id_, mongodb_connection_);
+    // Only the leader (loc_id_==0) needs actual MongoDB connections for writes.
+    // Non-leaders use 0 connections so they don't overwhelm mongod in WAN mode.
+    mongodb_ = make_shared<MongodbConnectionThreadPool>(loc_id_ == 0 ? mongodb_connection_ : 0, mongo_uri_);
 #else
     // Default legacy behavior: only leader connects using the legacy fixed URI.
     mongo_uri_ = kMongoDbUri;

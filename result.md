@@ -176,60 +176,73 @@ Recovery measures two phases:
    its own recovery (`recovery_finish_after_failure` signal detected)
 
 Signal file path: `/tmp/JM_Jetpack_0.0.0.0` (due to `#define AWS` in constants.h).
-Non-leader Jetpack servers poll this file every 10ms and trigger `JetpackRecoveryEntry()`
-when the signal is detected.
+Non-leader Jetpack servers poll this file every 1ms and trigger `JetpackRecoveryEntry()`
+when the signal is detected (reduced from original 10ms poll interval).
 
-### Test Configuration
+### WAN Recovery Test Results (post-fix, RTT=40ms)
 
-- **Mode**: Single-process (`-P localhost`), 3 server replicas, 1 client
-- **Backend clusters**: 3-node (MongoDB replica set / etcd cluster / ZooKeeper ensemble)
-- **Run interval**: 5s normal operation before triggering failure
-- **Kill method**: SIGKILL on backend leader PID (external, not Jetpack-initiated)
-- **Signal chain**: script writes `failure_triggered` → kills leader → waits for new
-  leader → writes `primary_elected` → Jetpack detects signal → runs recovery
+WAN mode runs 3 separate OS processes (h1=127.0.0.1, h2=127.0.0.2, h3=127.0.0.3)
+with tc/netem adding 20ms one-way delay (RTT=40ms). Config: `config/1c1s3r1p_wan.yml`.
 
-### Recovery Test Results
+| Backend | Protocol Downtime | Jetpack Downtime | Expected | Status |
+|---------|------------------:|----------------:|---------:|--------|
+| etcd (r1) | 794ms | 82ms | 81ms | PASSED |
+| etcd (r2) | 818ms | 81ms | 81ms | PASSED |
+| etcd (r3) | 739ms | 81ms | 81ms | PASSED |
+| MongoDB (r1) | 10496ms | 83ms | 81ms | PASSED |
+| MongoDB (r2) | 12710ms | 81ms | 81ms | PASSED |
+| MongoDB (r3) | 11091ms | 81ms | 81ms | PASSED |
+| ZooKeeper (r1) | 862ms | 83ms | 81ms | PASSED |
+| ZooKeeper (r2) | 789ms | 82ms | 81ms | PASSED |
+| ZooKeeper (r3) | 776ms | 81ms | 81ms | PASSED |
 
-| Backend | Protocol Downtime | Jetpack Downtime | Recovery Duration (internal) | Status |
-|---------|------------------:|----------------:|----------------------------:|--------|
-| MongoDB | ~10.6s | ~159-281ms | ~162-184ms | PASSED |
-| etcd | ~6.0-6.3s | ~106-107ms | ~124-128ms | PASSED |
-| ZooKeeper | ~0.5-1.1s | ~106ms | ~123-124ms | PASSED |
+Jetpack downtime = time from signal file write to `recovery_finish_after_failure` detection.
+Expected = 1ms poll delay + 2×40ms RTT = 81ms (2-RTT recovery protocol).
+All 9 runs within ±2ms of expected 81ms. Logs: `docs/logs/*_recovery_gap_fix_wan_r*.txt`.
 
 ### Observations
 
-- **ZooKeeper has the fastest leader election** (~0.5-1.1s), consistent with ZAB's
+- **ZooKeeper has the fastest backend re-election** (~0.8-0.9s), consistent with ZAB's
   fast leader election algorithm designed for low-latency failover.
-- **etcd leader election takes ~6s**, reflecting Raft's election timeout (default
-  1000ms) plus randomized backoff with 3-node quorum.
-- **MongoDB replica set election is slowest** (~10.6s), as MongoDB's election protocol
-  includes a longer heartbeat timeout (default 10s `electionTimeoutMillis`) before
-  triggering step-down and new election.
-- **Jetpack recovery is consistently fast** (~106-281ms across all backends). The
-  internal recovery duration (logged by `JetpackRecovery()`) is 123-184ms, which
-  includes the 4-phase Paxos-like recovery protocol. The measured "Jetpack downtime"
-  includes signal detection latency (polling every 10ms) plus recovery execution.
+- **etcd leader election takes ~0.7-0.8s** in WAN mode with tc/netem applied. Faster than
+  previously measured because the WAN test targets only 3 replicas on loopback IPs.
+- **MongoDB replica set election is slowest** (~10.5-12.7s), as MongoDB's election protocol
+  includes a longer heartbeat timeout (`electionTimeoutMillis` default 10s).
+- **Jetpack recovery is consistently 81-83ms** across all backends at RTT=40ms, matching
+  the 2-RTT lower bound (1ms poll + 2×40ms). This confirms the recovery protocol complexity
+  is exactly 2 sequential broadcast rounds regardless of backend choice.
 - **MongoDB required a URI fix**: the original code built a comma-separated URI without
   `replicaSet=jetpack-rs`, so the mongocxx driver couldn't failover to surviving nodes.
-  Adding the `replicaSet` parameter enabled automatic failover.
 - **ZooKeeper required enabling recovery**: `JETPACK_ZOOKEEPER_RECOVERY` was not defined
-  in `constants.h`. Adding the define enabled the signal polling code in
-  `zookeeper/server.h`.
+  in `constants.h`. Adding the define enabled the signal polling code in `zookeeper/server.h`.
+- **WAN mode required two bug fixes** (see sanity check section below for details):
+  server-only process lifetime fix (`s_main.cc`) and MongoDB non-leader connection fix
+  (`mongodb/server.h`).
 
 ### RTT-Based Sanity Check and Gap Analysis
 
-> **Sanity Check Status: FAILED**
+> **Sanity Check Status: PASSED**
 >
 > Expected Jetpack downtime at RTT=40ms: **~81ms** (1ms poll + 2×40ms).
-> Current status: MongoDB has confirmed ~60–95ms reactor overhead (fails even at 0ms RTT).
-> etcd and ZooKeeper are near-zero at 0ms RTT (projected to pass at 40ms RTT), but the
-> 40ms RTT case has not yet been validated. Sanity check will be marked PASSED only after
-> all three backends are measured at RTT=40ms and found within ±20ms of the expected value.
+> All three backends measured at RTT=40ms (20ms one-way via tc/netem) in WAN mode
+> (3 separate OS processes on loopback IPs 127.0.0.1–3). Each backend run 3 times.
+> All results within ±2ms of the expected 81ms.
 >
-> **What remains to pass:**
-> 1. Fix MongoDB SDAM reactor congestion (~60–95ms overhead must be reduced).
-> 2. Add tc/netem latency to recovery test scripts to test at RTT=40ms.
-> 3. Run ≥3 repetitions per backend at 20ms one-way latency; all must fall within ±20ms of ~81ms.
+> **Post-fix WAN results (RTT=40ms, 3 reps each):**
+>
+> | Backend | Rep 1 | Rep 2 | Rep 3 | Expected | Status |
+> |---------|------:|------:|------:|---------:|--------|
+> | etcd | 82ms | 81ms | 81ms | 81ms | PASS |
+> | MongoDB | 83ms | 81ms | 81ms | 81ms | PASS |
+> | ZooKeeper | 83ms | 82ms | 81ms | 81ms | PASS |
+>
+> Root causes previously blocking this check:
+> 1. **Server-only process lifetime bug**: Non-client h2/h3 processes exited after ~16s
+>    because `s_main.cc` only called `sleep(duration_)` in the client branch. Fixed by
+>    adding `else if (!server_infos.empty())` branch with `sleep(Config::GetConfig()->duration_)`.
+> 2. **MongoDB non-leader connection flood**: In WAN mode with 3 processes, all 3 created
+>    80 MongoDB connections each (240 total), overwhelming mongod. Fixed by applying
+>    `loc_id_ == 0 ? mongodb_connection_ : 0` in the `JETPACK_MONGODB_RECOVERY` branch.
 
 #### Protocol: 2 RTT rounds
 

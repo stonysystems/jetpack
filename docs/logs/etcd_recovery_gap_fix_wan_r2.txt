@@ -1,0 +1,45 @@
+[0;32m[INFO][0m === Failure Recovery Test: kill etcd leader, measure recovery ===
+[0;32m[INFO][0m Config: 3 server replicas, 1 client, 3-node etcd cluster
+[0;32m[INFO][0m External kill: script kills etcd leader after 5s, measures recovery
+[0;32m[INFO][0m Duration: 30s
+[0;32m[INFO][0m WAN mode: 20ms one-way latency (RTT=40ms)
+[0;32m[INFO][0m Starting 3-node etcd cluster...
+[0;32m[INFO][0m   etcd0 (127.0.0.1:2379) PID=9
+[0;32m[INFO][0m   etcd1 (127.0.0.2:2379) PID=16
+[0;32m[INFO][0m   etcd2 (127.0.0.3:2379) PID=23
+[0;32m[INFO][0m etcd cluster is ready (3/3 nodes healthy)
+[0;32m[INFO][0m Verifying etcd read/write at http://127.0.0.1:2379 ...
+[0;32m[INFO][0m etcd read/write verification passed
+[0;32m[INFO][0m Setting up network latency: 20ms +/- 0ms on lo
+[0;32m[INFO][0m   127.0.0.2: 20ms +/- 0ms delay
+[0;32m[INFO][0m   127.0.0.3: 20ms +/- 0ms delay
+[0;32m[INFO][0m   127.0.0.4: 20ms +/- 0ms delay
+[0;32m[INFO][0m   127.0.0.5: 20ms +/- 0ms delay
+[0;32m[INFO][0m Latency simulation active
+[0;32m[INFO][0m Starting Jetpack (3-process WAN mode: h1=127.0.0.1, h2=127.0.0.2, h3=127.0.0.3)
+[0;32m[INFO][0m Letting Jetpack run for 5 seconds...
+[0;32m[INFO][0m Current etcd leader: 127.0.0.1
+[0;32m[INFO][0m Killing etcd node at 127.0.0.1 (PID=9)
+[0;32m[INFO][0m Wrote failure_triggered signal
+[0;32m[INFO][0m Waiting for new etcd leader (old leader was 127.0.0.1)...
+[0;32m[INFO][0m New etcd leader elected: 127.0.0.3 (took 6973ms)
+[0;32m[INFO][0m etcd downtime: 6973ms (new leader: 127.0.0.3)
+[0;32m[INFO][0m Wrote primary_elected signal to /tmp/JM_Jetpack_0.0.0.0
+[0;32m[INFO][0m Jetpack recovery detected (5ms after signal)
+[0;32m[INFO][0m Waiting for Jetpack to finish...
+[0;32m[INFO][0m --- Recovery Result Validation ---
+[0;32m[INFO][0m   Jetpack recovery started (found in logs)
+[0;32m[INFO][0m   Jetpack recovery completed (duration=81ms)
+[0;32m[INFO][0m   etcd leader change detected in Jetpack logs
+[0;32m[INFO][0m   etcd cluster: 2/3 nodes healthy
+[0;32m[INFO][0m   Signal files:
+[0;32m[INFO][0m     JM_Jetpack_0.0.0.0: etcd:primary_elected
+[0;32m[INFO][0m     JM_Jetpack_failure_triggered: failure:failure_triggered
+[0;32m[INFO][0m     JM_Jetpack_recovery_finish: jetpack:recovery_finish
+[0;32m[INFO][0m     JM_Jetpack_recovery_finish_after_failure: jetpack:recovery_finish_after_failure
+
+[0;32m[INFO][0m === Recovery Timing ===
+[0;32m[INFO][0m   Original protocol (etcd) downtime: 6973ms
+[0;32m[INFO][0m   Jetpack downtime: 5ms
+[0;32m[INFO][0m === Failure Recovery Test PASSED ===
+[0;32m[INFO][0m Cleaning up...

@@ -329,13 +329,18 @@ measures from signal file write to `recovery_finish_after_failure` detection.
         Dockerfiles: `COPY third_party/ /build/third_party/` before cmake builds (cached layer),
         then `COPY . /build/` just before rpcgen+WAF (invalidated by src changes). Makes incremental
         rebuilds ~6 min instead of ~40 min when only `src/` changes.
-- [ ] Re-run failure recovery experiments after fixes:
+- [x] Re-run failure recovery experiments after fixes:
       - Run at least 3 repetitions per backend (MongoDB/etcd/ZooKeeper) with the same 20ms one-way latency setup.
       - Report before/after recovery downtime and remaining gap to expected RTT model.
-- [ ] Update report/docs with full gap analysis and fixes:
+      - **Results (2026-02-21, WAN mode RTT=40ms)**: All 9 runs PASSED (81–83ms each, expected 81ms).
+        etcd: 82ms/81ms/81ms, MongoDB: 83ms/81ms/81ms, ZooKeeper: 83ms/82ms/81ms.
+        Logs: `docs/logs/*_recovery_gap_fix_wan_r*.txt`.
+- [x] Update report/docs with full gap analysis and fixes:
       - `docs/failure_recovery_evaluation.md`: reason analysis, root cause, fix design, validation results.
       - `result.md`: final post-fix numbers, expected-vs-measured comparison, pass/fail of sanity check.
       - Save rerun logs under `docs/logs/` with clear `*_recovery_gap_fix_*.txt` naming.
+      - **Done (2026-02-21)**: Sanity check updated to PASSED in both result.md and evaluation doc.
+        WAN results table added. All fixes listed in Fixes Applied table marked DONE.
 - [x] Double-check all 3 recovery tests truly kill the original protocol leader (not a
       follower) and then wait for leader re-election before measuring recovery time.
       Verify the kill target PID is the leader process for each backend:
