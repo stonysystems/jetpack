@@ -563,7 +563,7 @@ run_recovery_test() {
     local jetpack_downtime_ms="N/A"
     local signal_write_ns
     signal_write_ns=$(date +%s%N)
-    for attempt in $(seq 1 200); do
+    for attempt in $(seq 1 2000); do
         if [ -f /tmp/JM_Jetpack_recovery_finish_after_failure ] || \
            grep -q "JETPACK-RECOVERY.*COMPLETED" "$LOG_DIR/proc-localhost.log" 2>/dev/null; then
             local recovery_ns
@@ -572,7 +572,7 @@ run_recovery_test() {
             log_info "Jetpack recovery detected (${jetpack_downtime_ms}ms after signal)"
             break
         fi
-        sleep 0.1
+        sleep 0.01
     done
 
     # Wait for Jetpack to finish

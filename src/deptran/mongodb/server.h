@@ -119,7 +119,7 @@ class MongodbServer : public TxLogServer {
           JetpackRecoveryEntry();
           break;
         }
-          auto sp_e = Reactor::CreateSpEvent<TimeoutEvent>(10 * 1000); // 10ms
+          auto sp_e = Reactor::CreateSpEvent<TimeoutEvent>(1 * 1000); // 1ms (reduced from 10ms)
           sp_e->Wait();
         }
       });

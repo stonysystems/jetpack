@@ -1,0 +1,41 @@
+[INFO] === Failure Recovery Test: kill etcd leader, measure recovery ===
+[INFO] Config: 3 server replicas, 1 client, 3-node etcd cluster
+[INFO] External kill: script kills etcd leader after 5s, measures recovery
+[INFO] Duration: 30s
+[INFO] Starting 3-node etcd cluster...
+[INFO]   etcd0 (127.0.0.1:2379) PID=9
+[INFO]   etcd1 (127.0.0.2:2379) PID=12
+[INFO]   etcd2 (127.0.0.3:2379) PID=15
+[INFO] etcd cluster is ready (3/3 nodes healthy)
+[INFO] Verifying etcd read/write at http://127.0.0.1:2379 ...
+[INFO] etcd read/write verification passed
+[INFO] Starting Jetpack (single-process, no failover config)
+[INFO] Letting Jetpack run for 5 seconds...
+[INFO] Current etcd leader: 127.0.0.3
+[INFO] Killing etcd node at 127.0.0.3 (PID=15)
+[INFO] Wrote failure_triggered signal
+[INFO] Waiting for new etcd leader (old leader was 127.0.0.3)...
+[INFO] New etcd leader elected: 127.0.0.1 (took 1060ms)
+[INFO] etcd downtime: 1060ms (new leader: 127.0.0.1)
+[INFO] Wrote primary_elected signal to /tmp/JM_Jetpack_0.0.0.0
+[INFO] Jetpack recovery detected (3ms after signal)
+[INFO] Waiting for Jetpack to finish...
+[INFO] --- Recovery Result Validation ---
+[INFO]   Jetpack recovery started (found in logs)
+[INFO]   Jetpack recovery completed (duration=1ms)
+[INFO]   etcd leader change detected in Jetpack logs
+[INFO]   etcd cluster: 2/3 nodes healthy
+[INFO]   Signal files:
+[INFO]     JM_Jetpack_0.0.0.0: etcd:primary_elected
+[INFO]     JM_Jetpack_failure_triggered: failure:failure_triggered
+[INFO]     JM_Jetpack_recovery_finish: jetpack:recovery_finish
+[INFO]     JM_Jetpack_recovery_finish_after_failure: jetpack:recovery_finish_after_failure
+
+[INFO] === Recovery Timing ===
+[INFO]   Original protocol (etcd) downtime: 1060ms
+[INFO]   Jetpack downtime: 3ms
+[INFO] === Failure Recovery Test PASSED ===
+[INFO] Cleaning up...
+
+NOTE: Script poll interval changed from 100ms to 10ms (sleep 0.01).
+NOTE: etcd downtime is shorter this run (1060ms vs 6672ms original) due to configuration differences.

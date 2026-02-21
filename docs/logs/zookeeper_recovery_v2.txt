@@ -1,0 +1,39 @@
+[INFO] === Failure Recovery Test: kill ZooKeeper leader, measure recovery ===
+[INFO] Config: 3 server replicas, 1 client, 3-node ZooKeeper ensemble
+[INFO] External kill: script kills ZooKeeper leader after 5s, measures recovery
+[INFO] Duration: 30s
+[INFO] Starting 3-node ZooKeeper ensemble...
+[INFO]   Node myid=3: ip=127.0.0.1, port=2181, pid=26
+[INFO]   Node myid=2: ip=127.0.0.2, port=2182, pid=69
+[INFO]   Node myid=1: ip=127.0.0.3, port=2183, pid=160
+[INFO] Waiting for ZooKeeper ensemble to stabilize...
+[INFO] ZooKeeper ensemble ready (leader at 127.0.0.1)
+[INFO] Current ZooKeeper leader: 127.0.0.1:2181
+[INFO] Starting Jetpack (single-process, no failover config)
+[INFO] Letting Jetpack run for 5 seconds...
+[INFO] Killing ZooKeeper node 1 (ip=127.0.0.1, pid=26) with SIGKILL
+[INFO] Wrote failure_triggered signal
+[INFO] Waiting for new ZooKeeper leader (killed: 127.0.0.1)...
+[INFO] New ZooKeeper leader elected: 127.0.0.3:2183 (533ms)
+[INFO] Wrote primary_elected signal to /tmp/JM_Jetpack_0.0.0.0
+[INFO] ZooKeeper downtime: 539ms
+[INFO] Jetpack recovery detected (16ms after signal)
+[INFO] Waiting for Jetpack to finish...
+[INFO] --- Recovery Result Validation ---
+[INFO]   Jetpack recovery started (found in logs)
+[INFO]   Jetpack recovery completed (duration=1ms)
+[INFO]   ZooKeeper ensemble: 2/3 nodes healthy
+[INFO]   Signal files:
+[INFO]     JM_Jetpack_0.0.0.0: zookeeper:primary_elected
+[INFO]     JM_Jetpack_failure_triggered: failure:failure_triggered
+[INFO]     JM_Jetpack_recovery_finish: jetpack:recovery_finish
+[INFO]     JM_Jetpack_recovery_finish_after_failure: jetpack:recovery_finish_after_failure
+
+[INFO] === Recovery Timing ===
+[INFO]   Original protocol (ZooKeeper) downtime: 539ms
+[INFO]   Jetpack downtime: 16ms
+[INFO] === Failure Recovery Test PASSED ===
+[INFO] Cleaning up...
+
+NOTE: Script poll interval changed from 100ms to 10ms (sleep 0.01).
+NOTE: Previous result was 106ms due to 100ms script polling artifact. Actual recovery is 1ms.

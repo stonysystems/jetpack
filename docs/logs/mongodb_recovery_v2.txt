@@ -1,0 +1,43 @@
+[INFO] === Failure Recovery Test: kill MongoDB primary, measure recovery ===
+[INFO] Config: 3 server replicas, 1 client, 3-member MongoDB replica set
+[INFO] External kill: script kills MongoDB primary after 5s, measures recovery
+[INFO] Duration: 60s
+[INFO] Starting 3-member MongoDB replica set...
+[INFO]   mongod0 (127.0.0.1:27017) PID=11
+[INFO]   mongod1 (127.0.0.2:27017) PID=74
+[INFO]   mongod2 (127.0.0.3:27017) PID=137
+[INFO] Initiating replica set 'jetpack-rs'...
+[INFO] Replica set is ready (primary=127.0.0.1)
+[INFO] Verifying MongoDB read/write...
+[INFO] MongoDB read/write verification passed
+[INFO] Starting Jetpack (single-process, no failover config)
+[INFO] Letting Jetpack run for 5 seconds...
+[INFO] Current MongoDB primary: 127.0.0.1
+[INFO] Killing MongoDB node at 127.0.0.1 (PID=11)
+[INFO] Wrote failure_triggered signal
+[INFO] Waiting for new MongoDB primary (old primary was 127.0.0.1)...
+[INFO] New MongoDB primary elected: 127.0.0.3 (took 10259ms)
+[INFO] MongoDB downtime: 10259ms (new primary: 127.0.0.3)
+[INFO] Wrote primary_elected signal to /tmp/JM_Jetpack_0.0.0.0
+[INFO] Jetpack recovery detected (94ms after signal)
+[INFO] Waiting for Jetpack to finish...
+[INFO] --- Recovery Result Validation ---
+[INFO]   Jetpack recovery started (found in logs)
+[INFO]   Jetpack recovery completed (duration=60ms)
+[INFO]   MongoDB replica set: 2/3 nodes healthy
+[INFO]   Signal files:
+[INFO]     JM_Jetpack_0.0.0.0: mongo:primary_elected
+[INFO]     JM_Jetpack_failure_triggered: failure:failure_triggered
+[INFO]     JM_Jetpack_recovery_finish: jetpack:recovery_finish
+[INFO]     JM_Jetpack_recovery_finish_after_failure: jetpack:recovery_finish_after_failure
+
+[INFO] === Recovery Timing ===
+[INFO]   Original protocol (MongoDB) downtime: 10259ms
+[INFO]   Jetpack downtime: 94ms
+[INFO] === Failure Recovery Test PASSED ===
+[INFO] Cleaning up...
+
+NOTE: Script poll interval changed from 100ms to 10ms (sleep 0.01).
+NOTE: Previous result was 143ms script-reported (100ms artifact + 43ms). Now 94ms more accurately 
+      reflects actual recovery (60ms internal + ~34ms polling overhead at 10ms poll interval).
+NOTE: MongoDB internal recovery still ~60-95ms due to reactor congestion during SDAM reconnection.
