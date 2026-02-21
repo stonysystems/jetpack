@@ -46,6 +46,24 @@ TLC logs are saved to `tla/log/` with protocol name and timestamp.
     - [x] ZooKeeper: signal write in `Leader.java:lead()` after `setZabState(BROADCAST)`
       (`third_party/zookeeper/`)
 
+### Jetpack pseudocode documentation refresh
+
+- [ ] Extract the current Jetpack algorithm flow from implementation (normal case + failure recovery)
+  - Use `docs/jetpack_pseudocode_old.tex` as the format/template baseline
+  - Build step-to-code mapping first so pseudocode matches current behavior
+- [ ] Write `docs/jetpack_pseudocode_optimized.tex` for the current optimized implementation
+  - Include normal-case algorithm with merged RPC flow used today
+  - Include failure-recovery algorithm (`JetpackRecoveryEntry` path and completion condition)
+  - Call out which legacy RPC steps are merged in the optimized path
+- [ ] Write `docs/jetpack_pseudocode.tex` for the non-optimized reference flow
+  - Include explicit RPCs: `PreAccept`, `Prepare`, `Accept`, `Resubmit`, `FinishRecovery`
+  - Cover both normal-case and failure-recovery algorithms in full
+  - Keep naming/semantics aligned with current Jetpack implementation
+- [ ] Validate and document both pseudocode versions
+  - Verify every step against current code paths to avoid stale old-version logic
+  - Ensure formatting/style matches `docs/jetpack_pseudocode_old.tex`
+  - Add a short write-up describing optimized vs non-optimized RPC mapping and rationale
+
 ## Priority 0 (Top): Benchmark Data Collection (`result.md`)
 
 ### Performance chart (12 experiments)

@@ -1,0 +1,458 @@
+% Setting up the document class for a two-column article
+\documentclass[twocolumn]{article}
+
+% Including essential packages for formatting and functionality
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage{amsmath, amssymb}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{lipsum} % For dummy text
+
+% Including algorithm2e for algorithm typesetting
+\usepackage[linesnumbered,ruled,vlined]{algorithm2e}
+
+% Configuring page geometry for better layout in two-column format
+\usepackage[margin=1in]{geometry}
+
+% Ensuring proper hyperlinking and metadata
+\usepackage{hyperref}
+\hypersetup{
+    colorlinks=true,
+    linkcolor=blue,
+    citecolor=blue,
+    urlcolor=blue
+}
+
+\newcommand{\zh}[1]{\pgwrapper{magenta}{ZH}{#1}}
+
+% Setting up bibliography support
+\usepackage{natbib}
+\bibliographystyle{plain}
+
+% Configuring fonts (loaded last as per guidelines)
+\usepackage{lmodern}
+
+% Beginning the document
+\begin{document}
+
+% Adding title, author, and abstract
+\title{Jetpack Algorithm}
+\maketitle
+
+
+\paragraph{View Change Outline}
+
+\begin{itemize}
+  \setlength{\itemsep}{0pt}
+  \item \textbf{Pause original protocol for a while (Algo~\ref{alg:begin_recovery})}
+  \begin{itemize}
+    \setlength{\itemsep}{0pt}
+     \item Aim: prevent new proposing replica from submiting request before command that in the current unexecuted command pool
+     \item Where: after a non-proposing replica become proposing replica; before it start to accept requests
+  \end{itemize}
+  
+  \item \textbf{Jetpack coordinator collect cmd from cmd pools (Algo~\ref{alg:jetpack_recovery})}
+  \begin{itemize}
+    \setlength{\itemsep}{0pt}
+    \item Index by epoch and ballot
+  \end{itemize}
+  
+  \item \textbf{Jetpack coordinator resubmit (Algo~\ref{alg:jetpack_recovery})}
+  \begin{itemize}
+    \setlength{\itemsep}{0pt}
+    \item Forward to a proposing replica to resubmit
+  \end{itemize}
+  
+\end{itemize}
+
+
+\begin{algorithm}
+\caption{Client - Request}
+    \label{alg:client_request}
+    \setcounter{AlgoLine}{0}
+    
+    \underline{Client $C$, start to send a request of $cmd$}\\
+
+    $(cmd\_id, type, k, v)\gets cmd$\\
+    \eIf{fast path On}{
+        client broadcast $Request(C.epoch, cmd)$ to replicas on $C.view$\\
+        \eIf{receiving at least $f+\lfloor\frac{f+1}{2}\rfloor+1$ $PreAcceptAck(view, result, verison)$ with the same version  \textbf{and} all $result$ from proposors (according to $view$) are not $NULL$\label{line:fastpathsuccesscondition}} {
+            return $result$ in the response\\
+        }
+        {
+            wait for $result$ of $cmd\_id$ from servers\\
+            return $result$ in the response\\
+        }
+        \If{Received$PreAcceptRej(epoch, view)$\textbf{ and }$epoch>C.epoch$} {
+            $C.epoch\gets epoch$\\
+            $C.view\gets view$\\
+        }
+    } {
+        client broadcasts $Request(cmd)$ according to original protocol rules\\
+        wait for $result$ of $cmd\_id$ from servers\\
+        return $result$ in the response\\
+    }
+\end{algorithm}
+
+\paragraph{Need for a Reliable View} 
+In the condition specified in line~\ref{line:fastpathsuccesscondition}, fast path success requires a supermajority that includes all proposing replicas. A key challenge here is: how can the client determine who the up-to-date proposing replicas are? Even the view provided by the presumed leader may be unreliable—it could come from an outdated leader that is unaware of a network partition. Therefore, to ensure we operate under the correct view, the client must collect responses from a majority of replicas that agree on the same view.
+
+
+\begin{algorithm}
+\caption{JetPack - PreAccept}
+    \label{alg:jetpack_preaccept}
+    \setcounter{AlgoLine}{16}
+    
+    \underline{Replica $R$, on receiving $Request(epoch, cmd)$}
+    \underline{from client $C$}\\
+    \eIf{$epoch=R.jepoch$\textbf{ and }$R.status=RDY$\label{line:normalrequestdisabledcheck}} {
+        $preaccept\gets False$\\
+        $result\gets NULL$\\
+        $version\gets NULL$\\
+        \If{$cmd$ has no conflicting with any unexecuted cmd in $R.pool$} {
+            $preaccept\gets True$\\
+            \If{$R.proposing\_replica$} {
+                $(result, version)\gets  speculative\_install(cmd)$\label{line:speculativeinstall}\\
+            }
+        }
+        $R.pool.insert(\{cmd, preaccept\})$\label{line:commandpoolinsert}\\
+        \eIf{$preaccept$} {
+            reply $PreAcceptAck(R.new\_view,$ $result,$ $version)$ to client\\
+        } {
+            reply $PreAcceptRej(R.jepoch, R.new\_view)$ to client\\
+        }
+        \If{$R.proposing\_replica$}{
+            $OnRequest(cmd)$\\
+        }
+    } {
+        reply $PreAcceptRej(R.jepoch,$ $R.new\_view)$ to client\\
+    }
+    % \If{$epoch>R.epoch$}{
+    %     $R.epoch\gets epoch$
+    % }
+    % \vskip 10pt
+    % \underline{Replica $R$, on receiving $Request(epoch, cmd)$ }\\
+    % \underline{from client $C$}\\
+    % \If{$epoch < R.epoch$} {
+    %     reply $UpdateConfig(R.config)$
+    % }
+    % \If{$R.proposing\_replica$}{
+    %     $OnRequest(cmd)$\\
+    % }
+
+    \vskip 10pt
+    \underline{Replica $R$, on called $OnRequest(cmd)$ from }
+    \underline{replica $R$}\\
+    do what the original protocol do when a replica received a $cmd$ request
+\end{algorithm}
+
+\begin{algorithm}
+\caption{JetPack - Prepare}
+    \label{alg:jetpack_prepare}
+    \setcounter{AlgoLine}{16}
+    
+    \underline{Replica $R$, on receiving $Request(epoch, cmd)$}
+    \underline{from client $C$}\\
+    \eIf{$epoch=R.jepoch$\textbf{ and }$R.status=RDY$\label{line:normalrequestdisabledcheck}} {
+        $preaccept\gets False$\\
+        $result\gets NULL$\\
+        $version\gets NULL$\\
+        \If{$cmd$ has no conflicting with any unexecuted cmd in $R.pool$} {
+            $preaccept\gets True$\\
+            \If{$R.proposing\_replica$} {
+                $(result, version)\gets  speculative\_install(cmd)$\label{line:speculativeinstall}\\
+            }
+        }
+        $R.pool.insert(\{cmd, preaccept\})$\label{line:commandpoolinsert}\\
+        \eIf{$preaccept$} {
+            reply $PreAcceptAck(R.new\_view,$ $result,$ $version)$ to client\\
+        } {
+            reply $PreAcceptRej(R.jepoch, R.new\_view)$ to client\\
+        }
+        \If{$R.proposing\_replica$}{
+            $OnRequest(cmd)$\\
+        }
+    } {
+        reply $PreAcceptRej(R.jepoch,$ $R.new\_view)$ to client\\
+    }
+    % \If{$epoch>R.epoch$}{
+    %     $R.epoch\gets epoch$
+    % }
+    % \vskip 10pt
+    % \underline{Replica $R$, on receiving $Request(epoch, cmd)$ }\\
+    % \underline{from client $C$}\\
+    % \If{$epoch < R.epoch$} {
+    %     reply $UpdateConfig(R.config)$
+    % }
+    % \If{$R.proposing\_replica$}{
+    %     $OnRequest(cmd)$\\
+    % }
+
+    \vskip 10pt
+    \underline{Replica $R$, on called $OnRequest(cmd)$ from }
+    \underline{replica $R$}\\
+    do what the original protocol do when a replica received a $cmd$ request
+\end{algorithm}
+
+\paragraph{Speculative Install} 
+During the fast path, we need to perform a speculative install, as shown in line~\ref{line:speculativeinstall}. To support this—especially for reads—we assume that the application provides an API for speculative installation. Otherwise, the system would need to maintain a separate key-value table. Reads should fetch data from this speculative API or table and combine the result with the commands that are still in the unexecuted command pool.
+
+
+\paragraph{What to Insert into the Command Pool} 
+In line~\ref{line:commandpoolinsert}, we insert a command into the command pool.
+
+We must insert the command even if the fast path fails. Consider a scenario where conflicting commands $A$, $B$, and $C$ arrive: suppose $A$ succeeds on the fast path, while $B$ and $C$ fail and fall back to the original path. After $A$ is executed, it will be removed from the command pool. However, when a new conflicting command $D$ arrives—which conflicts with $A$, $B$, and $C$—we must ensure it sees $B$ and $C$ in the command pool to correctly detect conflicts. This is necessary to prevent $D$ from incorrectly succeeding via the fast path.
+
+However, during failure recovery, we have only made a formal promise to the client regarding $A$, not $B$, $C$, or $D$. Therefore, we need an additional boolean flag to indicate whether a promise has been made to the client. This flag corresponds to the result of the \texttt{preaccept} step in line~\ref{line:commandpoolinsert}.
+
+
+
+\begin{algorithm}
+\caption{Original Protocol - Execute}
+    \label{alg:original_execute}
+    \setcounter{AlgoLine}{36}
+    \underline{Replica $R$, ready to execute $cmd$}\\
+    \If{$cmd$ $\not\in$ $R.executed$\label{line:dedeplication}} {
+        OriginalOriginalProtocolExecute($cmd$)\\
+        $R.executed.insert(cmd)$\label{line:deduplicationpool}\\
+    }
+    $R.pool.remove(cmd)$\label{line:normalgc}\\
+\end{algorithm}
+
+\paragraph{Deduplication} 
+We maintain a deduplication pool at line~\ref{line:deduplicationpool} and perform deduplication at line~\ref{line:dedeplication}. While this step may seem intrusive—since it must be done before the original protocol executes—in most cases (e.g., Raft, Copilot, MongoDB), JetPack does not introduce additional commands that require deduplication.
+
+\paragraph{Garbage Collection} 
+Garbage collection is performed at line~\ref{line:normalgc}, and it is non-intrusive—it can be triggered once execution is complete. Typically, this is done upon receiving a signal from the original protocol (which will reply to the client regardless of whether JetPack is used).
+
+\begin{algorithm}
+\caption{Original - Start View Change}
+    \label{alg:start_view_change}
+    \setcounter{AlgoLine}{41}
+    \underline{One replica $R$ decide to view change from}
+    \underline{$old\_epoch$}\label{line:finishrecoverybegin}\\
+    give Jetpack a message to let it broadcast $StopFastpath()$ to all replicas in $old\_epoch$\label{line:broadcastfinishrecovery}\\
+    waiting for $f+1$ of them received it, then continue\\
+    
+    \vskip 10pt
+    
+    \underline{Replica $R$, on receiving $StopFastpath()$}\\
+    $R.status\gets REC$\\
+    reply $ReceivedStopFastpath$\\
+\end{algorithm}
+
+\begin{algorithm}
+\caption{Original - Finish View Change}
+    \label{alg:finish_view_change}
+    \setcounter{AlgoLine}{47}
+    \underline{One replica $R$ finish a view change from}
+    \underline{$old\_view$ to $new\_view$}\label{line:finishrecoverybegin}\\
+    give Jetpack a message to let it broadcast $BeginRecovery(old\_view,$ $new\_view)$ to all replicas in $old\_view$\label{line:broadcastfinishrecovery}\\
+    waiting for Jetpack recovery to finish, then continue\\
+    
+    \vskip 10pt
+    
+    \underline{Replica $R$, on receiving $BeginRecovery(old\_view, $}
+    \underline{$new\_view)$}\\
+    $R.old\_view\gets old\_view$\\
+    $R.new\_view\gets new\_view$\label{line:updateview}\\
+    $R.oepoch\gets new\_view.id$\label{line:normalrequestdisabledsettrue}\\
+    $R.status\gets REC$\\
+    $R.Recovery()$\\
+\end{algorithm}
+
+\paragraph{JetPack Hook in the Original Protocol}  
+For failure recovery, we assume the protocol defines two key timepoints: when a new proposer is elected or steps up (line~\ref{line:finishrecoverybegin}), and when the new proposer begins accepting new requests (line~\ref{line:finishrecoveryend}). JetPack injects a hook between these two points to delay the new leader from serving new requests until the necessary JetPack modules have recognized the new view and ensured that no new requests are submitted to the original protocol prematurely.
+
+Since different protocols may have different failure recovery procedures, the hook can be flexibly inserted at any point between the proposer’s election and the start of request processing.
+
+\paragraph{Requirements for the View}  
+At line~\ref{line:broadcastfinishrecovery}, the original protocol is required to broadcast its view to JetPack. We impose the following requirements on the view:
+
+\begin{itemize}
+    \setlength{\itemsep}{0pt}
+    \item The original protocol must expose the current view.
+    \item The view must include the set of proposers (required for the supermajority check in line~\ref{line:fastpathsuccesscondition}).
+    \item Original protocol must expose view id, which is comparable, i.e., it must be possible to determine which view is newer or older.
+\end{itemize}
+
+
+\paragraph{Why the View ID Must Be Comparable}  
+If we cannot determine which original protocol view is newer, JetPack will be unable to identify the most recent view. As a result, an older view might incorrectly override a newer one when JetPack elects a coordinator.
+
+\paragraph{How JetPack Prevents New Requests from Being Processed Before Failure Recovery Completes}  
+Line~\ref{line:finishrecoverycondition} ensures that, for all proposing replica, the flag \texttt{R.status} is set to \texttt{REC} (as shown in line~\ref{line:normalrequestdisabledsettrue}). This flag prevents the proposing replicas from submitting requests in the new epoch, as enforced by the check in line~\ref{line:normalrequestdisabledcheck}.
+
+\paragraph{In Line~\ref{line:finishrecoverycondition}, After a Proposing Replica Recovers, It Waits for Replies from All Proposing Replicas. Will This Cause a Deadlock in Multi-Proposer Scenarios?}  
+Not in the case of Copilot or Mencius. Mencius does not claim to support reconfiguration and does not rely on view change, thus avoiding such deadlock scenarios. In Copilot, the two pilots recover independently, and their recovery processes do not block each other at this stage, so no deadlock occurs.
+
+
+
+\begin{algorithm}
+    \caption{$Recovery()$}
+    \label{alg:jetpack_recovery}
+    \setcounter{AlgoLine}{56}
+    broadcast $Prepare(R.jepoch, R.oepoch, "pool.iids")$ to all replicas in $R.old\_view$\\
+    \If{Received $f+1$ $PrepareAck(jepoch, value)$}{
+        $iid\_set\gets\bigcup value | jepoch=R.jepoch$
+    }
+    $sid\gets$ a global unique set id\\
+    $rid\gets 0$\\
+    \For{Every instance id $iid$ in $iid\_set$} {
+        broadcast $Prepare(R.jepoch,$ $R.oepoch,$ $"pool[\$iid]")$ to all replicas in $R.old\_view$\\
+        \If{received $f+1$ $PrepareAck(jepoch,$ $ins)$\label{line:collectcmdpool}} {
+            $ins\_set\gets$ all the received $ins$ with largest $jepoch$\\
+            \If {$cmd$ preaccept success in fast path in at least $\lceil\frac{f+2}{2}\rceil$ $ins$ among $ins\_set$} {
+                broadcast $Accept(jepoch,$ $oepoch,$ $"rec\_set[\$sid][\$rid]",$ $cmd)$ to all replicas in $R.old\_view$\\
+                $rid\gets rid+1$
+            }
+        }
+    }
+    $R.Prepare((sid, rid))$\\
+
+    \vskip 10pt
+
+    \underline{Replica $R$, on received $Prepare(jepoch, $}
+    \underline{$oepoch, key)$}\\
+    \If{$jepoch\ge R.jepoch$\textbf{ and }$oepoch\ge R.oepoch$} {
+        $R.status\gets REC$\\
+        reply $PrepareAck(R.jepoch,$ $R.key)$\\
+    }
+    
+    \vskip 10pt
+
+    \underline{Replica $R$, on received $Accept(jepoch, $}
+    \underline{$oepoch, key, value)$}\\
+    \If{$jepoch\ge R.jepoch$\textbf{ and }$oepoch\ge R.oepoch$} {
+        $R.key\gets value$\\
+        reply $AcceptAck$\\
+    }
+\end{algorithm}
+
+
+\begin{algorithm}
+    \caption{$Prepare(key, default\_value)$}
+    \label{alg:jetpack_prepare}
+    \setcounter{AlgoLine}{80}
+
+    broadcast $Prepare(R.jepoch, R.oepoch, key,$ $R.pool[key].seen\_ballot)$ to all replicas in $R.old\_view$\\
+
+    \If{received $f+1$ $PrepareAck(acc\_bal,$ $replied\_value)$} {
+        \eIf{highest $acc\_bal$ is greater than $0$} {
+            $to\_acc\_value\gets$ the $replied\_value$ with highest $acc\_bal$\\
+        } {
+            \eIf{$default\_value$ is not $nil$} {
+                $to\_acc\_value\gets default\_value$\\
+            } {
+                $to\_acc\_value\gets$ the $replied\_value$ with the highest frequency\\
+            }
+        }
+        $R.Accept(key, to\_acc\_value)$\\
+    }
+
+    \vskip 10pt
+    
+    \underline{Replica $R$, on received $Prepare(jepoch, oepoch,$}
+    \underline{$key, ballot)$}\\
+    \If{$jepoch\ge R.jepoch$\textbf{ and }$oepoch\ge R.oepoch$\textbf{ and }$ballot\ge R.pool.seen\_ballot$} {
+        reply $PrepareAck(R.pool.acc\_bal,$ $R.pool[key].value)$
+    }
+
+\end{algorithm}
+
+
+\begin{algorithm}
+    \caption{$Accept(key, value)$}
+    \label{alg:jetpack_accept}
+    \setcounter{AlgoLine}{89}
+
+    broadcast $Accept(R.jepoch, R.oepoch, key, $ $R.pool[key].seen\_bal,$ $value)$ to all replicas in $R.old\_view$\\
+    \If{receied $f+1$ $AcceptAck$}{
+        $Commit(value)$
+    }
+
+    \vskip 10pt
+    
+    \underline{Replica $R$, on received $Accept(jepoch, oepoch, $}
+    \underline{$key, ballot, value)$}\\
+    \If{$jepoch\ge R.jepoch$\textbf{ and }$oepoch\ge R.oepoch$\textbf{ and }$ballot\ge R.pool[key].seen\_ballot$\textbf{ and not }$R.pool[key].committed$} {
+        $R.pool[key].acc\_ballot\gets ballot$\\
+        $R.pool[key].value\gets value$\\
+        reply $AcceptAck$\\
+    }
+\end{algorithm}
+
+\begin{algorithm}
+    \caption{$Commit(key, value)$}
+    \label{alg:jetpack_commit}
+    \setcounter{AlgoLine}{97}
+
+    broadcast $Commit(R.jepoch, R.oepoch,$ $key, value)$ to all replicas in $R.old\_view$\\
+    $R.Resubmit()$\\
+    
+
+    \vskip 10pt
+    
+    \underline{Replica $R$, on received $Commit(jepoch, oepoch,  $}
+    \underline{$key, value)$}\\
+    \If{$jepoch\ge R.jepoch$\textbf{ and }$oepoch\ge R.oepoch$} {
+        $R.pool[key].value\gets value$\\
+        $R.pool[key].committed\gets True$\\
+    }
+\end{algorithm}
+
+\begin{algorithm}
+    \caption{$Resubmit()$}
+    \label{alg:jetpack_resubmit}
+    \setcounter{AlgoLine}{103}
+    make sure evey instance on $R.rec\_set[R.pool.sid]$ exist by pull it from other replicas\\
+    \For{$rid$ from $0$ to $R.pool.set\_size - 1$} {
+        % \If{$R.rec\_set[R.pool.sid][rid]=nil$}{
+        %     broadcast $PullRecSetIns(R.jepoch,$ $R.oepoch,$ $R.pool.sid, rid)$ to all replicas in $R.old\_view$\\
+        %     \If{Received $PullRecSetInsAck(cmd)$}{
+        %         $R.rec\_set[R.pool.sid][rid]\gets cmd$
+        %     }
+        % }
+        send $Resubmit(R.oepoch,$ $R.rec\_set[R.pool.sid][rid])$ to all the proposing replica according to $R.new\_view$\\
+        wait for the result\\
+    }
+    broadcast $FinishRecovery(R.oepoch,$ $R.new\_view)$ to all the replicas\\
+
+    % \vskip 10pt
+    
+    % \underline{Replica $R$, on received $PullRecSetIns(jepoch,$}
+    % \underline{$ oepoch, sid, rid)$}\\
+    % \If{$jepoch\ge R.jepoch$\textbf{ and }$oepoch\ge R.oepoch$} {
+    %     reply $PullRecSetInsAck(R.rec\_set[sid][rid])$
+    % }
+    
+    \vskip 10pt
+    
+    
+    \underline{Replica $R$, on received $FinishRecovery(oepoch, view)$}\\
+    \If{$oepoch\ge R.oepoch$}{
+        $R.jepoch\gets oepoch$\\
+        $R.oepoch\gets oepoch$\\
+        $R.old\_view\gets view$\\
+        $R.new\_view\gets view$\\
+        $R.pool\gets EmptyPool()$\\
+        $R.status\gets RDY$\\
+    }
+\end{algorithm}
+
+
+\paragraph{Uniqueness of Commands}  
+Line~\ref{line:collectcmdpool} is triggered only once to ensure that, for each key, only one command is resubmitted. Given this constraint, line~\ref{line:findwhichcmdstorecover} will identify a unique command for each key in the command pool, since any group of $f+1$ replicas can contain at most one value supported by $\left\lceil\frac{f+2}{2}\right\rceil$ replicas.
+
+
+\paragraph{Safe to Resubmit the First Seen \texorpdfstring{$\frac{1}{4}$}{1/4} Majority}  
+Line~\ref{line:findwhichcmdstorecover} is safe because, although the set of $2f+1$ replicas may contain multiple commands that each appear at least $\left\lceil\frac{f+2}{2}\right\rceil$ times, if more than one such command exists, then neither could have succeeded on the fast path. Therefore, resubmitting either is safe.
+
+\paragraph{Implicit epoch and view update}
+
+\paragraph{Implicit last\_recovered\_epoch and pool update}
+
+
+\end{document}
