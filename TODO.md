@@ -277,15 +277,23 @@ measures from signal file write to `recovery_finish_after_failure` detection.
   - Fixed: enabled `JETPACK_ZOOKEEPER_RECOVERY` in constants.h
 
 **Failure recovery verification**:
-- [x] Add RTT-based sanity check for Jetpack recovery downtime:
-      - Jetpack recovery = 2 RTT rounds (PullRecovery+Prepare, then RecordCmd+Accept), each parallel.
-      - With RTT=40ms: expected ~81ms (1ms poll + 2×40ms). With 0ms RTT: expected ~1ms.
-      - Gap analysis: ZooKeeper/etcd at 1-3ms internal (no gap). MongoDB 60-95ms (reactor congestion).
-      - Root cause: MongoDB SDAM reconnection congests the Jetpack event reactor during recovery.
-      - Fixes: hooker poll 10ms→1ms (all 3 backends), script poll 100ms→10ms (all 3 scripts).
-      - Post-fix results: etcd 3ms, ZK 16ms (was 106ms), MongoDB 94ms (was 143ms).
-      - Full analysis in `docs/failure_recovery_evaluation.md` and `result.md`.
-      - Logs: `docs/logs/etcd_recovery_v2.txt`, `zookeeper_recovery_v2.txt`, `mongodb_recovery_v2.txt`.
+- [ ] Re-open Jetpack recovery RTT sanity-check baseline:
+      - Expected Jetpack recovery downtime at one-way 20ms (RTT=40ms): ~81ms (1ms poll + 2×40ms).
+      - Current measured downtime from report: MongoDB ~159-281ms, etcd ~106-107ms, ZooKeeper ~106ms.
+      - Mark sanity check as failed until all three backends are within acceptable bound of expected RTT model.
+- [ ] Quantify RTT-level gap per backend and build a timing breakdown:
+      - Compute per-backend gap = measured - expected (MongoDB large gap, etcd/ZK RTT-level gap).
+      - Break down time into polling delay, transport RTT rounds, reactor scheduling, backend callback/IO overhead.
+- [ ] Root-cause MongoDB Jetpack recovery gap (159-281ms vs expected ~81ms).
+- [ ] Root-cause etcd/ZooKeeper RTT-level gap (~100ms vs expected ~81ms).
+- [ ] Implement targeted fixes for each identified gap and keep backend behavior unchanged.
+- [ ] Re-run failure recovery experiments after fixes:
+      - Run at least 3 repetitions per backend (MongoDB/etcd/ZooKeeper) with the same 20ms one-way latency setup.
+      - Report before/after recovery downtime and remaining gap to expected RTT model.
+- [ ] Update report/docs with full gap analysis and fixes:
+      - `docs/failure_recovery_evaluation.md`: reason analysis, root cause, fix design, validation results.
+      - `result.md`: final post-fix numbers, expected-vs-measured comparison, pass/fail of sanity check.
+      - Save rerun logs under `docs/logs/` with clear `*_recovery_gap_fix_*.txt` naming.
 - [x] Double-check all 3 recovery tests truly kill the original protocol leader (not a
       follower) and then wait for leader re-election before measuring recovery time.
       Verify the kill target PID is the leader process for each backend:
