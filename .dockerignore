@@ -7,7 +7,8 @@ tla/
 # Exclude WAF build output — build happens fresh inside Docker
 build/
 .waf3-*/
-.waf-tools/
+# NOTE: .waf-tools/ must be included — it contains boost.py and unittest_gtest.py
+# which are loaded by wscript at configure time
 
 # Exclude documentation, scripts, and data
 docs/
