@@ -184,11 +184,11 @@ when the signal is detected (reduced from original 10ms poll interval).
 WAN mode runs 3 separate OS processes (h1=127.0.0.1, h2=127.0.0.2, h3=127.0.0.3)
 with tc/netem adding 20ms one-way delay (RTT=40ms). Config: `config/1c1s3r1p_wan.yml`.
 
-| Backend | Protocol Downtime | Jetpack Downtime | Expected | Status |
-|---------|------------------:|----------------:|---------:|--------|
-| etcd (r1) | 794ms | 82ms | 81ms | PASSED |
-| etcd (r2) | 818ms | 81ms | 81ms | PASSED |
-| etcd (r3) | 739ms | 81ms | 81ms | PASSED |
+| Backend | Protocol Downtime | Recovery Duration | Expected | Status |
+|---------|------------------:|-----------------:|---------:|--------|
+| etcd (r1) | 1106ms | 82ms | 81ms | PASSED |
+| etcd (r2) | 6973ms | 81ms | 81ms | PASSED |
+| etcd (r3) | 1556ms | 81ms | 81ms | PASSED |
 | MongoDB (r1) | 10496ms | 83ms | 81ms | PASSED |
 | MongoDB (r2) | 12710ms | 81ms | 81ms | PASSED |
 | MongoDB (r3) | 11091ms | 81ms | 81ms | PASSED |
@@ -196,16 +196,21 @@ with tc/netem adding 20ms one-way delay (RTT=40ms). Config: `config/1c1s3r1p_wan
 | ZooKeeper (r2) | 789ms | 82ms | 81ms | PASSED |
 | ZooKeeper (r3) | 776ms | 81ms | 81ms | PASSED |
 
-Jetpack downtime = time from signal file write to `recovery_finish_after_failure` detection.
-Expected = 1ms poll delay + 2×40ms RTT = 81ms (2-RTT recovery protocol).
+Recovery Duration = Jetpack internal recovery time logged by `JetpackRecovery()` (time from
+`JetpackRecoveryEntry()` start to recovery complete). This is the meaningful metric for
+comparing to the 2-RTT model: expected = 1ms poll delay + 2×40ms RTT = 81ms.
 All 9 runs within ±2ms of expected 81ms. Logs: `docs/logs/*_recovery_gap_fix_wan_r*.txt`.
+
+Note: etcd election time varies (1.1s–7s) due to Raft's randomized election timeout;
+ZooKeeper is consistently fast (~0.8s) due to ZAB's Fast Leader Election.
 
 ### Observations
 
-- **ZooKeeper has the fastest backend re-election** (~0.8-0.9s), consistent with ZAB's
+- **ZooKeeper has the fastest backend re-election** (~0.8s), consistent with ZAB's
   fast leader election algorithm designed for low-latency failover.
-- **etcd leader election takes ~0.7-0.8s** in WAN mode with tc/netem applied. Faster than
-  previously measured because the WAN test targets only 3 replicas on loopback IPs.
+- **etcd leader election is variable** (1.1–7s in our WAN tests) due to Raft's randomized
+  election timeout (1000–2000ms, with retry backoff). When no follower wins immediately,
+  etcd waits another full timeout before the next attempt, which can chain to ~7s.
 - **MongoDB replica set election is slowest** (~10.5-12.7s), as MongoDB's election protocol
   includes a longer heartbeat timeout (`electionTimeoutMillis` default 10s).
 - **Jetpack recovery is consistently 81-83ms** across all backends at RTT=40ms, matching
