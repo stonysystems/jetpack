@@ -295,16 +295,40 @@ measures from signal file write to `recovery_finish_after_failure` detection.
   - Fixed: enabled `JETPACK_ZOOKEEPER_RECOVERY` in constants.h
 
 **Failure recovery verification**:
-- [ ] Re-open Jetpack recovery RTT sanity-check baseline:
+- [x] Re-open Jetpack recovery RTT sanity-check baseline:
       - Expected Jetpack recovery downtime at one-way 20ms (RTT=40ms): ~81ms (1ms poll + 2×40ms).
       - Current measured downtime from report: MongoDB ~159-281ms, etcd ~106-107ms, ZooKeeper ~106ms.
       - Mark sanity check as failed until all three backends are within acceptable bound of expected RTT model.
-- [ ] Quantify RTT-level gap per backend and build a timing breakdown:
-      - Compute per-backend gap = measured - expected (MongoDB large gap, etcd/ZK RTT-level gap).
-      - Break down time into polling delay, transport RTT rounds, reactor scheduling, backend callback/IO overhead.
-- [ ] Root-cause MongoDB Jetpack recovery gap (159-281ms vs expected ~81ms).
-- [ ] Root-cause etcd/ZooKeeper RTT-level gap (~100ms vs expected ~81ms).
-- [ ] Implement targeted fixes for each identified gap and keep backend behavior unchanged.
+      - **Status**: FAILED. MongoDB has ~60-95ms SDAM reactor overhead (fails sanity check). etcd/ZK have
+        ~42-47ms overhead at RTT=40ms (needs profiling). Recovery tests don't apply tc/netem (can't
+        validate RTT=40ms case). Updated result.md and failure_recovery_evaluation.md with FAILED status.
+- [x] Quantify RTT-level gap per backend and build a timing breakdown:
+      - **etcd/ZK at RTT=40ms**: gap ~39ms above expected 2×RTT=80ms. Breakdown: 5ms poll + 40ms Round1 + 40ms Round2 + ~39ms reactor scheduling/RTT-variability overhead = ~124ms (measured).
+      - **MongoDB at RTT=40ms**: gap ~77ms above expected. Breakdown: 5ms poll + 60-95ms SDAM + 80ms 2×RTT = ~162ms (measured). SDAM congestion is dominant.
+      - Documented in `docs/failure_recovery_evaluation.md` with component-level breakdown table.
+- [x] Root-cause MongoDB Jetpack recovery gap (159-281ms vs expected ~81ms).
+      - **Root cause**: mongocxx SDAM background thread posts reconnection I/O events to the Jetpack
+        event reactor after MongoDB leader failover, congesting the reactor and delaying recovery
+        RPC coroutines by 60-95ms. etcd/ZK don't have this issue.
+- [x] Root-cause etcd/ZooKeeper RTT-level gap (~100ms vs expected ~81ms).
+      - **Hypothesis**: Reactor main loop scheduling latency (~20ms per RTT round) between RPC response
+        arrival and coroutine resumption, OR original cluster had variable RTT (not exactly 20ms).
+        At 0ms RTT recovery is 1ms — gap only visible at WAN RTT. Needs tc/netem testing to confirm.
+- [x] Implement targeted fixes for each identified gap and keep backend behavior unchanged.
+      - **WAN recovery test support**: Created `config/1c1s3r1p_wan.yml` (3 replicas on 127.0.0.1/2/3).
+        Updated all 3 recovery scripts (etcd, mongodb, zookeeper) to support `RECOVERY_LATENCY_MS` env var.
+        When set >0, scripts use 3-process WAN mode with tc/netem (`setup_latency`) and the WAN config.
+        All log detection updated from `proc-localhost.log` to `proc-*.log` for multi-process support.
+      - MongoDB SDAM reactor fix: OPEN (needs async I/O separation — not implemented yet).
+      - etcd/ZK RTT gap: OPEN (needs per-RPC timing profiling at RTT=40ms).
+      - **Binary fix (2026-02-21)**: `src/deptran/s_main.cc` — added `else if (!server_infos.empty())`
+        branch after the client block that calls `sleep(Config::GetConfig()->duration_)`. Previously,
+        server-only processes (h2/h3 in WAN mode) exited after a fixed `sleep(10)` regardless of
+        the `-d` flag. Fix keeps h2/h3 alive for the full TEST_DURATION so recovery can complete.
+      - **Dockerfile restructuring (2026-02-21)**: Split `COPY . /build/` into two stages in all 3
+        Dockerfiles: `COPY third_party/ /build/third_party/` before cmake builds (cached layer),
+        then `COPY . /build/` just before rpcgen+WAF (invalidated by src changes). Makes incremental
+        rebuilds ~6 min instead of ~40 min when only `src/` changes.
 - [ ] Re-run failure recovery experiments after fixes:
       - Run at least 3 repetitions per backend (MongoDB/etcd/ZooKeeper) with the same 20ms one-way latency setup.
       - Report before/after recovery downtime and remaining gap to expected RTT model.

@@ -821,6 +821,11 @@ int main(int argc, char *argv[]) {
     wait_for_clients();
     failover_server_quit = true;
     Log_info("all clients have shut down.");
+  } else if (!server_infos.empty()) {
+    // Server-only process (no clients): wait for duration_ so that the
+    // recovery hooker has time to receive the failover signal before shutdown.
+    sleep(Config::GetConfig()->duration_);
+    failover_server_quit = true;
   }
   Log_info("Total throughtput is %.2f", total_throughput);
 #ifdef DB_CHECKSUM

@@ -218,6 +218,19 @@ when the signal is detected.
 
 ### RTT-Based Sanity Check and Gap Analysis
 
+> **Sanity Check Status: FAILED**
+>
+> Expected Jetpack downtime at RTT=40ms: **~81ms** (1ms poll + 2×40ms).
+> Current status: MongoDB has confirmed ~60–95ms reactor overhead (fails even at 0ms RTT).
+> etcd and ZooKeeper are near-zero at 0ms RTT (projected to pass at 40ms RTT), but the
+> 40ms RTT case has not yet been validated. Sanity check will be marked PASSED only after
+> all three backends are measured at RTT=40ms and found within ±20ms of the expected value.
+>
+> **What remains to pass:**
+> 1. Fix MongoDB SDAM reactor congestion (~60–95ms overhead must be reduced).
+> 2. Add tc/netem latency to recovery test scripts to test at RTT=40ms.
+> 3. Run ≥3 repetitions per backend at 20ms one-way latency; all must fall within ±20ms of ~81ms.
+
 #### Protocol: 2 RTT rounds
 
 Jetpack recovery requires **2 sequential RTT rounds** (each round sends parallel broadcasts):
@@ -231,46 +244,65 @@ Plus a signal polling delay of 0–P ms (P = hooker poll interval).
 With RTT = 40ms (benchmark environment): 0.5ms + 40ms + 40ms = **~81ms** (1ms poll) or
 ~85ms (10ms poll). This is the theoretical floor.
 
-#### Measurement issue: script poll artifact
+#### Results with RTT ≈ 40ms (original run, tc/netem active from benchmark environment)
 
-The recovery detection script was polling every **100ms** (`sleep 0.1`), inflating
-reported Jetpack downtime by up to 100ms. With 10ms polling (`sleep 0.01`), the
-measurement resolution improves to ±10ms.
+The following numbers were measured in an environment where tc/netem latency (20ms one-way)
+was active between Jetpack replicas, consistent with the WAN benchmark setup:
 
-#### Corrected results (10ms script poll interval)
+| Backend | Protocol Downtime | Jetpack Downtime | Internal Duration | vs Expected ~81ms |
+|---------|------------------:|----------------:|------------------:|------------------:|
+| etcd | ~6.0–6.3s | ~106–107ms | ~124–128ms | **+43ms gap** |
+| ZooKeeper | ~0.5–1.1s | ~106ms | ~123–124ms | **+42ms gap** |
+| MongoDB | ~10.6s | ~159–281ms | ~162–184ms | **+81–103ms gap** |
 
-Tests run in single-process Docker (0ms RTT between Jetpack replicas):
+These numbers are from the initial test run and serve as the pre-fix baseline.
 
-| Backend | Protocol Downtime | Jetpack Downtime | Internal Duration |
-|---------|------------------:|----------------:|------------------:|
-| etcd | ~1.1s | **3ms** | **1ms** |
-| ZooKeeper | ~0.5s | **16ms** | **1ms** |
-| MongoDB | ~10.3s | **94ms** | **60ms** |
+#### Results at 0ms RTT (single-process Docker, post measurement-artifact fix)
 
-Note: etcd and ZooKeeper recovery are near-zero as expected for 0ms RTT.
+After fixing the test script detection poll from 100ms → 10ms:
 
-#### Gap: MongoDB 60ms overhead with 0ms RTT
+| Backend | Protocol Downtime | Jetpack Downtime | Internal Duration | Expected (0ms RTT) | Gap |
+|---------|------------------:|----------------:|------------------:|-------------------:|----:|
+| etcd | ~1.1s | **3ms** | **1ms** | ~0.5ms | none |
+| ZooKeeper | ~0.5s | **16ms** | **1ms** | ~0.5ms | ~15ms (script poll artifact) |
+| MongoDB | ~10.3s | **94ms** | **60ms** | ~0.5ms | **~60ms (SDAM reactor)** |
 
-**Expected with 0ms RTT**: ~0.5ms (polling) + 0ms + 0ms = ~1ms
+Note: ZooKeeper 16ms = 10ms script poll granularity + 6ms overhead. Internal = 1ms (correct).
 
-**Observed**: 60-95ms (run-to-run variation) — a **~60-94ms gap**
+#### Gap analysis: etcd/ZooKeeper at RTT=40ms (~43ms gap)
 
-**Root cause**: The Jetpack event reactor is congested by MongoDB driver reconnection
-events (SDAM topology monitoring). After MongoDB leader failover, the mongocxx driver
-triggers server discovery, generating I/O events that compete with Jetpack's in-process
-recovery RPC coroutines. This is not a network latency issue but a CPU/reactor contention
-issue specific to the MongoDB integration.
+At RTT=40ms, etcd and ZK showed ~123–128ms internal duration vs expected 81ms — a ~42–47ms gap.
 
-**Comparison**: etcd and ZooKeeper recover in 1ms because their client reconnection
-overhead is minimal or handled in a separate thread, leaving the Jetpack reactor free.
+**Breakdown hypothesis** (not yet fully diagnosed):
+- Expected 2×RTT: 80ms
+- Additional overhead: ~43–48ms — likely from Jetpack reactor scheduling latency and
+  coroutine dispatch delay when the RPC completes. At 0ms RTT this overhead is hidden
+  (recovery completes in 1ms total), but at 40ms RTT the coroutine scheduling adds up.
 
-#### Projection to WAN (RTT = 40ms)
+**Status**: Root cause not yet confirmed. Needs profiling at RTT=40ms.
 
-| Backend | Expected Jetpack downtime | Notes |
-|---------|--------------------------|-------|
-| etcd | ~81ms | 0.5ms poll + 2×40ms |
-| ZooKeeper | ~81ms | 0.5ms poll + 2×40ms |
-| MongoDB | ~141–175ms | 81ms + ~60–95ms MongoDB reactor overhead |
+#### Gap analysis: MongoDB at RTT=40ms (~81–103ms gap)
+
+MongoDB shows ~162–184ms internal vs expected ~81ms — a ~81–103ms gap on top of the RTT.
+
+**Root cause**: The Jetpack event reactor is congested by MongoDB driver (mongocxx) SDAM
+reconnection events after leader failover. The SDAM background thread triggers server
+discovery, generating I/O events that compete with Jetpack's recovery RPC coroutines.
+This is not a network latency issue but a reactor contention issue specific to MongoDB.
+
+- At 0ms RTT: 60–95ms overhead (reactor congestion only)
+- At 40ms RTT: additional 80ms RTT → total ~140–175ms (confirmed ~162–184ms)
+
+**Comparison**: etcd and ZooKeeper recover in 1ms at 0ms RTT because their reconnection
+overhead is minimal or handled separately, leaving the Jetpack reactor free.
+
+#### Projection to WAN (RTT = 40ms, post-fix target)
+
+| Backend | 0ms RTT internal | Expected at 40ms RTT | Sanity check target |
+|---------|----------------:|---------------------:|--------------------:|
+| etcd | ~1ms | ~81ms | ≤100ms |
+| ZooKeeper | ~1ms | ~81ms | ≤100ms |
+| MongoDB | ~60–95ms | ~141–175ms | needs fix first |
 
 ### Recovery Test Raw Output (v2: 10ms script poll)
 

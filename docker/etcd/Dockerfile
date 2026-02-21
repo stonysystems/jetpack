@@ -62,8 +62,10 @@ RUN pip3 install --no-cache-dir pyyaml tabulate numpy setuptools || true
 
 WORKDIR /build
 
-# Copy source tree
-COPY . /build/
+# Copy third_party first so cmake builds below are cached independently of
+# Jetpack source changes. When only src/ changes, Docker skips re-running
+# the slow cmake build steps and only re-runs rpcgen + WAF (~6 min).
+COPY third_party/ /build/third_party/
 
 # Validate required third_party submodules are populated in build context.
 # If these directories are empty placeholders, initialize submodules on host:
@@ -151,6 +153,10 @@ RUN cd /build/third_party/zookeeper/zookeeper-client/zookeeper-client-c && \
 
 # Update library cache so linker can find all libraries
 RUN ldconfig
+
+# Copy Jetpack source and build files. This COPY is invalidated by source
+# changes but all third_party cmake layers above remain cached.
+COPY . /build/
 
 # Generate RPC files (rpcgen requires python2)
 RUN python2 bin/rpcgen --python --cpp src/deptran/rcc_rpc.rpc

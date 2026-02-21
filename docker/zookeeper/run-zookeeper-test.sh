@@ -9,11 +9,13 @@
 #   ./run-zookeeper-test.sh bash         # Interactive shell
 #
 # Environment variables:
-#   ZOOKEEPER_ENDPOINTS - External ZooKeeper URI (default: start embedded ZK at 127.0.0.1:2181)
-#   TEST_DURATION       - Test duration in seconds (default: 10)
-#   JETPACK_DIR         - Jetpack installation directory (default: /jetpack)
-#   LATENCY_MS          - Simulated inter-server latency in ms (default: 5, multi mode only)
-#   LATENCY_JITTER      - Latency jitter in ms (default: 2, multi mode only)
+#   ZOOKEEPER_ENDPOINTS    - External ZooKeeper URI (default: start embedded ZK at 127.0.0.1:2181)
+#   TEST_DURATION          - Test duration in seconds (default: 10)
+#   JETPACK_DIR            - Jetpack installation directory (default: /jetpack)
+#   LATENCY_MS             - Simulated inter-server latency in ms (default: 5, multi mode only)
+#   LATENCY_JITTER         - Latency jitter in ms (default: 2, multi mode only)
+#   RECOVERY_LATENCY_MS    - One-way latency for recovery test WAN mode in ms (default: 0 = single-process)
+#   RECOVERY_LATENCY_JITTER - Jitter for recovery test WAN mode in ms (default: 0)
 
 set -euo pipefail
 
@@ -488,15 +490,28 @@ run_multi_process_test() {
 }
 
 run_recovery_test() {
+    # RECOVERY_LATENCY_MS > 0: use 3-process WAN mode with tc/netem (RTT = 2×RECOVERY_LATENCY_MS).
+    # RECOVERY_LATENCY_MS = 0 (default): single-process mode with 0ms RTT.
+    local recovery_latency="${RECOVERY_LATENCY_MS:-0}"
+    local recovery_jitter="${RECOVERY_LATENCY_JITTER:-0}"
+
     log_info "=== Failure Recovery Test: kill ZooKeeper leader, measure recovery ==="
     log_info "Config: 3 server replicas, 1 client, 3-node ZooKeeper ensemble"
     log_info "External kill: script kills ZooKeeper leader after 5s, measures recovery"
     log_info "Duration: ${TEST_DURATION}s"
+    if [ "$recovery_latency" -gt 0 ] 2>/dev/null; then
+        log_info "WAN mode: ${recovery_latency}ms one-way latency (RTT=$((recovery_latency * 2))ms)"
+    fi
 
     start_zookeeper_ensemble
 
     mkdir -p "$LOG_DIR"
-    local config="${JETPACK_DIR}/config/1c1s3r1p.yml"
+    local config
+    if [ "$recovery_latency" -gt 0 ] 2>/dev/null; then
+        config="${JETPACK_DIR}/config/1c1s3r1p_wan.yml"
+    else
+        config="${JETPACK_DIR}/config/1c1s3r1p.yml"
+    fi
     local config_mode="${JETPACK_DIR}/config/none_zookeeper.yml"
     local config_bench="${JETPACK_DIR}/config/rw_fixed.yml"
     local binary="${JETPACK_DIR}/build/deptran_server"
@@ -504,6 +519,14 @@ run_recovery_test() {
     if [ ! -x "$binary" ]; then
         log_error "Jetpack server binary not found at $binary"
         return 1
+    fi
+
+    # Apply tc/netem latency before starting Jetpack (WAN mode only).
+    # setup_latency reads LATENCY_MS/LATENCY_JITTER globals, so override them here.
+    if [ "$recovery_latency" -gt 0 ] 2>/dev/null; then
+        LATENCY_MS="$recovery_latency"
+        LATENCY_JITTER="$recovery_jitter"
+        setup_latency
     fi
 
     # Clean any stale signal files
@@ -516,18 +539,54 @@ run_recovery_test() {
     log_info "Current ZooKeeper leader: $leader"
 
     # Start Jetpack WITHOUT failover config — external kill handles recovery.
-    log_info "Starting Jetpack (single-process, no failover config)"
-    "$binary" \
-        -f "$config" \
-        -f "$config_mode" \
-        -f "$config_bench" \
-        -f "${JETPACK_DIR}/config/client_closed.yml" \
-        -f "${JETPACK_DIR}/config/concurrent_1.yml" \
-        -P localhost \
-        -d "$TEST_DURATION" \
-        -r "$LOG_DIR" \
-        > "$LOG_DIR/proc-localhost.log" 2>&1 &
-    local jetpack_pid=$!
+    # JETPACK_ZOOKEEPER_RECOVERY is compiled in, so non-leader servers poll for
+    # primary_elected signal and trigger JetpackRecoveryEntry() when found.
+    local jetpack_pids=()
+    if [ "$recovery_latency" -gt 0 ] 2>/dev/null; then
+        log_info "Starting Jetpack (3-process WAN mode: h1=127.0.0.1, h2=127.0.0.2, h3=127.0.0.3)"
+        # h1 runs the client (c01) and server (s101) — use normal TEST_DURATION.
+        "$binary" \
+            -f "$config" \
+            -f "$config_mode" \
+            -f "$config_bench" \
+            -f "${JETPACK_DIR}/config/client_closed.yml" \
+            -f "${JETPACK_DIR}/config/concurrent_1.yml" \
+            -P h1 \
+            -d "$TEST_DURATION" \
+            -r "$LOG_DIR" \
+            > "$LOG_DIR/proc-h1.log" 2>&1 &
+        jetpack_pids+=($!)
+        # h2 and h3 are server-only (no client). WaitForShutdown exits quickly
+        # without a client, so use a 5× longer duration and kill them after recovery.
+        local server_duration=$(( TEST_DURATION * 5 ))
+        for proc in h2 h3; do
+            "$binary" \
+                -f "$config" \
+                -f "$config_mode" \
+                -f "$config_bench" \
+                -f "${JETPACK_DIR}/config/client_closed.yml" \
+                -f "${JETPACK_DIR}/config/concurrent_1.yml" \
+                -P "$proc" \
+                -d "$server_duration" \
+                -r "$LOG_DIR" \
+                > "$LOG_DIR/proc-${proc}.log" 2>&1 &
+            jetpack_pids+=($!)
+        done
+    else
+        log_info "Starting Jetpack (single-process, 0ms RTT)"
+        "$binary" \
+            -f "$config" \
+            -f "$config_mode" \
+            -f "$config_bench" \
+            -f "${JETPACK_DIR}/config/client_closed.yml" \
+            -f "${JETPACK_DIR}/config/concurrent_1.yml" \
+            -P localhost \
+            -d "$TEST_DURATION" \
+            -r "$LOG_DIR" \
+            > "$LOG_DIR/proc-localhost.log" 2>&1 &
+        jetpack_pids+=($!)
+    fi
+    local jetpack_pid="${jetpack_pids[0]}"
 
     # Let Jetpack run for 5 seconds
     log_info "Letting Jetpack run for 5 seconds..."
@@ -565,7 +624,7 @@ run_recovery_test() {
     signal_write_ns=$(date +%s%N)
     for attempt in $(seq 1 2000); do
         if [ -f /tmp/JM_Jetpack_recovery_finish_after_failure ] || \
-           grep -q "JETPACK-RECOVERY.*COMPLETED" "$LOG_DIR/proc-localhost.log" 2>/dev/null; then
+           grep -rq "JETPACK-RECOVERY.*COMPLETED" "$LOG_DIR"/proc-*.log 2>/dev/null; then
             local recovery_ns
             recovery_ns=$(date +%s%N)
             jetpack_downtime_ms=$(( (recovery_ns - signal_write_ns) / 1000000 ))
@@ -575,31 +634,52 @@ run_recovery_test() {
         sleep 0.01
     done
 
-    # Wait for Jetpack to finish
+    # In WAN mode: wait for h1 (client process) to finish, then kill server-only h2/h3.
+    # In single-process mode: wait for the single process to finish.
     log_info "Waiting for Jetpack to finish..."
     local exit_code=0
-    if ! wait "$jetpack_pid" 2>/dev/null; then
-        log_warn "Jetpack exited with non-zero status"
-        exit_code=1
-    fi
-
-    # Phase 2: Report results
-    log_info "--- Recovery Result Validation ---"
-
-    local logfile="$LOG_DIR/proc-localhost.log"
-    if [ -f "$logfile" ]; then
-        if grep -q "JETPACK-RECOVERY.*STARTING" "$logfile" 2>/dev/null; then
-            log_info "  Jetpack recovery started (found in logs)"
-        fi
-        if grep -q "JETPACK-RECOVERY.*COMPLETED" "$logfile" 2>/dev/null; then
-            local dur
-            dur=$(grep -o "duration=[0-9]*ms" "$logfile" 2>/dev/null | tail -1)
-            log_info "  Jetpack recovery completed ${dur:+(}${dur}${dur:+)}"
-        fi
-        if grep -qi "segfault\|segmentation fault\|abort\|FATAL" "$logfile" 2>/dev/null; then
-            log_error "  Crash detected in log"
+    if [ "$recovery_latency" -gt 0 ] 2>/dev/null; then
+        # Wait for h1 (client + server, index 0)
+        if ! wait "${jetpack_pids[0]}" 2>/dev/null; then
+            log_warn "Jetpack h1 process exited with non-zero status"
             exit_code=1
         fi
+        # Kill server-only h2, h3
+        for pid in "${jetpack_pids[@]:1}"; do
+            kill "$pid" 2>/dev/null || true
+            wait "$pid" 2>/dev/null || true
+        done
+    else
+        for pid in "${jetpack_pids[@]}"; do
+            if ! wait "$pid" 2>/dev/null; then
+                log_warn "A Jetpack process exited with non-zero status"
+                exit_code=1
+            fi
+        done
+    fi
+
+    # Remove tc/netem latency rules (WAN mode only).
+    if [ "$recovery_latency" -gt 0 ] 2>/dev/null; then
+        remove_latency
+    fi
+
+    # Phase 2: Report results — check all proc-*.log files.
+    log_info "--- Recovery Result Validation ---"
+
+    if grep -rq "JETPACK-RECOVERY.*STARTING" "$LOG_DIR"/proc-*.log 2>/dev/null; then
+        log_info "  Jetpack recovery started (found in logs)"
+    fi
+    if grep -rq "JETPACK-RECOVERY.*COMPLETED" "$LOG_DIR"/proc-*.log 2>/dev/null; then
+        local dur
+        dur=$(grep -roh "duration=[0-9]*ms" "$LOG_DIR"/proc-*.log 2>/dev/null | tail -1)
+        log_info "  Jetpack recovery completed ${dur:+(}${dur}${dur:+)}"
+    fi
+    if grep -rq "ZOOKEEPER-FAILOVER\|primary_elected" "$LOG_DIR"/proc-*.log 2>/dev/null; then
+        log_info "  ZooKeeper leader change detected in Jetpack logs"
+    fi
+    if grep -rqi "segfault\|segmentation fault\|abort\|FATAL" "$LOG_DIR"/proc-*.log 2>/dev/null; then
+        log_error "  Crash detected in log"
+        exit_code=1
     fi
 
     # Check surviving ZooKeeper nodes

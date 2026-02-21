@@ -1,0 +1,29 @@
+# Exclude large TLA+ model checker logs (91GB) — not needed for C++ build
+tla/
+
+# Exclude git history — not needed in build context
+.git/
+
+# Exclude WAF build output — build happens fresh inside Docker
+build/
+.waf3-*/
+.waf-tools/
+
+# Exclude documentation, scripts, and data
+docs/
+data_processing/
+curp_scripts/
+results/
+
+# Exclude MongoDB handler (standalone scripts, not compiled into Jetpack)
+mongodb_handler/
+
+# Exclude Python bytecode
+**/__pycache__/
+**/*.pyc
+
+# Exclude editor and IDE files
+.apas
+*.swp
+*.swo
+.DS_Store

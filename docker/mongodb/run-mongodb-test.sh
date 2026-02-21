@@ -9,11 +9,13 @@
 #   ./run-mongodb-test.sh bash         # Interactive shell
 #
 # Environment variables:
-#   MONGODB_ENDPOINTS - External MongoDB URI (default: start embedded mongod at 127.0.0.1:27017)
-#   TEST_DURATION     - Test duration in seconds (default: 10)
-#   JETPACK_DIR       - Jetpack installation directory (default: /jetpack)
-#   LATENCY_MS        - Simulated inter-server latency in ms (default: 5, multi mode only)
-#   LATENCY_JITTER    - Latency jitter in ms (default: 2, multi mode only)
+#   MONGODB_ENDPOINTS    - External MongoDB URI (default: start embedded mongod at 127.0.0.1:27017)
+#   TEST_DURATION        - Test duration in seconds (default: 10)
+#   JETPACK_DIR          - Jetpack installation directory (default: /jetpack)
+#   LATENCY_MS           - Simulated inter-server latency in ms (default: 5, multi mode only)
+#   LATENCY_JITTER       - Latency jitter in ms (default: 2, multi mode only)
+#   RECOVERY_LATENCY_MS  - One-way latency for recovery test WAN mode in ms (default: 0 = single-process)
+#   RECOVERY_LATENCY_JITTER - Jitter for recovery test WAN mode in ms (default: 0)
 
 set -euo pipefail
 
@@ -551,10 +553,18 @@ wait_mongodb_new_primary() {
 }
 
 run_recovery_test() {
+    # RECOVERY_LATENCY_MS > 0: use 3-process WAN mode with tc/netem (RTT = 2×RECOVERY_LATENCY_MS).
+    # RECOVERY_LATENCY_MS = 0 (default): single-process mode with 0ms RTT.
+    local recovery_latency="${RECOVERY_LATENCY_MS:-0}"
+    local recovery_jitter="${RECOVERY_LATENCY_JITTER:-0}"
+
     log_info "=== Failure Recovery Test: kill MongoDB primary, measure recovery ==="
     log_info "Config: 3 server replicas, 1 client, 3-member MongoDB replica set"
     log_info "External kill: script kills MongoDB primary after 5s, measures recovery"
     log_info "Duration: ${TEST_DURATION}s"
+    if [ "$recovery_latency" -gt 0 ] 2>/dev/null; then
+        log_info "WAN mode: ${recovery_latency}ms one-way latency (RTT=$((recovery_latency * 2))ms)"
+    fi
 
     # Start 3-member MongoDB replica set
     start_mongodb_replset
@@ -566,7 +576,12 @@ run_recovery_test() {
 
     mkdir -p "$LOG_DIR"
 
-    local config_site="${JETPACK_DIR}/config/1c1s3r1p.yml"
+    local config_site
+    if [ "$recovery_latency" -gt 0 ] 2>/dev/null; then
+        config_site="${JETPACK_DIR}/config/1c1s3r1p_wan.yml"
+    else
+        config_site="${JETPACK_DIR}/config/1c1s3r1p.yml"
+    fi
     local config_mode="${JETPACK_DIR}/config/none_mongodb.yml"
     local config_bench="${JETPACK_DIR}/config/rw_fixed.yml"
     local server_bin="${JETPACK_DIR}/build/deptran_server"
@@ -583,23 +598,63 @@ run_recovery_test() {
         fi
     done
 
+    # Apply tc/netem latency before starting Jetpack (WAN mode only).
+    if [ "$recovery_latency" -gt 0 ] 2>/dev/null; then
+        setup_latency "$recovery_latency" "$recovery_jitter"
+    fi
+
     # Clean any stale signal files
     rm -f /tmp/JM_Jetpack_* 2>/dev/null || true
 
     # Start Jetpack WITHOUT failover config — the script handles the kill externally.
-    local jetpack_pid
-    log_info "Starting Jetpack (single-process, no failover config)"
-    "$server_bin" \
-        -f "$config_site" \
-        -f "$config_mode" \
-        -f "$config_bench" \
-        -f "${JETPACK_DIR}/config/client_closed.yml" \
-        -f "${JETPACK_DIR}/config/concurrent_1.yml" \
-        -P localhost \
-        -d "$TEST_DURATION" \
-        -r "$LOG_DIR" \
-        > "$LOG_DIR/proc-localhost.log" 2>&1 &
-    jetpack_pid=$!
+    # JETPACK_MONGODB_RECOVERY is compiled in, so non-leader servers poll for
+    # primary_elected signal and trigger JetpackRecoveryEntry() when found.
+    local jetpack_pids=()
+    if [ "$recovery_latency" -gt 0 ] 2>/dev/null; then
+        log_info "Starting Jetpack (3-process WAN mode: h1=127.0.0.1, h2=127.0.0.2, h3=127.0.0.3)"
+        # h1 runs the client (c01) and server (s101) — use normal TEST_DURATION.
+        "$server_bin" \
+            -f "$config_site" \
+            -f "$config_mode" \
+            -f "$config_bench" \
+            -f "${JETPACK_DIR}/config/client_closed.yml" \
+            -f "${JETPACK_DIR}/config/concurrent_1.yml" \
+            -P h1 \
+            -d "$TEST_DURATION" \
+            -r "$LOG_DIR" \
+            > "$LOG_DIR/proc-h1.log" 2>&1 &
+        jetpack_pids+=($!)
+        # h2 and h3 are server-only (no client). WaitForShutdown exits quickly
+        # without a client, so use a 5× longer duration and kill them after recovery.
+        local server_duration=$(( TEST_DURATION * 5 ))
+        for proc in h2 h3; do
+            "$server_bin" \
+                -f "$config_site" \
+                -f "$config_mode" \
+                -f "$config_bench" \
+                -f "${JETPACK_DIR}/config/client_closed.yml" \
+                -f "${JETPACK_DIR}/config/concurrent_1.yml" \
+                -P "$proc" \
+                -d "$server_duration" \
+                -r "$LOG_DIR" \
+                > "$LOG_DIR/proc-${proc}.log" 2>&1 &
+            jetpack_pids+=($!)
+        done
+    else
+        log_info "Starting Jetpack (single-process, 0ms RTT)"
+        "$server_bin" \
+            -f "$config_site" \
+            -f "$config_mode" \
+            -f "$config_bench" \
+            -f "${JETPACK_DIR}/config/client_closed.yml" \
+            -f "${JETPACK_DIR}/config/concurrent_1.yml" \
+            -P localhost \
+            -d "$TEST_DURATION" \
+            -r "$LOG_DIR" \
+            > "$LOG_DIR/proc-localhost.log" 2>&1 &
+        jetpack_pids+=($!)
+    fi
+    local jetpack_pid="${jetpack_pids[0]}"
 
     # Let Jetpack run normally for 5 seconds
     log_info "Letting Jetpack run for 5 seconds..."
@@ -646,7 +701,7 @@ run_recovery_test() {
     signal_write_ns=$(date +%s%N)
     for attempt in $(seq 1 2000); do
         if [ -f /tmp/JM_Jetpack_recovery_finish_after_failure ] || \
-           grep -q "JETPACK-RECOVERY.*COMPLETED" "$LOG_DIR/proc-localhost.log" 2>/dev/null; then
+           grep -rq "JETPACK-RECOVERY.*COMPLETED" "$LOG_DIR"/proc-*.log 2>/dev/null; then
             local recovery_ns
             recovery_ns=$(date +%s%N)
             jetpack_downtime_ms=$(( (recovery_ns - signal_write_ns) / 1000000 ))
@@ -656,31 +711,52 @@ run_recovery_test() {
         sleep 0.01
     done
 
-    # Let Jetpack finish naturally
+    # In WAN mode: wait for h1 (client process) to finish, then kill server-only h2/h3.
+    # In single-process mode: wait for the single process to finish.
     log_info "Waiting for Jetpack to finish..."
     local exit_code=0
-    if ! wait "$jetpack_pid" 2>/dev/null; then
-        log_warn "Jetpack exited with non-zero status"
-        exit_code=1
-    fi
-
-    # Phase 2: Report results
-    log_info "--- Recovery Result Validation ---"
-
-    local logfile="$LOG_DIR/proc-localhost.log"
-    if [ -f "$logfile" ]; then
-        if grep -q "JETPACK-RECOVERY.*STARTING" "$logfile" 2>/dev/null; then
-            log_info "  Jetpack recovery started (found in logs)"
-        fi
-        if grep -q "JETPACK-RECOVERY.*COMPLETED" "$logfile" 2>/dev/null; then
-            local dur
-            dur=$(grep -o "duration=[0-9]*ms" "$logfile" 2>/dev/null | tail -1)
-            log_info "  Jetpack recovery completed ${dur:+(}${dur}${dur:+)}"
-        fi
-        if grep -qi "segfault\|segmentation fault\|abort\|FATAL" "$logfile" 2>/dev/null; then
-            log_error "  Crash detected in log"
+    if [ "$recovery_latency" -gt 0 ] 2>/dev/null; then
+        # Wait for h1 (client + server, index 0)
+        if ! wait "${jetpack_pids[0]}" 2>/dev/null; then
+            log_warn "Jetpack h1 process exited with non-zero status"
             exit_code=1
         fi
+        # Kill server-only h2, h3
+        for pid in "${jetpack_pids[@]:1}"; do
+            kill "$pid" 2>/dev/null || true
+            wait "$pid" 2>/dev/null || true
+        done
+    else
+        for pid in "${jetpack_pids[@]}"; do
+            if ! wait "$pid" 2>/dev/null; then
+                log_warn "A Jetpack process exited with non-zero status"
+                exit_code=1
+            fi
+        done
+    fi
+
+    # Remove tc/netem latency rules (WAN mode only).
+    if [ "$recovery_latency" -gt 0 ] 2>/dev/null; then
+        remove_latency
+    fi
+
+    # Phase 2: Report results — check all proc-*.log files.
+    log_info "--- Recovery Result Validation ---"
+
+    if grep -rq "JETPACK-RECOVERY.*STARTING" "$LOG_DIR"/proc-*.log 2>/dev/null; then
+        log_info "  Jetpack recovery started (found in logs)"
+    fi
+    if grep -rq "JETPACK-RECOVERY.*COMPLETED" "$LOG_DIR"/proc-*.log 2>/dev/null; then
+        local dur
+        dur=$(grep -roh "duration=[0-9]*ms" "$LOG_DIR"/proc-*.log 2>/dev/null | tail -1)
+        log_info "  Jetpack recovery completed ${dur:+(}${dur}${dur:+)}"
+    fi
+    if grep -rq "MONGODB-FAILOVER\|primary_elected" "$LOG_DIR"/proc-*.log 2>/dev/null; then
+        log_info "  MongoDB primary change detected in Jetpack logs"
+    fi
+    if grep -rqi "segfault\|segmentation fault\|abort\|FATAL" "$LOG_DIR"/proc-*.log 2>/dev/null; then
+        log_error "  Crash detected in log"
+        exit_code=1
     fi
 
     # Check surviving MongoDB nodes
