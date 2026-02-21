@@ -277,6 +277,12 @@ measures from signal file write to `recovery_finish_after_failure` detection.
   - Fixed: enabled `JETPACK_ZOOKEEPER_RECOVERY` in constants.h
 
 **Failure recovery verification**:
+- [ ] Add RTT-based sanity check for Jetpack recovery downtime:
+      - Derive how many RTTs Jetpack failure recovery requires (message path/state sync steps).
+      - With one-way latency = 20ms (RTT = 40ms), compute expected Jetpack downtime.
+      - Compare expected downtime vs measured downtime (MongoDB/etcd/ZooKeeper), identify gaps, and root-cause them.
+      - Implement fixes to close/reduce the identified gaps, then re-run recovery experiments to validate.
+      - Write full gap analysis + fix plan + post-fix results in the report (`docs/failure_recovery_evaluation.md` and `result.md`).
 - [x] Double-check all 3 recovery tests truly kill the original protocol leader (not a
       follower) and then wait for leader re-election before measuring recovery time.
       Verify the kill target PID is the leader process for each backend:
