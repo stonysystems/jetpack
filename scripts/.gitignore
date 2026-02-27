@@ -1,0 +1,8 @@
+*.txt
+aws_keys/
+test_output/
+figs/
+results/*
+!results/*.csv
+latency_results.json
+.ipynb_checkpoints/
