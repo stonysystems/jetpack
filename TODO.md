@@ -66,9 +66,24 @@ TLC logs are saved to `tla/log/` with protocol name and timestamp.
   - formatting/style matches jetpack_pseudocode_old.tex (algorithm2e, twocolumn)
   - Optimized vs non-optimized mapping documented in optimized.tex overview paragraph
 
-## Priority 0 (Top): Benchmark Data Collection (`result.md`)
+## Priority 0 (Top): Benchmark Data Collection (`docs/latency_analysis.md`)
 
-### Performance chart (12 experiments)
+**Re-opened benchmark scope (2026-02-27)**:
+- The existing benchmark tables in this TODO are historical reference only. They are
+  incomplete because they only cover the old "Jetpack off/on" split and do not include
+  the full throughput sweep data.
+- Do **not** mark the benchmark work complete unless all 3 protocols x 3 modes are rerun
+  and documented with the raw sweep points that were actually measured.
+- The authoritative benchmark write-up must be updated in `docs/latency_analysis.md`
+  (or a dedicated benchmark doc under `docs/` if the benchmark section becomes too large).
+  Do not leave the final benchmark results only in root-level `result.md`.
+- For every reported number, record the exact site config file (`config/5c1s5r5p.yml`,
+  `config/60c1s5r5p.yml`, etc.), the effective client count, the mode config file, and
+  any extra flags such as `-m 100` / `-m 101`.
+- If a mode, concurrency point, or client-count choice was not actually run, say it is
+  missing. Do not infer or copy numbers from a different mode.
+
+### Performance chart (18 experiments)
 
 All tests use 5 replicas, **open-loop**, multi-process mode with 20ms one-way simulated
 network latency (tc/netem). The original protocol leader is on h1.
@@ -83,22 +98,26 @@ network latency (tc/netem). The original protocol leader is on h1.
      - MongoDB: must be a 3+ node replica set (start_mongodb_replset) with w:majority write concern
      Verify this in docker/{etcd,zookeeper,mongodb}/run-*-test.sh for benchmark/multi modes. -->
 
-**Settings** (3 protocols x 4 settings = 12 experiments):
-- Setting A: 5 clients (1 per process, co-located with servers), concurrency = 1, Jetpack off
-- Setting B: near-peak-throughput clients/concurrency (from max throughput search), Jetpack off
-- Setting C: 5 clients (1 per process, co-located with servers), concurrency = 1, Jetpack on
-- Setting D: near-peak-throughput clients/concurrency (from max throughput search), Jetpack on
+**Settings** (3 protocols x 6 settings = 18 experiments):
+- Setting A: 5 clients (1 per process, co-located with servers), concurrency = 1, original protocol
+- Setting B: near-peak-throughput clients/concurrency (from max throughput search), original protocol
+- Setting C: 5 clients (1 per process, co-located with servers), concurrency = 1, fast path forced 100%
+- Setting D: near-peak-throughput clients/concurrency (from max throughput search), fast path forced 100%
+- Setting E: 5 clients (1 per process, co-located with servers), concurrency = 1, adaptive fast path
+- Setting F: near-peak-throughput clients/concurrency (from max throughput search), adaptive fast path
 
-Jetpack off = `config/none_<protocol>.yml` (cc: none),
-Jetpack on = `config/rule_<protocol>.yml` (cc: rule).
+Original protocol = `config/none_<protocol>.yml`
+Fast path forced 100% = `config/rule_<protocol>.yml` with `-m 100`
+Adaptive fast path = `config/rule_<protocol>.yml` with `-m 101`
 
-For Setting A/C, use 5 clients so each client co-locates with one server (h1-h5). This lets
-us observe the leader vs non-leader latency difference directly: the h1 client is co-located
-with the original protocol leader, h2-h5 clients are not.
+For Setting A/C/E, use `config/5c1s5r5p.yml` unless a protocol-specific variant is required.
+If a different site config is used, record the exact file and why.
 
-For Setting B/D, pick client count and concurrency near the maximum throughput point found by
+For Setting B/D/F, pick client count and concurrency near the maximum throughput point found by
 the throughput sweep (below). The goal is high throughput without excessive queuing-induced
-latency surge — avoid the 60c/c=200 setting which causes multi-second latencies.
+latency surge. If an overloaded point (for example, some `60c` / high-concurrency settings)
+causes multi-second latencies, still record it in the sweep table as a tried point, but do not
+pick it as the final near-peak setting.
 
 **Config files needed**:
 - [x] `config/none_mongodb.yml`, `config/none_etcd.yml`, `config/none_zookeeper.yml` (exist)
@@ -116,9 +135,11 @@ Latency (median, average) and throughput metrics are computed in `src/deptran/s_
       URI caused artificial tc/netem latency on ZK writes
 
 **Sanity check**: With 20ms one-way tc/netem latency, for the 5-client/concurrency=1 setting:
-- Jetpack OFF, h1 (client co-located with leader): 1 RTT to replicate to followers ≈ **~40ms** + backend write
-- Jetpack OFF, h2-h5 (client not co-located with leader): 1 RTT to leader + 1 RTT to replicate ≈ **~80ms** + backend write
-- Jetpack ON, any client: fast path 1 RTT ≈ **~40ms**
+- Original protocol, h1 (client co-located with leader): 1 RTT to replicate to followers ≈ **~40ms** + backend write
+- Original protocol, h2-h5 (client not co-located with leader): 1 RTT to leader + 1 RTT to replicate ≈ **~80ms** + backend write
+- Fast path forced 100%, any client: fast path 1 RTT ≈ **~40ms**
+- Adaptive fast path, any client: run and report it explicitly; if it stays on the fast path at
+  this load, it should be close to **~40ms**, but do not copy the `-m 100` numbers without rerunning
 
 **Sanity check results** (with 3-node backend clusters):
 
@@ -185,6 +206,10 @@ So "backend write" = backend's own replication RTT (~40ms via tc/netem) + local 
 | ZK A (off) | ~40ms + ZK ZAB repl | ~80ms + ZK ZAB repl | ZK must replicate via ZAB |
 | ZK C (on) | ~40ms | ~40ms | |
 
+**Historical note**: The results table below is the old off/on-only version. Keep it only as
+reference. It does **not** satisfy the reopened 3-mode benchmark requirement above and must be
+replaced or expanded in `docs/latency_analysis.md`.
+
 **Results chart** (columns: h1 avg, h2-h5 avg, h1-h5 avg, throughput):
 
 | Experiment | h1 Avg (ms) | h2-h5 Avg (ms) | h1-h5 Avg (ms) | Throughput (txn/s) |
@@ -215,27 +240,67 @@ So "backend write" = backend's own replication RTT (~40ms via tc/netem) + local 
 - [x] Run ZK Setting C (5c, c=1, Jetpack on) — h1=40.3ms, h2-h5=40.5ms (re-run after fix)
 - [x] Run ZK Setting D (near-peak throughput, Jetpack on) — 5,498 txn/s (re-run after fix)
 
-### Maximum throughput search (6 cases)
+### Maximum throughput search (9 cases, must include full sweep data)
 
-Use 60 client threads, vary concurrency to find the maximum throughput for each case
-(3 protocols x Jetpack on/off = 6 cases). Increase concurrency until throughput saturates.
-The peak clients/concurrency from this search will be used for Setting B/D above.
+The old 6-case off/on-only sweep is insufficient. The required matrix is:
+3 protocols x 3 modes = 9 cases.
 
-| Case | Best Concurrency | Max Throughput (txn/s) |
-|---|---:|---:|
-| MongoDB (Jetpack off) | c=50 | 2,304 |
-| MongoDB (Jetpack on) | c=75 | 1,966 |
-| etcd (Jetpack off) | c=200 | 7,753 |
-| etcd (Jetpack on) | c=200 | 7,414 |
-| ZooKeeper (Jetpack off) | c=400 | 5,879 |
-| ZooKeeper (Jetpack on) | c=200 | 5,954 |
+For each protocol (`mongodb`, `etcd`, `zookeeper`), run all 3 modes:
+- Original protocol: `config/none_<protocol>.yml`
+- Fast path forced 100%: `config/rule_<protocol>.yml` with `-m 100`
+- Adaptive fast path: `config/rule_<protocol>.yml` with `-m 101`
 
-- [x] MongoDB max throughput (Jetpack off): c=50 → 2,304 txn/s
-- [x] MongoDB max throughput (Jetpack on): c=75 → 1,966 txn/s
-- [x] etcd max throughput (Jetpack off): c=200 → 7,753 txn/s
-- [x] etcd max throughput (Jetpack on): c=200 → 7,414 txn/s
-- [x] ZooKeeper max throughput (Jetpack off): c=400 → 5,879 txn/s
-- [x] ZooKeeper max throughput (Jetpack on): c=200 → 5,954 txn/s
+For each of those 9 cases:
+- Use a fixed site config for the maximum-throughput sweep: `config/60c1s5r5p.yml`.
+  This means the sweep uses 60 clients for all 9 protocol/mode cases unless there is a hard
+  blocker that must be explained explicitly in the doc.
+- Sweep **several** concurrency values until throughput clearly plateaus or drops. The output
+  must include **all** tried concurrency values and the corresponding throughput numbers, not
+  just the best point.
+- If the first sweep is too coarse to identify the peak, add nearby concurrency configs and rerun.
+- The final report must identify the best concurrency and max throughput for each of the 9 cases,
+  but it must also show the full sweep table used to pick that point.
+- Save/update this data in `docs/latency_analysis.md` (or a dedicated benchmark doc under
+  `docs/`), with enough detail that the sweep can be reproduced exactly.
+
+Minimum reporting format for the doc update:
+
+- Use a **throughput matrix** for the full sweep with fixed site config
+  `config/60c1s5r5p.yml` and fixed clients = 60.
+- Each row is one concurrency value that was actually tried.
+- The table cells should be the measured throughput values.
+- The protocol+mode combinations belong in the **columns**, not in the row labels.
+
+Column definitions for the sweep matrix:
+- `MongoDB Original` = `config/none_mongodb.yml`
+- `MongoDB Fast path 100%` = `config/rule_mongodb.yml` with `-m 100`
+- `MongoDB Adaptive` = `config/rule_mongodb.yml` with `-m 101`
+- `etcd Original` = `config/none_etcd.yml`
+- `etcd Fast path 100%` = `config/rule_etcd.yml` with `-m 100`
+- `etcd Adaptive` = `config/rule_etcd.yml` with `-m 101`
+- `ZooKeeper Original` = `config/none_zookeeper.yml`
+- `ZooKeeper Fast path 100%` = `config/rule_zookeeper.yml` with `-m 100`
+- `ZooKeeper Adaptive` = `config/rule_zookeeper.yml` with `-m 101`
+
+Template for the full sweep table:
+
+All rows in this table use `config/60c1s5r5p.yml` (60 clients).
+
+| Conc | MongoDB Original | MongoDB Fast path 100% | MongoDB Adaptive | etcd Original | etcd Fast path 100% | etcd Adaptive | ZooKeeper Original | ZooKeeper Fast path 100% | ZooKeeper Adaptive |
+|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 1 | `TBD` | `TBD` | `TBD` | `TBD` | `TBD` | `TBD` | `TBD` | `TBD` | `TBD` |
+| 5 | `TBD` | `TBD` | `TBD` | `TBD` | `TBD` | `TBD` | `TBD` | `TBD` | `TBD` |
+| 10 | `TBD` | `TBD` | `TBD` | `TBD` | `TBD` | `TBD` | `TBD` | `TBD` | `TBD` |
+| ... | `...` | `...` | `...` | `...` | `...` | `...` | `...` | `...` | `...` |
+
+- After the full sweep matrix, include a separate 9-row summary table for the selected best point
+  of each protocol/mode combination.
+
+- [ ] Re-run the maximum-throughput sweep for MongoDB, etcd, and ZooKeeper in all 3 modes
+- [ ] Record every concurrency value tried and every throughput number measured for all 9 cases
+- [ ] Record that the sweep site config is `config/60c1s5r5p.yml` and that the sweep uses 60 clients
+- [ ] Update `docs/latency_analysis.md` (or another benchmark doc under `docs/`) with both:
+      (1) the full sweep tables and (2) the 9-case best-point summary table
 
 ### Docker test script improvements
 
@@ -381,7 +446,8 @@ measures from signal file write to `recovery_finish_after_failure` detection.
 
 ### Export
 
-- [x] Export all benchmark and recovery data to `result.md`
+- [ ] Export the benchmark matrices and full throughput sweeps to `docs/latency_analysis.md`
+- [ ] If `result.md` is kept for compatibility, treat it as a mirror only; the benchmark source of truth should be under `docs/`
 
 ## Priority 1 (High): TLA+ Specifications
 
