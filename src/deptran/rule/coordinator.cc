@@ -96,27 +96,26 @@ void CoordinatorRule::GotoNextPhase() {
         verify(0);
       }
 
-      // Keep leader queues from being overloaded for MongoDB/Etcd/Copilot.
+      // Throttle fast-path at high queue depth for MongoDB/Etcd/ZK/Copilot.
+      // At low queue depth (<50): fast-path freely for latency benefit.
+      // At high queue depth (>50): ramp down fast-path to avoid overhead from
+      // failed speculative RPCs which hurt peak throughput at high concurrency.
       if (Config::GetConfig()->replica_proto_ == MODE_MONGODB ||
           Config::GetConfig()->replica_proto_ == MODE_ETCD ||
           Config::GetConfig()->replica_proto_ == MODE_ZOOKEEPER) {
         double queue_depth = client_worker_->queue_depth_.recent_100_ave();
-        double rand_val = RandomGenerator::rand(0, 99);
-        if (queue_depth * 20 > rand_val) {
-          go_to_fastpath_ = false;
-          // Log_info("[QUEUE_DEPTH] Disabling fastpath due to queue_depth=%.2f (>2.0), rand=%.2f < %.2f", queue_depth, rand_val, queue_depth * 20);
-        } else {
-          // Log_info("[QUEUE_DEPTH] Let go fastpath due to queue_depth=%.2f (>2.0), rand=%.2f >= %.2f", queue_depth, rand_val, queue_depth * 20);
+        if (queue_depth > 50) {
+          double rand_val = RandomGenerator::rand(0, 99);
+          double throttle = (queue_depth - 50) * 0.5; // ramp: 50% at 150, 100% at 250+
+          if (throttle > rand_val) {
+            go_to_fastpath_ = false;
+          }
         }
       } else if (Config::GetConfig()->replica_proto_ == MODE_COPILOT) {
         double queue_depth = client_worker_->queue_depth_.recent_100_ave();
-        // Log_info("[QUEUE_DEPTH] %.2f", queue_depth);
         double rand_val = RandomGenerator::rand(0, 99);
         if (queue_depth - 300 > rand_val) {
           go_to_fastpath_ = false;
-          // Log_info("[QUEUE_DEPTH] Disabling fastpath due to queue_depth=%.2f (>2.0), rand=%.2f < %.2f", queue_depth, rand_val, queue_depth * 20);
-        } else {
-          // Log_info("[QUEUE_DEPTH] Let go fastpath due to queue_depth=%.2f (>2.0), rand=%.2f >= %.2f", queue_depth, rand_val, queue_depth * 20);
         }
       }
 
