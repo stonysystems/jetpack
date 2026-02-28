@@ -240,10 +240,42 @@ replaced or expanded in `docs/latency_analysis.md`.
 - [x] Run ZK Setting C (5c, c=1, Jetpack on) — h1=40.3ms, h2-h5=40.5ms (re-run after fix)
 - [x] Run ZK Setting D (near-peak throughput, Jetpack on) — 5,498 txn/s (re-run after fix)
 
-### Maximum throughput search (9 cases, must include full sweep data)
+### Maximum throughput search (9 cases, reopened again after 2026-02-28 review)
 
-The old 6-case off/on-only sweep is insufficient. The required matrix is:
+The old 6-case off/on-only sweep is insufficient. The required matrix is still:
 3 protocols x 3 modes = 9 cases.
+
+**Review of commit `a49d4ad90711ab8d62167dabf3c2a4598746e148`**:
+- Good: it correctly reopened the 9-case matrix and required raw sweep data instead of only
+  a best-point summary.
+- Not sufficient: it did **not** define how failed runs must be handled, did **not** require
+  CPU / queue / fast-path-attempt evidence, and did **not** define the acceptance criterion
+  for adaptive mode vs original mode.
+- Because those constraints were missing, later commits were able to mark the sweep/export
+  work complete too early. Treat the 2026-02-27 sweep as **diagnostic only**, not final.
+
+**Why the current sweep is still incomplete**:
+- `docs/sweep_results_2026-02-27.csv` still contains MongoDB failures (`—` in the published
+  table) and suspicious partial data (`MongoDB Adaptive c=10` has `h5=0.00` in the raw CSV).
+  Those points are not acceptable final benchmark evidence.
+- The current CSV only records throughput (`total_throughput`, `h1`-`h5`). It does **not**
+  record CPU usage, leader CPU usage, leader queue depth, fast-path attempt rate, fast-path
+  success rate, run status, error summary, or log path, so it cannot support bottleneck analysis.
+- etcd adaptive mode is still below original mode at the current reported peak
+  (`7,233 < 7,703`), so the adaptive policy task is still open.
+- MongoDB fast path 100% is below original mode (`4,894 < 5,265`), which strongly suggests
+  overload or another bottleneck. Adaptive mode cannot be treated as solved until MongoDB
+  reliability is fixed and the comparison is rerun cleanly.
+- ZooKeeper is the healthiest of the 3 backends, but it still needs the same CPU/bottleneck
+  survey so the 9-case report is complete and comparable.
+
+Current 2026-02-27 diagnostic peaks (do **not** treat these as final acceptance data):
+
+| Backend | Original peak | Fast path 100% peak | Adaptive peak | Current issue |
+|---|---:|---:|---:|---|
+| MongoDB | 5,265 | 4,894 | 5,267 | failed sweep points; reliability not fixed; CPU evidence missing |
+| etcd | 7,703 | 7,116 | 7,233 | adaptive still below original; CPU evidence missing |
+| ZooKeeper | 5,526 | 5,681 | 5,568 | needs CPU/bottleneck survey before closure |
 
 For each protocol (`mongodb`, `etcd`, `zookeeper`), run all 3 modes:
 - Original protocol: `config/none_<protocol>.yml`
@@ -270,6 +302,10 @@ Minimum reporting format for the doc update:
 - Each row is one concurrency value that was actually tried.
 - The table cells should be the measured throughput values.
 - The protocol+mode combinations belong in the **columns**, not in the row labels.
+- Keep failed attempts in the raw data with an explicit status; do **not** hide them by
+  silently dropping rows or replacing them with a nearby successful point.
+- The accepted final summary must be based on reruns after fixes, not on the current
+  2026-02-27 diagnostic table.
 
 Column definitions for the sweep matrix:
 - `MongoDB Original` = `config/none_mongodb.yml`
@@ -282,58 +318,90 @@ Column definitions for the sweep matrix:
 - `ZooKeeper Fast path 100%` = `config/rule_zookeeper.yml` with `-m 100`
 - `ZooKeeper Adaptive` = `config/rule_zookeeper.yml` with `-m 101`
 
-Template for the full sweep table:
+**Raw CSV requirements for `docs/sweep*.csv`**:
+- The existing `docs/sweep_results_2026-02-27.csv` is incomplete. Replace it or add a new
+  CSV with the same benchmark matrix but richer columns.
+- Minimum raw CSV schema:
+  `backend,mode,concurrency,run_id,status,total_throughput,h1,h2,h3,h4,h5,cpu_all_avg,cpu_leader_avg,leader_queue_depth_avg,fastpath_attempt_rate,fastpath_success_rate,original_path_rate,error_count,error_summary,log_path`
+- One row per attempted run. If you later publish a summarized CSV, keep the raw per-run CSV too.
+- `status` must be one of `OK`, `FAILED`, `PARTIAL`, `OUTLIER_UNINVESTIGATED`.
+- `error_summary` must contain the first concrete failure signature, not just `failed`.
+- `log_path` must point to the saved stdout/stderr or parsed benchmark log for that run.
 
-All rows in this table use `config/60c1s5r5p.yml` (60 clients).
+**Implementation guidance for CPU / queue metrics**:
+- `src/deptran/rule/coordinator.cc` already appends `AvgCpuAll()`, `AvgCpuLeaders()`, and
+  `LeaderQueueDepth()` into `ClientWorker`.
+- `src/deptran/communicator.h` already exposes those aggregates on
+  `RuleSpeculativeExecuteQuorumEvent`.
+- `src/deptran/client_worker.h` already stores `cpu_usage_all_`, `cpu_usage_leaders_`, and
+  `queue_depth_`.
+- Extend the benchmark output path and `scripts/sweep_benchmark.sh` so the sweep CSV records
+  those numbers instead of only throughput.
+- Also export fast-path attempt rate and fast-path success rate; otherwise the adaptive policy
+  cannot be evaluated honestly.
 
-| Conc | MongoDB Original | MongoDB Fast 100% | MongoDB Adaptive | etcd Original | etcd Fast 100% | etcd Adaptive | ZK Original | ZK Fast 100% | ZK Adaptive |
-|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| 1 | 41 | 40 | 39 | 40 | 39 | 41 | 41 | 40 | 40 |
-| 5 | 265 | 260 | 257 | 274 | 272 | 272 | 272 | 273 | 268 |
-| 10 | — | 570 | 363* | 571 | 572 | 573 | 571 | 570 | 572 |
-| 25 | 1,466 | 1,458 | — | 1,472 | 1,470 | 1,464 | 1,461 | 1,472 | 1,471 |
-| 50 | — | 2,960 | 2,970 | 2,959 | 2,966 | 2,958 | 2,957 | 2,957 | 2,964 |
-| 75 | 4,321 | 2,764 | 4,356 | 4,462 | 4,461 | 4,451 | 4,470 | 4,459 | 4,476 |
-| 100 | — | 3,041 | 5,267 | 5,956 | 5,952 | 5,966 | 5,439 | 5,442 | 4,412 |
-| 150 | **5,265** | 3,966 | 3,961 | **7,703** | **7,116** | 7,081 | 5,524 | 5,480 | 5,545 |
-| 200 | — | **4,894** | 4,916 | 7,639 | 5,772 | **7,233** | **5,526** | **5,681** | **5,568** |
-| 300 | 3,993 | 4,490 | 4,922 | 7,220 | 1,010* | 6,587 | 5,420 | 5,482 | 5,295 |
-| 400 | 4,829 | — | 4,577 | 6,416 | 6,389 | 6,310 | 5,394 | 5,307 | 5,370 |
+**Required bottleneck-survey table**:
+- In addition to the throughput matrix, publish a 9-row bottleneck table with columns:
+  `backend, mode, best_concurrency, throughput, cpu_all_avg, cpu_leader_avg, leader_queue_depth_avg, fastpath_attempt_rate, fastpath_success_rate, bottleneck_class, root_cause, evidence_path, fix_summary`
+- `bottleneck_class` should be something concrete such as `CPU-bound`, `leader queue bound`,
+  `pending-RPC bound`, `backend connection-pool bound`, `thread-pool bound`, or `unknown`.
+- If the peak-throughput point is reached while leader CPU is still substantially below full
+  utilization (for example, clearly below saturation such as <85%), you must treat that as an
+  unfinished bottleneck investigation, not as “good enough”.
 
-\* Partial data or outlier. — = failed (MongoDB connection pool issue). **Bold** = peak for that column.
+**Adaptive-mode acceptance criterion**:
+- The user requirement is that adaptive mode should achieve the same maximum throughput as
+  the original mode for MongoDB and etcd.
+- Do **not** close this task on a single lucky run. Compare repeated runs around the best point.
+- Minimum acceptance bar: after fixes and reruns, the repeated adaptive best point must match
+  original mode within measurement noise. Any persistent regression larger than a small noise
+  band (for example >2%) keeps the task open.
+- Protocol-specific policies are acceptable. A single general policy is only acceptable if it
+  actually works for all backends.
+- `src/deptran/rule/coordinator.cc` is the main policy control point. The current adaptive
+  logic mixes a bandit heuristic with protocol-specific queue/CPU gates; use that as the place
+  to implement a real policy instead of documenting around the regression.
+- It is acceptable to branch by protocol (`MODE_MONGODB`, `MODE_ETCD`, `MODE_ZOOKEEPER`, etc.)
+  if that is what is required to remove the regression.
 
-Best-point summary (9-case):
-
-| Backend | Mode | Best Concurrency | Peak (txn/s) |
-|---|---|---:|---:|
-| etcd | Original | c=150 | 7,703 |
-| etcd | Fast path 100% | c=150 | 7,116 |
-| etcd | Adaptive | c=200 | 7,233 |
-| MongoDB | Original | c=150 | 5,265 |
-| MongoDB | Fast path 100% | c=200 | 4,894 |
-| MongoDB | Adaptive | c=100 | 5,267 |
-| ZooKeeper | Original | c=200 | 5,526 |
-| ZooKeeper | Fast path 100% | c=200 | 5,681 |
-| ZooKeeper | Adaptive | c=200 | 5,568 |
-
-Sweep date: 2026-02-27. Site config: `config/60c1s5r5p.yml` (60 clients, 5 processes).
-Raw CSV data: `docs/sweep_results_2026-02-27.csv`.
-
-- [x] Re-run the maximum-throughput sweep for MongoDB, etcd, and ZooKeeper in all 3 modes
-  - [x] Rebuild Docker images for all 3 backends to ensure they match current code
-  - [x] Run MongoDB Original (`none_mongodb.yml`) concurrency sweep: c=1,5,10,25,50,75,100,150,200
-  - [x] Run MongoDB Fast path 100% (`rule_mongodb.yml -m 100`) concurrency sweep
-  - [x] Run MongoDB Adaptive (`rule_mongodb.yml -m 101`) concurrency sweep
-  - [x] Run etcd Original (`none_etcd.yml`) concurrency sweep: c=1,5,10,25,50,75,100,150,200,300
-  - [x] Run etcd Fast path 100% (`rule_etcd.yml -m 100`) concurrency sweep
-  - [x] Run etcd Adaptive (`rule_etcd.yml -m 101`) concurrency sweep
-  - [x] Run ZooKeeper Original (`none_zookeeper.yml`) concurrency sweep: c=1,5,10,25,50,100,200,300,400
-  - [x] Run ZooKeeper Fast path 100% (`rule_zookeeper.yml -m 100`) concurrency sweep
-  - [x] Run ZooKeeper Adaptive (`rule_zookeeper.yml -m 101`) concurrency sweep
-- [x] Record every concurrency value tried and every throughput number measured for all 9 cases
-- [x] Record that the sweep site config is `config/60c1s5r5p.yml` and that the sweep uses 60 clients
-- [x] Update `docs/latency_analysis.md` (or another benchmark doc under `docs/`) with both:
-      (1) the full sweep tables and (2) the 9-case best-point summary table
+**Concrete follow-up tasks**:
+- [ ] Re-open the maximum-throughput sweep and treat the current 2026-02-27 data as diagnostic only
+- [ ] Fix the MongoDB sweep reliability problem before claiming any MongoDB max-throughput result is final
+  - Start with the current failure signature (`serverSelectionTryOnce` / connection-pool-related errors)
+    and inspect `src/deptran/mongodb/server.h`, `src/deptran/mongodb_connection_thread_pool.h`,
+    and the benchmark Docker path that constructs the MongoDB URI / pool.
+  - If the benchmark path is still mixing a 5-host Jetpack replica list with a 3-node MongoDB
+    replica set, fix that mismatch instead of documenting around it.
+  - Re-run every previously failed or suspicious MongoDB point after the fix; do not leave `—`
+    or `h*=0.00` rows in the accepted final sweep.
+- [ ] Extend benchmark output and `scripts/sweep_benchmark.sh` so `docs/sweep*.csv` includes CPU, queue-depth, fast-path-attempt, and fast-path-success metrics
+- [ ] Re-run the full 9-case sweep with the richer CSV format and keep raw per-run rows
+- [ ] Record every concurrency value tried and every throughput number measured for all 9 cases
+- [ ] Record the sweep site config, effective client count, mode config, extra flags, run status, and log path for every row
+- [ ] Add a per-case bottleneck survey for all 9 protocol/mode combinations
+  - For every best-point candidate, record CPU usage and queue depth.
+  - If CPU is not full at the claimed maximum throughput, identify the actual bottleneck and fix it.
+  - Candidate places to inspect include `src/deptran/rule/commo.h` (`max_pending_rpc_`),
+    reactor scheduling, backend thread pools/connection pools, and original-protocol leader queues.
+- [ ] Fix the adaptive policy so MongoDB and etcd adaptive mode reach the same max throughput as original mode
+  - Use `src/deptran/rule/coordinator.cc` as the primary control point.
+  - Fast path 100% may legitimately use too much CPU; adaptive mode should back off before overload,
+    not after throughput has already collapsed.
+  - Record fast-path attempt rate and success rate at each concurrency so the policy change can be justified.
+  - Protocol-specific policy is acceptable if a single general policy does not work.
+- [ ] Re-run the best-point neighborhood after each fix, not just the single best concurrency
+  - At minimum, rerun the chosen best point and its adjacent concurrency values.
+  - If results are unstable, expand the neighborhood until the peak choice is defensible.
+- [ ] Update `docs/latency_analysis.md` with:
+  - the raw-sweep summary tables,
+  - the CPU/bottleneck table,
+  - the post-fix best-point summary,
+  - and a short “what changed after the 2026-02-27 diagnostic sweep” section
+- [ ] Do not mark this section complete until all of the following are true:
+  - MongoDB has no uninvestigated failed sweep points in the accepted final data.
+  - `docs/sweep*.csv` includes CPU and fast-path metrics, not just throughput.
+  - Every one of the 9 cases has a bottleneck classification with evidence.
+  - MongoDB and etcd adaptive mode are no longer meaningfully below original mode at max throughput.
 
 ### Docker test script improvements
 
@@ -479,8 +547,11 @@ measures from signal file write to `recovery_finish_after_failure` detection.
 
 ### Export
 
-- [x] Export the benchmark matrices and full throughput sweeps to `docs/latency_analysis.md`
-- [x] If `result.md` is kept for compatibility, treat it as a mirror only; the benchmark source of truth should be under `docs/`
+- [ ] Export the **post-fix** benchmark matrices, CPU/bottleneck tables, and full throughput sweeps to `docs/latency_analysis.md`
+  - Do not treat the current 2026-02-27 sweep export as final; it is diagnostic only.
+  - Re-open this task if the exported data still contains failed MongoDB rows, lacks CPU metrics,
+    or lacks the adaptive-vs-original bottleneck analysis required above.
+- [ ] If `result.md` is kept for compatibility, treat it as a mirror only; the benchmark source of truth should be under `docs/`
 
 ## Priority 1 (High): TLA+ Specifications
 
