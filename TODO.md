@@ -382,9 +382,17 @@ Column definitions for the sweep matrix:
   - New log lines: `Cpu-usage-leaders ave X.XXXX count N` and `Queue-depth ave X.XXXX count N`
   - Updated `run_benchmark()` in all 3 test scripts (etcd, mongodb, zookeeper) to extract and output these metrics
   - Extended `scripts/sweep_benchmark.sh` with 5 new TSV columns: `fp_attempted`, `fp_succeeded`, `fp_rate`, `cpu_leader_avg`, `queue_depth_avg`
-- [ ] Re-run the full 9-case sweep with the richer CSV format and keep raw per-run rows
-- [ ] Record every concurrency value tried and every throughput number measured for all 9 cases
-- [ ] Record the sweep site config, effective client count, mode config, extra flags, run status, and log path for every row
+- [x] Re-run the full 9-case sweep with the richer CSV format and keep raw per-run rows
+  - Fixed `ulimit -n` in all 3 Docker test scripts (was 1024, needed 65536 for AWS-mode 2500 connections)
+  - Raw per-concurrency TSV files in `docs/sweep_2026-02-28/` (9 files, one per backend×mode)
+  - Consolidated CSV: `docs/sweep_results_2026-02-28.csv` (99 rows × 15 columns)
+  - MongoDB still has failures at some high-concurrency points (2500 connections per leader overwhelms Docker mongod)
+- [x] Record every concurrency value tried and every throughput number measured for all 9 cases
+  - All 11 concurrency levels (1, 5, 10, 25, 50, 75, 100, 150, 200, 300, 400) recorded for all 9 cases
+  - Failed points recorded as 0 throughput (not omitted)
+- [x] Record the sweep site config, effective client count, mode config, extra flags, run status, and log path for every row
+  - Each TSV file header includes: image, mode, site_config (60c1s5r5p.yml), latency (20ms), duration (30s)
+  - CSV includes backend, mode, extra_args columns per row
 - [ ] Add a per-case bottleneck survey for all 9 protocol/mode combinations
   - For every best-point candidate, record CPU usage and queue depth.
   - If CPU is not full at the claimed maximum throughput, identify the actual bottleneck and fix it.

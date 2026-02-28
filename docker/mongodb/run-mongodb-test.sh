@@ -19,6 +19,9 @@
 
 set -euo pipefail
 
+# Raise file descriptor limit for high connection counts (AWS build uses 2500)
+ulimit -n 65536 2>/dev/null || true
+
 JETPACK_DIR="${JETPACK_DIR:-/jetpack}"
 TEST_DURATION="${TEST_DURATION:-30}"
 LATENCY_MS="${LATENCY_MS:-20}"
