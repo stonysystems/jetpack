@@ -286,20 +286,53 @@ Template for the full sweep table:
 
 All rows in this table use `config/60c1s5r5p.yml` (60 clients).
 
-| Conc | MongoDB Original | MongoDB Fast path 100% | MongoDB Adaptive | etcd Original | etcd Fast path 100% | etcd Adaptive | ZooKeeper Original | ZooKeeper Fast path 100% | ZooKeeper Adaptive |
+| Conc | MongoDB Original | MongoDB Fast 100% | MongoDB Adaptive | etcd Original | etcd Fast 100% | etcd Adaptive | ZK Original | ZK Fast 100% | ZK Adaptive |
 |---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| 1 | `TBD` | `TBD` | `TBD` | `TBD` | `TBD` | `TBD` | `TBD` | `TBD` | `TBD` |
-| 5 | `TBD` | `TBD` | `TBD` | `TBD` | `TBD` | `TBD` | `TBD` | `TBD` | `TBD` |
-| 10 | `TBD` | `TBD` | `TBD` | `TBD` | `TBD` | `TBD` | `TBD` | `TBD` | `TBD` |
-| ... | `...` | `...` | `...` | `...` | `...` | `...` | `...` | `...` | `...` |
+| 1 | 41 | 40 | 39 | 40 | 39 | 41 | 41 | 40 | 40 |
+| 5 | 265 | 260 | 257 | 274 | 272 | 272 | 272 | 273 | 268 |
+| 10 | — | 570 | 363* | 571 | 572 | 573 | 571 | 570 | 572 |
+| 25 | 1,466 | 1,458 | — | 1,472 | 1,470 | 1,464 | 1,461 | 1,472 | 1,471 |
+| 50 | — | 2,960 | 2,970 | 2,959 | 2,966 | 2,958 | 2,957 | 2,957 | 2,964 |
+| 75 | 4,321 | 2,764 | 4,356 | 4,462 | 4,461 | 4,451 | 4,470 | 4,459 | 4,476 |
+| 100 | — | 3,041 | 5,267 | 5,956 | 5,952 | 5,966 | 5,439 | 5,442 | 4,412 |
+| 150 | **5,265** | 3,966 | 3,961 | **7,703** | **7,116** | 7,081 | 5,524 | 5,480 | 5,545 |
+| 200 | — | **4,894** | 4,916 | 7,639 | 5,772 | **7,233** | **5,526** | **5,681** | **5,568** |
+| 300 | 3,993 | 4,490 | 4,922 | 7,220 | 1,010* | 6,587 | 5,420 | 5,482 | 5,295 |
+| 400 | 4,829 | — | 4,577 | 6,416 | 6,389 | 6,310 | 5,394 | 5,307 | 5,370 |
 
-- After the full sweep matrix, include a separate 9-row summary table for the selected best point
-  of each protocol/mode combination.
+\* Partial data or outlier. — = failed (MongoDB connection pool issue). **Bold** = peak for that column.
 
-- [ ] Re-run the maximum-throughput sweep for MongoDB, etcd, and ZooKeeper in all 3 modes
-- [ ] Record every concurrency value tried and every throughput number measured for all 9 cases
-- [ ] Record that the sweep site config is `config/60c1s5r5p.yml` and that the sweep uses 60 clients
-- [ ] Update `docs/latency_analysis.md` (or another benchmark doc under `docs/`) with both:
+Best-point summary (9-case):
+
+| Backend | Mode | Best Concurrency | Peak (txn/s) |
+|---|---|---:|---:|
+| etcd | Original | c=150 | 7,703 |
+| etcd | Fast path 100% | c=150 | 7,116 |
+| etcd | Adaptive | c=200 | 7,233 |
+| MongoDB | Original | c=150 | 5,265 |
+| MongoDB | Fast path 100% | c=200 | 4,894 |
+| MongoDB | Adaptive | c=100 | 5,267 |
+| ZooKeeper | Original | c=200 | 5,526 |
+| ZooKeeper | Fast path 100% | c=200 | 5,681 |
+| ZooKeeper | Adaptive | c=200 | 5,568 |
+
+Sweep date: 2026-02-27. Site config: `config/60c1s5r5p.yml` (60 clients, 5 processes).
+Raw CSV data: `docs/sweep_results_2026-02-27.csv`.
+
+- [x] Re-run the maximum-throughput sweep for MongoDB, etcd, and ZooKeeper in all 3 modes
+  - [x] Rebuild Docker images for all 3 backends to ensure they match current code
+  - [x] Run MongoDB Original (`none_mongodb.yml`) concurrency sweep: c=1,5,10,25,50,75,100,150,200
+  - [x] Run MongoDB Fast path 100% (`rule_mongodb.yml -m 100`) concurrency sweep
+  - [x] Run MongoDB Adaptive (`rule_mongodb.yml -m 101`) concurrency sweep
+  - [x] Run etcd Original (`none_etcd.yml`) concurrency sweep: c=1,5,10,25,50,75,100,150,200,300
+  - [x] Run etcd Fast path 100% (`rule_etcd.yml -m 100`) concurrency sweep
+  - [x] Run etcd Adaptive (`rule_etcd.yml -m 101`) concurrency sweep
+  - [x] Run ZooKeeper Original (`none_zookeeper.yml`) concurrency sweep: c=1,5,10,25,50,100,200,300,400
+  - [x] Run ZooKeeper Fast path 100% (`rule_zookeeper.yml -m 100`) concurrency sweep
+  - [x] Run ZooKeeper Adaptive (`rule_zookeeper.yml -m 101`) concurrency sweep
+- [x] Record every concurrency value tried and every throughput number measured for all 9 cases
+- [x] Record that the sweep site config is `config/60c1s5r5p.yml` and that the sweep uses 60 clients
+- [x] Update `docs/latency_analysis.md` (or another benchmark doc under `docs/`) with both:
       (1) the full sweep tables and (2) the 9-case best-point summary table
 
 ### Docker test script improvements

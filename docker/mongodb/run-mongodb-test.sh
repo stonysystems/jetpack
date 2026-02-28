@@ -23,6 +23,7 @@ JETPACK_DIR="${JETPACK_DIR:-/jetpack}"
 TEST_DURATION="${TEST_DURATION:-30}"
 LATENCY_MS="${LATENCY_MS:-20}"
 LATENCY_JITTER="${LATENCY_JITTER:-0}"
+SERVER_EXTRA_ARGS="${SERVER_EXTRA_ARGS:-}"
 MONGODB_PORT="${MONGODB_PORT:-27017}"
 MONGODB_DATA_DIR="/tmp/mongodb-data"
 MONGODB_LOG="/tmp/mongod.log"
@@ -875,6 +876,7 @@ run_benchmark() {
 
     for proc in "${host_procs[@]}"; do
         log_info "Starting process $proc"
+        # shellcheck disable=SC2086
         "$server_bin" \
             -f "$config_site" \
             -f "$config_mode" \
@@ -884,6 +886,7 @@ run_benchmark() {
             -P "$proc" \
             -d "$TEST_DURATION" \
             -r "$LOG_DIR" \
+            $SERVER_EXTRA_ARGS \
             > "$LOG_DIR/proc-${proc}.log" 2>&1 &
         pids+=($!)
         proc_names+=("$proc")

@@ -158,16 +158,47 @@ Low-concurrency (5 clients, concurrency=1):
 | ZK A (off) | 45.5 | 86.0 | 0/40ms RTT + ~45ms ZAB repl + fsync |
 | ZK C (on) | 40.3 | 40.5 | Jetpack fast path, 1 RTT |
 
-Maximum throughput (60 clients, best concurrency):
+Maximum throughput (60 clients, concurrency sweep, 2026-02-27):
 
-| Case | Concurrency | Max (txn/s) |
-|---|---:|---:|
-| etcd (off) | c=200 | 7,753 |
-| etcd (on) | c=200 | 7,414 |
-| MongoDB (off) | c=50 | 2,304 |
-| MongoDB (on) | c=75 | 1,966 |
-| ZooKeeper (off) | c=400 | 5,879 |
-| ZooKeeper (on) | c=200 | 5,954 |
+| Backend | Mode | Best Concurrency | Peak (txn/s) |
+|---|---|---:|---:|
+| etcd | Original | c=150 | 7,703 |
+| etcd | Fast path 100% | c=150 | 7,116 |
+| etcd | Adaptive | c=200 | 7,233 |
+| MongoDB | Original | c=150 | 5,265 |
+| MongoDB | Fast path 100% | c=200 | 4,894 |
+| MongoDB | Adaptive | c=100 | 5,267 |
+| ZooKeeper | Original | c=200 | 5,526 |
+| ZooKeeper | Fast path 100% | c=200 | 5,681 |
+| ZooKeeper | Adaptive | c=200 | 5,568 |
+
+**Notes on modes:**
+- **Original** (`none_*.yml`): Jetpack OFF, single-leader replication through backend.
+- **Fast path 100%** (`rule_*.yml -m 100`): Jetpack ON, all txns use fast path (broadcast + quorum).
+- **Adaptive** (`rule_*.yml -m 101`): Jetpack ON, dynamically selects fast/slow path per txn.
+
+**MongoDB reliability note:** Some MongoDB concurrency points failed due to the MongoDB C
+driver's `serverSelectionTryOnce` setting combined with a 5-host URI (5 Jetpack replicas)
+vs 3-node MongoDB replica set. Failed points are omitted; the peak is from the best
+successful data point. Full raw data: `docs/sweep_results_2026-02-27.csv`.
+
+Full concurrency sweep (total txn/s, 60 clients, `60c1s5r5p.yml`):
+
+| Conc | MongoDB Orig | MongoDB Fast | MongoDB Adapt | etcd Orig | etcd Fast | etcd Adapt | ZK Orig | ZK Fast | ZK Adapt |
+|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 1 | 41 | 40 | 39 | 40 | 39 | 41 | 41 | 40 | 40 |
+| 5 | 265 | 260 | 257 | 274 | 272 | 272 | 272 | 273 | 268 |
+| 10 | — | 570 | 363 | 571 | 572 | 573 | 571 | 570 | 572 |
+| 25 | 1,466 | 1,458 | — | 1,472 | 1,470 | 1,464 | 1,461 | 1,472 | 1,471 |
+| 50 | — | 2,960 | 2,970 | 2,959 | 2,966 | 2,958 | 2,957 | 2,957 | 2,964 |
+| 75 | 4,321 | 2,764 | 4,356 | 4,462 | 4,461 | 4,451 | 4,470 | 4,459 | 4,476 |
+| 100 | — | 3,041 | 5,267 | 5,956 | 5,952 | 5,966 | 5,439 | 5,442 | 4,412 |
+| 150 | 5,265 | 3,966 | 3,961 | 7,703 | 7,116 | 7,081 | 5,524 | 5,480 | 5,545 |
+| 200 | — | 4,894 | 4,916 | 7,639 | 5,772 | 7,233 | 5,526 | 5,681 | 5,568 |
+| 300 | 3,993 | 4,490 | 4,922 | 7,220 | 1,010 | 6,587 | 5,420 | 5,482 | 5,295 |
+| 400 | 4,829 | — | 4,577 | 6,416 | 6,389 | 6,310 | 5,394 | 5,307 | 5,370 |
+
+— = failed run (MongoDB connection issue). Raw data: `docs/sweep_results_2026-02-27.csv`.
 
 ### Notes
 
@@ -176,6 +207,9 @@ Maximum throughput (60 clients, best concurrency):
   client→leader communication is on the same loopback IP (no tc/netem).
 - High-concurrency results are dominated by queuing effects, not network RTT.
 - `SIMULATE_WAN` must remain disabled when using tc/netem.
+- etcd shows highest throughput (~7.7k txn/s) due to its efficient Raft implementation.
+- ZooKeeper shows consistent ~5.5k txn/s across all three modes.
+- MongoDB peaks at ~5.3k txn/s but has intermittent connection failures at some concurrency levels.
 
 ---
 
