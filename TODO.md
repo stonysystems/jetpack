@@ -479,8 +479,8 @@ measures from signal file write to `recovery_finish_after_failure` detection.
 
 ### Export
 
-- [ ] Export the benchmark matrices and full throughput sweeps to `docs/latency_analysis.md`
-- [ ] If `result.md` is kept for compatibility, treat it as a mirror only; the benchmark source of truth should be under `docs/`
+- [x] Export the benchmark matrices and full throughput sweeps to `docs/latency_analysis.md`
+- [x] If `result.md` is kept for compatibility, treat it as a mirror only; the benchmark source of truth should be under `docs/`
 
 ## Priority 1 (High): TLA+ Specifications
 
