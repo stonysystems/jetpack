@@ -255,7 +255,7 @@ The old 6-case off/on-only sweep is insufficient. The required matrix is still:
   work complete too early. Treat the 2026-02-27 sweep as **diagnostic only**, not final.
 
 **Why the current sweep is still incomplete**:
-- `docs/sweep_results_2026-02-27.csv` still contains MongoDB failures (`—` in the published
+- `docs/sweep_results_2026-02-27_diagnostic.csv` still contains MongoDB failures (`—` in the published
   table) and suspicious partial data (`MongoDB Adaptive c=10` has `h5=0.00` in the raw CSV).
   Those points are not acceptable final benchmark evidence.
 - The current CSV only records throughput (`total_throughput`, `h1`-`h5`). It does **not**
@@ -319,7 +319,7 @@ Column definitions for the sweep matrix:
 - `ZooKeeper Adaptive` = `config/rule_zookeeper.yml` with `-m 101`
 
 **Raw CSV requirements for `docs/sweep*.csv`**:
-- The existing `docs/sweep_results_2026-02-27.csv` is incomplete. Replace it or add a new
+- The existing `docs/sweep_results_2026-02-27_diagnostic.csv` is incomplete. Replace it or add a new
   CSV with the same benchmark matrix but richer columns.
 - Minimum raw CSV schema:
   `backend,mode,concurrency,run_id,status,total_throughput,h1,h2,h3,h4,h5,cpu_all_avg,cpu_leader_avg,leader_queue_depth_avg,fastpath_attempt_rate,fastpath_success_rate,original_path_rate,error_count,error_summary,log_path`
@@ -365,7 +365,9 @@ Column definitions for the sweep matrix:
   if that is what is required to remove the regression.
 
 **Concrete follow-up tasks**:
-- [ ] Re-open the maximum-throughput sweep and treat the current 2026-02-27 data as diagnostic only
+- [x] Re-open the maximum-throughput sweep and treat the current 2026-02-27 data as diagnostic only
+  - Renamed CSV to `sweep_results_2026-02-27_diagnostic.csv`
+  - Updated `docs/latency_analysis.md` with diagnostic-only banner and caveats
 - [ ] Fix the MongoDB sweep reliability problem before claiming any MongoDB max-throughput result is final
   - Start with the current failure signature (`serverSelectionTryOnce` / connection-pool-related errors)
     and inspect `src/deptran/mongodb/server.h`, `src/deptran/mongodb_connection_thread_pool.h`,

@@ -158,7 +158,12 @@ Low-concurrency (5 clients, concurrency=1):
 | ZK A (off) | 45.5 | 86.0 | 0/40ms RTT + ~45ms ZAB repl + fsync |
 | ZK C (on) | 40.3 | 40.5 | Jetpack fast path, 1 RTT |
 
-Maximum throughput (60 clients, concurrency sweep, 2026-02-27):
+Maximum throughput (60 clients, concurrency sweep, 2026-02-27) — **DIAGNOSTIC ONLY**:
+
+> **Status**: The 2026-02-27 sweep data below is diagnostic/preliminary. It contains
+> MongoDB connection failures at several concurrency points, lacks CPU/queue-depth metrics,
+> and does not include a bottleneck analysis. A re-run with richer instrumentation is
+> required before these numbers can be treated as final. See the follow-up tasks in TODO.md.
 
 | Backend | Mode | Best Concurrency | Peak (txn/s) |
 |---|---|---:|---:|
@@ -180,7 +185,8 @@ Maximum throughput (60 clients, concurrency sweep, 2026-02-27):
 **MongoDB reliability note:** Some MongoDB concurrency points failed due to the MongoDB C
 driver's `serverSelectionTryOnce` setting combined with a 5-host URI (5 Jetpack replicas)
 vs 3-node MongoDB replica set. Failed points are omitted; the peak is from the best
-successful data point. Full raw data: `docs/sweep_results_2026-02-27.csv`.
+successful data point. This reliability problem must be fixed before re-running.
+Full raw diagnostic data: `docs/sweep_results_2026-02-27_diagnostic.csv`.
 
 Full concurrency sweep (total txn/s, 60 clients, `60c1s5r5p.yml`):
 
@@ -198,7 +204,7 @@ Full concurrency sweep (total txn/s, 60 clients, `60c1s5r5p.yml`):
 | 300 | 3,993 | 4,490 | 4,922 | 7,220 | 1,010 | 6,587 | 5,420 | 5,482 | 5,295 |
 | 400 | 4,829 | — | 4,577 | 6,416 | 6,389 | 6,310 | 5,394 | 5,307 | 5,370 |
 
-— = failed run (MongoDB connection issue). Raw data: `docs/sweep_results_2026-02-27.csv`.
+— = failed run (MongoDB connection issue). Raw diagnostic data: `docs/sweep_results_2026-02-27_diagnostic.csv`.
 
 ### Notes
 
