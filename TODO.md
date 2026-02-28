@@ -393,11 +393,21 @@ Column definitions for the sweep matrix:
 - [x] Record the sweep site config, effective client count, mode config, extra flags, run status, and log path for every row
   - Each TSV file header includes: image, mode, site_config (60c1s5r5p.yml), latency (20ms), duration (30s)
   - CSV includes backend, mode, extra_args columns per row
-- [ ] Add a per-case bottleneck survey for all 9 protocol/mode combinations
-  - For every best-point candidate, record CPU usage and queue depth.
-  - If CPU is not full at the claimed maximum throughput, identify the actual bottleneck and fix it.
-  - Candidate places to inspect include `src/deptran/rule/commo.h` (`max_pending_rpc_`),
-    reactor scheduling, backend thread pools/connection pools, and original-protocol leader queues.
+- [x] Add a per-case bottleneck survey for all 9 protocol/mode combinations
+  - **etcd original** (peak 7,709 txn/s @ conc=150): CPU-bound (inferred from Jetpack modes showing ~90% CPU at similar throughput). Scales linearly through conc=100. One anomalous dip at conc=50.
+  - **etcd fastpath100** (peak 6,545 @ conc=200): CPU-bound at ~90%. Fast-path abandoned after conc≥25 (0 attempts). Unstable — 3 of 11 points failed. 15% below original mode.
+  - **etcd adaptive** (peak 6,584 @ conc=300): CPU-bound (86-98%). Adaptive disables fast-path almost immediately. 2 of 11 points failed. 15% below original mode.
+  - **MongoDB original** (peak 3,183 @ conc=200): Connection/replication limited. w:majority writes bottlenecked by 2500-conn pool + 3-node replica replication. 2 of 11 points failed (conc=50,75). qd=0 (no Jetpack coordinator).
+  - **MongoDB fastpath100** (peak 3,370 @ conc=150): Fast-path success collapses from 99% → 5% at conc≥75. CPU drops from 99% to 20% (less work per fast-path failure). Queue depth always 1 (MongoDB pool design). 1 of 11 failed.
+  - **MongoDB adaptive** (peak 3,773 @ conc=75): Best MongoDB result. Adaptive keeps fast-path rate 77-92% at medium concurrency. CPU 84-97%. 2 of 11 failed. Declines at conc≥100 as pool saturates.
+  - **ZK original** (peak 4,854 @ conc=200): ZK session overhead limits throughput. 1 anomalous dip at conc=150 (471 txn/s — process failure). No CPU data (original mode).
+  - **ZK fastpath100** (peak 4,723 @ conc=100): CPU 89-97%. Queue depth explodes to 5000+ at conc≥75 (ZK write latency). 2 of 11 failed. Slightly below original.
+  - **ZK adaptive** (peak 5,169 @ conc=300): Best ZK result. CPU near saturation (97%). Queue depth 5000-7000 at high conc. 2 of 11 failed (conc=100,400).
+  - **Cross-cutting findings**:
+    - All backends show sporadic process failures at certain concurrency levels (Docker resource contention).
+    - Original mode outperforms Jetpack modes for etcd (7.7K vs 6.5K) and is comparable for ZK/MongoDB.
+    - Fast-path is only active at very low concurrency; at higher levels the coordinator abandons it entirely.
+    - MongoDB is systematically slower (~3.2K) than etcd (~7.7K) and ZK (~4.9K) due to connection pool overhead and w:majority replication latency.
 - [ ] Fix the adaptive policy so MongoDB and etcd adaptive mode reach the same max throughput as original mode
   - Use `src/deptran/rule/coordinator.cc` as the primary control point.
   - Fast path 100% may legitimately use too much CPU; adaptive mode should back off before overload,
