@@ -923,6 +923,24 @@ run_benchmark() {
             if [ -n "$tp_line" ]; then
                 log_info "  $proc: $tp_line"
             fi
+            # Print fastpath statistics
+            local fp_line
+            fp_line=$(grep "Fastpath statistics" "$logfile" 2>/dev/null | tail -1)
+            if [ -n "$fp_line" ]; then
+                log_info "  $proc: $fp_line"
+            fi
+            # Print CPU usage (leader avg from client-observed responses)
+            local cpu_line
+            cpu_line=$(grep "Cpu-usage-leaders" "$logfile" 2>/dev/null | tail -1)
+            if [ -n "$cpu_line" ]; then
+                log_info "  $proc: $cpu_line"
+            fi
+            # Print queue depth (leader backend queue)
+            local qd_line
+            qd_line=$(grep "Queue-depth" "$logfile" 2>/dev/null | tail -1)
+            if [ -n "$qd_line" ]; then
+                log_info "  $proc: $qd_line"
+            fi
         fi
     done
 

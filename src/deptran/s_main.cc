@@ -204,6 +204,8 @@ static void KillEtcdPrimary() {
 // 5: all efficient attempts (count all faster one) (should equals to category 2 merge category 4)
 Distribution cli2cli[6];
 Distribution dispatch_time_distribution;
+Distribution cpu_usage_leaders;
+Distribution queue_depth;
 // commit_time for all (default 30s) duration
 vector<std::pair<double, double>> commit_time; // <dispatch_time, duration>
 Frequency frequency;
@@ -396,6 +398,8 @@ void client_shutdown() {
     for (int i = 0; i < 6; i++)
       cli2cli[i].merge(client->cli2cli_[i]);
     dispatch_time_distribution.merge(client->dispatch_time_distribution_);
+    cpu_usage_leaders.merge(client->cpu_usage_leaders_);
+    queue_depth.merge(client->queue_depth_);
     frequency.merge(client->frequency_);
     commit_time.insert(commit_time.end(), client->commit_time_.begin(), client->commit_time_.end());
 #ifdef LATENCY_DEBUG
@@ -890,8 +894,10 @@ int main(int argc, char *argv[]) {
   Log_info("Dispatch-time                    distribution %s", dispatch_time_distribution.distribution().c_str());
   
   Log_info("Mid throughput is %.2f", cli2cli[5].count() / (Config::GetConfig()->duration_ / 3.0));
-  Log_info("Fastpath statistics attempted %d successed %d rate(pct) %.2f efficient_successed %d efficient_rate(pct) %.2f", 
+  Log_info("Fastpath statistics attempted %d successed %d rate(pct) %.2f efficient_successed %d efficient_rate(pct) %.2f",
     cli2cli[0].count(), cli2cli[1].count(), cli2cli[1].count() * 100.0 / cli2cli[0].count(), cli2cli[2].count(), cli2cli[2].count() * 100.0 / cli2cli[0].count());
+  Log_info("Cpu-usage-leaders ave %.4f count %zu", cpu_usage_leaders.ave(), cpu_usage_leaders.count());
+  Log_info("Queue-depth ave %.4f count %zu", queue_depth.ave(), queue_depth.count());
   Log_info("Frequency: %s", frequency.top_keys_pcts().c_str());
 
   string dump_file_name = "results/recent_csv/" + Config::GetConfig()->exp_setting_name_ + ".csv";

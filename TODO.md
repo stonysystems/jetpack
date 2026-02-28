@@ -377,7 +377,11 @@ Column definitions for the sweep matrix:
     `std::min(hosts.size(), static_cast<size_t>(3))`, added `serverSelectionTryOnce=false`
     and `serverSelectionTimeoutMS=10000` for robustness under load.
   - Re-run of previously failed MongoDB points is tracked as a separate downstream task.
-- [ ] Extend benchmark output and `scripts/sweep_benchmark.sh` so `docs/sweep*.csv` includes CPU, queue-depth, fast-path-attempt, and fast-path-success metrics
+- [x] Extend benchmark output and `scripts/sweep_benchmark.sh` so `docs/sweep*.csv` includes CPU, queue-depth, fast-path-attempt, and fast-path-success metrics
+  - Added `cpu_usage_leaders` and `queue_depth` Distribution merging/logging in `src/deptran/s_main.cc`
+  - New log lines: `Cpu-usage-leaders ave X.XXXX count N` and `Queue-depth ave X.XXXX count N`
+  - Updated `run_benchmark()` in all 3 test scripts (etcd, mongodb, zookeeper) to extract and output these metrics
+  - Extended `scripts/sweep_benchmark.sh` with 5 new TSV columns: `fp_attempted`, `fp_succeeded`, `fp_rate`, `cpu_leader_avg`, `queue_depth_avg`
 - [ ] Re-run the full 9-case sweep with the richer CSV format and keep raw per-run rows
 - [ ] Record every concurrency value tried and every throughput number measured for all 9 cases
 - [ ] Record the sweep site config, effective client count, mode config, extra flags, run status, and log path for every row
