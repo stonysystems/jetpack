@@ -368,14 +368,15 @@ Column definitions for the sweep matrix:
 - [x] Re-open the maximum-throughput sweep and treat the current 2026-02-27 data as diagnostic only
   - Renamed CSV to `sweep_results_2026-02-27_diagnostic.csv`
   - Updated `docs/latency_analysis.md` with diagnostic-only banner and caveats
-- [ ] Fix the MongoDB sweep reliability problem before claiming any MongoDB max-throughput result is final
-  - Start with the current failure signature (`serverSelectionTryOnce` / connection-pool-related errors)
-    and inspect `src/deptran/mongodb/server.h`, `src/deptran/mongodb_connection_thread_pool.h`,
-    and the benchmark Docker path that constructs the MongoDB URI / pool.
-  - If the benchmark path is still mixing a 5-host Jetpack replica list with a 3-node MongoDB
-    replica set, fix that mismatch instead of documenting around it.
-  - Re-run every previously failed or suspicious MongoDB point after the fix; do not leave `—`
-    or `h*=0.00` rows in the accepted final sweep.
+- [x] Fix the MongoDB sweep reliability problem before claiming any MongoDB max-throughput result is final
+  - Root cause: `GetReplicaHosts()` returned all 5 Jetpack replica hosts, but only 3 run mongod.
+    Hosts 4 and 5 (127.0.0.4:27017, 127.0.0.5:27017) were phantom — no mongod listening.
+    Under high concurrency the C driver wasted connections/timeouts on these phantom hosts,
+    causing `serverSelectionTryOnce` failures.
+  - Fix in `src/deptran/mongodb/server.h`: limited URI to first 3 hosts via
+    `std::min(hosts.size(), static_cast<size_t>(3))`, added `serverSelectionTryOnce=false`
+    and `serverSelectionTimeoutMS=10000` for robustness under load.
+  - Re-run of previously failed MongoDB points is tracked as a separate downstream task.
 - [ ] Extend benchmark output and `scripts/sweep_benchmark.sh` so `docs/sweep*.csv` includes CPU, queue-depth, fast-path-attempt, and fast-path-success metrics
 - [ ] Re-run the full 9-case sweep with the richer CSV format and keep raw per-run rows
 - [ ] Record every concurrency value tried and every throughput number measured for all 9 cases

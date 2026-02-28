@@ -62,15 +62,20 @@ class MongodbServer : public TxLogServer {
   void Setup() override { 
     SimpleRWCommand::SetZeroTime();
 #ifdef JETPACK_MONGODB_RECOVERY
-    // Determine Mongo URI: build replica set list from config for this partition.
+    // Determine Mongo URI: use only the first 3 replica hosts (matching
+    // the 3-node MongoDB replica set in Docker). The Jetpack config may
+    // list 5 hosts (5 Jetpack replicas), but only 3 run mongod.
+    // Also set serverSelectionTryOnce=false and a generous timeout so
+    // the driver retries on transient topology failures under high
+    // concurrency instead of failing immediately.
     auto cfg = Config::GetConfig();
     auto hosts = cfg->GetReplicaHosts(partition_id_);
     if (!hosts.empty()) {
+      const size_t mongo_nodes = std::min(hosts.size(), static_cast<size_t>(3));
       std::ostringstream oss;
       oss << "mongodb://";
-      for (size_t i = 0; i < hosts.size(); ++i) {
+      for (size_t i = 0; i < mongo_nodes; ++i) {
         if (i > 0) oss << ",";
-        // force MongoDB default port for now
         auto pos = hosts[i].find(':');
         if (pos != std::string::npos) {
           oss << hosts[i].substr(0, pos) << ":27017";
@@ -78,7 +83,9 @@ class MongodbServer : public TxLogServer {
           oss << hosts[i] << ":27017";
         }
       }
-      oss << "/?replicaSet=jetpack-rs";
+      oss << "/?replicaSet=jetpack-rs"
+          << "&serverSelectionTryOnce=false"
+          << "&serverSelectionTimeoutMS=10000";
       mongo_uri_ = oss.str();
     }
     Log_info("mongo_uri_:%s, loc_id_:%d, mongodb_connection_:%d", mongo_uri_.c_str(), loc_id_, mongodb_connection_);
