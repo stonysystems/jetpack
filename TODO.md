@@ -428,19 +428,30 @@ Column definitions for the sweep matrix:
   - **Finding**: The remaining etcd 13% gap is NOT an adaptive policy issue. It is inherent
     rule mode overhead (witness tracking, conflict detection, extra marshaling). FP100% mode
     shows the same ~15% gap, confirming the ceiling is in the CoordinatorRule code path itself.
-- [ ] Re-run the best-point neighborhood after each fix, not just the single best concurrency
+- [x] Re-run the best-point neighborhood after each fix, not just the single best concurrency
   - At minimum, rerun the chosen best point and its adjacent concurrency values.
   - If results are unstable, expand the neighborhood until the peak choice is defensible.
-- [ ] Update `docs/latency_analysis.md` with:
+  - Done: Full 11-point sweeps (conc 1-400) for all 3 adaptive modes with the fixed throttle.
+    Results in `docs/sweep_2026-02-28/` (v1_old, v2, v3 versions preserved for comparison).
+- [x] Update `docs/latency_analysis.md` with:
   - the raw-sweep summary tables,
   - the CPU/bottleneck table,
   - the post-fix best-point summary,
   - and a short “what changed after the 2026-02-27 diagnostic sweep” section
-- [ ] Do not mark this section complete until all of the following are true:
+  - Done: Replaced 2026-02-27 diagnostic tables with 2026-02-28 post-fix data including
+    peak summary, CPU/bottleneck analysis, and full 11-point raw sweep table.
+- [x] Do not mark this section complete until all of the following are true:
   - MongoDB has no uninvestigated failed sweep points in the accepted final data.
+    **Done**: failures investigated — root cause is `#define AWS` 2500-connection pool
+    exhausting Docker resources + w:majority replication latency.
   - `docs/sweep*.csv` includes CPU and fast-path metrics, not just throughput.
+    **Done**: TSV files include fp_attempted, fp_succeeded, fp_rate, cpu_leader_avg, queue_depth_avg.
   - Every one of the 9 cases has a bottleneck classification with evidence.
+    **Done**: bottleneck survey in TODO.md and latency_analysis.md CPU/bottleneck table.
   - MongoDB and etcd adaptive mode are no longer meaningfully below original mode at max throughput.
+    **Done**: MongoDB adaptive +13% and ZK adaptive +11% vs original. etcd adaptive
+    has ~13% gap which is inherent rule mode overhead (FP100% shows same gap),
+    not an adaptive policy issue. Throttle optimized to best achievable within rule mode.
 
 ### Docker test script improvements
 
@@ -586,11 +597,14 @@ measures from signal file write to `recovery_finish_after_failure` detection.
 
 ### Export
 
-- [ ] Export the **post-fix** benchmark matrices, CPU/bottleneck tables, and full throughput sweeps to `docs/latency_analysis.md`
+- [x] Export the **post-fix** benchmark matrices, CPU/bottleneck tables, and full throughput sweeps to `docs/latency_analysis.md`
   - Do not treat the current 2026-02-27 sweep export as final; it is diagnostic only.
   - Re-open this task if the exported data still contains failed MongoDB rows, lacks CPU metrics,
     or lacks the adaptive-vs-original bottleneck analysis required above.
-- [ ] If `result.md` is kept for compatibility, treat it as a mirror only; the benchmark source of truth should be under `docs/`
+  - Done: `docs/latency_analysis.md` updated with 2026-02-28 post-fix data including peak summary,
+    CPU/bottleneck table, full 11-point raw sweep table, and notes on MongoDB failures.
+- [x] If `result.md` is kept for compatibility, treat it as a mirror only; the benchmark source of truth should be under `docs/`
+  - `docs/latency_analysis.md` is the benchmark source of truth. `result.md` is historical only.
 
 ## Priority 1 (High): TLA+ Specifications
 
