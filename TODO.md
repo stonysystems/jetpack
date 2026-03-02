@@ -514,7 +514,7 @@ this section can be closed again.
   - Add self-healing guardrails so the next sweep automatically retries/quarantines bad runs
     instead of publishing unreasonable results.
 
-- [ ] Add real original-mode CPU metrics for comparison
+- [x] Add real original-mode CPU metrics for comparison
   - The accepted final sweep must include a meaningful `cpu_leader_avg` for original mode
     (`none_*.yml`) as well as rule mode. Zero placeholders are not acceptable as “metric present”.
   - If `cpu_all_avg` is already available in the original path, export it too and include it in

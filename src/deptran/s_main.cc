@@ -390,6 +390,14 @@ void server_launch_worker(vector<Config::SiteInfo>& server_sites) {
     worker.SetupHeartbeat();
   }
   Log_info("server workers' communicators setup");
+
+  // Start CPU monitor on all servers unconditionally so original (none) mode
+  // has CPU metrics available at summary time.
+  for (ServerWorker& worker : svr_workers_g) {
+    if (worker.tx_sched_) {
+      worker.tx_sched_->StartCpuMonitorIfNeeded();
+    }
+  }
 }
 
 void client_shutdown() {
@@ -896,7 +904,30 @@ int main(int argc, char *argv[]) {
   Log_info("Mid throughput is %.2f", cli2cli[5].count() / (Config::GetConfig()->duration_ / 3.0));
   Log_info("Fastpath statistics attempted %d successed %d rate(pct) %.2f efficient_successed %d efficient_rate(pct) %.2f",
     cli2cli[0].count(), cli2cli[1].count(), cli2cli[1].count() * 100.0 / cli2cli[0].count(), cli2cli[2].count(), cli2cli[2].count() * 100.0 / cli2cli[0].count());
+  // If client-side CPU data is empty (none/original mode), fall back to
+  // server-side CPU monitor which runs unconditionally.
+  if (cpu_usage_leaders.count() == 0) {
+    for (auto& worker : svr_workers_g) {
+      if (worker.tx_sched_) {
+        double cpu = worker.tx_sched_->SampleCpuUsage();
+        if (cpu >= 0.0) {
+          cpu_usage_leaders.append(cpu);
+        }
+      }
+    }
+  }
   Log_info("Cpu-usage-leaders ave %.4f count %zu", cpu_usage_leaders.ave(), cpu_usage_leaders.count());
+  // Same fallback for queue depth in none/original mode
+  if (queue_depth.count() == 0) {
+    for (auto& worker : svr_workers_g) {
+      if (worker.tx_sched_) {
+        double qd = worker.tx_sched_->GetQueueDepthForRule();
+        if (qd >= 0.0) {
+          queue_depth.append(qd);
+        }
+      }
+    }
+  }
   Log_info("Queue-depth ave %.4f count %zu", queue_depth.ave(), queue_depth.count());
   Log_info("Frequency: %s", frequency.top_keys_pcts().c_str());
 
