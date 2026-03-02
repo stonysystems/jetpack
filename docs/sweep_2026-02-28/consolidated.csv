@@ -1,100 +1,100 @@
 backend,mode,extra_args,concurrency,run_id,status,total_throughput,h1,h2,h3,h4,h5,cpu_all_avg,cpu_leader_avg,leader_queue_depth_avg,fastpath_attempt_rate,fastpath_success_rate,original_path_rate,error_count,error_summary,log_path
-etcd,original,,1,1,OK,40.10,8.00,8.20,8.40,7.70,7.80,NA,NA,NA,0,0,100,0,,
-etcd,original,,5,2,OK,273.40,55.20,54.80,53.80,54.40,55.20,NA,NA,NA,0,0,100,0,,
-etcd,original,,10,3,OK,571.10,113.20,115.30,114.50,113.50,114.60,NA,NA,NA,0,0,100,0,,
-etcd,original,,25,4,OK,1471.20,291.10,296.40,293.70,295.60,294.40,NA,NA,NA,0,0,100,0,,
-etcd,original,,50,5,OK,2374.00,543.60,457.70,454.90,461.50,456.30,NA,NA,NA,0,0,100,0,,
-etcd,original,,75,6,OK,4461.70,893.40,886.20,893.10,894.90,894.10,NA,NA,NA,0,0,100,0,,
-etcd,original,,100,7,OK,5956.70,1194.80,1187.60,1189.90,1190.30,1194.10,NA,NA,NA,0,0,100,0,,
-etcd,original,,150,8,OK,7708.90,1577.20,1509.60,1525.60,1542.70,1553.80,NA,NA,NA,0,0,100,0,,
-etcd,original,,200,9,OK,7396.80,1492.50,1459.70,1470.80,1476.40,1497.40,NA,NA,NA,0,0,100,0,,
-etcd,original,,300,10,OK,7237.60,1498.30,1458.00,1440.00,1452.00,1389.30,NA,NA,NA,0,0,100,0,,
-etcd,original,,400,11,OK,6583.90,1393.50,1254.30,1325.20,1300.80,1310.10,NA,NA,NA,0,0,100,0,,
-etcd,fastpath-100,-m 100,1,12,OK,39.50,8.20,8.10,7.50,7.90,7.80,NA,54.8367,4.6220,100.00,100.00,0,0,,
-etcd,fastpath-100,-m 100,5,13,OK,274.00,54.50,55.20,55.00,55.20,54.10,NA,31.4921,7.8922,100.00,100.00,0,0,,
-etcd,fastpath-100,-m 100,10,14,OK,576.40,115.00,115.20,114.70,117.20,114.30,NA,39.1900,19.0776,100.00,100.00,0,0,,
-etcd,fastpath-100,-m 100,25,15,OK,1444.50,295.10,280.90,288.70,289.50,290.30,NA,49.3315,64.3155,NA,NA,NA,0,,
-etcd,fastpath-100,-m 100,50,16,OK,2957.90,595.90,587.90,589.60,594.40,590.10,NA,60.2972,306.8948,NA,NA,NA,0,,
-etcd,fastpath-100,-m 100,75,17,OK,4466.10,894.70,891.60,894.40,891.60,893.80,NA,70.3445,846.0781,NA,NA,NA,0,,
-etcd,fastpath-100,-m 100,100,18,OK,5951.30,1192.00,1188.90,1188.10,1193.70,1188.60,NA,90.0387,455.5925,NA,NA,NA,0,,
-etcd,fastpath-100,-m 100,150,19,OK,572.20,131.90,98.60,114.80,103.80,123.10,NA,87.9683,424.4225,NA,NA,NA,0,,
-etcd,fastpath-100,-m 100,200,20,OK,6544.70,1305.60,1308.40,1296.10,1311.20,1323.40,NA,90.0000,579.3346,NA,NA,NA,0,,
-etcd,fastpath-100,-m 100,300,21,OK,5765.80,1205.80,1100.00,1180.00,1140.00,1140.00,NA,84.4555,1911.7890,NA,NA,NA,0,,
-etcd,fastpath-100,-m 100,400,22,OK,6254.40,1276.80,1220.00,1250.40,1253.60,1253.60,NA,91.2065,205.5617,NA,NA,NA,0,,
-etcd,adaptive,,1,23,OK,39.80,8.20,7.90,8.10,7.50,8.10,NA,66.9697,1.8155,100.00,100.00,0,0,,
-etcd,adaptive,,5,24,OK,275.70,55.40,56.20,54.20,54.50,55.40,NA,79.1750,12.8319,100.00,100.00,0,0,,
-etcd,adaptive,,10,25,OK,571.80,115.20,113.10,114.50,114.10,114.90,NA,87.3002,26.1578,100.00,100.00,0,0,,
-etcd,adaptive,,25,26,OK,1469.70,292.60,293.30,294.30,294.90,294.60,NA,97.9453,42.7619,100.00,100.00,0,0,,
-etcd,adaptive,,50,27,OK,2965.00,591.00,595.50,593.80,593.70,591.00,NA,97.8152,213.5806,100.00,100.00,0,0,,
-etcd,adaptive,,75,28,OK,4458.90,896.10,894.80,890.40,888.90,888.70,NA,83.4272,270.1021,NA,NA,NA,0,,
-etcd,adaptive,,100,29,OK,2764.80,526.50,527.80,606.40,537.10,567.00,NA,94.3593,602.1753,87.50,87.50,12.50,0,,
-etcd,adaptive,,150,30,OK,6728.20,1439.00,1312.90,1352.70,1317.80,1305.80,NA,84.7007,1154.3822,NA,NA,NA,0,,
-etcd,adaptive,,200,31,OK,6672.10,1402.20,1317.50,1318.40,1327.20,1306.80,NA,90.1318,538.4209,100.00,100.00,0,0,,
-etcd,adaptive,,300,32,OK,6159.10,1439.10,1140.00,1200.00,1180.00,1200.00,NA,90.7465,1362.5723,NA,NA,NA,0,,
-etcd,adaptive,,400,33,OK,6410.00,1323.20,1261.40,1277.80,1269.90,1277.70,NA,91.2998,300.1770,92.95,92.95,7.05,0,,
-mongodb,original,,1,34,OK,40.00,8.30,8.20,7.60,8.00,7.90,NA,NA,NA,0,0,100,0,,
-mongodb,original,,5,35,OK,272.70,54.60,54.40,56.00,54.70,53.00,NA,NA,NA,0,0,100,0,,
-mongodb,original,,10,36,OK,569.30,113.90,115.10,112.50,114.10,113.70,NA,NA,NA,0,0,100,0,,
-mongodb,original,,25,37,OK,1475.10,294.80,296.60,295.50,292.50,295.70,NA,NA,NA,0,0,100,0,,
-mongodb,original,,50,38,OK,2959.90,591.60,591.50,591.80,592.40,592.60,NA,NA,NA,0,0,100,0,,
-mongodb,original,,75,39,OK,3681.20,733.30,710.90,736.40,739.40,761.20,NA,NA,NA,0,0,100,0,,
-mongodb,original,,100,40,OK,1171.80,234.80,217.00,240.00,240.00,240.00,NA,NA,NA,0,0,100,0,,
-mongodb,original,,150,41,OK,3023.40,589.90,569.00,588.50,652.90,623.10,NA,NA,NA,0,0,100,0,,
-mongodb,original,,200,42,OK,3182.90,640.10,602.60,620.00,660.10,660.10,NA,NA,NA,0,0,100,0,,
-mongodb,original,,300,43,OK,3100.00,680.00,600.00,620.00,600.00,600.00,NA,NA,NA,0,0,100,0,,
-mongodb,original,,400,44,OK,2820.00,540.00,580.00,540.00,580.00,580.00,NA,NA,NA,0,0,100,0,,
-mongodb,fastpath-100,-m 100,1,45,OK,39.60,8.10,8.10,7.90,7.80,7.70,NA,98.0220,1.0000,95.19,95.19,4.81,0,,
-mongodb,fastpath-100,-m 100,5,46,OK,272.20,54.90,54.30,54.30,54.40,54.30,NA,98.3821,1.0000,99.31,99.31,.69,0,,
-mongodb,fastpath-100,-m 100,10,47,OK,569.30,113.70,112.70,113.40,115.20,114.30,NA,99.7694,1.0000,100.00,100.00,0,0,,
-mongodb,fastpath-100,-m 100,25,48,OK,1469.30,297.10,293.40,294.30,290.60,293.90,NA,99.2500,1.0000,98.66,98.66,1.34,0,,
-mongodb,fastpath-100,-m 100,50,49,OK,2365.40,472.80,475.00,472.90,469.90,474.80,NA,23.4477,1.0000,4.48,4.48,95.52,0,,
-mongodb,fastpath-100,-m 100,75,50,OK,2242.80,470.50,425.40,481.20,434.50,431.20,NA,28.6858,1.0000,6.01,6.01,93.99,0,,
-mongodb,fastpath-100,-m 100,100,51,OK,2962.80,567.50,632.00,558.60,596.20,608.50,NA,22.4144,1.0000,4.55,4.55,95.45,0,,
-mongodb,fastpath-100,-m 100,150,52,OK,3369.60,740.00,661.00,649.10,653.90,665.60,NA,20.8293,1.0000,5.33,5.33,94.67,0,,
-mongodb,fastpath-100,-m 100,200,53,OK,3360.00,700.00,660.00,680.00,660.00,660.00,NA,20.1860,1.0000,4.73,4.73,95.27,0,,
-mongodb,fastpath-100,-m 100,300,54,OK,3060.00,660.00,640.00,560.00,640.00,560.00,NA,19.8670,1.0000,5.58,5.58,94.42,0,,
-mongodb,fastpath-100,-m 100,400,55,OK,2760.00,520.00,560.00,540.00,600.00,540.00,NA,20.0649,1.0000,6.30,6.30,93.70,0,,
-mongodb,adaptive,,1,56,OK,39.90,8.10,8.00,8.00,8.20,7.60,NA,50.0278,1.0000,100.00,100.00,0,0,,
-mongodb,adaptive,,5,57,OK,271.50,53.20,54.40,54.60,54.20,55.10,NA,83.7472,1.0000,100.00,100.00,0,0,,
-mongodb,adaptive,,10,58,OK,571.20,115.30,114.20,114.00,115.10,112.60,NA,93.6703,1.0000,100.00,100.00,0,0,,
-mongodb,adaptive,,25,59,OK,1465.70,291.50,294.30,291.90,294.10,293.90,NA,97.4618,1.0000,99.95,99.95,.05,0,,
-mongodb,adaptive,,50,60,OK,2966.40,590.50,594.80,595.20,592.40,593.50,NA,85.5268,1.0000,90.42,90.42,9.58,0,,
-mongodb,adaptive,,75,61,OK,3773.00,740.90,775.50,761.60,734.80,760.20,NA,84.2091,1.0000,77.28,77.28,22.72,0,,
-mongodb,adaptive,,100,62,OK,3754.20,744.10,725.50,723.00,775.70,785.90,NA,87.2635,1.0000,85.37,85.37,14.63,0,,
-mongodb,adaptive,,150,63,OK,3650.00,811.70,687.80,707.10,703.70,739.70,NA,87.9140,1.0000,86.63,86.63,13.37,0,,
-mongodb,adaptive,,200,64,OK,3679.70,744.10,739.50,737.80,720.00,738.30,NA,84.8887,1.0159,83.99,83.99,16.01,0,,
-mongodb,adaptive,,300,65,OK,3040.00,660.00,540.00,660.00,640.00,540.00,NA,89.5050,1.0000,91.95,91.95,8.05,0,,
-mongodb,adaptive,,400,66,OK,2804.40,620.00,584.40,520.00,560.00,520.00,NA,87.4915,1.0000,86.27,86.27,13.73,0,,
-zookeeper,original,,1,67,OK,40.50,7.90,8.00,7.90,8.40,8.30,NA,NA,NA,0,0,100,0,,
-zookeeper,original,,5,68,OK,272.90,55.30,53.80,55.90,53.20,54.70,NA,NA,NA,0,0,100,0,,
-zookeeper,original,,10,69,OK,576.20,114.20,115.30,116.60,114.50,115.60,NA,NA,NA,0,0,100,0,,
-zookeeper,original,,25,70,OK,1468.90,294.60,291.40,295.20,292.10,295.60,NA,NA,NA,0,0,100,0,,
-zookeeper,original,,50,71,OK,2945.50,594.00,585.00,593.50,588.10,584.90,NA,NA,NA,0,0,100,0,,
-zookeeper,original,,75,72,OK,3823.40,760.80,764.00,766.50,756.90,775.20,NA,NA,NA,0,0,100,0,,
-zookeeper,original,,100,73,OK,4632.80,939.90,924.90,921.90,923.20,922.90,NA,NA,NA,0,0,100,0,,
-zookeeper,original,,150,74,OK,470.80,100.10,98.40,83.20,90.10,99.00,NA,NA,NA,0,0,100,0,,
-zookeeper,original,,200,75,OK,4853.70,976.80,963.90,979.40,967.80,965.80,NA,NA,NA,0,0,100,0,,
-zookeeper,original,,300,76,OK,3786.90,769.50,769.40,757.90,746.00,744.10,NA,NA,NA,0,0,100,0,,
-zookeeper,original,,400,77,OK,3228.00,661.90,652.40,620.00,629.30,664.40,NA,NA,NA,0,0,100,0,,
-zookeeper,fastpath-100,-m 100,1,78,OK,39.00,7.60,8.00,7.70,8.20,7.50,NA,40.0379,2.6293,100.00,100.00,0,0,,
-zookeeper,fastpath-100,-m 100,5,79,OK,271.50,54.10,54.40,54.80,54.50,53.70,NA,91.7821,12.0988,NA,NA,NA,0,,
-zookeeper,fastpath-100,-m 100,10,80,OK,570.10,113.20,114.40,115.30,113.00,114.20,NA,59.5378,26.0171,NA,NA,NA,0,,
-zookeeper,fastpath-100,-m 100,25,81,OK,1472.10,292.80,293.50,295.60,294.90,295.30,NA,84.5512,70.3399,NA,NA,NA,0,,
-zookeeper,fastpath-100,-m 100,50,82,OK,2670.10,562.60,511.30,555.20,511.20,529.80,NA,92.8962,122.8263,NA,NA,NA,0,,
-zookeeper,fastpath-100,-m 100,75,83,OK,4452.40,876.60,891.70,889.20,899.90,895.00,NA,97.7840,5421.6473,NA,NA,NA,0,,
-zookeeper,fastpath-100,-m 100,100,84,OK,4723.00,957.60,940.50,941.20,940.00,943.70,NA,91.6666,1451.2959,NA,NA,NA,0,,
-zookeeper,fastpath-100,-m 100,150,85,OK,4596.40,924.30,918.20,919.20,918.20,916.50,NA,87.1941,3323.1078,NA,NA,NA,0,,
-zookeeper,fastpath-100,-m 100,200,86,OK,4034.00,810.50,825.60,801.80,809.80,786.30,NA,89.6202,6867.9108,NA,NA,NA,0,,
-zookeeper,fastpath-100,-m 100,300,87,OK,5921.60,1209.70,1189.20,1168.70,1186.10,1167.90,NA,89.7192,4851.0054,NA,NA,NA,0,,
-zookeeper,fastpath-100,-m 100,400,88,OK,4390.40,942.00,840.00,860.20,880.00,868.20,NA,96.6666,5587.4698,NA,NA,NA,0,,
-zookeeper,adaptive,,1,89,OK,41.70,8.40,8.50,7.90,8.70,8.20,NA,68.6880,2.7368,100.00,100.00,0,0,,
-zookeeper,adaptive,,5,90,OK,274.10,54.80,54.40,55.40,54.70,54.80,NA,76.3957,13.0221,100.00,100.00,0,0,,
-zookeeper,adaptive,,10,91,OK,570.60,114.70,114.20,113.00,114.60,114.10,NA,78.0595,26.1573,100.00,100.00,0,0,,
-zookeeper,adaptive,,25,92,OK,1471.10,295.30,293.80,290.50,295.80,295.70,NA,92.1140,691.3346,NA,NA,NA,0,,
-zookeeper,adaptive,,50,93,OK,2954.00,590.60,588.10,589.70,593.80,591.80,NA,97.5807,140.3277,100.00,100.00,0,0,,
-zookeeper,adaptive,,75,94,OK,4458.50,892.40,891.60,891.40,891.10,892.00,NA,94.0499,627.5604,NA,NA,NA,0,,
-zookeeper,adaptive,,100,95,OK,5103.40,1009.40,1012.00,1009.80,1039.50,1032.70,NA,83.0236,1235.9358,NA,NA,NA,0,,
-zookeeper,adaptive,,150,96,OK,4849.60,971.50,981.40,948.90,971.80,976.00,NA,87.9670,2884.0888,NA,NA,NA,0,,
-zookeeper,adaptive,,200,97,OK,4823.10,975.90,960.10,964.00,960.00,963.10,NA,91.0503,5461.1453,NA,NA,NA,0,,
-zookeeper,adaptive,,300,98,OK,5407.80,1083.30,1060.00,1064.50,1140.00,1060.00,NA,91.3706,5525.0368,NA,NA,NA,0,,
-zookeeper,adaptive,,400,99,OK,4186.10,848.30,833.80,825.10,840.90,838.00,NA,96.6770,6521.8163,NA,NA,NA,0,,
+etcd,original,,1,1,OK,39.90,7.90,8.10,7.90,7.90,8.10,NA,4.7500,.7980,0,0,100,0,;timeout,docs/sweep_2026-02-28/logs/jetpack-etcd_none_etcd/conc1_attempt0.log
+etcd,original,,5,2,OK,272.40,54.60,54.10,55.00,54.30,54.40,NA,6.6600,1.2500,0,0,100,0,;timeout,docs/sweep_2026-02-28/logs/jetpack-etcd_none_etcd/conc5_attempt0.log
+etcd,original,,10,3,OK,568.00,115.10,114.40,112.70,113.10,112.70,NA,5.7700,1.2840,0,0,100,0,;timeout,docs/sweep_2026-02-28/logs/jetpack-etcd_none_etcd/conc10_attempt0.log
+etcd,original,,25,4,OK,1471.70,291.40,292.60,295.80,296.40,295.50,NA,5.3500,2.3460,0,0,100,0,;timeout,docs/sweep_2026-02-28/logs/jetpack-etcd_none_etcd/conc25_attempt0.log
+etcd,original,,50,5,OK,2974.70,596.20,594.00,598.90,594.50,591.10,NA,6.0500,2.6300,0,0,100,0,;timeout,docs/sweep_2026-02-28/logs/jetpack-etcd_none_etcd/conc50_attempt0.log
+etcd,original,,75,6,OK,4458.40,892.40,894.90,894.10,889.40,887.60,NA,9.4900,4.4660,0,0,100,0,;timeout,docs/sweep_2026-02-28/logs/jetpack-etcd_none_etcd/conc75_attempt0.log
+etcd,original,,100,7,OK,5949.40,1193.00,1194.50,1186.80,1187.80,1187.30,NA,9.0800,7.6420,0,0,100,0,;timeout,docs/sweep_2026-02-28/logs/jetpack-etcd_none_etcd/conc100_attempt0.log
+etcd,original,,150,8,OK,7616.40,1579.50,1440.30,1505.90,1530.50,1560.20,NA,8.4100,8.0540,0,0,100,0,;timeout,docs/sweep_2026-02-28/logs/jetpack-etcd_none_etcd/conc150_attempt0.log
+etcd,original,,200,9,OK,7686.60,1678.50,1529.50,1578.00,1521.00,1379.60,NA,8.0900,7.1340,0,0,100,0,;timeout,docs/sweep_2026-02-28/logs/jetpack-etcd_none_etcd/conc200_attempt0.log
+etcd,original,,300,10,OK,6977.20,1467.70,1345.90,1372.60,1400.00,1391.00,NA,7.8500,18.9120,0,0,100,0,;timeout,docs/sweep_2026-02-28/logs/jetpack-etcd_none_etcd/conc300_attempt0.log
+etcd,original,,400,11,OK,6915.20,1489.70,1381.10,1359.90,1360.50,1324.00,NA,8.7800,88.5000,0,0,100,0,;timeout,docs/sweep_2026-02-28/logs/jetpack-etcd_none_etcd/conc400_attempt0.log
+etcd,fastpath-100,-m 100,1,12,OK,39.90,8.30,7.70,7.80,7.90,8.20,NA,5.0500,4.1483,100.00,100.00,0,0,;timeout,docs/sweep_2026-02-28/logs/jetpack-etcd_rule_etcd/conc1_attempt0.log
+etcd,fastpath-100,-m 100,5,13,OK,274.70,54.80,55.50,55.10,54.60,54.70,NA,5.3000,26.3404,100.00,100.00,0,0,;timeout,docs/sweep_2026-02-28/logs/jetpack-etcd_rule_etcd/conc5_attempt0.log
+etcd,fastpath-100,-m 100,10,14,OK,566.70,113.80,112.70,113.10,113.30,113.80,NA,8.0400,33.4362,100.00,100.00,0,0,;timeout,docs/sweep_2026-02-28/logs/jetpack-etcd_rule_etcd/conc10_attempt0.log
+etcd,fastpath-100,-m 100,25,15,OK,1465.60,292.60,294.10,294.00,292.60,292.30,NA,4.5200,223.3436,100.00,100.00,0,0,;timeout,docs/sweep_2026-02-28/logs/jetpack-etcd_rule_etcd/conc25_attempt0.log
+etcd,fastpath-100,-m 100,50,16,OK,2968.70,593.40,594.80,589.00,596.70,594.80,NA,5.5200,386.2148,100.00,100.00,0,0,;timeout,docs/sweep_2026-02-28/logs/jetpack-etcd_rule_etcd/conc50_attempt0.log
+etcd,fastpath-100,-m 100,75,17,OK,4464.60,897.80,894.40,892.70,890.50,889.20,NA,6.4500,412.4509,NA,NA,NA,0,;timeout,docs/sweep_2026-02-28/logs/jetpack-etcd_rule_etcd/conc75_attempt0.log
+etcd,fastpath-100,-m 100,100,18,OK,5938.30,1184.90,1188.50,1181.60,1191.70,1191.60,NA,7.5700,232.5375,100.00,100.00,0,0,;timeout,docs/sweep_2026-02-28/logs/jetpack-etcd_rule_etcd/conc100_attempt0.log
+etcd,fastpath-100,-m 100,150,19,OK,4817.60,1048.60,908.20,932.40,993.70,934.70,NA,10.1300,6546.2843,NA,NA,NA,0,;timeout,docs/sweep_2026-02-28/logs/jetpack-etcd_rule_etcd/conc150_attempt0.log
+etcd,fastpath-100,-m 100,200,20,OK,6064.80,1251.30,1208.20,1246.80,1169.40,1189.10,NA,11.3700,571.3703,7.37,7.37,92.63,0,;timeout,docs/sweep_2026-02-28/logs/jetpack-etcd_rule_etcd/conc200_attempt0.log
+etcd,fastpath-100,-m 100,300,21,OK,6448.80,1300.00,1286.60,1299.10,1293.20,1269.90,NA,11.2500,560.9459,NA,NA,NA,0,;timeout,docs/sweep_2026-02-28/logs/jetpack-etcd_rule_etcd/conc300_attempt0.log
+etcd,fastpath-100,-m 100,400,22,OK,6749.30,1374.40,1350.90,1335.00,1334.60,1354.40,NA,10.1800,284.4602,25.55,25.55,74.45,0,;timeout,docs/sweep_2026-02-28/logs/jetpack-etcd_rule_etcd/conc400_attempt0.log
+etcd,adaptive,,1,23,OK,39.70,8.00,7.80,8.00,8.00,7.90,NA,4.0600,2.5819,100.00,100.00,0,0,;timeout,docs/sweep_2026-02-28/logs/jetpack-etcd_rule_etcd/conc1_attempt0.log
+etcd,adaptive,,5,24,OK,271.60,53.10,54.50,54.30,55.10,54.60,NA,6.7600,6.8215,100.00,100.00,0,0,;timeout,docs/sweep_2026-02-28/logs/jetpack-etcd_rule_etcd/conc5_attempt0.log
+etcd,adaptive,,10,25,OK,574.40,115.50,115.30,114.90,115.40,113.30,NA,6.8100,14.4945,100.00,100.00,0,0,;timeout,docs/sweep_2026-02-28/logs/jetpack-etcd_rule_etcd/conc10_attempt0.log
+etcd,adaptive,,25,26,OK,1465.50,296.70,291.80,292.80,293.00,291.20,NA,9.7900,41.4565,100.00,100.00,0,0,;timeout,docs/sweep_2026-02-28/logs/jetpack-etcd_rule_etcd/conc25_attempt0.log
+etcd,adaptive,,50,27,OK,2964.20,593.00,591.40,594.10,597.50,588.20,NA,5.8700,210.0035,100.00,100.00,0,0,;timeout,docs/sweep_2026-02-28/logs/jetpack-etcd_rule_etcd/conc50_attempt0.log
+etcd,adaptive,,75,28,OK,4462.90,892.90,892.80,891.60,893.00,892.60,NA,8.7000,286.7394,NA,NA,NA,0,;timeout,docs/sweep_2026-02-28/logs/jetpack-etcd_rule_etcd/conc75_attempt0.log
+etcd,adaptive,,100,29,OK,5925.00,1182.10,1189.20,1190.30,1183.90,1179.50,NA,7.0100,378.1478,NA,NA,NA,0,;timeout,docs/sweep_2026-02-28/logs/jetpack-etcd_rule_etcd/conc100_attempt0.log
+etcd,adaptive,,150,30,OK,6955.60,1418.70,1342.10,1371.50,1439.70,1383.60,NA,9.7000,492.4247,NA,NA,NA,0,;timeout,docs/sweep_2026-02-28/logs/jetpack-etcd_rule_etcd/conc150_attempt0.log
+etcd,adaptive,,200,31,OK,7323.30,1461.60,1443.30,1460.30,1474.40,1483.70,NA,11.7400,315.2866,88.52,88.52,11.48,0,;timeout,docs/sweep_2026-02-28/logs/jetpack-etcd_rule_etcd/conc200_attempt0.log
+etcd,adaptive,,300,32,OK,6789.50,1421.80,1340.00,1341.70,1335.30,1350.70,NA,10.7000,721.8157,NA,NA,NA,0,;timeout,docs/sweep_2026-02-28/logs/jetpack-etcd_rule_etcd/conc300_attempt0.log
+etcd,adaptive,,400,33,OK,6051.40,1241.10,1232.90,1206.90,1180.00,1190.50,NA,9.4700,456.7845,NA,NA,NA,0,;timeout,docs/sweep_2026-02-28/logs/jetpack-etcd_rule_etcd/conc400_attempt0.log
+mongodb,original,,1,34,OK,40.90,8.40,7.60,8.50,8.20,8.20,NA,7.0400,.2000,0,0,100,0,;timeout,docs/sweep_2026-02-28/logs/jetpack-mongodb_none_mongodb/conc1_attempt0.log
+mongodb,original,,5,35,OK,275.40,54.80,55.20,55.30,55.00,55.10,NA,7.1100,.2000,0,0,100,0,;timeout,docs/sweep_2026-02-28/logs/jetpack-mongodb_none_mongodb/conc5_attempt0.log
+mongodb,original,,10,36,OK,569.10,115.70,112.50,115.70,112.90,112.30,NA,6.9400,.2000,0,0,100,0,;timeout,docs/sweep_2026-02-28/logs/jetpack-mongodb_none_mongodb/conc10_attempt1.log
+mongodb,original,,25,37,OK,1457.40,291.00,291.50,291.90,291.10,291.90,NA,8.1000,.2000,0,0,100,0,;timeout,docs/sweep_2026-02-28/logs/jetpack-mongodb_none_mongodb/conc25_attempt0.log
+mongodb,original,,50,38,OK,2969.90,594.40,595.70,594.80,590.30,594.70,NA,8.4900,.2000,0,0,100,0,;timeout,docs/sweep_2026-02-28/logs/jetpack-mongodb_none_mongodb/conc50_attempt0.log
+mongodb,original,,75,39,OK,3728.40,712.60,755.70,764.40,766.10,729.60,NA,11.8900,.2000,0,0,100,0,;timeout,docs/sweep_2026-02-28/logs/jetpack-mongodb_none_mongodb/conc75_attempt1.log
+mongodb,original,,100,40,OK,3799.30,826.20,715.90,814.50,665.10,777.60,NA,11.4700,.2000,0,0,100,0,;timeout,docs/sweep_2026-02-28/logs/jetpack-mongodb_none_mongodb/conc100_attempt0.log
+mongodb,original,,150,41,OK,3766.80,758.80,736.40,785.20,758.90,727.50,NA,10.5900,.2000,0,0,100,0,;timeout,docs/sweep_2026-02-28/logs/jetpack-mongodb_none_mongodb/conc150_attempt0.log
+mongodb,original,,200,42,OK,3641.80,699.90,742.10,700.00,759.80,740.00,NA,12.0500,.2000,0,0,100,0,;timeout,docs/sweep_2026-02-28/logs/jetpack-mongodb_none_mongodb/conc200_attempt1.log
+mongodb,original,,300,43,OK,3460.00,720.00,680.00,700.00,680.00,680.00,NA,12.1400,.2000,0,0,100,0,;timeout,docs/sweep_2026-02-28/logs/jetpack-mongodb_none_mongodb/conc300_attempt0.log
+mongodb,original,,400,44,OK,3148.70,620.00,608.60,639.70,640.00,640.40,NA,11.1200,.2000,0,0,100,0,;timeout,docs/sweep_2026-02-28/logs/jetpack-mongodb_none_mongodb/conc400_attempt2.log
+mongodb,fastpath-100,-m 100,1,45,OK,40.10,7.90,7.90,8.10,8.40,7.80,NA,6.2100,1.0000,100.00,100.00,0,0,;timeout,docs/sweep_2026-02-28/logs/jetpack-mongodb_rule_mongodb/conc1_attempt0.log
+mongodb,fastpath-100,-m 100,5,46,OK,274.00,55.10,55.10,54.30,54.30,55.20,NA,6.5600,1.0000,100.00,100.00,0,0,;timeout,docs/sweep_2026-02-28/logs/jetpack-mongodb_rule_mongodb/conc5_attempt1.log
+mongodb,fastpath-100,-m 100,10,47,OK,572.70,116.60,113.60,114.60,113.30,114.60,NA,6.8600,1.0000,100.00,100.00,0,0,;timeout,docs/sweep_2026-02-28/logs/jetpack-mongodb_rule_mongodb/conc10_attempt0.log
+mongodb,fastpath-100,-m 100,25,48,OK,1473.80,293.60,292.60,295.10,295.50,297.00,NA,7.7200,1.0000,97.25,97.25,2.75,0,;timeout,docs/sweep_2026-02-28/logs/jetpack-mongodb_rule_mongodb/conc25_attempt0.log
+mongodb,fastpath-100,-m 100,50,49,OK,2104.20,440.30,393.30,419.00,405.80,445.80,NA,12.6700,1.0000,10.99,10.99,89.01,0,;timeout,docs/sweep_2026-02-28/logs/jetpack-mongodb_rule_mongodb/conc50_attempt0.log
+mongodb,fastpath-100,-m 100,75,50,OK,2715.30,604.30,546.70,525.10,484.80,554.40,NA,11.7100,1.0000,.01,.01,99.99,0,;timeout,docs/sweep_2026-02-28/logs/jetpack-mongodb_rule_mongodb/conc75_attempt0.log
+mongodb,fastpath-100,-m 100,100,51,OK,2947.60,597.80,563.40,562.30,618.70,605.40,NA,11.1700,1.0000,0,0,100,0,;timeout,docs/sweep_2026-02-28/logs/jetpack-mongodb_rule_mongodb/conc100_attempt0.log
+mongodb,fastpath-100,-m 100,150,52,OK,2506.70,540.00,477.60,500.70,512.50,475.90,NA,11.0100,1.0000,0,0,100,0,;timeout,docs/sweep_2026-02-28/logs/jetpack-mongodb_rule_mongodb/conc150_attempt0.log
+mongodb,fastpath-100,-m 100,200,53,OK,3199.60,600.00,599.90,680.00,679.70,640.00,NA,9.6700,1.0000,0,0,100,0,;timeout,docs/sweep_2026-02-28/logs/jetpack-mongodb_rule_mongodb/conc200_attempt0.log
+mongodb,fastpath-100,-m 100,300,54,OK,2880.00,640.00,560.00,540.00,560.00,580.00,NA,11.2600,1.0000,0,0,100,0,;timeout,docs/sweep_2026-02-28/logs/jetpack-mongodb_rule_mongodb/conc300_attempt0.log
+mongodb,fastpath-100,-m 100,400,55,OK,2920.00,540.00,600.00,580.00,600.00,600.00,NA,10.9500,1.0000,0,0,100,0,;timeout,docs/sweep_2026-02-28/logs/jetpack-mongodb_rule_mongodb/conc400_attempt1.log
+mongodb,adaptive,,1,56,OK,40.00,8.00,7.80,7.70,7.90,8.60,NA,6.0400,1.0000,100.00,100.00,0,0,;timeout,docs/sweep_2026-02-28/logs/jetpack-mongodb_rule_mongodb/conc1_attempt0.log
+mongodb,adaptive,,5,57,OK,274.10,55.70,54.70,54.40,55.30,54.00,NA,6.6500,1.0000,100.00,100.00,0,0,;timeout,docs/sweep_2026-02-28/logs/jetpack-mongodb_rule_mongodb/conc5_attempt0.log
+mongodb,adaptive,,10,58,OK,563.30,111.40,111.40,113.00,113.70,113.80,NA,6.9800,1.0000,100.00,100.00,0,0,;timeout,docs/sweep_2026-02-28/logs/jetpack-mongodb_rule_mongodb/conc10_attempt0.log
+mongodb,adaptive,,25,59,OK,1465.50,293.90,295.60,291.10,292.50,292.40,NA,7.6000,1.0000,99.85,99.85,.15,0,;timeout,docs/sweep_2026-02-28/logs/jetpack-mongodb_rule_mongodb/conc25_attempt0.log
+mongodb,adaptive,,50,60,OK,2964.80,590.40,600.30,592.50,591.20,590.40,NA,9.8700,1.0000,84.96,84.96,15.04,0,;timeout,docs/sweep_2026-02-28/logs/jetpack-mongodb_rule_mongodb/conc50_attempt0.log
+mongodb,adaptive,,75,61,OK,3849.90,818.90,774.90,758.80,767.50,729.80,NA,9.1800,1.0000,66.86,66.86,33.14,0,;timeout,docs/sweep_2026-02-28/logs/jetpack-mongodb_rule_mongodb/conc75_attempt0.log
+mongodb,adaptive,,100,62,OK,3858.30,781.40,779.10,789.00,722.80,786.00,NA,9.2300,1.0000,77.11,77.11,22.89,0,;timeout,docs/sweep_2026-02-28/logs/jetpack-mongodb_rule_mongodb/conc100_attempt2.log
+mongodb,adaptive,,150,63,OK,3670.30,727.50,721.60,791.10,724.70,705.40,NA,9.4500,1.0000,82.21,82.21,17.79,0,;timeout,docs/sweep_2026-02-28/logs/jetpack-mongodb_rule_mongodb/conc150_attempt1.log
+mongodb,adaptive,,200,64,OK,3542.10,757.80,705.90,720.40,678.10,679.90,NA,10.5800,1.0000,86.56,86.56,13.44,0,;timeout,docs/sweep_2026-02-28/logs/jetpack-mongodb_rule_mongodb/conc200_attempt0.log
+mongodb,adaptive,,300,65,OK,3200.00,680.00,660.00,620.00,600.00,640.00,NA,13.9000,1.0000,88.15,88.15,11.85,0,;timeout,docs/sweep_2026-02-28/logs/jetpack-mongodb_rule_mongodb/conc300_attempt1.log
+mongodb,adaptive,,400,66,OK,1659.80,320.00,340.00,320.00,340.00,339.80,NA,16.0000,1.0000,79.80,79.80,20.20,0,;timeout,docs/sweep_2026-02-28/logs/jetpack-mongodb_rule_mongodb/conc400_attempt0.log
+zookeeper,original,,1,67,OK,39.60,8.10,7.80,7.80,8.10,7.80,NA,4.6100,.4720,0,0,100,0,;timeout,docs/sweep_2026-02-28/logs/jetpack-zookeeper_none_zookeeper/conc1_attempt0.log
+zookeeper,original,,5,68,OK,270.10,53.90,54.70,53.80,53.70,54.00,NA,7.0500,1.0480,0,0,100,0,;timeout,docs/sweep_2026-02-28/logs/jetpack-zookeeper_none_zookeeper/conc5_attempt0.log
+zookeeper,original,,10,69,OK,570.00,114.70,113.10,113.80,113.40,115.00,NA,5.0200,1.4380,0,0,100,0,;timeout,docs/sweep_2026-02-28/logs/jetpack-zookeeper_none_zookeeper/conc10_attempt0.log
+zookeeper,original,,25,70,OK,1475.50,294.30,296.00,293.60,294.80,296.80,NA,5.9900,1.8560,0,0,100,0,;timeout,docs/sweep_2026-02-28/logs/jetpack-zookeeper_none_zookeeper/conc25_attempt0.log
+zookeeper,original,,50,71,OK,2959.20,589.50,592.90,590.80,593.10,592.90,NA,6.1900,3.1560,0,0,100,0,;timeout,docs/sweep_2026-02-28/logs/jetpack-zookeeper_none_zookeeper/conc50_attempt0.log
+zookeeper,original,,75,72,OK,4460.10,890.60,890.70,889.80,892.20,896.80,NA,6.5400,3.6920,0,0,100,0,;timeout,docs/sweep_2026-02-28/logs/jetpack-zookeeper_none_zookeeper/conc75_attempt0.log
+zookeeper,original,,100,73,OK,5360.40,1087.60,1067.00,1067.70,1068.50,1069.60,NA,9.2800,848.3520,0,0,100,0,;timeout,docs/sweep_2026-02-28/logs/jetpack-zookeeper_none_zookeeper/conc100_attempt0.log
+zookeeper,original,,150,74,OK,5647.60,1148.20,1123.60,1122.00,1126.80,1127.00,NA,9.2000,926.1940,0,0,100,0,;timeout,docs/sweep_2026-02-28/logs/jetpack-zookeeper_none_zookeeper/conc150_attempt0.log
+zookeeper,original,,200,75,OK,5589.90,1135.60,1124.10,1114.00,1121.00,1095.20,NA,8.4800,819.0140,0,0,100,0,;timeout,docs/sweep_2026-02-28/logs/jetpack-zookeeper_none_zookeeper/conc200_attempt0.log
+zookeeper,original,,300,76,OK,5488.60,1151.50,1048.80,1084.30,1095.40,1108.60,NA,8.6900,735.6180,0,0,100,0,;timeout,docs/sweep_2026-02-28/logs/jetpack-zookeeper_none_zookeeper/conc300_attempt0.log
+zookeeper,original,,400,77,OK,5223.20,1056.00,1052.20,1034.10,1038.10,1042.80,NA,9.5800,1301.8460,0,0,100,0,;timeout,docs/sweep_2026-02-28/logs/jetpack-zookeeper_none_zookeeper/conc400_attempt0.log
+zookeeper,fastpath-100,-m 100,1,78,OK,41.30,8.30,8.30,7.90,8.00,8.80,NA,4.1800,2.7301,100.00,100.00,0,0,;timeout,docs/sweep_2026-02-28/logs/jetpack-zookeeper_rule_zookeeper/conc1_attempt0.log
+zookeeper,fastpath-100,-m 100,5,79,OK,271.30,53.50,54.80,54.90,54.20,53.90,NA,7.2600,12.7890,100.00,100.00,0,0,;timeout,docs/sweep_2026-02-28/logs/jetpack-zookeeper_rule_zookeeper/conc5_attempt0.log
+zookeeper,fastpath-100,-m 100,10,80,OK,573.70,114.10,115.20,114.40,115.50,114.50,NA,9.2400,25.4055,100.00,100.00,0,0,;timeout,docs/sweep_2026-02-28/logs/jetpack-zookeeper_rule_zookeeper/conc10_attempt0.log
+zookeeper,fastpath-100,-m 100,25,81,OK,1467.70,291.70,293.00,292.70,294.60,295.70,NA,9.3300,66.4539,100.00,100.00,0,0,;timeout,docs/sweep_2026-02-28/logs/jetpack-zookeeper_rule_zookeeper/conc25_attempt0.log
+zookeeper,fastpath-100,-m 100,50,82,OK,2959.20,595.50,590.60,591.90,592.40,588.80,NA,6.4500,138.5513,100.00,100.00,0,0,;timeout,docs/sweep_2026-02-28/logs/jetpack-zookeeper_rule_zookeeper/conc50_attempt0.log
+zookeeper,fastpath-100,-m 100,75,83,OK,4458.60,896.40,892.60,891.80,889.60,888.20,NA,11.2900,410.5087,100.00,100.00,0,0,;timeout,docs/sweep_2026-02-28/logs/jetpack-zookeeper_rule_zookeeper/conc75_attempt0.log
+zookeeper,fastpath-100,-m 100,100,84,OK,4743.00,961.40,945.40,943.00,945.00,948.20,NA,9.4700,935.1416,NA,NA,NA,0,;timeout,docs/sweep_2026-02-28/logs/jetpack-zookeeper_rule_zookeeper/conc100_attempt0.log
+zookeeper,fastpath-100,-m 100,150,85,OK,4729.90,958.80,943.00,943.00,941.00,944.10,NA,9.5300,3819.3746,NA,NA,NA,0,;timeout,docs/sweep_2026-02-28/logs/jetpack-zookeeper_rule_zookeeper/conc150_attempt0.log
+zookeeper,fastpath-100,-m 100,200,86,OK,5436.40,1106.70,1078.50,1086.90,1081.00,1083.30,NA,11.9400,5045.6490,NA,NA,NA,0,;timeout,docs/sweep_2026-02-28/logs/jetpack-zookeeper_rule_zookeeper/conc200_attempt0.log
+zookeeper,fastpath-100,-m 100,300,87,OK,5456.40,1086.00,1098.50,1079.80,1079.40,1112.70,NA,11.9000,4745.2596,NA,NA,NA,0,;timeout,docs/sweep_2026-02-28/logs/jetpack-zookeeper_rule_zookeeper/conc300_attempt0.log
+zookeeper,fastpath-100,-m 100,400,88,OK,4930.80,1023.80,988.50,979.00,968.50,971.00,NA,14.2700,5417.5591,NA,NA,NA,0,;timeout,docs/sweep_2026-02-28/logs/jetpack-zookeeper_rule_zookeeper/conc400_attempt0.log
+zookeeper,adaptive,,1,89,OK,39.30,8.00,7.60,7.70,8.00,8.00,NA,6.6300,2.6624,100.00,100.00,0,0,;timeout,docs/sweep_2026-02-28/logs/jetpack-zookeeper_rule_zookeeper/conc1_attempt0.log
+zookeeper,adaptive,,5,90,OK,272.70,54.50,53.80,53.90,55.30,55.20,NA,7.2900,12.6260,100.00,100.00,0,0,;timeout,docs/sweep_2026-02-28/logs/jetpack-zookeeper_rule_zookeeper/conc5_attempt0.log
+zookeeper,adaptive,,10,91,OK,567.20,115.00,112.00,112.80,113.10,114.30,NA,7.5900,25.3887,100.00,100.00,0,0,;timeout,docs/sweep_2026-02-28/logs/jetpack-zookeeper_rule_zookeeper/conc10_attempt0.log
+zookeeper,adaptive,,25,92,OK,1462.80,291.30,293.90,290.70,292.80,294.10,NA,6.0900,66.0173,100.00,100.00,0,0,;timeout,docs/sweep_2026-02-28/logs/jetpack-zookeeper_rule_zookeeper/conc25_attempt0.log
+zookeeper,adaptive,,50,93,OK,2958.30,587.80,590.90,592.10,595.70,591.80,NA,5.4800,143.6791,100.00,100.00,0,0,;timeout,docs/sweep_2026-02-28/logs/jetpack-zookeeper_rule_zookeeper/conc50_attempt0.log
+zookeeper,adaptive,,75,94,OK,4459.10,892.90,893.40,889.50,894.50,888.80,NA,5.7900,327.4907,100.00,100.00,0,0,;timeout,docs/sweep_2026-02-28/logs/jetpack-zookeeper_rule_zookeeper/conc75_attempt0.log
+zookeeper,adaptive,,100,95,OK,5054.20,1027.90,1006.40,1006.50,1008.20,1005.20,NA,6.7200,1022.2242,NA,NA,NA,0,;timeout,docs/sweep_2026-02-28/logs/jetpack-zookeeper_rule_zookeeper/conc100_attempt0.log
+zookeeper,adaptive,,150,96,OK,5486.00,1097.50,1090.60,1092.20,1118.70,1087.00,NA,5.9300,3084.9261,NA,NA,NA,0,;timeout,docs/sweep_2026-02-28/logs/jetpack-zookeeper_rule_zookeeper/conc150_attempt0.log
+zookeeper,adaptive,,200,97,OK,4620.80,943.10,926.10,911.60,917.40,922.60,NA,6.9300,4969.5728,NA,NA,NA,0,;timeout,docs/sweep_2026-02-28/logs/jetpack-zookeeper_rule_zookeeper/conc200_attempt0.log
+zookeeper,adaptive,,300,98,OK,5380.30,1063.80,1071.10,1096.50,1069.50,1079.40,NA,8.6900,5090.6952,NA,NA,NA,0,;timeout,docs/sweep_2026-02-28/logs/jetpack-zookeeper_rule_zookeeper/conc300_attempt0.log
+zookeeper,adaptive,,400,99,OK,5422.80,1120.60,1076.80,1083.20,1067.10,1075.10,NA,9.4400,5927.9521,NA,NA,NA,0,;timeout,docs/sweep_2026-02-28/logs/jetpack-zookeeper_rule_zookeeper/conc400_attempt0.log

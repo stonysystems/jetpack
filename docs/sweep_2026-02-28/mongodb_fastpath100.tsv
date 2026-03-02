@@ -1,15 +1,17 @@
 # Sweep: image=jetpack-mongodb mode=rule_mongodb.yml extra_args='-m 100'
 # Site config: 60c1s5r5p.yml (60 clients)
 # Latency: 20ms, Duration: 30s
-concurrency	total_throughput	h1	h2	h3	h4	h5	fp_attempted	fp_succeeded	fp_rate	cpu_leader_avg	queue_depth_avg
-1	39.60	8.10	8.10	7.90	7.80	7.70	312	297	95.19	98.0220	1.0000
-5	272.20	54.90	54.30	54.30	54.40	54.30	2185	2170	99.31	98.3821	1.0000
-10	569.30	113.70	112.70	113.40	115.20	114.30	4525	4525	100.00	99.7694	1.0000
-25	1469.30	297.10	293.40	294.30	290.60	293.90	11787	11630	98.66	99.2500	1.0000
-50	2365.40	472.80	475.00	472.90	469.90	474.80	23654	1060	4.48	23.4477	1.0000
-75	2242.80	470.50	425.40	481.20	434.50	431.20	17915	1078	6.01	28.6858	1.0000
-100	2962.80	567.50	632.00	558.60	596.20	608.50	23688	1079	4.55	22.4144	1.0000
-150	3369.60	740.00	661.00	649.10	653.90	665.60	26920	1437	5.33	20.8293	1.0000
-200	3360.00	700.00	660.00	680.00	660.00	660.00	26888	1273	4.73	20.1860	1.0000
-300	3060.00	660.00	640.00	560.00	640.00	560.00	24461	1365	5.58	19.8670	1.0000
-400	2760.00	520.00	560.00	540.00	600.00	540.00	22096	1393	6.30	20.0649	1.0000
+# Date: 2026-03-02T20:11:47Z
+# Max retries per point: 2
+concurrency	total_throughput	h1	h2	h3	h4	h5	fp_attempted	fp_succeeded	fp_rate	cpu_leader_avg	queue_depth_avg	status	error_summary	log_path	retry_count
+1	40.10	7.90	7.90	8.10	8.40	7.80	401	401	100.00	6.2100	1.0000	OK	;timeout	docs/sweep_2026-02-28/logs/jetpack-mongodb_rule_mongodb/conc1_attempt0.log	0
+5	274.00	55.10	55.10	54.30	54.30	55.20	2740	2740	100.00	6.5600	1.0000	OK	;timeout	docs/sweep_2026-02-28/logs/jetpack-mongodb_rule_mongodb/conc5_attempt1.log	1
+10	572.70	116.60	113.60	114.60	113.30	114.60	5727	5727	100.00	6.8600	1.0000	OK	;timeout	docs/sweep_2026-02-28/logs/jetpack-mongodb_rule_mongodb/conc10_attempt0.log	0
+25	1473.80	293.60	292.60	295.10	295.50	297.00	14738	14333	97.25	7.7200	1.0000	OK	;timeout	docs/sweep_2026-02-28/logs/jetpack-mongodb_rule_mongodb/conc25_attempt0.log	0
+50	2104.20	440.30	393.30	419.00	405.80	445.80	21042	2313	10.99	12.6700	1.0000	OK	;timeout	docs/sweep_2026-02-28/logs/jetpack-mongodb_rule_mongodb/conc50_attempt0.log	0
+75	2715.30	604.30	546.70	525.10	484.80	554.40	27153	4	.01	11.7100	1.0000	OK	;timeout	docs/sweep_2026-02-28/logs/jetpack-mongodb_rule_mongodb/conc75_attempt0.log	0
+100	2947.60	597.80	563.40	562.30	618.70	605.40	29476	0	0	11.1700	1.0000	OK	;timeout	docs/sweep_2026-02-28/logs/jetpack-mongodb_rule_mongodb/conc100_attempt0.log	0
+150	2506.70	540.00	477.60	500.70	512.50	475.90	25067	0	0	11.0100	1.0000	OK	;timeout	docs/sweep_2026-02-28/logs/jetpack-mongodb_rule_mongodb/conc150_attempt0.log	0
+200	3199.60	600.00	599.90	680.00	679.70	640.00	31996	0	0	9.6700	1.0000	OK	;timeout	docs/sweep_2026-02-28/logs/jetpack-mongodb_rule_mongodb/conc200_attempt0.log	0
+300	2880.00	640.00	560.00	540.00	560.00	580.00	28800	0	0	11.2600	1.0000	OK	;timeout	docs/sweep_2026-02-28/logs/jetpack-mongodb_rule_mongodb/conc300_attempt0.log	0
+400	2920.00	540.00	600.00	580.00	600.00	600.00	29200	0	0	10.9500	1.0000	OK	;timeout	docs/sweep_2026-02-28/logs/jetpack-mongodb_rule_mongodb/conc400_attempt1.log	1

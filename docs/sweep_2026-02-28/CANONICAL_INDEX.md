@@ -3,23 +3,29 @@
 One accepted dataset per backend/mode for the final report.
 Superseded versions are in `archive/`.
 
-| Backend | Mode | Canonical File | Peak (txn/s) | Failed Rows | Superseded Files | Reason | Date |
-|---------|------|---------------|-------------|-------------|-----------------|--------|------|
-| etcd | original | `etcd_original.tsv` | 7,709 @ c=150 | 0/11 | — | Only version | 2026-02-28 |
-| etcd | fastpath-100 | `etcd_fastpath100.tsv` | 6,545 @ c=200 | 0/11 | — | Rerun 2026-03-02 fixed 3 failures | 2026-02-28 |
-| etcd | adaptive | `etcd_adaptive.tsv` | 6,728 @ c=150 | 0/11 | v1_old, v2, v3 | Rerun 2026-03-02 fixed 2 failures | 2026-02-28 |
-| MongoDB | original | `mongodb_original.tsv` | 3,681 @ c=75 | 0/11 | — | Rerun 2026-03-02 fixed 2 failures | 2026-02-28 |
-| MongoDB | fastpath-100 | `mongodb_fastpath100.tsv` | 3,370 @ c=150 | 0/11 | — | Rerun 2026-03-02 fixed 1 failure | 2026-02-28 |
-| MongoDB | adaptive | `mongodb_adaptive.tsv` | 3,773 @ c=75 | 0/11 | v2, v3 | Rerun 2026-03-02 fixed 2 failures | 2026-02-28 |
-| ZooKeeper | original | `zookeeper_original.tsv` | 4,854 @ c=200 | 0/11 | — | Only version | 2026-02-28 |
-| ZooKeeper | fastpath-100 | `zookeeper_fastpath100.tsv` | 5,922 @ c=300 | 0/11 | — | Rerun 2026-03-02 fixed 2 failures | 2026-02-28 |
-| ZooKeeper | adaptive | `zookeeper_adaptive.tsv` | 5,408 @ c=300 | 0/11 | v1_old, v2, v3 | Zero failures | 2026-02-28 |
+| Backend | Mode | Canonical File | Peak (txn/s) | Failed Rows | CPU Metric | Reason | Date |
+|---------|------|---------------|-------------|-------------|------------|--------|------|
+| etcd | original | `etcd_original.tsv` | 7,687 @ c=200 | 0/11 | external /proc/stat | Full 9-case rerun 2026-03-02 | 2026-03-02 |
+| etcd | fastpath-100 | `etcd_fastpath100.tsv` | 6,749 @ c=400 | 0/11 | in-process leader | Full 9-case rerun 2026-03-02 | 2026-03-02 |
+| etcd | adaptive | `etcd_adaptive.tsv` | 7,323 @ c=200 | 0/11 | in-process leader | Full 9-case rerun 2026-03-02 | 2026-03-02 |
+| MongoDB | original | `mongodb_original.tsv` | 3,799 @ c=100 | 0/11 | external /proc/stat | Full 9-case rerun 2026-03-02 | 2026-03-02 |
+| MongoDB | fastpath-100 | `mongodb_fastpath100.tsv` | 3,200 @ c=200 | 0/11 | in-process leader | Full 9-case rerun 2026-03-02 | 2026-03-02 |
+| MongoDB | adaptive | `mongodb_adaptive.tsv` | 3,858 @ c=100 | 0/11 | in-process leader | Full 9-case rerun 2026-03-02 | 2026-03-02 |
+| ZooKeeper | original | `zookeeper_original.tsv` | 5,648 @ c=150 | 0/11 | external /proc/stat | Full 9-case rerun 2026-03-02 | 2026-03-02 |
+| ZooKeeper | fastpath-100 | `zookeeper_fastpath100.tsv` | 5,456 @ c=300 | 0/11 | in-process leader | Full 9-case rerun 2026-03-02 | 2026-03-02 |
+| ZooKeeper | adaptive | `zookeeper_adaptive.tsv` | 5,486 @ c=150 | 0/11 | in-process leader | Full 9-case rerun 2026-03-02 | 2026-03-02 |
 
 ## Status
 
-All 9 canonical datasets now have **zero failed rows**. The 12 previously failed
-data points were rerun on 2026-03-02 (commit 8ba5d49e) and all succeeded.
-See [FAILURE_LEDGER.md](FAILURE_LEDGER.md) for details.
+All 9 canonical datasets were generated from a **single consistent rerun** on 2026-03-02
+using the current sweep script (`scripts/sweep_benchmark.sh`) with retry logic, failure
+classification, and per-run log saving. All data points have real CPU measurements.
 
-Remaining: original-mode files still lack CPU/queue-depth metrics (pending Docker
-image rebuild with the instrumentation fix from commit c1368ef4).
+- **99/99 data points OK** (zero failed rows across all 9 datasets)
+- **CPU metrics present for all modes** including original (`none_*.yml`)
+  - Rule modes: in-process leader CPU from RPC responses
+  - Original mode: external `/proc/stat` measurement during benchmark
+- **Git commit**: 194c32c1
+- **Docker images rebuilt**: 2026-03-02 (with CPU instrumentation from c1368ef4)
+- **Consolidated CSV**: [`consolidated.csv`](consolidated.csv) (99 rows, all OK)
+- **Previous history**: See [FAILURE_LEDGER.md](FAILURE_LEDGER.md) for the 12 pre-rerun failures

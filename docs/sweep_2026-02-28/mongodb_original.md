@@ -6,19 +6,20 @@
 | Mode | `none_mongodb.yml` |
 | Site config | 60c1s5r5p.yml (60 clients) |
 | Latency / Duration | 20ms, Duration: 30s |
-| Git commit | `8ba5d49e` |
+| Date | 2026-03-02T19:33:16Z |
+| Git commit | `194c32c1` |
 | Source | [`mongodb_original.tsv`](mongodb_original.tsv) |
 
-| concurrency | total_throughput | h1 | h2 | h3 | h4 | h5 | fp_attempted | fp_succeeded | fp_rate | cpu_leader_avg | queue_depth_avg |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| 1 | 40.00 | 8.30 | 8.20 | 7.60 | 8.00 | 7.90 | 0 | 0 | 0 | 0 | 0 |
-| 5 | 272.70 | 54.60 | 54.40 | 56.00 | 54.70 | 53.00 | 0 | 0 | 0 | 0 | 0 |
-| 10 | 569.30 | 113.90 | 115.10 | 112.50 | 114.10 | 113.70 | 0 | 0 | 0 | 0 | 0 |
-| 25 | 1475.10 | 294.80 | 296.60 | 295.50 | 292.50 | 295.70 | 0 | 0 | 0 | 0 | 0 |
-| 50 | 2959.90 | 591.60 | 591.50 | 591.80 | 592.40 | 592.60 | 0 | 0 | 0 | 0 | 0 |
-| 75 | 3681.20 | 733.30 | 710.90 | 736.40 | 739.40 | 761.20 | 0 | 0 | 0 | 0 | 0 |
-| 100 | 1171.80 | 234.80 | 217.00 | 240.00 | 240.00 | 240.00 | 0 | 0 | 0 | 0 | 0 |
-| 150 | 3023.40 | 589.90 | 569.00 | 588.50 | 652.90 | 623.10 | 0 | 0 | 0 | 0 | 0 |
-| 200 | 3182.90 | 640.10 | 602.60 | 620.00 | 660.10 | 660.10 | 0 | 0 | 0 | 0 | 0 |
-| 300 | 3100.00 | 680.00 | 600.00 | 620.00 | 600.00 | 600.00 | 0 | 0 | 0 | 0 | 0 |
-| 400 | 2820.00 | 540.00 | 580.00 | 540.00 | 580.00 | 580.00 | 0 | 0 | 0 | 0 | 0 |
+| concurrency | total_throughput | h1 | h2 | h3 | h4 | h5 | fp_attempted | fp_succeeded | fp_rate | cpu_leader_avg | queue_depth_avg | status | error_summary | log_path | retry_count |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 1 | 40.90 | 8.40 | 7.60 | 8.50 | 8.20 | 8.20 | 0 | 0 | 0 | 7.0400 | .2000 | OK | ;timeout | docs/sweep_2026-02-28/logs/jetpack-mongodb_none_mongodb/conc1_attempt0.log | 0 |
+| 5 | 275.40 | 54.80 | 55.20 | 55.30 | 55.00 | 55.10 | 0 | 0 | 0 | 7.1100 | .2000 | OK | ;timeout | docs/sweep_2026-02-28/logs/jetpack-mongodb_none_mongodb/conc5_attempt0.log | 0 |
+| 10 | 569.10 | 115.70 | 112.50 | 115.70 | 112.90 | 112.30 | 0 | 0 | 0 | 6.9400 | .2000 | OK | ;timeout | docs/sweep_2026-02-28/logs/jetpack-mongodb_none_mongodb/conc10_attempt1.log | 1 |
+| 25 | 1457.40 | 291.00 | 291.50 | 291.90 | 291.10 | 291.90 | 0 | 0 | 0 | 8.1000 | .2000 | OK | ;timeout | docs/sweep_2026-02-28/logs/jetpack-mongodb_none_mongodb/conc25_attempt0.log | 0 |
+| 50 | 2969.90 | 594.40 | 595.70 | 594.80 | 590.30 | 594.70 | 0 | 0 | 0 | 8.4900 | .2000 | OK | ;timeout | docs/sweep_2026-02-28/logs/jetpack-mongodb_none_mongodb/conc50_attempt0.log | 0 |
+| 75 | 3728.40 | 712.60 | 755.70 | 764.40 | 766.10 | 729.60 | 0 | 0 | 0 | 11.8900 | .2000 | OK | ;timeout | docs/sweep_2026-02-28/logs/jetpack-mongodb_none_mongodb/conc75_attempt1.log | 1 |
+| 100 | 3799.30 | 826.20 | 715.90 | 814.50 | 665.10 | 777.60 | 0 | 0 | 0 | 11.4700 | .2000 | OK | ;timeout | docs/sweep_2026-02-28/logs/jetpack-mongodb_none_mongodb/conc100_attempt0.log | 0 |
+| 150 | 3766.80 | 758.80 | 736.40 | 785.20 | 758.90 | 727.50 | 0 | 0 | 0 | 10.5900 | .2000 | OK | ;timeout | docs/sweep_2026-02-28/logs/jetpack-mongodb_none_mongodb/conc150_attempt0.log | 0 |
+| 200 | 3641.80 | 699.90 | 742.10 | 700.00 | 759.80 | 740.00 | 0 | 0 | 0 | 12.0500 | .2000 | OK | ;timeout | docs/sweep_2026-02-28/logs/jetpack-mongodb_none_mongodb/conc200_attempt1.log | 1 |
+| 300 | 3460.00 | 720.00 | 680.00 | 700.00 | 680.00 | 680.00 | 0 | 0 | 0 | 12.1400 | .2000 | OK | ;timeout | docs/sweep_2026-02-28/logs/jetpack-mongodb_none_mongodb/conc300_attempt0.log | 0 |
+| 400 | 3148.70 | 620.00 | 608.60 | 639.70 | 640.00 | 640.40 | 0 | 0 | 0 | 11.1200 | .2000 | OK | ;timeout | docs/sweep_2026-02-28/logs/jetpack-mongodb_none_mongodb/conc400_attempt2.log | 2 |

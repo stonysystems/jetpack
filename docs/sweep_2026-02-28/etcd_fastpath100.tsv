@@ -1,15 +1,17 @@
 # Sweep: image=jetpack-etcd mode=rule_etcd.yml extra_args='-m 100'
 # Site config: 60c1s5r5p.yml (60 clients)
 # Latency: 20ms, Duration: 30s
-concurrency	total_throughput	h1	h2	h3	h4	h5	fp_attempted	fp_succeeded	fp_rate	cpu_leader_avg	queue_depth_avg
-1	39.50	8.20	8.10	7.50	7.90	7.80	201	201	100.00	54.8367	4.6220
-5	274.00	54.50	55.20	55.00	55.20	54.10	3	3	100.00	31.4921	7.8922
-10	576.40	115.00	115.20	114.70	117.20	114.30	1	1	100.00	39.1900	19.0776
-25	1444.50	295.10	280.90	288.70	289.50	290.30	0	0	0	49.3315	64.3155
-50	2957.90	595.90	587.90	589.60	594.40	590.10	0	0	0	60.2972	306.8948
-75	4466.10	894.70	891.60	894.40	891.60	893.80	0	0	0	70.3445	846.0781
-100	5951.30	1192.00	1188.90	1188.10	1193.70	1188.60	0	0	0	90.0387	455.5925
-150	572.20	131.90	98.60	114.80	103.80	123.10	0	0	0	87.9683	424.4225
-200	6544.70	1305.60	1308.40	1296.10	1311.20	1323.40	0	0	0	90.0000	579.3346
-300	5765.80	1205.80	1100.00	1180.00	1140.00	1140.00	0	0	0	84.4555	1911.7890
-400	6254.40	1276.80	1220.00	1250.40	1253.60	1253.60	0	0	0	91.2065	205.5617
+# Date: 2026-03-02T18:53:20Z
+# Max retries per point: 2
+concurrency	total_throughput	h1	h2	h3	h4	h5	fp_attempted	fp_succeeded	fp_rate	cpu_leader_avg	queue_depth_avg	status	error_summary	log_path	retry_count
+1	39.90	8.30	7.70	7.80	7.90	8.20	399	399	100.00	5.0500	4.1483	OK	;timeout	docs/sweep_2026-02-28/logs/jetpack-etcd_rule_etcd/conc1_attempt0.log	0
+5	274.70	54.80	55.50	55.10	54.60	54.70	2747	2747	100.00	5.3000	26.3404	OK	;timeout	docs/sweep_2026-02-28/logs/jetpack-etcd_rule_etcd/conc5_attempt0.log	0
+10	566.70	113.80	112.70	113.10	113.30	113.80	5667	5667	100.00	8.0400	33.4362	OK	;timeout	docs/sweep_2026-02-28/logs/jetpack-etcd_rule_etcd/conc10_attempt0.log	0
+25	1465.60	292.60	294.10	294.00	292.60	292.30	928	928	100.00	4.5200	223.3436	OK	;timeout	docs/sweep_2026-02-28/logs/jetpack-etcd_rule_etcd/conc25_attempt0.log	0
+50	2968.70	593.40	594.80	589.00	596.70	594.80	1	1	100.00	5.5200	386.2148	OK	;timeout	docs/sweep_2026-02-28/logs/jetpack-etcd_rule_etcd/conc50_attempt0.log	0
+75	4464.60	897.80	894.40	892.70	890.50	889.20	0	0	0	6.4500	412.4509	OK	;timeout	docs/sweep_2026-02-28/logs/jetpack-etcd_rule_etcd/conc75_attempt0.log	0
+100	5938.30	1184.90	1188.50	1181.60	1191.70	1191.60	8	8	100.00	7.5700	232.5375	OK	;timeout	docs/sweep_2026-02-28/logs/jetpack-etcd_rule_etcd/conc100_attempt0.log	0
+150	4817.60	1048.60	908.20	932.40	993.70	934.70	0	0	0	10.1300	6546.2843	OK	;timeout	docs/sweep_2026-02-28/logs/jetpack-etcd_rule_etcd/conc150_attempt0.log	0
+200	6064.80	1251.30	1208.20	1246.80	1169.40	1189.10	122	9	7.37	11.3700	571.3703	OK	;timeout	docs/sweep_2026-02-28/logs/jetpack-etcd_rule_etcd/conc200_attempt0.log	0
+300	6448.80	1300.00	1286.60	1299.10	1293.20	1269.90	0	0	0	11.2500	560.9459	OK	;timeout	docs/sweep_2026-02-28/logs/jetpack-etcd_rule_etcd/conc300_attempt0.log	0
+400	6749.30	1374.40	1350.90	1335.00	1334.60	1354.40	90	23	25.55	10.1800	284.4602	OK	;timeout	docs/sweep_2026-02-28/logs/jetpack-etcd_rule_etcd/conc400_attempt0.log	0

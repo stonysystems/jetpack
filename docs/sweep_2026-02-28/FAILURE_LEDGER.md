@@ -41,3 +41,11 @@ classification, which would have prevented these zero-throughput rows in the ori
 - **Script**: `scripts/rerun_failed_points.sh`
 - **Max retries**: 2
 - **Full results**: `docs/sweep_2026-02-28/rerun_results.tsv`
+
+## Superseded by Full 9-Case Rerun
+
+The individual rerun data above has been superseded by a full 9-case rerun
+(all 99 data points across all 9 backend/mode combinations) on 2026-03-02
+using `scripts/sweep_benchmark.sh` with commit 194c32c1. The current canonical
+TSV files contain data from this full rerun, not the individual reruns above.
+All 99 points succeeded (0 failures). See [CANONICAL_INDEX.md](CANONICAL_INDEX.md).

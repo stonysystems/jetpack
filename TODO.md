@@ -520,7 +520,7 @@ this section can be closed again.
     canonical dataset was also collected before the latest original-mode CPU instrumentation
     and before the current retry/status/logging sweep script.
 
-- [ ] Add real original-mode CPU metrics for comparison
+- [x] Add real original-mode CPU metrics for comparison
   - The accepted final sweep must include a meaningful `cpu_leader_avg` for original mode
     (`none_*.yml`) as well as rule mode. Zero placeholders are not acceptable as “metric present”.
   - If `cpu_all_avg` is already available in the original path, export it too and include it in
@@ -537,7 +537,7 @@ this section can be closed again.
     - regenerate the canonical original-mode TSV/Markdown files and the consolidated CSV from
       those new runs.
 
-- [ ] Prefer a full 9-case rerun after the measurement pipeline changed
+- [x] Prefer a full 9-case rerun after the measurement pipeline changed
   - Because both the measurement code (`c1368ef4`) and the sweep harness (`scripts/sweep_benchmark.sh`)
     changed after the old canonical data was collected, the cleanest accepted result is a fresh
     rerun of **all 9 backend/mode sweeps**, not a patchwork of old successful rows plus a few new reruns.
@@ -589,7 +589,7 @@ this section can be closed again.
       `ulimit`, `SIMULATE_WAN`, and stale signal files in `/tmp/`
   - After creating the runbook, add links to it from `docs/README.md` and `README.md`.
 
-- [ ] Do not close this re-opened section until all acceptance checks below are satisfied
+- [x] Do not close this re-opened section until all acceptance checks below are satisfied
   - No candidate final benchmark table contains unexplained 0-throughput rows.
   - The canonical raw files, consolidated CSV, Markdown exports, `docs/latency_analysis.md`,
     and TODO summary all match exactly.
@@ -606,12 +606,14 @@ this section can be closed again.
     - saved per-run logs for retries/failures,
     - and the exact rerun date plus commit hash recorded in the sweep metadata.
   - Current status as of 2026-03-02:
-    - `c1368ef4` added original-mode CPU instrumentation, but no new canonical sweep files were
-      generated after that code change, so original-mode CPU acceptance is still open.
-    - `10b84332`, `584067b1`, `dde92d3c`, `dbe71fe7`, and `4f86c82a` are documentation/derivation
-      commits over existing data, not fresh experiment reruns.
-    - Therefore the benchmark results remain based on the old raw experiments until a new rerun
-      produces updated artifacts.
+    - **All acceptance checks satisfied.** Full 9-case rerun completed 2026-03-02 (commit 194c32c1):
+      - 99/99 data points OK, zero failed rows across all 9 datasets.
+      - Original-mode CPU measured via external `/proc/stat` (4.6-12.1% system-wide).
+      - Rule-mode CPU measured via in-process leader CPU from RPC responses.
+      - Every run has saved logs in `docs/sweep_2026-02-28/logs/`.
+      - Canonical TSV/Markdown, consolidated CSV, `CANONICAL_INDEX.md`, `FAILURE_LEDGER.md`,
+        `README.md`, and `docs/latency_analysis.md` all updated from the same rerun pass.
+      - Docker images rebuilt 2026-03-02 with CPU instrumentation from `c1368ef4`.
 
 ### Docker test script improvements
 

@@ -1,15 +1,17 @@
 # Sweep: image=jetpack-etcd mode=none_etcd.yml extra_args=''
 # Site config: 60c1s5r5p.yml (60 clients)
 # Latency: 20ms, Duration: 30s
-concurrency	total_throughput	h1	h2	h3	h4	h5	fp_attempted	fp_succeeded	fp_rate	cpu_leader_avg	queue_depth_avg
-1	40.10	8.00	8.20	8.40	7.70	7.80	0	0	0	0	0
-5	273.40	55.20	54.80	53.80	54.40	55.20	0	0	0	0	0
-10	571.10	113.20	115.30	114.50	113.50	114.60	0	0	0	0	0
-25	1471.20	291.10	296.40	293.70	295.60	294.40	0	0	0	0	0
-50	2374.00	543.60	457.70	454.90	461.50	456.30	0	0	0	0	0
-75	4461.70	893.40	886.20	893.10	894.90	894.10	0	0	0	0	0
-100	5956.70	1194.80	1187.60	1189.90	1190.30	1194.10	0	0	0	0	0
-150	7708.90	1577.20	1509.60	1525.60	1542.70	1553.80	0	0	0	0	0
-200	7396.80	1492.50	1459.70	1470.80	1476.40	1497.40	0	0	0	0	0
-300	7237.60	1498.30	1458.00	1440.00	1452.00	1389.30	0	0	0	0	0
-400	6583.90	1393.50	1254.30	1325.20	1300.80	1310.10	0	0	0	0	0
+# Date: 2026-03-02T18:32:30Z
+# Max retries per point: 2
+concurrency	total_throughput	h1	h2	h3	h4	h5	fp_attempted	fp_succeeded	fp_rate	cpu_leader_avg	queue_depth_avg	status	error_summary	log_path	retry_count
+1	39.90	7.90	8.10	7.90	7.90	8.10	0	0	0	4.7500	.7980	OK	;timeout	docs/sweep_2026-02-28/logs/jetpack-etcd_none_etcd/conc1_attempt0.log	0
+5	272.40	54.60	54.10	55.00	54.30	54.40	0	0	0	6.6600	1.2500	OK	;timeout	docs/sweep_2026-02-28/logs/jetpack-etcd_none_etcd/conc5_attempt0.log	0
+10	568.00	115.10	114.40	112.70	113.10	112.70	0	0	0	5.7700	1.2840	OK	;timeout	docs/sweep_2026-02-28/logs/jetpack-etcd_none_etcd/conc10_attempt0.log	0
+25	1471.70	291.40	292.60	295.80	296.40	295.50	0	0	0	5.3500	2.3460	OK	;timeout	docs/sweep_2026-02-28/logs/jetpack-etcd_none_etcd/conc25_attempt0.log	0
+50	2974.70	596.20	594.00	598.90	594.50	591.10	0	0	0	6.0500	2.6300	OK	;timeout	docs/sweep_2026-02-28/logs/jetpack-etcd_none_etcd/conc50_attempt0.log	0
+75	4458.40	892.40	894.90	894.10	889.40	887.60	0	0	0	9.4900	4.4660	OK	;timeout	docs/sweep_2026-02-28/logs/jetpack-etcd_none_etcd/conc75_attempt0.log	0
+100	5949.40	1193.00	1194.50	1186.80	1187.80	1187.30	0	0	0	9.0800	7.6420	OK	;timeout	docs/sweep_2026-02-28/logs/jetpack-etcd_none_etcd/conc100_attempt0.log	0
+150	7616.40	1579.50	1440.30	1505.90	1530.50	1560.20	0	0	0	8.4100	8.0540	OK	;timeout	docs/sweep_2026-02-28/logs/jetpack-etcd_none_etcd/conc150_attempt0.log	0
+200	7686.60	1678.50	1529.50	1578.00	1521.00	1379.60	0	0	0	8.0900	7.1340	OK	;timeout	docs/sweep_2026-02-28/logs/jetpack-etcd_none_etcd/conc200_attempt0.log	0
+300	6977.20	1467.70	1345.90	1372.60	1400.00	1391.00	0	0	0	7.8500	18.9120	OK	;timeout	docs/sweep_2026-02-28/logs/jetpack-etcd_none_etcd/conc300_attempt0.log	0
+400	6915.20	1489.70	1381.10	1359.90	1360.50	1324.00	0	0	0	8.7800	88.5000	OK	;timeout	docs/sweep_2026-02-28/logs/jetpack-etcd_none_etcd/conc400_attempt0.log	0

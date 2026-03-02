@@ -194,14 +194,44 @@ detect_failure_signature() {
     fi
 }
 
+# read_proc_stat: Read aggregate CPU jiffies from /proc/stat
+# Returns: "user nice system idle iowait irq softirq steal" on stdout
+read_proc_stat() {
+    awk '/^cpu / {print $2, $3, $4, $5, $6, $7, $8, $9}' /proc/stat
+}
+
+# compute_cpu_pct: Given two /proc/stat snapshots, compute CPU usage percentage
+# Usage: compute_cpu_pct "before_stats" "after_stats"
+compute_cpu_pct() {
+    local before="$1"
+    local after="$2"
+    read -r u1 n1 s1 i1 w1 q1 f1 t1 <<< "$before"
+    read -r u2 n2 s2 i2 w2 q2 f2 t2 <<< "$after"
+    local total1=$((u1 + n1 + s1 + i1 + w1 + q1 + f1 + t1))
+    local total2=$((u2 + n2 + s2 + i2 + w2 + q2 + f2 + t2))
+    local idle1=$((i1 + w1))
+    local idle2=$((i2 + w2))
+    local total_diff=$((total2 - total1))
+    local idle_diff=$((idle2 - idle1))
+    if [ "$total_diff" -le 0 ]; then
+        echo "0"
+        return
+    fi
+    echo "scale=4; 100.0 * (1.0 - $idle_diff / $total_diff)" | bc 2>/dev/null || echo "0"
+}
+
 for conc in "${CONCURRENCIES[@]}"; do
     best_status="FAILED"
     best_output=""
     best_exit_code=1
+    best_ext_cpu=""
     retry_count=0
 
     for attempt in $(seq 0 "$MAX_RETRIES"); do
         log_file="${LOG_DIR}/conc${conc}_attempt${attempt}.log"
+
+        # Snapshot host CPU before benchmark for external measurement
+        cpu_before=$(read_proc_stat)
 
         # Run benchmark, capturing exit code
         exit_code=0
@@ -215,6 +245,10 @@ for conc in "${CONCURRENCIES[@]}"; do
             -e TEST_DURATION="$TEST_DURATION" \
             -e SERVER_EXTRA_ARGS="$EXTRA_ARGS" \
             "$DOCKER_IMAGE" benchmark 2>&1) || exit_code=$?
+
+        # Snapshot host CPU after benchmark
+        cpu_after=$(read_proc_stat)
+        ext_cpu=$(compute_cpu_pct "$cpu_before" "$cpu_after")
 
         # Save full output to log file
         {
@@ -235,16 +269,19 @@ for conc in "${CONCURRENCIES[@]}"; do
             best_status="OK"
             best_output="$output"
             best_exit_code="$exit_code"
+            best_ext_cpu="$ext_cpu"
             retry_count="$attempt"
             break
         elif [ "$status" = "PARTIAL" ] && [ "$best_status" = "FAILED" ]; then
             best_status="PARTIAL"
             best_output="$output"
             best_exit_code="$exit_code"
+            best_ext_cpu="$ext_cpu"
             retry_count="$attempt"
         elif [ "$best_status" = "FAILED" ]; then
             best_output="$output"
             best_exit_code="$exit_code"
+            best_ext_cpu="$ext_cpu"
             retry_count="$attempt"
         fi
 
@@ -263,6 +300,11 @@ for conc in "${CONCURRENCIES[@]}"; do
     extract_metrics "$best_output"
     classify_run "$best_exit_code" "$total" "$h1" "$h2" "$h3" "$h4" "$h5"
     detect_failure_signature "$best_output" "$best_exit_code"
+
+    # Fallback: if in-process CPU is 0 (e.g., original mode), use external measurement
+    if [ "$cpu_leader_avg" = "0" ] && [ -n "$best_ext_cpu" ] && [ "$best_ext_cpu" != "0" ]; then
+        cpu_leader_avg="$best_ext_cpu"
+    fi
 
     # Log path relative to repo root
     log_path="${LOG_DIR}/conc${conc}_attempt${retry_count}.log"

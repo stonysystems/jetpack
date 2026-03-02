@@ -6,19 +6,20 @@
 | Mode | `rule_zookeeper.yml` |
 | Site config | 60c1s5r5p.yml (60 clients) |
 | Latency / Duration | 20ms, Duration: 30s |
-| Git commit | `8ba5d49e` |
+| Date | 2026-03-02T21:56:26Z |
+| Git commit | `194c32c1` |
 | Source | [`zookeeper_adaptive.tsv`](zookeeper_adaptive.tsv) |
 
-| concurrency | total_throughput | h1 | h2 | h3 | h4 | h5 | fp_attempted | fp_succeeded | fp_rate | cpu_leader_avg | queue_depth_avg |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| 1 | 41.70 | 8.40 | 8.50 | 7.90 | 8.70 | 8.20 | 417 | 417 | 100.00 | 68.6880 | 2.7368 |
-| 5 | 274.10 | 54.80 | 54.40 | 55.40 | 54.70 | 54.80 | 2741 | 2741 | 100.00 | 76.3957 | 13.0221 |
-| 10 | 570.60 | 114.70 | 114.20 | 113.00 | 114.60 | 114.10 | 5706 | 5706 | 100.00 | 78.0595 | 26.1573 |
-| 25 | 1471.10 | 295.30 | 293.80 | 290.50 | 295.80 | 295.70 | 0 | 0 | 0 | 92.1140 | 691.3346 |
-| 50 | 2954.00 | 590.60 | 588.10 | 589.70 | 593.80 | 591.80 | 15502 | 15502 | 100.00 | 97.5807 | 140.3277 |
-| 75 | 4458.50 | 892.40 | 891.60 | 891.40 | 891.10 | 892.00 | 0 | 0 | 0 | 94.0499 | 627.5604 |
-| 100 | 5103.40 | 1009.40 | 1012.00 | 1009.80 | 1039.50 | 1032.70 | 0 | 0 | 0 | 83.0236 | 1235.9358 |
-| 150 | 4849.60 | 971.50 | 981.40 | 948.90 | 971.80 | 976.00 | 0 | 0 | 0 | 87.9670 | 2884.0888 |
-| 200 | 4823.10 | 975.90 | 960.10 | 964.00 | 960.00 | 963.10 | 0 | 0 | 0 | 91.0503 | 5461.1453 |
-| 300 | 5407.80 | 1083.30 | 1060.00 | 1064.50 | 1140.00 | 1060.00 | 0 | 0 | 0 | 91.3706 | 5525.0368 |
-| 400 | 4186.10 | 848.30 | 833.80 | 825.10 | 840.90 | 838.00 | 0 | 0 | 0 | 96.6770 | 6521.8163 |
+| concurrency | total_throughput | h1 | h2 | h3 | h4 | h5 | fp_attempted | fp_succeeded | fp_rate | cpu_leader_avg | queue_depth_avg | status | error_summary | log_path | retry_count |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 1 | 39.30 | 8.00 | 7.60 | 7.70 | 8.00 | 8.00 | 393 | 393 | 100.00 | 6.6300 | 2.6624 | OK | ;timeout | docs/sweep_2026-02-28/logs/jetpack-zookeeper_rule_zookeeper/conc1_attempt0.log | 0 |
+| 5 | 272.70 | 54.50 | 53.80 | 53.90 | 55.30 | 55.20 | 2727 | 2727 | 100.00 | 7.2900 | 12.6260 | OK | ;timeout | docs/sweep_2026-02-28/logs/jetpack-zookeeper_rule_zookeeper/conc5_attempt0.log | 0 |
+| 10 | 567.20 | 115.00 | 112.00 | 112.80 | 113.10 | 114.30 | 5672 | 5672 | 100.00 | 7.5900 | 25.3887 | OK | ;timeout | docs/sweep_2026-02-28/logs/jetpack-zookeeper_rule_zookeeper/conc10_attempt0.log | 0 |
+| 25 | 1462.80 | 291.30 | 293.90 | 290.70 | 292.80 | 294.10 | 13430 | 13430 | 100.00 | 6.0900 | 66.0173 | OK | ;timeout | docs/sweep_2026-02-28/logs/jetpack-zookeeper_rule_zookeeper/conc25_attempt0.log | 0 |
+| 50 | 2958.30 | 587.80 | 590.90 | 592.10 | 595.70 | 591.80 | 14633 | 14633 | 100.00 | 5.4800 | 143.6791 | OK | ;timeout | docs/sweep_2026-02-28/logs/jetpack-zookeeper_rule_zookeeper/conc50_attempt0.log | 0 |
+| 75 | 4459.10 | 892.90 | 893.40 | 889.50 | 894.50 | 888.80 | 252 | 252 | 100.00 | 5.7900 | 327.4907 | OK | ;timeout | docs/sweep_2026-02-28/logs/jetpack-zookeeper_rule_zookeeper/conc75_attempt0.log | 0 |
+| 100 | 5054.20 | 1027.90 | 1006.40 | 1006.50 | 1008.20 | 1005.20 | 0 | 0 | 0 | 6.7200 | 1022.2242 | OK | ;timeout | docs/sweep_2026-02-28/logs/jetpack-zookeeper_rule_zookeeper/conc100_attempt0.log | 0 |
+| 150 | 5486.00 | 1097.50 | 1090.60 | 1092.20 | 1118.70 | 1087.00 | 0 | 0 | 0 | 5.9300 | 3084.9261 | OK | ;timeout | docs/sweep_2026-02-28/logs/jetpack-zookeeper_rule_zookeeper/conc150_attempt0.log | 0 |
+| 200 | 4620.80 | 943.10 | 926.10 | 911.60 | 917.40 | 922.60 | 0 | 0 | 0 | 6.9300 | 4969.5728 | OK | ;timeout | docs/sweep_2026-02-28/logs/jetpack-zookeeper_rule_zookeeper/conc200_attempt0.log | 0 |
+| 300 | 5380.30 | 1063.80 | 1071.10 | 1096.50 | 1069.50 | 1079.40 | 0 | 0 | 0 | 8.6900 | 5090.6952 | OK | ;timeout | docs/sweep_2026-02-28/logs/jetpack-zookeeper_rule_zookeeper/conc300_attempt0.log | 0 |
+| 400 | 5422.80 | 1120.60 | 1076.80 | 1083.20 | 1067.10 | 1075.10 | 0 | 0 | 0 | 9.4400 | 5927.9521 | OK | ;timeout | docs/sweep_2026-02-28/logs/jetpack-zookeeper_rule_zookeeper/conc400_attempt0.log | 0 |
