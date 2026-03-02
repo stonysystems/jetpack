@@ -54,6 +54,7 @@ profile-results/
 /results
 *.log
 *.csv
+!docs/sweep_2026-02-28/consolidated.csv
 prof
 *.pdf
 .vscode/settings.json

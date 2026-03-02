@@ -524,7 +524,7 @@ this section can be closed again.
   - Update the CPU/bottleneck analysis in `docs/latency_analysis.md` after original-mode CPU data
     exists; do not keep using inference where direct measurement is possible.
 
-- [ ] Bring the consolidated sweep CSV up to the promised audit schema
+- [x] Bring the consolidated sweep CSV up to the promised audit schema
   - The final raw CSV must include at least:
     `backend,mode,extra_args,concurrency,run_id,status,total_throughput,h1,h2,h3,h4,h5,cpu_all_avg,cpu_leader_avg,leader_queue_depth_avg,fastpath_attempt_rate,fastpath_success_rate,original_path_rate,error_count,error_summary,log_path`.
   - If a field truly cannot be measured for a given mode, emit `NA` and document why.
