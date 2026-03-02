@@ -453,6 +453,123 @@ Column definitions for the sweep matrix:
     has ~13% gap which is inherent rule mode overhead (FP100% shows same gap),
     not an adaptive policy issue. Throttle optimized to best achievable within rule mode.
 
+### Re-opened After 2026-03-02 Review (Highest Priority For Claude)
+
+The benchmark/reporting work above is **not accepted as final** yet. The items above record
+what was attempted; the checklist below is the acceptance gate that must be satisfied before
+this section can be closed again.
+
+**Why this is re-opened:**
+- The current sweep export still publishes multiple **0-throughput rows** in the candidate
+  final data under `docs/sweep_2026-02-28/`. Those rows are evidence of failed runs, not
+  valid measurement points.
+- `docs/latency_analysis.md`, `TODO.md`, `docs/sweep_results_2026-02-28.csv`, and the
+  per-case TSV files do **not** currently agree on one canonical set of numbers.
+- The human-readable reporting is still weak: raw TSV is machine-friendly, but there is no
+  per-table Markdown export beside each TSV for quick review.
+- Original-mode runs still do not provide a real `cpu_leader_avg`, so the claimed
+  cross-mode CPU comparison is incomplete.
+- Run instructions exist, but they are scattered across `README.md`, `docs/run.md`,
+  `docs/failure_recovery_design.md`, and `docs/failure_recovery_evaluation.md` instead of
+  one operator-facing runbook for “run protocol X with config Y / modify config Z / run
+  failure recovery / inspect logs”.
+
+- [ ] Re-open the 2026-02-28 sweep as **draft only** until a single canonical dataset is selected and all published numbers are reconciled
+  - Pick exactly one accepted dataset per backend/mode for the final report.
+  - If `v1_old`, `v2`, `v3`, and non-suffixed files are kept, document precisely which one is
+    canonical and why; otherwise move superseded attempts into an `archive/` subdirectory.
+  - Add a small index file under `docs/sweep_2026-02-28/` that lists:
+    `backend, mode, canonical_file, superseded_files, reason_for_supersession, owner, date`.
+  - Reconcile every number in `docs/latency_analysis.md` and this TODO section against the
+    canonical raw files. No hand-edited summary table is allowed to disagree with the source.
+  - Explicitly fix the current adaptive-data ambiguity:
+    `mongodb_adaptive.tsv`, `mongodb_adaptive_v2.tsv`, and `mongodb_adaptive_v3.tsv`
+    currently describe different outcomes and are being cited inconsistently.
+
+- [ ] Stop treating failed runs as valid 0-throughput benchmark points
+  - `scripts/sweep_benchmark.sh` currently suppresses `docker run` failures and then emits
+    zero-filled rows. Replace that behavior with explicit failure classification.
+  - Every attempted point must record:
+    `status` (`OK`, `FAILED`, `PARTIAL`, `OUTLIER_UNINVESTIGATED`),
+    `error_summary`, `log_path`, and whether an automatic retry was attempted.
+  - Save full stdout/stderr for every failed or partial run under a stable path in `docs/logs/`
+    or `docs/sweep_2026-02-28/logs/`, and reference that path from the CSV row.
+  - Add automatic retry logic for clearly failed points before accepting a sweep result.
+    Minimum rule: retry at least 2 more times when total throughput is 0 or when any process
+    exits non-zero or fails to print the expected benchmark lines.
+  - Final published tables in docs must **not** silently include impossible 0-throughput rows
+    as if they were measured performance. If a point remains unusable after retries, it must
+    be labeled as failed with reason, excluded from any peak-selection logic, and linked to logs.
+
+- [ ] Root-cause every currently published failed point in `docs/sweep_2026-02-28/`, fix the defect where feasible, and rerun the affected neighborhood
+  - Build a failure ledger for every zero/partial row:
+    `backend, mode, concurrency, observed_signature, suspected_root_cause, fix_owner, rerun_status`.
+  - Minimum currently known bad points to investigate: MongoDB original/adaptive, etcd fastpath/adaptive,
+    and ZooKeeper fastpath runs with 0 throughput or obvious crash signatures.
+  - Do not stop at “Docker resource contention” as a blanket explanation. Identify the first
+    concrete failure signature from logs: OOM, file descriptors, connection exhaustion,
+    process crash, missing output, timeout, etc.
+  - After each fix, rerun the failed point plus its adjacent concurrency values so the peak
+    choice is defensible and not based on a gap-ridden curve.
+  - Add self-healing guardrails so the next sweep automatically retries/quarantines bad runs
+    instead of publishing unreasonable results.
+
+- [ ] Add real original-mode CPU metrics for comparison
+  - The accepted final sweep must include a meaningful `cpu_leader_avg` for original mode
+    (`none_*.yml`) as well as rule mode. Zero placeholders are not acceptable as “metric present”.
+  - If `cpu_all_avg` is already available in the original path, export it too and include it in
+    the raw CSV schema and bottleneck table.
+  - If the current instrumentation only exists in the rule/coordinator path, extend the original
+    execution path or benchmark parser so original-mode CPU is measured from the same run.
+  - Update the CPU/bottleneck analysis in `docs/latency_analysis.md` after original-mode CPU data
+    exists; do not keep using inference where direct measurement is possible.
+
+- [ ] Bring the consolidated sweep CSV up to the promised audit schema
+  - The final raw CSV must include at least:
+    `backend,mode,extra_args,concurrency,run_id,status,total_throughput,h1,h2,h3,h4,h5,cpu_all_avg,cpu_leader_avg,leader_queue_depth_avg,fastpath_attempt_rate,fastpath_success_rate,original_path_rate,error_count,error_summary,log_path`.
+  - If a field truly cannot be measured for a given mode, emit `NA` and document why.
+    Do not encode “missing” as `0`.
+  - Make the CSV the audit source of truth and generate the Markdown summaries from it.
+    Manual table editing in docs is not acceptable.
+
+- [ ] Export a Markdown table beside every TSV table under `docs/sweep_2026-02-28/`
+  - For every `*.tsv`, generate a sibling `*.md` with:
+    - a short metadata header (image, mode, site config, latency, duration, date, git commit)
+    - a Markdown table version of the rows
+    - a short note explaining failed rows and where logs live
+  - Add a directory-level `README.md` under `docs/sweep_2026-02-28/` that links all canonical
+    TSV/Markdown pairs plus the consolidated CSV and failure logs.
+  - Update `docs/latency_analysis.md` to link the canonical Markdown/TSV artifacts directly so
+    the report is readable without opening raw TSV in an editor.
+
+- [ ] Create one operator-facing benchmark + recovery runbook and put it in a stable docs location
+  - Create `docs/benchmark_runbook.md` (or a similarly obvious top-level doc under `docs/`) as
+    the primary entry point for running a specific protocol/config test.
+  - This runbook must consolidate the currently scattered instructions from `README.md`,
+    `docs/run.md`, `docs/failure_recovery_design.md`, and `docs/failure_recovery_evaluation.md`.
+  - Required runbook contents:
+    - how to build each Docker image
+    - how to run a single benchmark for one protocol with explicit `SITE_CONFIG`,
+      `MODE_CONFIG`, `CLIENT_CONFIG`, `CONCURRENT_CONFIG`, `LATENCY_MS`, `LATENCY_JITTER`,
+      `TEST_DURATION`, and `SERVER_EXTRA_ARGS`
+    - how to choose original vs `-m 100` vs `-m 101`
+    - how to modify or create config files under `config/`
+    - how to run a failure recovery test, including WAN recovery with `RECOVERY_LATENCY_MS`
+    - where logs/results are written
+    - what output lines to check for latency, throughput, CPU, queue depth, and recovery completion
+    - a troubleshooting section for 0 throughput, missing benchmark lines, `--privileged`,
+      `ulimit`, `SIMULATE_WAN`, and stale signal files in `/tmp/`
+  - After creating the runbook, add links to it from `docs/README.md` and `README.md`.
+
+- [ ] Do not close this re-opened section until all acceptance checks below are satisfied
+  - No candidate final benchmark table contains unexplained 0-throughput rows.
+  - The canonical raw files, consolidated CSV, Markdown exports, `docs/latency_analysis.md`,
+    and TODO summary all match exactly.
+  - Original-mode CPU comparison is present with real measurements, not zeros/inference.
+  - Every failed or retried run has saved logs and a concrete failure reason.
+  - A reader can run a specific protocol/config benchmark or recovery test from the runbook
+    without needing to stitch together instructions from multiple documents.
+
 ### Docker test script improvements
 
 Improve the Docker run scripts (`run-{mongodb,etcd,zookeeper}-test.sh`) and benchmark mode
