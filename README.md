@@ -286,6 +286,7 @@ docker compose -f docker/zookeeper/docker-compose.yml down -v
 
 ## Benchmark Results
 
+See [`docs/benchmark_runbook.md`](docs/benchmark_runbook.md) for the full operator guide to running benchmarks and recovery tests.
 See [`result.md`](result.md) for detailed performance and recovery benchmark data.
 See [`docs/latency_analysis.md`](docs/latency_analysis.md) for the latency model explanation.
 

@@ -542,7 +542,7 @@ this section can be closed again.
   - Update `docs/latency_analysis.md` to link the canonical Markdown/TSV artifacts directly so
     the report is readable without opening raw TSV in an editor.
 
-- [ ] Create one operator-facing benchmark + recovery runbook and put it in a stable docs location
+- [x] Create one operator-facing benchmark + recovery runbook and put it in a stable docs location
   - Create `docs/benchmark_runbook.md` (or a similarly obvious top-level doc under `docs/`) as
     the primary entry point for running a specific protocol/config test.
   - This runbook must consolidate the currently scattered instructions from `README.md`,
