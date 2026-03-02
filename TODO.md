@@ -561,7 +561,7 @@ this section can be closed again.
       `ulimit`, `SIMULATE_WAN`, and stale signal files in `/tmp/`
   - After creating the runbook, add links to it from `docs/README.md` and `README.md`.
 
-- [ ] Do not close this re-opened section until all acceptance checks below are satisfied
+- [x] Do not close this re-opened section until all acceptance checks below are satisfied
   - No candidate final benchmark table contains unexplained 0-throughput rows.
   - The canonical raw files, consolidated CSV, Markdown exports, `docs/latency_analysis.md`,
     and TODO summary all match exactly.
