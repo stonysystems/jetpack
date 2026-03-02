@@ -474,7 +474,7 @@ this section can be closed again.
   one operator-facing runbook for “run protocol X with config Y / modify config Z / run
   failure recovery / inspect logs”.
 
-- [ ] Re-open the 2026-02-28 sweep as **draft only** until a single canonical dataset is selected and all published numbers are reconciled
+- [x] Re-open the 2026-02-28 sweep as **draft only** until a single canonical dataset is selected and all published numbers are reconciled
   - Pick exactly one accepted dataset per backend/mode for the final report.
   - If `v1_old`, `v2`, `v3`, and non-suffixed files are kept, document precisely which one is
     canonical and why; otherwise move superseded attempts into an `archive/` subdirectory.
