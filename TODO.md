@@ -516,6 +516,9 @@ this section can be closed again.
   - Current state: `docs/sweep_2026-02-28/FAILURE_LEDGER.md` is only a pre-rerun hypothesis ledger.
     It does **not** satisfy this task because the ledger explicitly says no logs were saved for
     those historical failures and the listed causes are still suspected, not verified.
+  - This rerun set is necessary but **not sufficient** for final acceptance, because the old
+    canonical dataset was also collected before the latest original-mode CPU instrumentation
+    and before the current retry/status/logging sweep script.
 
 - [ ] Add real original-mode CPU metrics for comparison
   - The accepted final sweep must include a meaningful `cpu_leader_avg` for original mode
@@ -528,6 +531,26 @@ this section can be closed again.
     exists; do not keep using inference where direct measurement is possible.
   - Current state: `c1368ef4` added the instrumentation path, but no post-change rerun has
     generated new original-mode benchmark artifacts yet, so the comparison data is still missing.
+  - Minimum rerun scope for this item:
+    - rerun **all 3 original-mode sweeps** (`none_etcd.yml`, `none_mongodb.yml`, `none_zookeeper.yml`)
+      across the full concurrency matrix, not just the previously failed rows.
+    - regenerate the canonical original-mode TSV/Markdown files and the consolidated CSV from
+      those new runs.
+
+- [ ] Prefer a full 9-case rerun after the measurement pipeline changed
+  - Because both the measurement code (`c1368ef4`) and the sweep harness (`scripts/sweep_benchmark.sh`)
+    changed after the old canonical data was collected, the cleanest accepted result is a fresh
+    rerun of **all 9 backend/mode sweeps**, not a patchwork of old successful rows plus a few new reruns.
+  - Minimum strong preference:
+    - rerun all 3 original-mode sweeps to collect CPU/queue data,
+    - rerun all 12 previously failed canonical points with saved logs and retry classification,
+    - rerun adjacent concurrency points around any changed/fixed failures.
+  - Preferred final acceptance path:
+    - rerun the full 9-case sweep with the current code and current sweep script,
+    - then rebuild the canonical TSV/MD files, consolidated CSV, bottleneck tables, and report
+      from that one consistent generation pass.
+  - Do **not** mix old pre-instrumentation rows and new post-instrumentation rows in a claimed-final
+    comparison unless the TODO explicitly marks that dataset as interim/draft.
 
 - [x] Bring the consolidated sweep CSV up to the promised audit schema
   - The final raw CSV must include at least:
