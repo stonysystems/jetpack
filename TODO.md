@@ -766,7 +766,41 @@ measures from signal file write to `recovery_finish_after_failure` detection.
 - [x] If `result.md` is kept for compatibility, treat it as a mirror only; the benchmark source of truth should be under `docs/`
   - `docs/latency_analysis.md` is the benchmark source of truth. `result.md` is historical only.
 
-## Priority 1 (High): TLA+ Specifications
+## Priority 2 (Medium, after evaluation): TLA+ Specifications
+
+Priority note:
+- TLA+ work is important, but it is **medium priority** and should not displace the
+  benchmark/evaluation reruns above.
+- Do **not** overclaim TLA+ completion. A long TLC run with no error yet is not the same as
+  a passed model check, and a wrapper-only result is not the same as the final abstraction proof.
+
+### Completion Discipline
+
+Rules for Claude on this section:
+- Do **not** check a TLA+ TODO item as done based only on code written, SANY parsing,
+  informal reasoning, or a partially remembered prior run.
+- A TLA+ verification item may be marked `[x]` only when the repo contains all of:
+  - the relevant checked-in spec/config changes,
+  - the exact TLC command or runner invocation used,
+  - a saved timestamped TLC log for that run,
+  - the exact property/invariant set that was checked,
+  - and a result summary that clearly states whether the run was exhaustive, bounded, or partial.
+- If a run is bounded/partial, describe it as bounded/partial. Do **not** relabel it as
+  “proved”, “verified”, “passed” without qualification, or “complete proof”.
+- If TLC reports an invariant violation, crash, exception, timeout, or an interrupted run,
+  leave the task open and record:
+  - the failing log path,
+  - the failing invariant or exception,
+  - the current suspected root cause,
+  - and the next required fix/rerun step.
+- If only part of a task is done, keep the parent item open and add sub-bullets for partial
+  progress. Do **not** check the parent box just because there is some momentum.
+- Do **not** weaken the goal to match the current implementation. If the current model cannot
+  satisfy the intended goal yet, keep the goal open and document the gap explicitly.
+- For any claim that a property was changed intentionally, write down whether it became
+  stronger, weaker, or just more accurate, and why that change matches the intended proof story.
+- For any final “done” claim in this section, include concrete artifact references in the TODO
+  note itself: spec path, cfg/path, log path, and run date.
 
 ### Properties
 
@@ -776,7 +810,11 @@ Properties to prove in `jetpack.tla` (refer to `jetpack_raft.tla` for reference)
   and A is before B, then in the execution log A is still before B. This pairwise
   conflict-ordering check adapts to multi-sequence protocols (CoPilot: 2 sequences,
   Mencius: N sequences).
-- ExecutionDedupMatches
+- ExecutionDedupMatches: after deduplication, any conflicting pair that appears in
+  `original_execution_cmds` keeps the same order in `execution_cmds`, and any
+  conflicting pair that appears in `execution_cmds` keeps the same order in
+  `original_execution_cmds`. This is weaker than requiring either deduplicated
+  execution trace to be a prefix of the other.
 
 Properties for original base protocols (`raft.tla`, `copilot.tla`, `mencius.tla`):
 - CommittedLogAgreement (the base protocol form of LogAgreement — unrestricted LogAgreement
@@ -794,6 +832,31 @@ Properties for original base protocols (`raft.tla`, `copilot.tla`, `mencius.tla`
 - [x] Create wrapper/composition modules (`jetpack_copilot.tla`, `jetpack_mencius.tla`)
   - `jetpack_copilot.tla`: Jetpack + CoPilot composition (SANY verified)
   - `jetpack_mencius.tla`: Jetpack + Mencius composition (SANY verified)
+
+### Re-opened After 2026-03-02 TLA+ Review
+
+The TLA+ area has useful progress, but the proof story is **not complete** yet and some items
+below were previously overclaimed.
+
+Current review findings:
+- The current generic Jetpack abstraction still uses `log[i]` = one sequence per server
+  (`tla/jetpack.tla`), not the intended replicated multi-sequence structure `Log[i][j][k]`.
+- `ExecutionDedupMatches` in `tla/jetpack.tla` currently compares deduplicated-vs-raw prefixes,
+  but the intended property is weaker and different: pairwise conflicting commands should
+  preserve relative order across `Dedup(original_execution_cmds)` and
+  `Dedup(execution_cmds)` in both directions.
+- `LogOrderMatchesExecution` is currently an indexwise `log[i][k]` vs `execution_cmds[k]`
+  check, which is weaker/different than the desired conflict-ordering property across
+  multiple log sequences.
+- `tla/jetpack_mencius.log` and `tla/jetpack_mencius2.log` both contain
+  `Error: Invariant Safety is violated.` The current Mencius wrapper must therefore be treated
+  as **failing**, not passing.
+- The final abstraction goal should not be closed as “unachievable”. The correct target is:
+  one shared `jetpack.tla`, plus abstracted base protocol modules (`base_raft.tla`,
+  `base_copilot.tla`, `base_mencius.tla` or equivalent), plus thin composition glue if needed.
+  A tiny composition driver is acceptable; declaring the goal N/A is not.
+- `tla/run-tlc.sh` does not currently save timestamped log files automatically, so the
+  verification trail is weaker than required.
 
 ### Mid-step: wrapper module verification
 
@@ -813,10 +876,16 @@ than abstraction at this stage.
 - [x] TLC verification of `jetpack_copilot.tla` with full Jetpack properties
   - Safety = [](LogAgreement /\ LogOrderMatchesExecution /\ ExecutionDedupMatches /\ ActiveProposerBound)
   - Exhaustive: 515 states, 70 distinct, depth 7 (3 servers, 1 cmd, SmallStateConstraint)
-- [x] TLC verification of `jetpack_mencius.tla` with full Jetpack properties
-  - Safety = [](LogAgreement /\ SlotAgreement /\ LogOrderMatchesExecution /\ ExecutionDedupMatches)
-  - Partial: 281M+ states, 28.8M+ distinct, depth 16, no violations (3 servers, 1 cmd, SmallStateConstraint)
-  - Note: Mencius composition state space too large for exhaustive checking
+- [ ] TLC verification of `jetpack_mencius.tla` with full Jetpack properties
+  - Historical note: this was previously marked complete.
+  - Current status: **open/failing**. Both `tla/jetpack_mencius.log` and `tla/jetpack_mencius2.log`
+    report `Error: Invariant Safety is violated.`
+  - Do not mark this done again until:
+    - the violated sub-property is identified precisely,
+    - the spec/property is corrected,
+    - the small config passes cleanly,
+    - the large config is rerun with saved logs,
+    - and the TODO note cites the exact passing log filenames and run dates.
 - [x] Add CommittedLogAgreement and LogOrderMatchesExecution to each base protocol
   - [x] `raft.tla`: added LogOrderMatchesExecution (CommittedLogAgreement already existed)
     - Exhaustive: 40M states, 2.8M distinct, depth 56 (3 servers, 1 cmd, SmallStateConstraint)
@@ -828,48 +897,83 @@ than abstraction at this stage.
     does not hold for base protocols — CoPilot violates it when terms differ across
     replicas for uncommitted entries. CommittedLogAgreement is the correct adaptation.
 
-### Final goal: direct composition without wrapper modules
+### Final goal: shared Jetpack abstraction across base protocols
 
-Achieve `jetpack.tla` + `raft.tla` / `copilot.tla` / `mencius.tla` composition
-without writing a new monolithic `jetpack_<protocol>.tla` for each combination.
+Achieve one shared Jetpack model that can be composed with abstracted base protocols
+for Raft, CoPilot, and Mencius, without falling back to protocol-specific Jetpack logic.
 
-Requires N-sequence log abstraction:
+Expected abstraction direction:
 - Raft: 1 sequence (single leader)
 - CoPilot: 2 sequences (pilot + copilot)
 - Mencius: N sequences (round-robin, one per server)
+- Replicated-log view should be expressible as a 3D structure `Log[i][j][k]`:
+  - `i`: where the copy is stored
+  - `j`: which logical proposer/sequence the log belongs to
+  - `k`: position within that sequence
+- If Claude uses a different internal representation, it must write down an explicit
+  refinement mapping that shows it is equivalent to this 3D logical view.
 
-- [x] Design N-sequence log abstraction in `jetpack.tla`
-  - Documented the 6 coupling seams between jetpack.tla and base protocols
-  - Defined abstract interface: IsProposer, BecomeToBeLeader, ProposeToLog, ApplyCommitted
-  - Analysis shows wrapper modules are the correct TLA+ pattern for composition;
-    direct INSTANCE composition would require extracting protocol-specific actions
-    from jetpack.tla, which is a larger refactoring effort
-- [x] Refactor base protocols to expose N-sequence log interface
-  - Refactored jetpack.tla: removed 5 protocol-specific variables (votedFor, votesResponded,
-    votesGranted, nextIndex, matchIndex), removed BecomeToBeLeader action, added baseVars tuple,
-    added InitJetpackVars/InitClientVars/InitExecutionVars for wrapper use
-  - Rewrote jetpack_raft.tla as thin wrapper using INSTANCE (1105→533 lines, ~52% reduction)
-  - Rewrote jetpack_copilot.tla as thin wrapper using INSTANCE (1029→508 lines, ~51% reduction)
-  - Rewrote jetpack_mencius.tla as thin wrapper using INSTANCE (1124→612 lines, ~46% reduction)
-  - Each wrapper: J == INSTANCE jetpack, wraps Jetpack actions with UNCHANGED protocolExtraVars
-  - TLC re-verified: Raft 82K states, CoPilot 515 states, Mencius 5M+ states (all no errors)
-- [x] ~~Verify `jetpack.tla` + `raft.tla` direct composition (no wrapper)~~ N/A
-- [x] ~~Verify `jetpack.tla` + `copilot.tla` direct composition (no wrapper)~~ N/A
-- [x] ~~Verify `jetpack.tla` + `mencius.tla` direct composition (no wrapper)~~ N/A
-  - Analysis: direct composition without a wrapper is infeasible in TLA+ due to 7 blockers:
-    (1) INSTANCE requires explicit variable mappings via WITH clauses,
-    (2) UNCHANGED clauses don't automatically inherit across module boundaries,
-    (3) Init predicates must be manually composed,
-    (4) message type routing requires a custom dispatcher,
-    (5) BecomeLeader interception (ToBeLeader state) requires wrapper-level override,
-    (6) ApplyCommitted has conflicting guard conditions between raft.tla and jetpack.tla,
-    (7) Next relations cannot be directly OR'd together
-  - The thin INSTANCE-based wrappers (jetpack_raft.tla, etc.) ARE the correct and
-    near-minimal TLA+ pattern for plugin composition
+- [ ] Redesign the generic Jetpack/base abstraction so it matches the intended multi-sequence replicated log model
+  - Current `tla/jetpack.tla` still reads `log[i][k]`; that is not enough for the final proof target.
+  - Introduce `base_raft.tla`, `base_copilot.tla`, and `base_mencius.tla` (or equivalent names)
+    that expose the same abstract Jetpack-facing interface.
+  - The abstraction must support:
+    - base-protocol local/original log copies,
+    - replicated copies of each utilized sequence,
+    - `original_execution_cmds`,
+    - `execution_cmds`,
+    - and the Jetpack/base agreement properties over that abstraction.
+- [ ] Align the generic Jetpack properties with the intended proof semantics
+  - `ExecutionDedupMatches` should be rewritten as a cross-trace conflict-order property:
+    if conflicting commands `A` and `B` appear in `Dedup(original_execution_cmds)` with
+    `A` before `B`, then `A` must also be before `B` in `Dedup(execution_cmds)`; and vice
+    versa for conflicting pairs that appear in `Dedup(execution_cmds)`.
+  - Do **not** require either deduplicated execution trace to be a prefix of the other.
+  - `LogOrderMatchesExecution` should be expressed in terms of conflict order across the
+    utilized log sequences, not only by matching `log[i][k]` against `execution_cmds[k]`.
+  - `LogAgreement` for the abstract/base integration should mean replicated copy matches
+    original copy for the same logical sequence (`Log[i][j][k]` vs `Log[j][j][k]` when non-nil).
+- [ ] Prove the wrapper step cleanly before claiming the abstraction step
+  - `jetpack_raft.tla`, `jetpack_copilot.tla`, and `jetpack_mencius.tla` remain the mid-step.
+  - All 3 wrappers must pass the intended small config first.
+  - Large configs may remain bounded/partial due to search-space size, but logs must show
+    no error for the actual duration run.
+  - This item stays open unless all three wrappers have checked-in TLC evidence. Two out of
+    three is still open.
+  - Do **not** claim wrapper completion from SANY-only success, from one historical log, or
+    from logs produced before the latest property/interface changes.
+- [ ] Complete the final abstraction step with the same shared `jetpack.tla`
+  - Run the same `jetpack.tla` with each abstracted base protocol:
+    - `base_raft.tla` + `jetpack.tla`
+    - `base_copilot.tla` + `jetpack.tla`
+    - `base_mencius.tla` + `jetpack.tla`
+  - A thin composition driver/wrapper is acceptable as glue for `Init/Next/UNCHANGED`.
+    What is **not** acceptable is embedding different Jetpack logic per protocol and then
+    claiming the abstraction proof is done.
+  - This item may be checked `[x]` only if the same checked-in `jetpack.tla` is reused for
+    all three base protocols and the TODO note cites the exact passing logs for all three
+    compositions.
+  - It is **not** enough to say the interface “could” support all three protocols; the repo
+    must contain the actual base modules/composition glue and the saved TLC evidence.
+  - Do not close this task as N/A unless there is a written, technically rigorous argument
+    why the target is impossible **and** the user has explicitly accepted that downgrade.
 
 ### TLA+ Verification (via Docker)
 
-All TLC logs saved to `tla/log/<protocol>_<timestamp>.log`.
+Required verification workflow:
+- Small config: run an exhaustive/small bounded model first.
+- Large config: run at least 5 servers, 2 keys, 3 commands. If exhaustive search is not practical,
+  run the larger bounded search for a long window (target: ~2 days) and treat it only as
+  “high confidence, no bug found yet”, not as a proof.
+- Every run must save a timestamped log whose filename includes protocol/spec + config.
+- Do not treat TLC crashes, invariant violations, or interrupted partial runs as success.
+- When updating TODO after a run, record:
+  - spec/module name,
+  - config name,
+  - run date,
+  - exact log filename,
+  - property set checked,
+  - and whether the result was exhaustive, bounded-no-violation, or failed.
 
 - [x] `raft.tla`: TLC model check (CommittedLogAgreement, ElectionSafety, LogOrderMatchesExecution)
   - Exhaustive: 40M states, 2.8M distinct, depth 56 (3 servers, 1 cmd, SmallStateConstraint)
@@ -888,9 +992,11 @@ All TLC logs saved to `tla/log/<protocol>_<timestamp>.log`.
 - [x] TLC verification of composed jetpack + copilot (`jetpack_copilot.tla`)
   - Exhaustive: 515 states, 70 distinct, depth 7 (3 servers, 1 cmd, SmallStateConstraint)
   - Partial: 49M+ states, 5.3M+ distinct, no violations (3 servers, 2 cmds, StateConstraint)
-- [x] TLC verification of composed jetpack + mencius (`jetpack_mencius.tla`)
-  - Partial: 37M+ states, 3.6M+ distinct, no violations (3 servers, 1 cmd, SmallStateConstraint)
-  - Note: Mencius composition state space too large for exhaustive checking
+- [ ] TLC verification of composed jetpack + mencius (`jetpack_mencius.tla`)
+  - Current repo evidence does **not** support a pass claim.
+  - `tla/jetpack_mencius.log` and `tla/jetpack_mencius2.log` both show
+    `Error: Invariant Safety is violated.`
+  - Reopen this task and keep it open until the violation is root-caused and fixed.
 
 ## Priority 2 (Medium): Jetpack + Industry Applications
 
