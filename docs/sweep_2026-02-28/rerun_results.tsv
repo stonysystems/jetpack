@@ -1,0 +1,30 @@
+# Rerun of failed benchmark points
+# Date: 2026-03-02T14:21:44Z
+# Git commit: 8ba5d49e
+# Max retries: 2
+dataset	concurrency	total_throughput	h1	h2	h3	h4	h5	fp_attempted	fp_succeeded	fp_rate	cpu_leader_avg	queue_depth_avg	status	error_summary	log_path	retry_count
+# Running: etcd_fastpath100 conc=50 (image=jetpack-etcd mode=rule_etcd.yml extra='-m 100')
+etcd_fastpath100	50	2957.90	595.90	587.90	589.60	594.40	590.10	0	0	0	60.2972	306.8948	OK	;timeout	docs/sweep_2026-02-28/logs/etcd_fastpath100_rerun/conc50_attempt0.log	0
+# Running: etcd_fastpath100 conc=75 (image=jetpack-etcd mode=rule_etcd.yml extra='-m 100')
+etcd_fastpath100	75	4466.10	894.70	891.60	894.40	891.60	893.80	0	0	0	70.3445	846.0781	OK	;timeout	docs/sweep_2026-02-28/logs/etcd_fastpath100_rerun/conc75_attempt0.log	0
+# Running: etcd_fastpath100 conc=300 (image=jetpack-etcd mode=rule_etcd.yml extra='-m 100')
+etcd_fastpath100	300	5765.80	1205.80	1100.00	1180.00	1140.00	1140.00	0	0	0	84.4555	1911.7890	OK	;timeout	docs/sweep_2026-02-28/logs/etcd_fastpath100_rerun/conc300_attempt0.log	0
+# Running: etcd_adaptive conc=150 (image=jetpack-etcd mode=rule_etcd.yml extra='')
+etcd_adaptive	150	6728.20	1439.00	1312.90	1352.70	1317.80	1305.80	0	0	0	84.7007	1154.3822	OK	;timeout	docs/sweep_2026-02-28/logs/etcd_adaptive_rerun/conc150_attempt0.log	0
+# Running: etcd_adaptive conc=300 (image=jetpack-etcd mode=rule_etcd.yml extra='')
+etcd_adaptive	300	6159.10	1439.10	1140.00	1200.00	1180.00	1200.00	0	0	0	90.7465	1362.5723	OK	;timeout	docs/sweep_2026-02-28/logs/etcd_adaptive_rerun/conc300_attempt0.log	0
+# Running: mongodb_original conc=50 (image=jetpack-mongodb mode=none_mongodb.yml extra='')
+mongodb_original	50	2959.90	591.60	591.50	591.80	592.40	592.60	0	0	0	0	0	OK	;timeout	docs/sweep_2026-02-28/logs/mongodb_original_rerun/conc50_attempt0.log	0
+# Running: mongodb_original conc=75 (image=jetpack-mongodb mode=none_mongodb.yml extra='')
+#   Retry 1/2 (status=FAILED)
+mongodb_original	75	3681.20	733.30	710.90	736.40	739.40	761.20	0	0	0	0	0	OK	;timeout	docs/sweep_2026-02-28/logs/mongodb_original_rerun/conc75_attempt1.log	1
+# Running: mongodb_fastpath100 conc=50 (image=jetpack-mongodb mode=rule_mongodb.yml extra='-m 100')
+mongodb_fastpath100	50	2365.40	472.80	475.00	472.90	469.90	474.80	23654	1060	4.48	23.4477	1.0000	OK	;timeout	docs/sweep_2026-02-28/logs/mongodb_fastpath100_rerun/conc50_attempt0.log	0
+# Running: mongodb_adaptive conc=5 (image=jetpack-mongodb mode=rule_mongodb.yml extra='')
+mongodb_adaptive	5	271.50	53.20	54.40	54.60	54.20	55.10	2229	2229	100.00	83.7472	1.0000	OK	;timeout	docs/sweep_2026-02-28/logs/mongodb_adaptive_rerun/conc5_attempt0.log	0
+# Running: mongodb_adaptive conc=200 (image=jetpack-mongodb mode=rule_mongodb.yml extra='')
+mongodb_adaptive	200	3679.70	744.10	739.50	737.80	720.00	738.30	2137	1795	83.99	84.8887	1.0159	OK	;timeout	docs/sweep_2026-02-28/logs/mongodb_adaptive_rerun/conc200_attempt0.log	0
+# Running: zookeeper_fastpath100 conc=150 (image=jetpack-zookeeper mode=rule_zookeeper.yml extra='-m 100')
+zookeeper_fastpath100	150	4596.40	924.30	918.20	919.20	918.20	916.50	0	0	0	87.1941	3323.1078	OK	;timeout	docs/sweep_2026-02-28/logs/zookeeper_fastpath100_rerun/conc150_attempt0.log	0
+# Running: zookeeper_fastpath100 conc=300 (image=jetpack-zookeeper mode=rule_zookeeper.yml extra='-m 100')
+zookeeper_fastpath100	300	5921.60	1209.70	1189.20	1168.70	1186.10	1167.90	0	0	0	89.7192	4851.0054	OK	;timeout	docs/sweep_2026-02-28/logs/zookeeper_fastpath100_rerun/conc300_attempt0.log	0

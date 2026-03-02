@@ -6,7 +6,7 @@
 | Mode | `none_zookeeper.yml` |
 | Site config | 60c1s5r5p.yml (60 clients) |
 | Latency / Duration | 20ms, Duration: 30s |
-| Git commit | `31a95a57` |
+| Git commit | `8ba5d49e` |
 | Source | [`zookeeper_original.tsv`](zookeeper_original.tsv) |
 
 | concurrency | total_throughput | h1 | h2 | h3 | h4 | h5 | fp_attempted | fp_succeeded | fp_rate | cpu_leader_avg | queue_depth_avg |

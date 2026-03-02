@@ -53,6 +53,7 @@ profile-results/
 /archive
 /results
 *.log
+!docs/sweep_2026-02-28/logs/**/*.log
 *.csv
 !docs/sweep_2026-02-28/consolidated.csv
 prof

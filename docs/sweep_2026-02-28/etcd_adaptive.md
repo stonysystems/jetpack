@@ -6,7 +6,7 @@
 | Mode | `rule_etcd.yml` |
 | Site config | 60c1s5r5p.yml (60 clients) |
 | Latency / Duration | 20ms, Duration: 30s |
-| Git commit | `31a95a57` |
+| Git commit | `8ba5d49e` |
 | Source | [`etcd_adaptive.tsv`](etcd_adaptive.tsv) |
 
 | concurrency | total_throughput | h1 | h2 | h3 | h4 | h5 | fp_attempted | fp_succeeded | fp_rate | cpu_leader_avg | queue_depth_avg |
@@ -18,15 +18,7 @@
 | 50 | 2965.00 | 591.00 | 595.50 | 593.80 | 593.70 | 591.00 | 624 | 624 | 100.00 | 97.8152 | 213.5806 |
 | 75 | 4458.90 | 896.10 | 894.80 | 890.40 | 888.90 | 888.70 | 0 | 0 | 0 | 83.4272 | 270.1021 |
 | 100 | 2764.80 | 526.50 | 527.80 | 606.40 | 537.10 | 567.00 | 16 | 14 | 87.50 | 94.3593 | 602.1753 |
-| 150 | 0 | 0.00 | 0.00 | 0.00 | 0.00 | 0.00 | 0 | 0 | 0 | 89.3381 | 187.6592 |
+| 150 | 6728.20 | 1439.00 | 1312.90 | 1352.70 | 1317.80 | 1305.80 | 0 | 0 | 0 | 84.7007 | 1154.3822 |
 | 200 | 6672.10 | 1402.20 | 1317.50 | 1318.40 | 1327.20 | 1306.80 | 1 | 1 | 100.00 | 90.1318 | 538.4209 |
-| 300 | 0 | 0.00 | 0.00 | 0.00 | 0.00 | 0.00 | 0 | 0 | 0 | 93.9884 | 454.6041 |
+| 300 | 6159.10 | 1439.10 | 1140.00 | 1200.00 | 1180.00 | 1200.00 | 0 | 0 | 0 | 90.7465 | 1362.5723 |
 | 400 | 6410.00 | 1323.20 | 1261.40 | 1277.80 | 1269.90 | 1277.70 | 71 | 66 | 92.95 | 91.2998 | 300.1770 |
-
-### Failed/zero-throughput rows (2)
-
-  - concurrency=150: 0 throughput
-  - concurrency=300: 0 throughput
-
-These rows were recorded before failure classification was added.
-See [sweep_benchmark.sh](../../scripts/sweep_benchmark.sh) for the updated script with retry and failure tracking.

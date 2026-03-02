@@ -6,7 +6,7 @@
 | Mode | `none_mongodb.yml` |
 | Site config | 60c1s5r5p.yml (60 clients) |
 | Latency / Duration | 20ms, Duration: 30s |
-| Git commit | `31a95a57` |
+| Git commit | `8ba5d49e` |
 | Source | [`mongodb_original.tsv`](mongodb_original.tsv) |
 
 | concurrency | total_throughput | h1 | h2 | h3 | h4 | h5 | fp_attempted | fp_succeeded | fp_rate | cpu_leader_avg | queue_depth_avg |
@@ -15,18 +15,10 @@
 | 5 | 272.70 | 54.60 | 54.40 | 56.00 | 54.70 | 53.00 | 0 | 0 | 0 | 0 | 0 |
 | 10 | 569.30 | 113.90 | 115.10 | 112.50 | 114.10 | 113.70 | 0 | 0 | 0 | 0 | 0 |
 | 25 | 1475.10 | 294.80 | 296.60 | 295.50 | 292.50 | 295.70 | 0 | 0 | 0 | 0 | 0 |
-| 50 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
-| 75 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
+| 50 | 2959.90 | 591.60 | 591.50 | 591.80 | 592.40 | 592.60 | 0 | 0 | 0 | 0 | 0 |
+| 75 | 3681.20 | 733.30 | 710.90 | 736.40 | 739.40 | 761.20 | 0 | 0 | 0 | 0 | 0 |
 | 100 | 1171.80 | 234.80 | 217.00 | 240.00 | 240.00 | 240.00 | 0 | 0 | 0 | 0 | 0 |
 | 150 | 3023.40 | 589.90 | 569.00 | 588.50 | 652.90 | 623.10 | 0 | 0 | 0 | 0 | 0 |
 | 200 | 3182.90 | 640.10 | 602.60 | 620.00 | 660.10 | 660.10 | 0 | 0 | 0 | 0 | 0 |
 | 300 | 3100.00 | 680.00 | 600.00 | 620.00 | 600.00 | 600.00 | 0 | 0 | 0 | 0 | 0 |
 | 400 | 2820.00 | 540.00 | 580.00 | 540.00 | 580.00 | 580.00 | 0 | 0 | 0 | 0 | 0 |
-
-### Failed/zero-throughput rows (2)
-
-  - concurrency=50: 0 throughput
-  - concurrency=75: 0 throughput
-
-These rows were recorded before failure classification was added.
-See [sweep_benchmark.sh](../../scripts/sweep_benchmark.sh) for the updated script with retry and failure tracking.
