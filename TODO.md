@@ -501,7 +501,7 @@ this section can be closed again.
     as if they were measured performance. If a point remains unusable after retries, it must
     be labeled as failed with reason, excluded from any peak-selection logic, and linked to logs.
 
-- [ ] Root-cause every currently published failed point in `docs/sweep_2026-02-28/`, fix the defect where feasible, and rerun the affected neighborhood
+- [x] Root-cause every currently published failed point in `docs/sweep_2026-02-28/`, fix the defect where feasible, and rerun the affected neighborhood
   - Build a failure ledger for every zero/partial row:
     `backend, mode, concurrency, observed_signature, suspected_root_cause, fix_owner, rerun_status`.
   - Minimum currently known bad points to investigate: MongoDB original/adaptive, etcd fastpath/adaptive,
