@@ -227,7 +227,7 @@ Full concurrency sweep (total txn/s, 2026-02-28):
 | 400 | 6,584 | 6,254 | 6,410 | — | 2,760 | — | — | — | 4,186 |
 
 — = failed run (process crash or connection failure in Docker).
-Raw TSV files: `docs/sweep_2026-02-28/*.tsv`.
+Raw data: [`docs/sweep_2026-02-28/`](sweep_2026-02-28/README.md) (TSV + Markdown tables for each backend/mode).
 
 **Notes:** MongoDB remains systematically slower (~3.2K) than etcd (~7.7K) and ZK (~5K)
 due to the `#define AWS` 2500-connection pool and w:majority replication. Docker's

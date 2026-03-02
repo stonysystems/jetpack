@@ -1,0 +1,33 @@
+# mongodb_adaptive_v2
+
+| Field | Value |
+|-------|-------|
+| Image | `jetpack-mongodb` |
+| Mode | `rule_mongodb.yml` |
+| Site config | 60c1s5r5p.yml (60 clients) |
+| Latency / Duration | 20ms, Duration: 30s |
+| Git commit | `31a95a57` |
+| Source | [`mongodb_adaptive_v2.tsv`](mongodb_adaptive_v2.tsv) |
+
+| concurrency | total_throughput | h1 | h2 | h3 | h4 | h5 | fp_attempted | fp_succeeded | fp_rate | cpu_leader_avg | queue_depth_avg |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 1 | 38.70 | 8.00 | 7.90 | 7.70 | 7.50 | 7.60 | 369 | 369 | 100.00 | 71.1447 | 1.0000 |
+| 5 | 275.00 | 54.50 | 56.50 | 54.70 | 54.20 | 55.10 | 2243 | 2243 | 100.00 | 99.3937 | 1.0000 |
+| 10 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
+| 25 | 1474.80 | 293.90 | 296.20 | 295.00 | 295.30 | 294.40 | 11950 | 11933 | 99.85 | 99.7686 | 1.0000 |
+| 50 | 0 | 0.00 | 0.00 | 0.00 | 0.00 | 0.00 | 0 | 0 | 0 | .0164 | 1.0000 |
+| 75 | 3478.30 | 670.40 | 732.80 | 681.90 | 680.90 | 712.30 | 1876 | 1269 | 67.64 | 82.8481 | 1.0000 |
+| 100 | 3573.20 | 725.20 | 721.50 | 702.90 | 698.00 | 725.60 | 1814 | 1343 | 74.03 | 85.2213 | 1.0000 |
+| 150 | 3590.60 | 705.50 | 708.70 | 738.70 | 734.90 | 702.80 | 1842 | 1566 | 85.01 | 85.0654 | 1.0000 |
+| 200 | 3539.80 | 699.90 | 700.00 | 700.00 | 740.00 | 699.90 | 1757 | 1497 | 85.20 | 83.7945 | 1.0000 |
+| 300 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
+| 400 | 2820.00 | 560.00 | 560.00 | 580.00 | 560.00 | 560.00 | 1447 | 1266 | 87.49 | 86.4124 | 1.0000 |
+
+### Failed/zero-throughput rows (3)
+
+  - concurrency=10: 0 throughput
+  - concurrency=50: 0 throughput
+  - concurrency=300: 0 throughput
+
+These rows were recorded before failure classification was added.
+See [sweep_benchmark.sh](../../scripts/sweep_benchmark.sh) for the updated script with retry and failure tracking.

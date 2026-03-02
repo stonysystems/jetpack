@@ -1,0 +1,31 @@
+# etcd_adaptive_v1_old
+
+| Field | Value |
+|-------|-------|
+| Image | `jetpack-etcd` |
+| Mode | `rule_etcd.yml` |
+| Site config | 60c1s5r5p.yml (60 clients) |
+| Latency / Duration | 20ms, Duration: 30s |
+| Git commit | `31a95a57` |
+| Source | [`etcd_adaptive_v1_old.tsv`](etcd_adaptive_v1_old.tsv) |
+
+| concurrency | total_throughput | h1 | h2 | h3 | h4 | h5 | fp_attempted | fp_succeeded | fp_rate | cpu_leader_avg | queue_depth_avg |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 1 | 39.40 | 8.40 | 7.90 | 7.70 | 8.10 | 7.30 | 206 | 206 | 100.00 | 78.7631 | 2.5560 |
+| 5 | 273.10 | 54.30 | 54.90 | 55.20 | 55.50 | 53.20 | 5 | 5 | 100.00 | 66.6852 | 5.6210 |
+| 10 | 566.50 | 113.20 | 113.60 | 113.70 | 114.10 | 111.90 | 0 | 0 | 0 | 80.8268 | 20.9678 |
+| 25 | 1471.50 | 295.70 | 295.80 | 292.50 | 293.60 | 293.90 | 0 | 0 | 0 | 92.8000 | 67.8185 |
+| 50 | 78.20 | 78.20 | 0.00 | 0.00 | 0.00 | 0.00 | 48 | 48 | 100.00 | 94.4762 | 505.0355 |
+| 75 | 1562.70 | 241.70 | 329.00 | 328.50 | 332.80 | 330.70 | 0 | 0 | 0 | 92.7583 | 288.0038 |
+| 100 | 0 | 0.00 | 0.00 | 0.00 | 0.00 | 0.00 | 0 | 0 | 0 | 95.3675 | 679.4221 |
+| 150 | 1006.20 | 81.80 | 228.60 | 244.70 | 210.50 | 240.60 | 0 | 0 | 0 | 98.0166 | 173.7314 |
+| 200 | 6390.80 | 746.80 | 1438.70 | 1428.40 | 1396.90 | 1380.00 | 0 | 0 | 0 | 98.3333 | 382.6113 |
+| 300 | 6583.80 | 1359.30 | 1314.80 | 1297.00 | 1314.70 | 1298.00 | 0 | 0 | 0 | 87.6421 | 268.5133 |
+| 400 | 6317.90 | 1315.20 | 1235.20 | 1259.20 | 1250.80 | 1257.50 | 0 | 0 | 0 | 86.2272 | 317.1868 |
+
+### Failed/zero-throughput rows (1)
+
+  - concurrency=100: 0 throughput
+
+These rows were recorded before failure classification was added.
+See [sweep_benchmark.sh](../../scripts/sweep_benchmark.sh) for the updated script with retry and failure tracking.

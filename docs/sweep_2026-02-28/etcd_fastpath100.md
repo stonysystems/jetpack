@@ -1,0 +1,33 @@
+# etcd_fastpath100
+
+| Field | Value |
+|-------|-------|
+| Image | `jetpack-etcd` |
+| Mode | `rule_etcd.yml` |
+| Site config | 60c1s5r5p.yml (60 clients) |
+| Latency / Duration | 20ms, Duration: 30s |
+| Git commit | `31a95a57` |
+| Source | [`etcd_fastpath100.tsv`](etcd_fastpath100.tsv) |
+
+| concurrency | total_throughput | h1 | h2 | h3 | h4 | h5 | fp_attempted | fp_succeeded | fp_rate | cpu_leader_avg | queue_depth_avg |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 1 | 39.50 | 8.20 | 8.10 | 7.50 | 7.90 | 7.80 | 201 | 201 | 100.00 | 54.8367 | 4.6220 |
+| 5 | 274.00 | 54.50 | 55.20 | 55.00 | 55.20 | 54.10 | 3 | 3 | 100.00 | 31.4921 | 7.8922 |
+| 10 | 576.40 | 115.00 | 115.20 | 114.70 | 117.20 | 114.30 | 1 | 1 | 100.00 | 39.1900 | 19.0776 |
+| 25 | 1444.50 | 295.10 | 280.90 | 288.70 | 289.50 | 290.30 | 0 | 0 | 0 | 49.3315 | 64.3155 |
+| 50 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
+| 75 | 0 | 0.00 | 0.00 | 0.00 | 0.00 | 0.00 | 0 | 0 | 0 | 30.3500 | 596.3731 |
+| 100 | 5951.30 | 1192.00 | 1188.90 | 1188.10 | 1193.70 | 1188.60 | 0 | 0 | 0 | 90.0387 | 455.5925 |
+| 150 | 572.20 | 131.90 | 98.60 | 114.80 | 103.80 | 123.10 | 0 | 0 | 0 | 87.9683 | 424.4225 |
+| 200 | 6544.70 | 1305.60 | 1308.40 | 1296.10 | 1311.20 | 1323.40 | 0 | 0 | 0 | 90.0000 | 579.3346 |
+| 300 | 0 | 0.00 | 0.00 | 0.00 | 0.00 | 0.00 | 0 | 0 | 0 | 0 | 580.6359 |
+| 400 | 6254.40 | 1276.80 | 1220.00 | 1250.40 | 1253.60 | 1253.60 | 0 | 0 | 0 | 91.2065 | 205.5617 |
+
+### Failed/zero-throughput rows (3)
+
+  - concurrency=50: 0 throughput
+  - concurrency=75: 0 throughput
+  - concurrency=300: 0 throughput
+
+These rows were recorded before failure classification was added.
+See [sweep_benchmark.sh](../../scripts/sweep_benchmark.sh) for the updated script with retry and failure tracking.

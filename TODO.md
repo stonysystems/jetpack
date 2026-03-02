@@ -532,7 +532,7 @@ this section can be closed again.
   - Make the CSV the audit source of truth and generate the Markdown summaries from it.
     Manual table editing in docs is not acceptable.
 
-- [ ] Export a Markdown table beside every TSV table under `docs/sweep_2026-02-28/`
+- [x] Export a Markdown table beside every TSV table under `docs/sweep_2026-02-28/`
   - For every `*.tsv`, generate a sibling `*.md` with:
     - a short metadata header (image, mode, site config, latency, duration, date, git commit)
     - a Markdown table version of the rows

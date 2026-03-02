@@ -1,0 +1,34 @@
+# zookeeper_adaptive_v2
+
+| Field | Value |
+|-------|-------|
+| Image | `jetpack-zookeeper` |
+| Mode | `rule_zookeeper.yml` |
+| Site config | 60c1s5r5p.yml (60 clients) |
+| Latency / Duration | 20ms, Duration: 30s |
+| Git commit | `31a95a57` |
+| Source | [`zookeeper_adaptive_v2.tsv`](zookeeper_adaptive_v2.tsv) |
+
+| concurrency | total_throughput | h1 | h2 | h3 | h4 | h5 | fp_attempted | fp_succeeded | fp_rate | cpu_leader_avg | queue_depth_avg |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 1 | 39.80 | 8.60 | 7.80 | 7.60 | 8.10 | 7.70 | 398 | 398 | 100.00 | 67.8422 | 2.7076 |
+| 5 | 271.20 | 54.90 | 54.70 | 53.80 | 54.10 | 53.70 | 2712 | 2712 | 100.00 | 66.7754 | 12.5885 |
+| 10 | 569.50 | 114.70 | 113.50 | 112.50 | 115.10 | 113.70 | 5695 | 5695 | 100.00 | 90.6575 | 26.1383 |
+| 25 | 1471.10 | 293.40 | 294.00 | 294.30 | 293.60 | 295.80 | 14710 | 14710 | 100.00 | 94.5472 | 912.8622 |
+| 50 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
+| 75 | 4369.70 | 868.00 | 866.30 | 868.50 | 883.70 | 883.20 | 0 | 0 | 0 | 84.3649 | 1782.8647 |
+| 100 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
+| 150 | 6.30 | 4.60 | 0.00 | 0.00 | 1.40 | 0.30 | 0 | 0 | 0 | 91.4676 | 7020.7122 |
+| 200 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
+| 300 | 4263.10 | 834.50 | 854.90 | 841.40 | 850.70 | 881.60 | 0 | 0 | 0 | 94.0068 | 7036.6723 |
+| 400 | 0 | 0.00 | 0.00 | 0.00 | 0.00 | 0.00 | 0 | 0 | 0 | 89.7788 | 5217.3129 |
+
+### Failed/zero-throughput rows (4)
+
+  - concurrency=50: 0 throughput
+  - concurrency=100: 0 throughput
+  - concurrency=200: 0 throughput
+  - concurrency=400: 0 throughput
+
+These rows were recorded before failure classification was added.
+See [sweep_benchmark.sh](../../scripts/sweep_benchmark.sh) for the updated script with retry and failure tracking.
