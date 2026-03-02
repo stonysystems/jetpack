@@ -12,7 +12,13 @@
 # Output: TSV with columns:
 #   concurrency, total_throughput, h1..h5,
 #   fp_attempted, fp_succeeded, fp_rate,
-#   cpu_leader_avg, queue_depth_avg
+#   cpu_leader_avg, queue_depth_avg,
+#   status, error_summary, log_path, retry_count
+#
+# Status values:
+#   OK       - docker exited 0, all 5 processes reported throughput > 0
+#   PARTIAL  - docker exited 0 but some processes reported 0 throughput
+#   FAILED   - docker exited non-zero or total throughput is 0 after all retries
 
 set -euo pipefail
 
@@ -25,6 +31,14 @@ CLIENT_CONFIG="client_open.yml"
 LATENCY_MS=20
 LATENCY_JITTER=0
 TEST_DURATION=30
+MAX_RETRIES=2
+
+# Log directory: docs/sweep_2026-02-28/logs/<image>_<mode>/
+# Derive a short name from image and mode for the log subdirectory
+IMAGE_SHORT=$(echo "$DOCKER_IMAGE" | sed 's/.*\///' | tr ':' '_')
+MODE_SHORT=$(basename "$MODE_CONFIG" .yml)
+LOG_DIR="docs/sweep_2026-02-28/logs/${IMAGE_SHORT}_${MODE_SHORT}"
+mkdir -p "$LOG_DIR"
 
 # Concurrency values to sweep
 CONCURRENCIES=(1 5 10 25 50 75 100 150 200 300 400)
@@ -32,20 +46,15 @@ CONCURRENCIES=(1 5 10 25 50 75 100 150 200 300 400)
 echo "# Sweep: image=$DOCKER_IMAGE mode=$MODE_CONFIG extra_args='$EXTRA_ARGS'"
 echo "# Site config: $SITE_CONFIG (60 clients)"
 echo "# Latency: ${LATENCY_MS}ms, Duration: ${TEST_DURATION}s"
-echo -e "concurrency\ttotal_throughput\th1\th2\th3\th4\th5\tfp_attempted\tfp_succeeded\tfp_rate\tcpu_leader_avg\tqueue_depth_avg"
+echo "# Date: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+echo "# Max retries per point: $MAX_RETRIES"
+echo -e "concurrency\ttotal_throughput\th1\th2\th3\th4\th5\tfp_attempted\tfp_succeeded\tfp_rate\tcpu_leader_avg\tqueue_depth_avg\tstatus\terror_summary\tlog_path\tretry_count"
 
-for conc in "${CONCURRENCIES[@]}"; do
-    # Run benchmark
-    output=$(docker run --rm --privileged \
-        -e SITE_CONFIG="$SITE_CONFIG" \
-        -e MODE_CONFIG="$MODE_CONFIG" \
-        -e CLIENT_CONFIG="$CLIENT_CONFIG" \
-        -e CONCURRENT_CONFIG="concurrent_${conc}.yml" \
-        -e LATENCY_MS="$LATENCY_MS" \
-        -e LATENCY_JITTER="$LATENCY_JITTER" \
-        -e TEST_DURATION="$TEST_DURATION" \
-        -e SERVER_EXTRA_ARGS="$EXTRA_ARGS" \
-        "$DOCKER_IMAGE" benchmark 2>&1) || true
+# extract_metrics <output_text>
+# Sets variables: h1..h5, total, fp_attempted, fp_succeeded, fp_rate,
+#                 cpu_leader_avg, queue_depth_avg
+extract_metrics() {
+    local output="$1"
 
     # Extract per-process throughput
     h1=$(echo "$output" | grep "h1:.*Mid throughput" | grep -oP '[\d.]+$' || echo "0")
@@ -58,7 +67,6 @@ for conc in "${CONCURRENCIES[@]}"; do
     total=$(echo "$h1 + $h2 + $h3 + $h4 + $h5" | bc 2>/dev/null || echo "0")
 
     # Extract fastpath statistics (sum across processes)
-    # Log line: "Fastpath statistics attempted X successed Y rate(pct) Z.ZZ ..."
     fp_attempted=0
     fp_succeeded=0
     for h in h1 h2 h3 h4 h5; do
@@ -76,8 +84,7 @@ for conc in "${CONCURRENCIES[@]}"; do
         fp_rate="0"
     fi
 
-    # Extract CPU usage leader average (average across processes that report it)
-    # Log line: "Cpu-usage-leaders ave X.XXXX count N"
+    # Extract CPU usage leader average
     cpu_sum=0
     cpu_n=0
     for h in h1 h2 h3 h4 h5; do
@@ -96,8 +103,7 @@ for conc in "${CONCURRENCIES[@]}"; do
         cpu_leader_avg="0"
     fi
 
-    # Extract queue depth average (average across processes that report it)
-    # Log line: "Queue-depth ave X.XXXX count N"
+    # Extract queue depth average
     qd_sum=0
     qd_n=0
     for h in h1 h2 h3 h4 h5; do
@@ -115,9 +121,151 @@ for conc in "${CONCURRENCIES[@]}"; do
     else
         queue_depth_avg="0"
     fi
+}
 
-    echo -e "${conc}\t${total}\t${h1}\t${h2}\t${h3}\t${h4}\t${h5}\t${fp_attempted}\t${fp_succeeded}\t${fp_rate}\t${cpu_leader_avg}\t${queue_depth_avg}"
+# classify_status <exit_code> <total_throughput> <h1> <h2> <h3> <h4> <h5>
+# Sets variables: status, error_summary
+classify_run() {
+    local exit_code="$1"
+    local total_tp="$2"
+    shift 2
+    local procs=("$@")
 
-    # If throughput dropped significantly, we may have passed the peak
-    # Continue anyway to get full data
+    if [ "$exit_code" -ne 0 ]; then
+        status="FAILED"
+        error_summary="docker_exit_${exit_code}"
+        return
+    fi
+
+    # Check if total throughput is zero (string comparison handles bc output)
+    local is_zero
+    is_zero=$(echo "$total_tp == 0" | bc 2>/dev/null || echo "1")
+    if [ "$is_zero" -eq 1 ]; then
+        status="FAILED"
+        error_summary="zero_throughput_all_processes"
+        return
+    fi
+
+    # Check for partial failure: some processes reported 0
+    local zero_count=0
+    for p in "${procs[@]}"; do
+        local pz
+        pz=$(echo "$p == 0" | bc 2>/dev/null || echo "1")
+        if [ "$pz" -eq 1 ]; then
+            zero_count=$((zero_count + 1))
+        fi
+    done
+
+    if [ "$zero_count" -gt 0 ]; then
+        status="PARTIAL"
+        error_summary="${zero_count}_of_5_processes_zero"
+    else
+        status="OK"
+        error_summary=""
+    fi
+}
+
+# detect_failure_signature <output_text> <exit_code>
+# Appends concrete failure info to error_summary
+detect_failure_signature() {
+    local output="$1"
+    local exit_code="$2"
+
+    # Look for common failure patterns in output
+    if echo "$output" | grep -qi "out of memory\|OOM\|Cannot allocate memory"; then
+        error_summary="${error_summary};OOM"
+    fi
+    if echo "$output" | grep -qi "too many open files\|EMFILE"; then
+        error_summary="${error_summary};fd_exhaustion"
+    fi
+    if echo "$output" | grep -qi "connection refused\|Connection reset"; then
+        error_summary="${error_summary};connection_failure"
+    fi
+    if echo "$output" | grep -qi "Segmentation fault\|SIGSEGV\|core dumped"; then
+        error_summary="${error_summary};crash_segfault"
+    fi
+    if echo "$output" | grep -qi "timeout\|timed out"; then
+        error_summary="${error_summary};timeout"
+    fi
+    if [ -z "$output" ]; then
+        error_summary="${error_summary};empty_output"
+    elif ! echo "$output" | grep -q "Mid throughput"; then
+        error_summary="${error_summary};no_benchmark_output"
+    fi
+}
+
+for conc in "${CONCURRENCIES[@]}"; do
+    best_status="FAILED"
+    best_output=""
+    best_exit_code=1
+    retry_count=0
+
+    for attempt in $(seq 0 "$MAX_RETRIES"); do
+        log_file="${LOG_DIR}/conc${conc}_attempt${attempt}.log"
+
+        # Run benchmark, capturing exit code
+        exit_code=0
+        output=$(docker run --rm --privileged \
+            -e SITE_CONFIG="$SITE_CONFIG" \
+            -e MODE_CONFIG="$MODE_CONFIG" \
+            -e CLIENT_CONFIG="$CLIENT_CONFIG" \
+            -e CONCURRENT_CONFIG="concurrent_${conc}.yml" \
+            -e LATENCY_MS="$LATENCY_MS" \
+            -e LATENCY_JITTER="$LATENCY_JITTER" \
+            -e TEST_DURATION="$TEST_DURATION" \
+            -e SERVER_EXTRA_ARGS="$EXTRA_ARGS" \
+            "$DOCKER_IMAGE" benchmark 2>&1) || exit_code=$?
+
+        # Save full output to log file
+        {
+            echo "# Attempt: $attempt of $MAX_RETRIES"
+            echo "# Concurrency: $conc"
+            echo "# Docker exit code: $exit_code"
+            echo "# Timestamp: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            echo "---"
+            echo "$output"
+        } > "$log_file"
+
+        # Extract metrics from this attempt
+        extract_metrics "$output"
+        classify_run "$exit_code" "$total" "$h1" "$h2" "$h3" "$h4" "$h5"
+
+        # Keep best attempt: OK > PARTIAL > FAILED
+        if [ "$status" = "OK" ]; then
+            best_status="OK"
+            best_output="$output"
+            best_exit_code="$exit_code"
+            retry_count="$attempt"
+            break
+        elif [ "$status" = "PARTIAL" ] && [ "$best_status" = "FAILED" ]; then
+            best_status="PARTIAL"
+            best_output="$output"
+            best_exit_code="$exit_code"
+            retry_count="$attempt"
+        elif [ "$best_status" = "FAILED" ]; then
+            best_output="$output"
+            best_exit_code="$exit_code"
+            retry_count="$attempt"
+        fi
+
+        # Only retry if the run failed or had zero throughput
+        if [ "$status" = "OK" ] || [ "$status" = "PARTIAL" ]; then
+            break
+        fi
+
+        if [ "$attempt" -lt "$MAX_RETRIES" ]; then
+            echo "# Retry $((attempt + 1))/$MAX_RETRIES for concurrency=$conc (status=$status)" >&2
+            sleep 5
+        fi
+    done
+
+    # Re-extract final metrics from best attempt
+    extract_metrics "$best_output"
+    classify_run "$best_exit_code" "$total" "$h1" "$h2" "$h3" "$h4" "$h5"
+    detect_failure_signature "$best_output" "$best_exit_code"
+
+    # Log path relative to repo root
+    log_path="${LOG_DIR}/conc${conc}_attempt${retry_count}.log"
+
+    echo -e "${conc}\t${total}\t${h1}\t${h2}\t${h3}\t${h4}\t${h5}\t${fp_attempted}\t${fp_succeeded}\t${fp_rate}\t${cpu_leader_avg}\t${queue_depth_avg}\t${status}\t${error_summary}\t${log_path}\t${retry_count}"
 done

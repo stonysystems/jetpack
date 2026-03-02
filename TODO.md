@@ -486,7 +486,7 @@ this section can be closed again.
     `mongodb_adaptive.tsv`, `mongodb_adaptive_v2.tsv`, and `mongodb_adaptive_v3.tsv`
     currently describe different outcomes and are being cited inconsistently.
 
-- [ ] Stop treating failed runs as valid 0-throughput benchmark points
+- [x] Stop treating failed runs as valid 0-throughput benchmark points
   - `scripts/sweep_benchmark.sh` currently suppresses `docker run` failures and then emits
     zero-filled rows. Replace that behavior with explicit failure classification.
   - Every attempted point must record:
