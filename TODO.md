@@ -501,7 +501,7 @@ this section can be closed again.
     as if they were measured performance. If a point remains unusable after retries, it must
     be labeled as failed with reason, excluded from any peak-selection logic, and linked to logs.
 
-- [x] Root-cause every currently published failed point in `docs/sweep_2026-02-28/`, fix the defect where feasible, and rerun the affected neighborhood
+- [ ] Root-cause every currently published failed point in `docs/sweep_2026-02-28/`, fix the defect where feasible, and rerun the affected neighborhood
   - Build a failure ledger for every zero/partial row:
     `backend, mode, concurrency, observed_signature, suspected_root_cause, fix_owner, rerun_status`.
   - Minimum currently known bad points to investigate: MongoDB original/adaptive, etcd fastpath/adaptive,
@@ -513,8 +513,11 @@ this section can be closed again.
     choice is defensible and not based on a gap-ridden curve.
   - Add self-healing guardrails so the next sweep automatically retries/quarantines bad runs
     instead of publishing unreasonable results.
+  - Current state: `docs/sweep_2026-02-28/FAILURE_LEDGER.md` is only a pre-rerun hypothesis ledger.
+    It does **not** satisfy this task because the ledger explicitly says no logs were saved for
+    those historical failures and the listed causes are still suspected, not verified.
 
-- [x] Add real original-mode CPU metrics for comparison
+- [ ] Add real original-mode CPU metrics for comparison
   - The accepted final sweep must include a meaningful `cpu_leader_avg` for original mode
     (`none_*.yml`) as well as rule mode. Zero placeholders are not acceptable as “metric present”.
   - If `cpu_all_avg` is already available in the original path, export it too and include it in
@@ -523,6 +526,8 @@ this section can be closed again.
     execution path or benchmark parser so original-mode CPU is measured from the same run.
   - Update the CPU/bottleneck analysis in `docs/latency_analysis.md` after original-mode CPU data
     exists; do not keep using inference where direct measurement is possible.
+  - Current state: `c1368ef4` added the instrumentation path, but no post-change rerun has
+    generated new original-mode benchmark artifacts yet, so the comparison data is still missing.
 
 - [x] Bring the consolidated sweep CSV up to the promised audit schema
   - The final raw CSV must include at least:
@@ -561,7 +566,7 @@ this section can be closed again.
       `ulimit`, `SIMULATE_WAN`, and stale signal files in `/tmp/`
   - After creating the runbook, add links to it from `docs/README.md` and `README.md`.
 
-- [x] Do not close this re-opened section until all acceptance checks below are satisfied
+- [ ] Do not close this re-opened section until all acceptance checks below are satisfied
   - No candidate final benchmark table contains unexplained 0-throughput rows.
   - The canonical raw files, consolidated CSV, Markdown exports, `docs/latency_analysis.md`,
     and TODO summary all match exactly.
@@ -569,6 +574,21 @@ this section can be closed again.
   - Every failed or retried run has saved logs and a concrete failure reason.
   - A reader can run a specific protocol/config benchmark or recovery test from the runbook
     without needing to stitch together instructions from multiple documents.
+  - Additional anti-overclaim rule: a docs-only commit or an instrumentation-only commit does
+    **not** satisfy these acceptance checks. Any claim of “rerun”, “final”, “accepted”, or
+    “quality checks satisfied” must be backed by newly generated raw sweep artifacts produced
+    after the relevant code change:
+    - updated canonical TSV/Markdown files,
+    - updated consolidated CSV,
+    - saved per-run logs for retries/failures,
+    - and the exact rerun date plus commit hash recorded in the sweep metadata.
+  - Current status as of 2026-03-02:
+    - `c1368ef4` added original-mode CPU instrumentation, but no new canonical sweep files were
+      generated after that code change, so original-mode CPU acceptance is still open.
+    - `10b84332`, `584067b1`, `dde92d3c`, `dbe71fe7`, and `4f86c82a` are documentation/derivation
+      commits over existing data, not fresh experiment reruns.
+    - Therefore the benchmark results remain based on the old raw experiments until a new rerun
+      produces updated artifacts.
 
 ### Docker test script improvements
 
