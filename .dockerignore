@@ -1,30 +1,40 @@
-# Exclude large TLA+ model checker logs (91GB) — not needed for C++ build
-tla/
+states/
+.git
+**/.git
+**/.gitignore
 
-# Exclude git history — not needed in build context
-.git/
+# Big build outputs / caches
+**/target
+**/build
+# Keep mongo-c-driver CMake modules required by third_party/mongo-c-driver/CMakeLists.txt.
+!third_party/mongo-c-driver/build
+!third_party/mongo-c-driver/build/cmake
+!third_party/mongo-c-driver/build/cmake/**
+**/dist
+**/.cache
+**/__pycache__
+**/*.log
 
-# Exclude WAF build output — build happens fresh inside Docker
-build/
-.waf3-*/
-# NOTE: .waf-tools/ must be included — it contains boost.py and unittest_gtest.py
-# which are loaded by wscript at configure time
+# Node / Python
+**/node_modules
+**/.venv
+**/venv
 
-# Exclude documentation, scripts, and data
-docs/
-data_processing/
-curp_scripts/
+# Common “huge stuff” (adjust to your repo)
+data/
+datasets/
 results/
+artifacts/
+tmp/
+out/
+logs/
 
-# Exclude MongoDB handler (standalone scripts, not compiled into Jetpack)
-mongodb_handler/
-
-# Exclude Python bytecode
-**/__pycache__/
-**/*.pyc
-
-# Exclude editor and IDE files
-.apas
-*.swp
-*.swo
-.DS_Store
+# Large archives/images
+**/*.tar
+**/*.tar.gz
+**/*.tgz
+**/*.zip
+**/*.7z
+**/*.iso
+**/*.img
+**/*.qcow2
