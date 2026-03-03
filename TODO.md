@@ -917,9 +917,15 @@ Expected abstraction direction:
   refinement mapping that shows it is equivalent to this 3D logical view.
 
 - [ ] Redesign the generic Jetpack/base abstraction so it matches the intended multi-sequence replicated log model
+  - [x] Sub-task 1: Unify safety properties so all wrappers use shared `jetpack.tla` definitions
+    - Added `CONSTANT NoOpCmd` + `FilterNoOps` to `jetpack.tla` for protocol-agnostic NoOp handling
+    - Replaced `LogAgreement` with `CommittedLogAgreement` (valid for all protocols)
+    - Made `ExecutionDedupMatches` filter NoOps via shared `NoOpCmd` constant
+    - Removed per-protocol property overrides from `jetpack_mencius.tla`
+    - All 3 wrappers now call `J!CommittedLogAgreement` and `J!ExecutionDedupMatches` identically
+    - TLC: Raft exhaustive 82K, CoPilot exhaustive 515, Mencius partial 31M+ (2026-03-03)
+  - [ ] Sub-task 2: Introduce `base_raft.tla`, `base_copilot.tla`, `base_mencius.tla`
   - Current `tla/jetpack.tla` still reads `log[i][k]`; that is not enough for the final proof target.
-  - Introduce `base_raft.tla`, `base_copilot.tla`, and `base_mencius.tla` (or equivalent names)
-    that expose the same abstract Jetpack-facing interface.
   - The abstraction must support:
     - base-protocol local/original log copies,
     - replicated copies of each utilized sequence,

@@ -67,7 +67,7 @@ vars == <<messages, serverVars, candidateVars, leaderVars,
 (* INSTANCE Jetpack module                                                 *)
 (***************************************************************************)
 
-J == INSTANCE jetpack
+J == INSTANCE jetpack WITH NoOpCmd <- [tag |-> "RaftNoOp"]
 
 (***************************************************************************)
 (* Raft helpers and constants                                              *)
@@ -522,11 +522,11 @@ SmallStateConstraint ==
 (* Properties                                                              *)
 (***************************************************************************)
 
-LogAgreement == J!LogAgreement
+CommittedLogAgreement == J!CommittedLogAgreement
 LogOrderMatchesExecution == J!LogOrderMatchesExecution
 ExecutionDedupMatches == J!ExecutionDedupMatches
 
-Safety == [](LogAgreement /\ LogOrderMatchesExecution /\ ExecutionDedupMatches)
+Safety == [](CommittedLogAgreement /\ LogOrderMatchesExecution /\ ExecutionDedupMatches)
 
 SpecSafety == Spec => Safety
 

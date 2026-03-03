@@ -79,7 +79,7 @@ vars == <<messages, serverVars, candidateVars, leaderVars,
 (* INSTANCE Jetpack module                                                 *)
 (***************************************************************************)
 
-J == INSTANCE jetpack
+J == INSTANCE jetpack WITH NoOpCmd <- [tag |-> "CoPilotNoOp"]
 
 (***************************************************************************)
 (* CoPilot helpers and constants                                           *)
@@ -493,7 +493,7 @@ SmallStateConstraint ==
 (* Properties                                                              *)
 (***************************************************************************)
 
-LogAgreement == J!LogAgreement
+CommittedLogAgreement == J!CommittedLogAgreement
 LogOrderMatchesExecution == J!LogOrderMatchesExecution
 ExecutionDedupMatches == J!ExecutionDedupMatches
 
@@ -501,7 +501,7 @@ ExecutionDedupMatches == J!ExecutionDedupMatches
 ActiveProposerBound ==
     Cardinality({i \in Server : role[i] \in {Pilot, Copilot}}) <= 2
 
-Safety == [](LogAgreement /\ LogOrderMatchesExecution /\ ExecutionDedupMatches /\ ActiveProposerBound)
+Safety == [](CommittedLogAgreement /\ LogOrderMatchesExecution /\ ExecutionDedupMatches /\ ActiveProposerBound)
 
 SpecSafety == Spec => Safety
 

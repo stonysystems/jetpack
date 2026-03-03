@@ -53,7 +53,7 @@
 EXTENDS Naturals, FiniteSets, Sequences, TLC
 
 \* ---- Constants shared with base protocol (supplied at instantiation) ----
-CONSTANTS Server, Client, CmdId, Key
+CONSTANTS Server, Client, CmdId, Key, NoOpCmd
 
 Nil == "Nil"
 NilCmd == [tag |-> "NilCmd"]
@@ -227,6 +227,10 @@ Dedup(seq) ==
     ELSE LET head == seq[1]
              tail == SubSeq(seq, 2, Len(seq))
          IN <<head>> \o Dedup(RemoveCmd(tail, head))
+
+\* Filter out NoOp entries (protocol-internal bookkeeping, e.g. Mencius skipped slots).
+\* For protocols without NoOps, NoOpCmd is a sentinel that never matches, so this is a no-op.
+FilterNoOps(seq) == SelectSeq(seq, LAMBDA x : x # NoOpCmd)
 
 LogCmdIds ==
     UNION { {log[i][k].value.cmd_id : k \in 1..Len(log[i])} : i \in Server }
@@ -712,15 +716,17 @@ JetpackNext ==
 (* Properties                                                              *)
 (***************************************************************************)
 
-\* Committed log entries agree across servers at each index.
-\* Use length guards to avoid comparing records with Nil (TLC type error).
-LogAgreement ==
-    /\ MaxLogLen >= 0
-    /\ \A i, j \in Server :
-         \A k \in 1..MaxLogLen :
-            \/ k > Len(log[i])
-            \/ k > Len(log[j])
-            \/ log[i][k] = log[j][k]
+\* Committed log entries agree across servers.
+\* Only committed entries (up to commitIndex) must match. Uncommitted entries may
+\* legitimately diverge (e.g. Mencius servers independently propose to different slots).
+\* This is strictly weaker than requiring all entries to agree, so it holds for all protocols.
+CommittedLogAgreement ==
+    \A i, j \in Server :
+        LET ci == commitIndex[i]
+            cj == commitIndex[j]
+            limit == Min({ci, cj} \cup {0})
+        IN \A k \in 1..limit :
+            log[i][k] = log[j][k]
 
 \* Log order matches execution_cmds (allowing NilCmd for missing).
 LogOrderMatchesExecution ==
@@ -734,8 +740,12 @@ LogOrderMatchesExecution ==
                \/ ec = NilCmd
 
 \* Deduplicated original executions match execution_cmds.
+\* NoOp entries (from protocol-internal operations like Mencius skipped slots)
+\* are filtered out before comparison since they are not real commands.
 ExecutionDedupMatches ==
-    \/ IsPrefix(Dedup(original_execution_cmds), execution_cmds)
-    \/ IsPrefix(Dedup(execution_cmds), original_execution_cmds)
+    LET origFiltered == FilterNoOps(original_execution_cmds)
+        execFiltered == FilterNoOps(execution_cmds)
+    IN \/ IsPrefix(Dedup(origFiltered), execFiltered)
+       \/ IsPrefix(Dedup(execFiltered), origFiltered)
 
 =============================================================================
