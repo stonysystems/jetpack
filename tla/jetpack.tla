@@ -232,6 +232,28 @@ Dedup(seq) ==
 \* For protocols without NoOps, NoOpCmd is a sentinel that never matches, so this is a no-op.
 FilterNoOps(seq) == SelectSeq(seq, LAMBDA x : x # NoOpCmd)
 
+\* Two commands conflict if they access the same key (but are different commands).
+CmdConflicts(a, b) == a.key = b.key /\ a # b
+
+\* Position of element e in sequence s (0 if not found).
+\* After Dedup, each element appears at most once, so position is unique.
+RECURSIVE IndexOf(_, _)
+IndexOf(s, e) ==
+    IF s = <<>> THEN 0
+    ELSE IF Head(s) = e THEN 1
+    ELSE LET rest == IndexOf(Tail(s), e)
+         IN IF rest = 0 THEN 0 ELSE rest + 1
+
+\* Conflict order preserved: for any conflicting pair (a before b) in s1,
+\* if both appear in s2, then a must also appear before b in s2.
+ConflictOrderPreserved(s1, s2) ==
+    \A k1 \in 1..Len(s1) : \A k2 \in 1..Len(s1) :
+        (/\ k1 < k2
+         /\ CmdConflicts(s1[k1], s1[k2])
+         /\ IndexOf(s2, s1[k1]) > 0
+         /\ IndexOf(s2, s1[k2]) > 0)
+        => IndexOf(s2, s1[k1]) < IndexOf(s2, s1[k2])
+
 LogCmdIds ==
     UNION { {log[i][k].value.cmd_id : k \in 1..Len(log[i])} : i \in Server }
 
@@ -264,16 +286,9 @@ ChosenExecutedInView(i) ==
         \A s \in new_view[i].replica_ids :
             cmd \in SeqToSet(CommittedCmds(s))
 
-ExecAt(k) == IF k <= Len(execution_cmds) THEN execution_cmds[k] ELSE NilCmd
-LogEntryAt(i, k) == IF k <= Len(log[i]) THEN log[i][k] ELSE Nil
-LogCmdAt(i, k) == IF k <= Len(log[i]) THEN log[i][k].value ELSE NilCmd
-
-MaxLogLen == Max({Len(log[i]) : i \in Server} \cup {0})
-MaxLogExecLen == Max({MaxLogLen, Len(execution_cmds)})
-
-IsPrefix(p, s) ==
-    /\ Len(p) <= Len(s)
-    /\ \A k \in 1..Len(p) : p[k] = s[k]
+CommittedCmdSeq(i) ==
+    IF commitIndex[i] = 0 THEN <<>>
+    ELSE FilterNoOps([k \in 1..commitIndex[i] |-> log[i][k].value])
 
 (***************************************************************************)
 (* Jetpack initialization                                                  *)
@@ -728,24 +743,20 @@ CommittedLogAgreement ==
         IN \A k \in 1..limit :
             log[i][k] = log[j][k]
 
-\* Log order matches execution_cmds (allowing NilCmd for missing).
+\* Committed log order matches execution order for conflicting commands.
+\* For any server's committed entries, the relative order of conflicting commands
+\* must match their order in the execution trace. NoOps are filtered out.
 LogOrderMatchesExecution ==
-    /\ MaxLogExecLen >= 0
-    /\ \A i \in Server :
-         \A k \in 1..MaxLogExecLen :
-            LET lc == LogCmdAt(i, k)
-                ec == ExecAt(k)
-            IN \/ lc = ec
-               \/ lc = NilCmd
-               \/ ec = NilCmd
+    \A i \in Server :
+        ConflictOrderPreserved(CommittedCmdSeq(i), FilterNoOps(execution_cmds))
 
-\* Deduplicated original executions match execution_cmds.
-\* NoOp entries (from protocol-internal operations like Mencius skipped slots)
-\* are filtered out before comparison since they are not real commands.
+\* Conflict order between deduplicated original and replicated execution traces.
+\* NoOp entries are filtered out as they are protocol-internal bookkeeping.
+\* The relative order of any conflicting pair must be consistent across both traces.
 ExecutionDedupMatches ==
-    LET origFiltered == FilterNoOps(original_execution_cmds)
-        execFiltered == FilterNoOps(execution_cmds)
-    IN \/ IsPrefix(Dedup(origFiltered), execFiltered)
-       \/ IsPrefix(Dedup(execFiltered), origFiltered)
+    LET origDedup == Dedup(FilterNoOps(original_execution_cmds))
+        execDedup == Dedup(FilterNoOps(execution_cmds))
+    IN /\ ConflictOrderPreserved(origDedup, execDedup)
+       /\ ConflictOrderPreserved(execDedup, origDedup)
 
 =============================================================================

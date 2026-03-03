@@ -943,16 +943,22 @@ Expected abstraction direction:
     - `original_execution_cmds`,
     - `execution_cmds`,
     - and the Jetpack/base agreement properties over that abstraction.
-- [ ] Align the generic Jetpack properties with the intended proof semantics
-  - `ExecutionDedupMatches` should be rewritten as a cross-trace conflict-order property:
-    if conflicting commands `A` and `B` appear in `Dedup(original_execution_cmds)` with
-    `A` before `B`, then `A` must also be before `B` in `Dedup(execution_cmds)`; and vice
-    versa for conflicting pairs that appear in `Dedup(execution_cmds)`.
-  - Do **not** require either deduplicated execution trace to be a prefix of the other.
-  - `LogOrderMatchesExecution` should be expressed in terms of conflict order across the
-    utilized log sequences, not only by matching `log[i][k]` against `execution_cmds[k]`.
-  - `LogAgreement` for the abstract/base integration should mean replicated copy matches
-    original copy for the same logical sequence (`Log[i][j][k]` vs `Log[j][j][k]` when non-nil).
+- [x] Align the generic Jetpack properties with the intended proof semantics
+  - [x] `ExecutionDedupMatches` rewritten as bidirectional `ConflictOrderPreserved` on
+    `Dedup(FilterNoOps(original_execution_cmds))` vs `Dedup(FilterNoOps(execution_cmds))`.
+    No longer requires prefix relationship — only conflict order (same-key commands preserve
+    relative order across traces).
+  - [x] `LogOrderMatchesExecution` rewritten as `ConflictOrderPreserved(CommittedCmdSeq(i),
+    FilterNoOps(execution_cmds))` for all servers. No longer requires position-by-position
+    matching — only conflict order of committed entries vs execution trace.
+  - [ ] `LogAgreement` redesign for multi-sequence log model deferred (depends on task 919
+    multi-sequence abstraction: `Log[i][j][k]` vs `Log[j][j][k]`).
+  - New helpers in `jetpack.tla`: `CmdConflicts(a, b)`, `IndexOf(s, e)`,
+    `ConflictOrderPreserved(s1, s2)`, `CommittedCmdSeq(i)`.
+  - Removed unused old helpers: `ExecAt`, `LogEntryAt`, `LogCmdAt`, `MaxLogLen`,
+    `MaxLogExecLen`, `IsPrefix`.
+  - **Verified**: Raft 82,375 states (exhaustive), CoPilot 515 states (exhaustive),
+    Mencius 121M+ states (partial, no errors).
 - [x] Prove the wrapper step cleanly before claiming the abstraction step
   - `jetpack_raft.tla`, `jetpack_copilot.tla`, and `jetpack_mencius.tla` remain the mid-step.
   - All 3 wrappers must pass the intended small config first.
