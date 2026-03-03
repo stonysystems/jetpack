@@ -928,7 +928,10 @@ Expected abstraction direction:
     - [x] `base_raft.tla`: extracted Raft protocol from monolithic `jetpack_raft.tla` (~280 lines)
       - Refactored `jetpack_raft.tla` to `B == INSTANCE base_raft` + thin wrappers (~250 lines, was 533)
       - TLC: exhaustive 82,375 states (exact match with pre-refactoring baseline)
-    - [ ] `base_copilot.tla`: extract CoPilot protocol from `jetpack_copilot.tla`
+    - [x] `base_copilot.tla`: extracted CoPilot protocol from monolithic `jetpack_copilot.tla` (~270 lines)
+      - Refactored `jetpack_copilot.tla` to `B == INSTANCE base_copilot` + thin wrappers (~260 lines, was 508)
+      - Wrapper adds `v \in J!AvailableCommands` guard (base module uses `v \in Commands`)
+      - TLC: exhaustive 515 states (exact match with pre-refactoring baseline)
     - [ ] `base_mencius.tla`: extract Mencius protocol from `jetpack_mencius.tla`
   - Current `tla/jetpack.tla` still reads `log[i][k]`; that is not enough for the final proof target.
   - The abstraction must support:

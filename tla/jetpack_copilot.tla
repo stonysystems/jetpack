@@ -2,10 +2,10 @@
 \* Composition of Jetpack plugin with CoPilot base protocol.
 \*
 \* This wrapper module:
-\*   1. Declares all variables (shared + CoPilot-specific)
-\*   2. INSTANCE's jetpack.tla (maps shared variables)
-\*   3. Defines CoPilot-specific actions inline
-\*   4. Wraps J!<action> with UNCHANGED copilotVars for Jetpack actions
+\*   1. Declares all variables (shared + CoPilot-specific + Jetpack + client + execution)
+\*   2. INSTANCE's base_copilot.tla (CoPilot protocol) and jetpack.tla (plugin)
+\*   3. Wraps base protocol actions with UNCHANGED <<jetpackVars, clientVars, executionVars>>
+\*   4. Wraps Jetpack actions with UNCHANGED copilotExtraVars
 \*   5. Wires Init, Next, Spec, and properties
 \*
 \* CoPilot provides: dual-leader (pilot + copilot) replication with
@@ -16,10 +16,6 @@ EXTENDS Naturals, FiniteSets, Sequences, TLC
 
 \* Basic universe sets.
 CONSTANTS Server, Client, CmdId, Key
-
-\* Reserved value for votedFor.
-Nil == "Nil"
-NilDep == [tag |-> "NilDep"]
 
 (***************************************************************************)
 (* Variables                                                               *)
@@ -56,261 +52,97 @@ VARIABLES
     \* Execution tracking.
     original_execution_cmds, execution_cmds
 
-\* Protocol-specific variables (for UNCHANGED in Jetpack actions).
+\* Variable groups for UNCHANGED clauses.
 copilotExtraVars == <<votedFor, votesResponded, votesGranted, nextIndex, matchIndex,
                       role, cpLog, cpBallot>>
-
-\* Variable groups for actions' UNCHANGED clauses.
-serverVars == <<currentTerm, ostate, votedFor>>
-logVars == <<log, commitIndex>>
+serverVars    == <<currentTerm, ostate, votedFor>>
 candidateVars == <<votesResponded, votesGranted>>
-leaderVars == <<nextIndex, matchIndex>>
-copilotVars == <<role, cpLog, cpBallot>>
-jetpackVars == <<jstate, jepoch, oepoch, old_view, new_view, jpool,
-                 recovery_set, chosen_value, br_responses,
-                 prep_responses, accept_responses>>
-clientVars == <<client_view, client_pending, client_successes>>
+leaderVars    == <<nextIndex, matchIndex>>
+logVars       == <<log, commitIndex>>
+copilotVars   == <<role, cpLog, cpBallot>>
+jetpackVars   == <<jstate, jepoch, oepoch, old_view, new_view, jpool,
+                   recovery_set, chosen_value, br_responses,
+                   prep_responses, accept_responses>>
+clientVars    == <<client_view, client_pending, client_successes>>
 executionVars == <<original_execution_cmds, execution_cmds>>
 
 vars == <<messages, serverVars, candidateVars, leaderVars,
           logVars, copilotVars, jetpackVars, clientVars, executionVars>>
 
 (***************************************************************************)
-(* INSTANCE Jetpack module                                                 *)
+(* INSTANCE base protocol and Jetpack modules                              *)
 (***************************************************************************)
 
+B == INSTANCE base_copilot
 J == INSTANCE jetpack WITH NoOpCmd <- [tag |-> "CoPilotNoOp"]
 
 (***************************************************************************)
-(* CoPilot helpers and constants                                           *)
+(* Re-exported constants                                                   *)
 (***************************************************************************)
 
-Follower   == J!Follower
-Candidate  == J!Candidate
-ToBeLeader == J!ToBeLeader
-Leader     == J!Leader
-
-\* CoPilot roles.
-Pilot      == "Pilot"
-Copilot    == "Copilot"
-Acceptor   == "Acceptor"
-
-\* CoPilot-specific entry states.
-PreAccepted  == "PreAccepted"
-Accepted     == "Accepted"
-Committed    == "Committed"
-
-\* CoPilot message types.
-CoPilotPreAcceptRequest   == "CoPilotPreAcceptRequest"
-CoPilotPreAcceptResponse  == "CoPilotPreAcceptResponse"
-CoPilotAcceptRequest      == "CoPilotAcceptRequest"
-CoPilotAcceptResponse     == "CoPilotAcceptResponse"
-CoPilotCommitRequest      == "CoPilotCommitRequest"
-
-CoPilotMessageTypes == {CoPilotPreAcceptRequest, CoPilotPreAcceptResponse,
-                        CoPilotAcceptRequest, CoPilotAcceptResponse,
-                        CoPilotCommitRequest}
-
-Symmetry == Permutations(Server)
-
-Quorum == J!Quorum
-
-\* CoPilot helpers.
-ServerSeq == CHOOSE f \in [1..Cardinality(Server) -> Server] :
-                \A i, j \in 1..Cardinality(Server) : i /= j => f[i] /= f[j]
-
-PilotOf(term) == ServerSeq[((term - 1) % Cardinality(Server)) + 1]
-CopilotOf(term) == ServerSeq[(term % Cardinality(Server)) + 1]
-
-IsPilotOrCopilot(i) == role[i] \in {Pilot, Copilot}
-
-DepsFor(i, cmd) ==
-    {k \in 1..Len(cpLog[i]) :
-        /\ cpLog[i][k].cmd.key = cmd.key
-        /\ cpLog[i][k].cmd /= cmd}
+Follower     == B!Follower
+Candidate    == B!Candidate
+ToBeLeader   == B!ToBeLeader
+Leader       == B!Leader
+Symmetry     == B!Symmetry
+Quorum       == B!Quorum
 
 (***************************************************************************)
 (* Initialization                                                          *)
 (***************************************************************************)
 
 Init ==
-    /\ messages = [m \in {} |-> 0]
-    /\ currentTerm = [i \in Server |-> 1]
-    /\ ostate = [i \in Server |-> Follower]
-    /\ votedFor = [i \in Server |-> Nil]
-    /\ log = [i \in Server |-> <<>>]
-    /\ commitIndex = [i \in Server |-> 0]
-    /\ votesResponded = [i \in Server |-> {}]
-    /\ votesGranted = [i \in Server |-> {}]
-    /\ nextIndex = [i \in Server |-> [j \in Server |-> 1]]
-    /\ matchIndex = [i \in Server |-> [j \in Server |-> 0]]
-    \* CoPilot init.
-    /\ role = [i \in Server |-> IF i = PilotOf(1) THEN Pilot
-                                 ELSE IF i = CopilotOf(1) THEN Copilot
-                                 ELSE Acceptor]
-    /\ cpLog = [i \in Server |-> <<>>]
-    /\ cpBallot = [i \in Server |-> 0]
-    \* Jetpack init.
+    /\ B!InitBaseVars
     /\ J!InitJetpackVars
     /\ J!InitClientVars
     /\ J!InitExecutionVars
 
 (***************************************************************************)
-(* CoPilot transitions (protocol-specific)                                 *)
+(* Wrapped base protocol transitions                                       *)
 (***************************************************************************)
 
-\* A pilot or copilot proposes a command via CoPilot protocol.
-Propose(i, v) ==
-    /\ IsPilotOrCopilot(i)
-    /\ v \in J!AvailableCommands
-    /\ LET deps == DepsFor(i, v)
-           newEntry == [cmd |-> v, deps |-> deps,
-                        status |-> PreAccepted, ballot |-> cpBallot[i]]
-           newLogEntry == [term |-> currentTerm[i], value |-> v]
-           msgSet == { [mtype |-> CoPilotPreAcceptRequest,
-                        mterm |-> currentTerm[i],
-                        msource |-> i,
-                        mdest |-> s,
-                        mcmd |-> v,
-                        mdeps |-> deps,
-                        mballot |-> cpBallot[i],
-                        mindex |-> Len(cpLog[i]) + 1] : s \in Server \ {i} }
-       IN /\ cpLog' = [cpLog EXCEPT ![i] = Append(cpLog[i], newEntry)]
-          /\ log' = [log EXCEPT ![i] = Append(log[i], newLogEntry)]
-          /\ messages' = J!AddMessages(msgSet, messages)
-          /\ UNCHANGED <<serverVars, candidateVars, leaderVars, commitIndex,
-                         role, cpBallot, jetpackVars, clientVars, executionVars>>
-
-HandleCoPilotPreAccept(i, m) ==
-    /\ m.mtype = CoPilotPreAcceptRequest
-    /\ i = m.mdest
-    /\ m.mballot >= cpBallot[i]
-    /\ LET cmd == m.mcmd
-           localDeps == DepsFor(i, cmd)
-           unionDeps == m.mdeps \cup localDeps
-           newEntry == [cmd |-> cmd, deps |-> unionDeps,
-                        status |-> PreAccepted, ballot |-> m.mballot]
-           newLogEntry == [term |-> m.mterm, value |-> cmd]
-       IN /\ cpLog' = [cpLog EXCEPT ![i] =
-                          IF Len(cpLog[i]) < m.mindex
-                          THEN Append(cpLog[i], newEntry)
-                          ELSE [cpLog[i] EXCEPT ![m.mindex] = newEntry]]
-          /\ log' = [log EXCEPT ![i] =
-                        IF Len(log[i]) < m.mindex
-                        THEN Append(log[i], newLogEntry)
-                        ELSE log[i]]
-          /\ cpBallot' = [cpBallot EXCEPT ![i] = m.mballot]
-          /\ J!Reply([mtype |-> CoPilotPreAcceptResponse,
-                      mterm |-> currentTerm[i],
-                      msource |-> i,
-                      mdest |-> m.msource,
-                      mdeps |-> unionDeps,
-                      mindex |-> m.mindex,
-                      mok |-> TRUE],
-                      m)
-          /\ UNCHANGED <<serverVars, candidateVars, leaderVars, commitIndex,
-                         role, jetpackVars, clientVars, executionVars>>
-
-HandleCoPilotPreAcceptResponse(i, m) ==
-    /\ m.mtype = CoPilotPreAcceptResponse
-    /\ i = m.mdest
-    /\ m.mok
-    /\ m.mindex <= Len(cpLog[i])
-    /\ cpLog[i][m.mindex].status = PreAccepted
-    /\ LET entry == cpLog[i][m.mindex]
-           finalDeps == entry.deps \cup m.mdeps
-           newEntry == [entry EXCEPT !.deps = finalDeps, !.status = Committed]
-       IN /\ cpLog' = [cpLog EXCEPT ![i][m.mindex] = newEntry]
-          /\ commitIndex' = [commitIndex EXCEPT ![i] =
-                               J!Max({commitIndex[i], m.mindex})]
-          /\ LET commitMsgs == { [mtype |-> CoPilotCommitRequest,
-                                  mterm |-> currentTerm[i],
-                                  msource |-> i,
-                                  mdest |-> s,
-                                  mcmd |-> entry.cmd,
-                                  mdeps |-> finalDeps,
-                                  mindex |-> m.mindex] : s \in Server \ {i} }
-             IN messages' = J!AddMessages(commitMsgs, J!WithoutMessage(m, messages))
-          /\ UNCHANGED <<serverVars, candidateVars, leaderVars, log,
-                         role, cpBallot, jetpackVars, clientVars, executionVars>>
-
-HandleCoPilotCommit(i, m) ==
-    /\ m.mtype = CoPilotCommitRequest
-    /\ i = m.mdest
-    /\ LET cmd == m.mcmd
-           newEntry == [cmd |-> cmd, deps |-> m.mdeps,
-                        status |-> Committed, ballot |-> cpBallot[i]]
-           newLogEntry == [term |-> m.mterm, value |-> cmd]
-       IN /\ cpLog' = [cpLog EXCEPT ![i] =
-                          IF Len(cpLog[i]) < m.mindex
-                          THEN Append(cpLog[i], newEntry)
-                          ELSE [cpLog[i] EXCEPT ![m.mindex] = newEntry]]
-          /\ log' = [log EXCEPT ![i] =
-                        IF Len(log[i]) < m.mindex
-                        THEN Append(log[i], newLogEntry)
-                        ELSE log[i]]
-          /\ commitIndex' = [commitIndex EXCEPT ![i] =
-                               J!Max({commitIndex[i], m.mindex})]
-          /\ J!Discard(m)
-          /\ UNCHANGED <<serverVars, candidateVars, leaderVars,
-                         role, cpBallot, jetpackVars, clientVars, executionVars>>
-
-\* Fast takeover: copilot takes over pilot role, becomes ToBeLeader
-\* for Jetpack recovery before becoming full Leader.
-FastTakeover(i) ==
-    /\ role[i] = Copilot
-    /\ role' = [role EXCEPT ![i] = Pilot]
-    /\ ostate' = [ostate EXCEPT ![i] = ToBeLeader]
-    /\ UNCHANGED <<messages, currentTerm, votedFor, candidateVars, leaderVars,
-                   logVars, cpLog, cpBallot, jetpackVars, clientVars, executionVars>>
-
-\* CoPilot-compatible Restart.
 Restart(i) ==
-    /\ ostate' = [ostate EXCEPT ![i] = Follower]
-    /\ role' = [role EXCEPT ![i] = Acceptor]
-    /\ votesResponded' = [votesResponded EXCEPT ![i] = {}]
-    /\ votesGranted' = [votesGranted EXCEPT ![i] = {}]
-    /\ nextIndex' = [nextIndex EXCEPT ![i] = [j \in Server |-> 1]]
-    /\ matchIndex' = [matchIndex EXCEPT ![i] = [j \in Server |-> 0]]
-    /\ commitIndex' = [commitIndex EXCEPT ![i] = 0]
-    /\ UNCHANGED <<messages, currentTerm, votedFor, log,
-                   cpLog, cpBallot, jetpackVars, clientVars, executionVars>>
+    /\ B!Restart(i)
+    /\ UNCHANGED <<jetpackVars, clientVars, executionVars>>
 
-\* Election timeout.
 Timeout(i) ==
-    /\ ostate[i] \in {Follower, Candidate}
-    /\ ostate' = [ostate EXCEPT ![i] = Candidate]
-    /\ currentTerm' = [currentTerm EXCEPT ![i] = currentTerm[i] + 1]
-    /\ votedFor' = [votedFor EXCEPT ![i] = i]
-    /\ votesResponded' = [votesResponded EXCEPT ![i] = {i}]
-    /\ votesGranted' = [votesGranted EXCEPT ![i] = {i}]
-    /\ UNCHANGED <<messages, leaderVars, logVars, copilotVars,
-                   jetpackVars, clientVars, executionVars>>
+    /\ B!Timeout(i)
+    /\ UNCHANGED <<jetpackVars, clientVars, executionVars>>
 
-\* Candidate transitions to ToBeLeader (Jetpack recovery must finish first).
 BecomeToBeLeader(i) ==
-    /\ ostate[i] = Candidate
-    /\ votesGranted[i] \in Quorum
-    /\ ostate' = [ostate EXCEPT ![i] = ToBeLeader]
-    /\ role' = [j \in Server |-> IF j = i THEN Pilot
-                                  ELSE IF role[j] = Pilot THEN Copilot
-                                  ELSE role[j]]
-    /\ nextIndex' = [nextIndex EXCEPT ![i] =
-                        [j \in Server |-> Len(log[i]) + 1]]
-    /\ matchIndex' = [matchIndex EXCEPT ![i] =
-                        [j \in Server |-> 0]]
-    /\ UNCHANGED <<messages, currentTerm, votedFor, candidateVars, logVars,
-                   cpLog, cpBallot, jetpackVars, clientVars, executionVars>>
+    /\ B!BecomeToBeLeader(i)
+    /\ UNCHANGED <<jetpackVars, clientVars, executionVars>>
 
-\* CoPilot ClientRequest: propose via CoPilot protocol.
+FastTakeover(i) ==
+    /\ B!FastTakeover(i)
+    /\ UNCHANGED <<jetpackVars, clientVars, executionVars>>
+
+\* CoPilot ClientRequest: wrapper adds Jetpack's AvailableCommands filter.
 ClientRequest(i, v) ==
-    /\ ostate[i] = Leader
-    /\ Propose(i, v)
+    /\ v \in J!AvailableCommands
+    /\ B!ClientRequest(i, v)
+    /\ UNCHANGED <<jetpackVars, clientVars, executionVars>>
 
 \* Leader applies committed entries via Raft-compatible log.
 ApplyCommitted(i) ==
     /\ J!ApplyCommitted(i)
     /\ UNCHANGED copilotExtraVars
+
+(***************************************************************************)
+(* Wrapped CoPilot message handlers                                        *)
+(***************************************************************************)
+
+HandleCoPilotPreAccept(i, m) ==
+    /\ B!HandleCoPilotPreAccept(i, m)
+    /\ UNCHANGED <<jetpackVars, clientVars, executionVars>>
+
+HandleCoPilotPreAcceptResponse(i, m) ==
+    /\ B!HandleCoPilotPreAcceptResponse(i, m)
+    /\ UNCHANGED <<jetpackVars, clientVars, executionVars>>
+
+HandleCoPilotCommit(i, m) ==
+    /\ B!HandleCoPilotCommit(i, m)
+    /\ UNCHANGED <<jetpackVars, clientVars, executionVars>>
 
 (***************************************************************************)
 (* Wrapped Jetpack transitions (add UNCHANGED copilotExtraVars)            *)
@@ -398,11 +230,11 @@ WHandleFinishRecovery(i, m) ==
 
 ServerReceive(m) ==
     /\ m.mdest \in Server
-    /\ \/ /\ m.mtype = CoPilotPreAcceptRequest
+    /\ \/ /\ m.mtype = B!CoPilotPreAcceptRequest
           /\ HandleCoPilotPreAccept(m.mdest, m)
-       \/ /\ m.mtype = CoPilotPreAcceptResponse
+       \/ /\ m.mtype = B!CoPilotPreAcceptResponse
           /\ HandleCoPilotPreAcceptResponse(m.mdest, m)
-       \/ /\ m.mtype = CoPilotCommitRequest
+       \/ /\ m.mtype = B!CoPilotCommitRequest
           /\ HandleCoPilotCommit(m.mdest, m)
        \/ /\ m.mtype = J!PreacceptRequest
           /\ WHandlePreacceptRequest(m.mdest, m)
@@ -499,7 +331,7 @@ ExecutionDedupMatches == J!ExecutionDedupMatches
 
 \* At most two active proposers (pilot + copilot) at any time.
 ActiveProposerBound ==
-    Cardinality({i \in Server : role[i] \in {Pilot, Copilot}}) <= 2
+    Cardinality({i \in Server : role[i] \in {B!Pilot, B!Copilot}}) <= 2
 
 Safety == [](CommittedLogAgreement /\ LogOrderMatchesExecution /\ ExecutionDedupMatches /\ ActiveProposerBound)
 
