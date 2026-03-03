@@ -23,7 +23,7 @@ CONSTANTS Server, Client, CmdId, Key
 
 \* Reserved value for votedFor.
 Nil == "Nil"
-NoOp == [tag |-> "NoOp"]
+NoOp == [cmd_id |-> "NoOp", key |-> "NoOp"]
 
 (***************************************************************************)
 (* Variables                                                               *)
@@ -137,6 +137,18 @@ MaxSlot == N * 3
 
 MySlotsUpTo(i, limit) == {sl \in 1..limit : CoordinatorOf(sl) = i}
 
+\* Extend log[i] through all consecutive Learned/Skipped slots from current length.
+\* newSS: the post-transition slotState for server i (function 1..MaxSlot -> state)
+\* newSV: the post-transition slotValue for server i (function 1..MaxSlot -> value)
+ExtendLog(i, newSS, newSV) ==
+    LET curLen == Len(log[i])
+        maxExt == CHOOSE n \in curLen..MaxSlot :
+                    /\ \A k \in (curLen+1)..n : newSS[k] \in {Learned, Skipped}
+                    /\ (n = MaxSlot \/ newSS[n+1] \notin {Learned, Skipped})
+        newEntries == [k \in 1..(maxExt - curLen) |->
+                        [term |-> currentTerm[i], value |-> newSV[curLen + k]]]
+    IN log[i] \o newEntries
+
 (***************************************************************************)
 (* Initialization                                                          *)
 (***************************************************************************)
@@ -186,10 +198,8 @@ Suggest(i, v) ==
           /\ slotBallot' = [slotBallot EXCEPT ![i][sl] = 1]
           /\ localIndex' = [localIndex EXCEPT ![i] = sl + N]
           /\ acceptCount' = [acceptCount EXCEPT ![i][sl] = 1]
-          /\ log' = [log EXCEPT ![i] = Append(log[i],
-                        [term |-> currentTerm[i], value |-> v])]
           /\ messages' = J!AddMessages(msgSet, messages)
-          /\ UNCHANGED <<serverVars, candidateVars, leaderVars, commitIndex,
+          /\ UNCHANGED <<serverVars, candidateVars, leaderVars, logVars,
                          jetpackVars, clientVars, executionVars>>
 
 \* Coordinator skips its slot with a no-op.
@@ -242,7 +252,16 @@ HandleSuggestResponse(i, m) ==
           /\ acceptCount' = [acceptCount EXCEPT ![i][sl] = acceptCount[i][sl] + 1]
           /\ IF acceptCount[i][sl] + 1 >= (N \div 2 + 1)
              THEN
-               /\ slotState' = [slotState EXCEPT ![i][sl] = Learned]
+               /\ LET newSS == [slotState[i] EXCEPT ![sl] = Learned]
+                      newLog == ExtendLog(i, newSS, slotValue[i])
+                  IN /\ slotState' = [slotState EXCEPT ![i] = newSS]
+                     /\ log' = [log EXCEPT ![i] = newLog]
+                     /\ LET newCI == commitIndex[i] + 1
+                        IN IF /\ newCI <= Len(newLog)
+                              /\ newCI <= MaxSlot
+                              /\ newSS[newCI] \in {Learned, Skipped}
+                           THEN commitIndex' = [commitIndex EXCEPT ![i] = newCI]
+                           ELSE UNCHANGED commitIndex
                /\ LET learnMsgs == { [mtype |-> LearnMessage,
                                        mterm |-> currentTerm[i],
                                        msource |-> i,
@@ -250,16 +269,10 @@ HandleSuggestResponse(i, m) ==
                                        mslot |-> sl,
                                        mvalue |-> slotValue[i][sl]] : s \in Server \ {i} }
                   IN messages' = J!AddMessages(learnMsgs, J!WithoutMessage(m, messages))
-               /\ LET newCI == commitIndex[i] + 1
-                  IN IF /\ newCI <= Len(log[i])
-                        /\ newCI <= MaxSlot
-                        /\ slotState[i][newCI] \in {Learned, Skipped}
-                     THEN commitIndex' = [commitIndex EXCEPT ![i] = newCI]
-                     ELSE UNCHANGED commitIndex
              ELSE
-               /\ UNCHANGED <<slotState, commitIndex>>
+               /\ UNCHANGED <<slotState, log, commitIndex>>
                /\ J!Discard(m)
-          /\ UNCHANGED <<serverVars, candidateVars, leaderVars, log,
+          /\ UNCHANGED <<serverVars, candidateVars, leaderVars,
                          slotValue, slotBallot, localIndex,
                          jetpackVars, clientVars, executionVars>>
 
@@ -269,10 +282,13 @@ HandleSkip(i, m) ==
     /\ LET sl == m.mslot
        IN /\ sl <= MaxSlot
           /\ slotState[i][sl] \in {Empty, Proposed}
-          /\ slotState' = [slotState EXCEPT ![i][sl] = Skipped]
-          /\ slotValue' = [slotValue EXCEPT ![i][sl] = NoOp]
+          /\ LET newSS == [slotState[i] EXCEPT ![sl] = Skipped]
+                 newSV == [slotValue[i] EXCEPT ![sl] = NoOp]
+             IN /\ slotState' = [slotState EXCEPT ![i] = newSS]
+                /\ slotValue' = [slotValue EXCEPT ![i] = newSV]
+                /\ log' = [log EXCEPT ![i] = ExtendLog(i, newSS, newSV)]
           /\ J!Discard(m)
-          /\ UNCHANGED <<serverVars, candidateVars, leaderVars, logVars,
+          /\ UNCHANGED <<serverVars, candidateVars, leaderVars, commitIndex,
                          slotBallot, localIndex, acceptCount,
                          jetpackVars, clientVars, executionVars>>
 
@@ -281,18 +297,18 @@ HandleLearn(i, m) ==
     /\ i = m.mdest
     /\ LET sl == m.mslot
        IN /\ sl <= MaxSlot
-          /\ slotState' = [slotState EXCEPT ![i][sl] = Learned]
-          /\ slotValue' = [slotValue EXCEPT ![i][sl] = m.mvalue]
-          /\ log' = [log EXCEPT ![i] =
-                        IF Len(log[i]) < sl
-                        THEN Append(log[i], [term |-> m.mterm, value |-> m.mvalue])
-                        ELSE log[i]]
-          /\ LET newCI == commitIndex[i] + 1
-             IN IF /\ newCI <= Len(log[i]) + 1
-                   /\ newCI <= MaxSlot
-                   /\ slotState'[i][newCI] \in {Learned, Skipped}
-                THEN commitIndex' = [commitIndex EXCEPT ![i] = newCI]
-                ELSE UNCHANGED commitIndex
+          /\ LET newSS == [slotState[i] EXCEPT ![sl] = Learned]
+                 newSV == [slotValue[i] EXCEPT ![sl] = m.mvalue]
+                 newLog == ExtendLog(i, newSS, newSV)
+             IN /\ slotState' = [slotState EXCEPT ![i] = newSS]
+                /\ slotValue' = [slotValue EXCEPT ![i] = newSV]
+                /\ log' = [log EXCEPT ![i] = newLog]
+                /\ LET newCI == commitIndex[i] + 1
+                   IN IF /\ newCI <= Len(newLog)
+                         /\ newCI <= MaxSlot
+                         /\ newSS[newCI] \in {Learned, Skipped}
+                      THEN commitIndex' = [commitIndex EXCEPT ![i] = newCI]
+                      ELSE UNCHANGED commitIndex
           /\ J!Discard(m)
           /\ UNCHANGED <<serverVars, candidateVars, leaderVars,
                          slotBallot, localIndex, acceptCount,
@@ -348,7 +364,9 @@ HandleRevokeResponse(i, m) ==
           /\ acceptCount' = [acceptCount EXCEPT ![i][sl] = acceptCount[i][sl] + 1]
           /\ IF acceptCount[i][sl] + 1 >= (N \div 2 + 1)
              THEN
-               /\ slotState' = [slotState EXCEPT ![i][sl] = Skipped]
+               /\ LET newSS == [slotState[i] EXCEPT ![sl] = Skipped]
+                  IN /\ slotState' = [slotState EXCEPT ![i] = newSS]
+                     /\ log' = [log EXCEPT ![i] = ExtendLog(i, newSS, slotValue[i])]
                /\ LET learnMsgs == { [mtype |-> SkipMessage,
                                        mterm |-> currentTerm[i],
                                        msource |-> i,
@@ -356,9 +374,9 @@ HandleRevokeResponse(i, m) ==
                                        mslot |-> sl] : s \in Server \ {i} }
                   IN messages' = J!AddMessages(learnMsgs, J!WithoutMessage(m, messages))
              ELSE
-               /\ UNCHANGED slotState
+               /\ UNCHANGED <<slotState, log>>
                /\ J!Discard(m)
-          /\ UNCHANGED <<serverVars, candidateVars, leaderVars, logVars,
+          /\ UNCHANGED <<serverVars, candidateVars, leaderVars, commitIndex,
                          slotValue, slotBallot, localIndex,
                          jetpackVars, clientVars, executionVars>>
 
@@ -589,12 +607,29 @@ SmallStateConstraint ==
     /\ Len(original_execution_cmds) <= 2
     /\ Len(execution_cmds) <= 2
 
+\* Minimal constraint for fast smoke testing (no restarts).
+TinyStateConstraint ==
+    /\ \A i \in Server : currentTerm[i] <= 1
+    /\ \A m \in DOMAIN messages : messages[m] <= 1
+    /\ Cardinality(DOMAIN messages) <= 2
+    /\ \A i \in Server : Len(log[i]) <= 2
+    /\ Len(original_execution_cmds) <= 2
+    /\ Len(execution_cmds) <= 2
+
 (***************************************************************************)
 (* Properties                                                              *)
 (***************************************************************************)
 
 LogOrderMatchesExecution == J!LogOrderMatchesExecution
-ExecutionDedupMatches == J!ExecutionDedupMatches
+\* In Mencius, Skipped slots produce NoOp entries in execution sequences.
+\* Dedup collapses multiple identical NoOps, breaking IsPrefix.
+\* Filter NoOps before comparison since they are not real commands.
+ExecutionDedupMatches ==
+    LET FilterNoOps(seq) == SelectSeq(seq, LAMBDA x : x # NoOp)
+        origFiltered == FilterNoOps(original_execution_cmds)
+        execFiltered == FilterNoOps(execution_cmds)
+    IN \/ J!IsPrefix(J!Dedup(origFiltered), execFiltered)
+       \/ J!IsPrefix(J!Dedup(execFiltered), origFiltered)
 
 \* Committed log entries must agree across servers.
 \* Note: unrestricted LogAgreement (J!LogAgreement) does NOT hold for Mencius because

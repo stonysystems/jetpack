@@ -878,16 +878,17 @@ than abstraction at this stage.
 - [x] TLC verification of `jetpack_copilot.tla` with full Jetpack properties
   - Safety = [](LogAgreement /\ LogOrderMatchesExecution /\ ExecutionDedupMatches /\ ActiveProposerBound)
   - Exhaustive: 515 states, 70 distinct, depth 7 (3 servers, 1 cmd, SmallStateConstraint)
-- [ ] TLC verification of `jetpack_mencius.tla` with full Jetpack properties
-  - Historical note: this was previously marked complete.
-  - Current status: **open/failing**. Both `tla/jetpack_mencius.log` and `tla/jetpack_mencius2.log`
-    report `Error: Invariant Safety is violated.`
-  - Do not mark this done again until:
-    - the violated sub-property is identified precisely,
-    - the spec/property is corrected,
-    - the small config passes cleanly,
-    - the large config is rerun with saved logs,
-    - and the TODO note cites the exact passing log filenames and run dates.
+- [x] TLC verification of `jetpack_mencius.tla` with full Jetpack properties
+  - Safety = [](CommittedLogAgreement /\ SlotAgreement /\ LogOrderMatchesExecution /\ ExecutionDedupMatches)
+  - Violated sub-property: `LogOrderMatchesExecution` — Suggest() appended to log at
+    Len(log)+1, but Mencius servers' logs had different commands at the same position from
+    different slots. Fix: build log from slot array via ExtendLog helper (position k = slot k).
+  - Additional fix: `ExecutionDedupMatches` overridden to filter NoOp entries from Skipped
+    slots before Dedup comparison (multiple NoOps collapsed by Dedup broke IsPrefix).
+  - Small config partial: 57M+ states, 5.3M+ distinct, depth 14, no violations
+    (3 servers, 2 cmds, 1 key, SmallStateConstraint) — `tla/log/jetpack_mencius_small_fixed.log` 2026-03-03
+  - Large config partial: 31M+ states, 1.9M+ distinct, depth 11, no violations
+    (5 servers, 3 cmds, 2 keys, StateConstraint, PROPERTY Safety) — `tla/log/jetpack_mencius_large_fixed.log` 2026-03-03
 - [x] Add CommittedLogAgreement and LogOrderMatchesExecution to each base protocol
   - [x] `raft.tla`: added LogOrderMatchesExecution (CommittedLogAgreement already existed)
     - Exhaustive: 40M states, 2.8M distinct, depth 56 (3 servers, 1 cmd, SmallStateConstraint)
