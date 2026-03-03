@@ -924,7 +924,7 @@ Expected abstraction direction:
     - Removed per-protocol property overrides from `jetpack_mencius.tla`
     - All 3 wrappers now call `J!CommittedLogAgreement` and `J!ExecutionDedupMatches` identically
     - TLC: Raft exhaustive 82K, CoPilot exhaustive 515, Mencius partial 31M+ (2026-03-03)
-  - [ ] Sub-task 2: Introduce `base_raft.tla`, `base_copilot.tla`, `base_mencius.tla`
+  - [x] Sub-task 2: Introduce `base_raft.tla`, `base_copilot.tla`, `base_mencius.tla`
     - [x] `base_raft.tla`: extracted Raft protocol from monolithic `jetpack_raft.tla` (~280 lines)
       - Refactored `jetpack_raft.tla` to `B == INSTANCE base_raft` + thin wrappers (~250 lines, was 533)
       - TLC: exhaustive 82,375 states (exact match with pre-refactoring baseline)
@@ -932,7 +932,10 @@ Expected abstraction direction:
       - Refactored `jetpack_copilot.tla` to `B == INSTANCE base_copilot` + thin wrappers (~260 lines, was 508)
       - Wrapper adds `v \in J!AvailableCommands` guard (base module uses `v \in Commands`)
       - TLC: exhaustive 515 states (exact match with pre-refactoring baseline)
-    - [ ] `base_mencius.tla`: extract Mencius protocol from `jetpack_mencius.tla`
+    - [x] `base_mencius.tla`: extracted Mencius protocol from monolithic `jetpack_mencius.tla` (~370 lines)
+      - Refactored `jetpack_mencius.tla` to `B == INSTANCE base_mencius` + thin wrappers (~300 lines, was 639)
+      - Wrapper adds `v \in J!AvailableCommands` guard (base module uses `v \in Commands`)
+      - TLC: partial 262M+ states, 28M+ distinct, depth 16 (no violations)
   - Current `tla/jetpack.tla` still reads `log[i][k]`; that is not enough for the final proof target.
   - The abstraction must support:
     - base-protocol local/original log copies,

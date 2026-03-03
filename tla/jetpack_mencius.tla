@@ -2,28 +2,19 @@
 \* Composition of Jetpack plugin with Mencius base protocol.
 \*
 \* This wrapper module:
-\*   1. Declares all variables (shared + Mencius-specific)
-\*   2. INSTANCE's jetpack.tla (maps shared variables)
-\*   3. Defines Mencius-specific actions inline
-\*   4. Wraps J!<action> with UNCHANGED menciusExtraVars for Jetpack actions
+\*   1. Declares all variables (shared + Mencius-specific + Jetpack + client + execution)
+\*   2. INSTANCE's base_mencius.tla (Mencius protocol) and jetpack.tla (plugin)
+\*   3. Wraps base protocol actions with UNCHANGED <<jetpackVars, clientVars, executionVars>>
+\*   4. Wraps Jetpack actions with UNCHANGED menciusExtraVars
 \*   5. Wires Init, Next, Spec, and properties
 \*
 \* Mencius provides: multi-leader Paxos with round-robin slot assignment.
 \* Jetpack provides: fast-path preaccept with recovery on leader change.
-\*
-\* Key differences from jetpack_raft.tla:
-\*   - All servers start as Leader (multi-leader Paxos)
-\*   - BecomeToBeLeader only used after Restart (recovery path)
-\*   - Mencius-specific variables (slotState, slotValue, etc.) added
 
 EXTENDS Naturals, FiniteSets, Sequences, TLC
 
 \* Basic universe sets.
 CONSTANTS Server, Client, CmdId, Key
-
-\* Reserved value for votedFor.
-Nil == "Nil"
-NoOp == [cmd_id |-> "NoOp", key |-> "NoOp"]
 
 (***************************************************************************)
 (* Variables                                                               *)
@@ -62,368 +53,114 @@ VARIABLES
     \* Execution tracking.
     original_execution_cmds, execution_cmds
 
-\* Protocol-specific variables (for UNCHANGED in Jetpack actions).
+\* Variable groups for UNCHANGED clauses.
 menciusExtraVars == <<votedFor, votesResponded, votesGranted, nextIndex, matchIndex,
                       slotState, slotValue, slotBallot, localIndex, acceptCount>>
-
-\* Variable groups for actions' UNCHANGED clauses.
-serverVars == <<currentTerm, ostate, votedFor>>
-logVars == <<log, commitIndex>>
+serverVars    == <<currentTerm, ostate, votedFor>>
 candidateVars == <<votesResponded, votesGranted>>
-leaderVars == <<nextIndex, matchIndex>>
-menciusVars == <<slotState, slotValue, slotBallot, localIndex, acceptCount>>
-jetpackVars == <<jstate, jepoch, oepoch, old_view, new_view, jpool,
-                 recovery_set, chosen_value, br_responses,
-                 prep_responses, accept_responses>>
-clientVars == <<client_view, client_pending, client_successes>>
+leaderVars    == <<nextIndex, matchIndex>>
+logVars       == <<log, commitIndex>>
+menciusVars   == <<slotState, slotValue, slotBallot, localIndex, acceptCount>>
+jetpackVars   == <<jstate, jepoch, oepoch, old_view, new_view, jpool,
+                   recovery_set, chosen_value, br_responses,
+                   prep_responses, accept_responses>>
+clientVars    == <<client_view, client_pending, client_successes>>
 executionVars == <<original_execution_cmds, execution_cmds>>
 
 vars == <<messages, serverVars, candidateVars, leaderVars,
           logVars, menciusVars, jetpackVars, clientVars, executionVars>>
 
 (***************************************************************************)
-(* INSTANCE Jetpack module                                                 *)
+(* INSTANCE base protocol and Jetpack modules                              *)
 (***************************************************************************)
 
-J == INSTANCE jetpack WITH NoOpCmd <- NoOp
+B == INSTANCE base_mencius
+J == INSTANCE jetpack WITH NoOpCmd <- B!NoOp
 
 (***************************************************************************)
-(* Mencius helpers and constants                                           *)
+(* Re-exported constants                                                   *)
 (***************************************************************************)
 
-Follower   == J!Follower
-Candidate  == J!Candidate
-ToBeLeader == J!ToBeLeader
-Leader     == J!Leader
-
-\* Mencius slot states.
-Empty     == "Empty"
-Proposed  == "Proposed"
-Accepted  == "Accepted"
-Learned   == "Learned"
-Skipped   == "Skipped"
-
-\* Mencius message types.
-SuggestRequest   == "SuggestRequest"
-SuggestResponse  == "SuggestResponse"
-SkipMessage      == "SkipMessage"
-RevokeRequest    == "RevokeRequest"
-RevokeResponse   == "RevokeResponse"
-LearnMessage     == "LearnMessage"
-
-MenciusMessageTypes == {SuggestRequest, SuggestResponse,
-                        SkipMessage, RevokeRequest,
-                        RevokeResponse, LearnMessage}
-
-N == Cardinality(Server)
-
-Symmetry == Permutations(Server)
-
-Quorum == J!Quorum
-
-LastTerm(xlog) == IF Len(xlog) = 0 THEN 0 ELSE xlog[Len(xlog)].term
-
-SlotValues == J!Commands \cup {NoOp}
-
-\* Map server to a unique index 1..N for round-robin assignment.
-ServerSeq == CHOOSE f \in [1..N -> Server] :
-                \A i, j \in 1..N : i /= j => f[i] /= f[j]
-
-ServerIdx(s) == CHOOSE idx \in 1..N : ServerSeq[idx] = s
-
-CoordinatorOf(sl) == ServerSeq[((sl - 1) % N) + 1]
-
-MaxSlot == N * 3
-
-MySlotsUpTo(i, limit) == {sl \in 1..limit : CoordinatorOf(sl) = i}
-
-\* Extend log[i] through all consecutive Learned/Skipped slots from current length.
-\* newSS: the post-transition slotState for server i (function 1..MaxSlot -> state)
-\* newSV: the post-transition slotValue for server i (function 1..MaxSlot -> value)
-ExtendLog(i, newSS, newSV) ==
-    LET curLen == Len(log[i])
-        maxExt == CHOOSE n \in curLen..MaxSlot :
-                    /\ \A k \in (curLen+1)..n : newSS[k] \in {Learned, Skipped}
-                    /\ (n = MaxSlot \/ newSS[n+1] \notin {Learned, Skipped})
-        newEntries == [k \in 1..(maxExt - curLen) |->
-                        [term |-> currentTerm[i], value |-> newSV[curLen + k]]]
-    IN log[i] \o newEntries
+Follower     == B!Follower
+Candidate    == B!Candidate
+ToBeLeader   == B!ToBeLeader
+Leader       == B!Leader
+Symmetry     == B!Symmetry
+Quorum       == B!Quorum
+MaxSlot      == B!MaxSlot
 
 (***************************************************************************)
 (* Initialization                                                          *)
 (***************************************************************************)
 
 Init ==
-    /\ messages = [m \in {} |-> 0]
-    /\ currentTerm = [i \in Server |-> 1]
-    /\ ostate = [i \in Server |-> Leader]    \* In Mencius, all servers are leaders
-    /\ votedFor = [i \in Server |-> Nil]
-    /\ log = [i \in Server |-> <<>>]
-    /\ commitIndex = [i \in Server |-> 0]
-    /\ votesResponded = [i \in Server |-> {}]
-    /\ votesGranted = [i \in Server |-> {}]
-    /\ nextIndex = [i \in Server |-> [j \in Server |-> 1]]
-    /\ matchIndex = [i \in Server |-> [j \in Server |-> 0]]
-    \* Mencius init.
-    /\ slotState = [i \in Server |-> [sl \in 1..MaxSlot |-> Empty]]
-    /\ slotValue = [i \in Server |-> [sl \in 1..MaxSlot |-> J!NilCmd]]
-    /\ slotBallot = [i \in Server |-> [sl \in 1..MaxSlot |-> 0]]
-    /\ localIndex = [i \in Server |-> ServerIdx(i)]
-    /\ acceptCount = [i \in Server |-> [sl \in 1..MaxSlot |-> 0]]
-    \* Jetpack init.
+    /\ B!InitBaseVars
     /\ J!InitJetpackVars
     /\ J!InitClientVars
     /\ J!InitExecutionVars
 
 (***************************************************************************)
-(* Mencius transitions (protocol-specific)                                 *)
+(* Wrapped base protocol transitions                                       *)
 (***************************************************************************)
 
-\* Coordinator suggests a command for its next slot.
-Suggest(i, v) ==
+Restart(i) ==
+    /\ B!Restart(i)
+    /\ UNCHANGED <<jetpackVars, clientVars, executionVars>>
+
+BecomeToBeLeader(i) ==
+    /\ B!BecomeToBeLeader(i)
+    /\ UNCHANGED <<jetpackVars, clientVars, executionVars>>
+
+AdvanceCommitIndex(i) ==
+    /\ B!AdvanceCommitIndex(i)
+    /\ UNCHANGED <<jetpackVars, clientVars, executionVars>>
+
+\* Mencius ClientRequest: wrapper adds Jetpack's AvailableCommands filter.
+ClientRequest(i, v) ==
     /\ v \in J!AvailableCommands
-    /\ localIndex[i] <= MaxSlot
-    /\ CoordinatorOf(localIndex[i]) = i
-    /\ slotState[i][localIndex[i]] = Empty
-    /\ LET sl == localIndex[i]
-           msgSet == { [mtype |-> SuggestRequest,
-                        mterm |-> currentTerm[i],
-                        msource |-> i,
-                        mdest |-> s,
-                        mslot |-> sl,
-                        mvalue |-> v,
-                        mballot |-> 1] : s \in Server \ {i} }
-       IN /\ slotState' = [slotState EXCEPT ![i][sl] = Proposed]
-          /\ slotValue' = [slotValue EXCEPT ![i][sl] = v]
-          /\ slotBallot' = [slotBallot EXCEPT ![i][sl] = 1]
-          /\ localIndex' = [localIndex EXCEPT ![i] = sl + N]
-          /\ acceptCount' = [acceptCount EXCEPT ![i][sl] = 1]
-          /\ messages' = J!AddMessages(msgSet, messages)
-          /\ UNCHANGED <<serverVars, candidateVars, leaderVars, logVars,
-                         jetpackVars, clientVars, executionVars>>
+    /\ B!ClientRequest(i, v)
+    /\ UNCHANGED <<jetpackVars, clientVars, executionVars>>
 
-\* Coordinator skips its slot with a no-op.
 Skip(i) ==
-    /\ localIndex[i] <= MaxSlot
-    /\ CoordinatorOf(localIndex[i]) = i
-    /\ slotState[i][localIndex[i]] = Empty
-    /\ LET sl == localIndex[i]
-           msgSet == { [mtype |-> SkipMessage,
-                        mterm |-> currentTerm[i],
-                        msource |-> i,
-                        mdest |-> s,
-                        mslot |-> sl] : s \in Server \ {i} }
-       IN /\ slotState' = [slotState EXCEPT ![i][sl] = Skipped]
-          /\ slotValue' = [slotValue EXCEPT ![i][sl] = NoOp]
-          /\ localIndex' = [localIndex EXCEPT ![i] = sl + N]
-          /\ messages' = J!AddMessages(msgSet, messages)
-          /\ UNCHANGED <<serverVars, candidateVars, leaderVars, logVars,
-                         slotBallot, acceptCount,
-                         jetpackVars, clientVars, executionVars>>
-
-HandleSuggest(i, m) ==
-    /\ m.mtype = SuggestRequest
-    /\ i = m.mdest
-    /\ LET sl == m.mslot
-       IN /\ sl <= MaxSlot
-          /\ m.mballot >= slotBallot[i][sl]
-          /\ slotState[i][sl] \in {Empty, Proposed}
-          /\ slotState' = [slotState EXCEPT ![i][sl] = Accepted]
-          /\ slotValue' = [slotValue EXCEPT ![i][sl] = m.mvalue]
-          /\ slotBallot' = [slotBallot EXCEPT ![i][sl] = m.mballot]
-          /\ J!Reply([mtype |-> SuggestResponse,
-                    mterm |-> currentTerm[i],
-                    msource |-> i,
-                    mdest |-> m.msource,
-                    mslot |-> sl,
-                    mok |-> TRUE],
-                    m)
-          /\ UNCHANGED <<serverVars, candidateVars, leaderVars, logVars,
-                         localIndex, acceptCount,
-                         jetpackVars, clientVars, executionVars>>
-
-HandleSuggestResponse(i, m) ==
-    /\ m.mtype = SuggestResponse
-    /\ i = m.mdest
-    /\ m.mok
-    /\ LET sl == m.mslot
-       IN /\ sl <= MaxSlot
-          /\ slotState[i][sl] = Proposed
-          /\ acceptCount' = [acceptCount EXCEPT ![i][sl] = acceptCount[i][sl] + 1]
-          /\ IF acceptCount[i][sl] + 1 >= (N \div 2 + 1)
-             THEN
-               /\ LET newSS == [slotState[i] EXCEPT ![sl] = Learned]
-                      newLog == ExtendLog(i, newSS, slotValue[i])
-                  IN /\ slotState' = [slotState EXCEPT ![i] = newSS]
-                     /\ log' = [log EXCEPT ![i] = newLog]
-                     /\ LET newCI == commitIndex[i] + 1
-                        IN IF /\ newCI <= Len(newLog)
-                              /\ newCI <= MaxSlot
-                              /\ newSS[newCI] \in {Learned, Skipped}
-                           THEN commitIndex' = [commitIndex EXCEPT ![i] = newCI]
-                           ELSE UNCHANGED commitIndex
-               /\ LET learnMsgs == { [mtype |-> LearnMessage,
-                                       mterm |-> currentTerm[i],
-                                       msource |-> i,
-                                       mdest |-> s,
-                                       mslot |-> sl,
-                                       mvalue |-> slotValue[i][sl]] : s \in Server \ {i} }
-                  IN messages' = J!AddMessages(learnMsgs, J!WithoutMessage(m, messages))
-             ELSE
-               /\ UNCHANGED <<slotState, log, commitIndex>>
-               /\ J!Discard(m)
-          /\ UNCHANGED <<serverVars, candidateVars, leaderVars,
-                         slotValue, slotBallot, localIndex,
-                         jetpackVars, clientVars, executionVars>>
-
-HandleSkip(i, m) ==
-    /\ m.mtype = SkipMessage
-    /\ i = m.mdest
-    /\ LET sl == m.mslot
-       IN /\ sl <= MaxSlot
-          /\ slotState[i][sl] \in {Empty, Proposed}
-          /\ LET newSS == [slotState[i] EXCEPT ![sl] = Skipped]
-                 newSV == [slotValue[i] EXCEPT ![sl] = NoOp]
-             IN /\ slotState' = [slotState EXCEPT ![i] = newSS]
-                /\ slotValue' = [slotValue EXCEPT ![i] = newSV]
-                /\ log' = [log EXCEPT ![i] = ExtendLog(i, newSS, newSV)]
-          /\ J!Discard(m)
-          /\ UNCHANGED <<serverVars, candidateVars, leaderVars, commitIndex,
-                         slotBallot, localIndex, acceptCount,
-                         jetpackVars, clientVars, executionVars>>
-
-HandleLearn(i, m) ==
-    /\ m.mtype = LearnMessage
-    /\ i = m.mdest
-    /\ LET sl == m.mslot
-       IN /\ sl <= MaxSlot
-          /\ LET newSS == [slotState[i] EXCEPT ![sl] = Learned]
-                 newSV == [slotValue[i] EXCEPT ![sl] = m.mvalue]
-                 newLog == ExtendLog(i, newSS, newSV)
-             IN /\ slotState' = [slotState EXCEPT ![i] = newSS]
-                /\ slotValue' = [slotValue EXCEPT ![i] = newSV]
-                /\ log' = [log EXCEPT ![i] = newLog]
-                /\ LET newCI == commitIndex[i] + 1
-                   IN IF /\ newCI <= Len(newLog)
-                         /\ newCI <= MaxSlot
-                         /\ newSS[newCI] \in {Learned, Skipped}
-                      THEN commitIndex' = [commitIndex EXCEPT ![i] = newCI]
-                      ELSE UNCHANGED commitIndex
-          /\ J!Discard(m)
-          /\ UNCHANGED <<serverVars, candidateVars, leaderVars,
-                         slotBallot, localIndex, acceptCount,
-                         jetpackVars, clientVars, executionVars>>
+    /\ B!Skip(i)
+    /\ UNCHANGED <<jetpackVars, clientVars, executionVars>>
 
 Revoke(i, sl) ==
-    /\ sl <= MaxSlot
-    /\ CoordinatorOf(sl) /= i
-    /\ slotState[i][sl] = Empty
-    /\ LET msgSet == { [mtype |-> RevokeRequest,
-                         mterm |-> currentTerm[i],
-                         msource |-> i,
-                         mdest |-> s,
-                         mslot |-> sl,
-                         mballot |-> slotBallot[i][sl] + 1] : s \in Server \ {i} }
-       IN /\ slotBallot' = [slotBallot EXCEPT ![i][sl] = slotBallot[i][sl] + 1]
-          /\ slotState' = [slotState EXCEPT ![i][sl] = Proposed]
-          /\ slotValue' = [slotValue EXCEPT ![i][sl] = NoOp]
-          /\ acceptCount' = [acceptCount EXCEPT ![i][sl] = 1]
-          /\ messages' = J!AddMessages(msgSet, messages)
-          /\ UNCHANGED <<serverVars, candidateVars, leaderVars, logVars,
-                         localIndex,
-                         jetpackVars, clientVars, executionVars>>
-
-HandleRevoke(i, m) ==
-    /\ m.mtype = RevokeRequest
-    /\ i = m.mdest
-    /\ LET sl == m.mslot
-       IN /\ sl <= MaxSlot
-          /\ m.mballot > slotBallot[i][sl]
-          /\ slotState[i][sl] \in {Empty, Proposed}
-          /\ slotState' = [slotState EXCEPT ![i][sl] = Accepted]
-          /\ slotValue' = [slotValue EXCEPT ![i][sl] = NoOp]
-          /\ slotBallot' = [slotBallot EXCEPT ![i][sl] = m.mballot]
-          /\ J!Reply([mtype |-> RevokeResponse,
-                    mterm |-> currentTerm[i],
-                    msource |-> i,
-                    mdest |-> m.msource,
-                    mslot |-> sl,
-                    mok |-> TRUE],
-                    m)
-          /\ UNCHANGED <<serverVars, candidateVars, leaderVars, logVars,
-                         localIndex, acceptCount,
-                         jetpackVars, clientVars, executionVars>>
-
-HandleRevokeResponse(i, m) ==
-    /\ m.mtype = RevokeResponse
-    /\ i = m.mdest
-    /\ m.mok
-    /\ LET sl == m.mslot
-       IN /\ sl <= MaxSlot
-          /\ slotState[i][sl] = Proposed
-          /\ acceptCount' = [acceptCount EXCEPT ![i][sl] = acceptCount[i][sl] + 1]
-          /\ IF acceptCount[i][sl] + 1 >= (N \div 2 + 1)
-             THEN
-               /\ LET newSS == [slotState[i] EXCEPT ![sl] = Skipped]
-                  IN /\ slotState' = [slotState EXCEPT ![i] = newSS]
-                     /\ log' = [log EXCEPT ![i] = ExtendLog(i, newSS, slotValue[i])]
-               /\ LET learnMsgs == { [mtype |-> SkipMessage,
-                                       mterm |-> currentTerm[i],
-                                       msource |-> i,
-                                       mdest |-> s,
-                                       mslot |-> sl] : s \in Server \ {i} }
-                  IN messages' = J!AddMessages(learnMsgs, J!WithoutMessage(m, messages))
-             ELSE
-               /\ UNCHANGED <<slotState, log>>
-               /\ J!Discard(m)
-          /\ UNCHANGED <<serverVars, candidateVars, leaderVars, commitIndex,
-                         slotValue, slotBallot, localIndex,
-                         jetpackVars, clientVars, executionVars>>
-
-\* Mencius AdvanceCommitIndex.
-AdvanceCommitIndex(i) ==
-    /\ LET newCI == commitIndex[i] + 1
-       IN /\ newCI <= Len(log[i])
-          /\ newCI <= MaxSlot
-          /\ slotState[i][newCI] \in {Learned, Skipped}
-          /\ commitIndex' = [commitIndex EXCEPT ![i] = newCI]
-    /\ UNCHANGED <<messages, serverVars, candidateVars, leaderVars, log,
-                   menciusVars, jetpackVars, clientVars, executionVars>>
-
-\* Mencius ClientRequest: suggest via Mencius protocol.
-ClientRequest(i, v) ==
-    /\ ostate[i] = Leader
-    /\ Suggest(i, v)
-
-\* Mencius Restart.
-Restart(i) ==
-    /\ ostate' = [ostate EXCEPT ![i] = Follower]
-    /\ votesResponded' = [votesResponded EXCEPT ![i] = {}]
-    /\ votesGranted' = [votesGranted EXCEPT ![i] = {}]
-    /\ nextIndex' = [nextIndex EXCEPT ![i] = [j \in Server |-> 1]]
-    /\ matchIndex' = [matchIndex EXCEPT ![i] = [j \in Server |-> 0]]
-    /\ commitIndex' = [commitIndex EXCEPT ![i] = 0]
-    /\ UNCHANGED <<messages, currentTerm, votedFor, log,
-                   menciusVars, jetpackVars, clientVars, executionVars>>
-
-\* BecomeToBeLeader (Jetpack recovery before becoming Leader).
-\* In Mencius, all servers start as Leader, so this mainly handles
-\* recovery after a Restart (which sets ostate to Follower).
-BecomeToBeLeader(i) ==
-    /\ ostate[i] = Candidate
-    /\ votesGranted[i] \in Quorum
-    /\ ostate' = [ostate EXCEPT ![i] = ToBeLeader]
-    /\ nextIndex' = [nextIndex EXCEPT ![i] =
-                        [j \in Server |-> Len(log[i]) + 1]]
-    /\ matchIndex' = [matchIndex EXCEPT ![i] =
-                        [j \in Server |-> 0]]
-    /\ UNCHANGED <<messages, currentTerm, votedFor, candidateVars, logVars,
-                   menciusVars, jetpackVars, clientVars, executionVars>>
+    /\ B!Revoke(i, sl)
+    /\ UNCHANGED <<jetpackVars, clientVars, executionVars>>
 
 \* Leader applies committed entries.
 ApplyCommitted(i) ==
     /\ J!ApplyCommitted(i)
     /\ UNCHANGED menciusExtraVars
+
+(***************************************************************************)
+(* Wrapped Mencius message handlers                                        *)
+(***************************************************************************)
+
+HandleSuggest(i, m) ==
+    /\ B!HandleSuggest(i, m)
+    /\ UNCHANGED <<jetpackVars, clientVars, executionVars>>
+
+HandleSuggestResponse(i, m) ==
+    /\ B!HandleSuggestResponse(i, m)
+    /\ UNCHANGED <<jetpackVars, clientVars, executionVars>>
+
+HandleSkip(i, m) ==
+    /\ B!HandleSkip(i, m)
+    /\ UNCHANGED <<jetpackVars, clientVars, executionVars>>
+
+HandleLearn(i, m) ==
+    /\ B!HandleLearn(i, m)
+    /\ UNCHANGED <<jetpackVars, clientVars, executionVars>>
+
+HandleRevoke(i, m) ==
+    /\ B!HandleRevoke(i, m)
+    /\ UNCHANGED <<jetpackVars, clientVars, executionVars>>
+
+HandleRevokeResponse(i, m) ==
+    /\ B!HandleRevokeResponse(i, m)
+    /\ UNCHANGED <<jetpackVars, clientVars, executionVars>>
 
 (***************************************************************************)
 (* Wrapped Jetpack transitions (add UNCHANGED menciusExtraVars)            *)
@@ -511,17 +248,17 @@ WHandleFinishRecovery(i, m) ==
 
 ServerReceive(m) ==
     /\ m.mdest \in Server
-    /\ \/ /\ m.mtype = SuggestRequest
+    /\ \/ /\ m.mtype = B!SuggestRequest
           /\ HandleSuggest(m.mdest, m)
-       \/ /\ m.mtype = SuggestResponse
+       \/ /\ m.mtype = B!SuggestResponse
           /\ HandleSuggestResponse(m.mdest, m)
-       \/ /\ m.mtype = SkipMessage
+       \/ /\ m.mtype = B!SkipMessage
           /\ HandleSkip(m.mdest, m)
-       \/ /\ m.mtype = LearnMessage
+       \/ /\ m.mtype = B!LearnMessage
           /\ HandleLearn(m.mdest, m)
-       \/ /\ m.mtype = RevokeRequest
+       \/ /\ m.mtype = B!RevokeRequest
           /\ HandleRevoke(m.mdest, m)
-       \/ /\ m.mtype = RevokeResponse
+       \/ /\ m.mtype = B!RevokeResponse
           /\ HandleRevokeResponse(m.mdest, m)
        \/ /\ m.mtype = J!PreacceptRequest
           /\ WHandlePreacceptRequest(m.mdest, m)
@@ -628,8 +365,8 @@ ExecutionDedupMatches == J!ExecutionDedupMatches
 SlotAgreement ==
     \A i, j \in Server :
         \A sl \in 1..MaxSlot :
-            (/\ slotState[i][sl] \in {Learned, Skipped}
-             /\ slotState[j][sl] \in {Learned, Skipped})
+            (/\ slotState[i][sl] \in {B!Learned, B!Skipped}
+             /\ slotState[j][sl] \in {B!Learned, B!Skipped})
             => slotValue[i][sl] = slotValue[j][sl]
 
 Safety == [](CommittedLogAgreement /\ SlotAgreement /\ LogOrderMatchesExecution /\ ExecutionDedupMatches)
