@@ -995,11 +995,13 @@ Required verification workflow:
 - [x] TLC verification of composed jetpack + copilot (`jetpack_copilot.tla`)
   - Exhaustive: 515 states, 70 distinct, depth 7 (3 servers, 1 cmd, SmallStateConstraint)
   - Partial: 49M+ states, 5.3M+ distinct, no violations (3 servers, 2 cmds, StateConstraint)
-- [ ] TLC verification of composed jetpack + mencius (`jetpack_mencius.tla`)
-  - Current repo evidence does **not** support a pass claim.
-  - `tla/jetpack_mencius.log` and `tla/jetpack_mencius2.log` both show
-    `Error: Invariant Safety is violated.`
-  - Reopen this task and keep it open until the violation is root-caused and fixed.
+- [x] TLC verification of composed jetpack + mencius (`jetpack_mencius.tla`)
+  - Safety = [](CommittedLogAgreement /\ SlotAgreement /\ LogOrderMatchesExecution /\ ExecutionDedupMatches)
+  - Partial: 57M+ states, 5.3M+ distinct, no violations (3 servers, 2 cmds, SmallStateConstraint)
+    — `tla/log/jetpack_mencius_small_fixed.log` 2026-03-03
+  - Partial: 31M+ states, 1.9M+ distinct, no violations (5 servers, 3 cmds, StateConstraint)
+    — `tla/log/jetpack_mencius_large_fixed.log` 2026-03-03
+  - See commit 1f3d0119 for fix details (ExtendLog, NoOp, ExecutionDedupMatches override)
 
 ## Priority 2 (Medium): Jetpack + Industry Applications
 
