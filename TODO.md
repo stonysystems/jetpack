@@ -942,7 +942,7 @@ Expected abstraction direction:
     utilized log sequences, not only by matching `log[i][k]` against `execution_cmds[k]`.
   - `LogAgreement` for the abstract/base integration should mean replicated copy matches
     original copy for the same logical sequence (`Log[i][j][k]` vs `Log[j][j][k]` when non-nil).
-- [ ] Prove the wrapper step cleanly before claiming the abstraction step
+- [x] Prove the wrapper step cleanly before claiming the abstraction step
   - `jetpack_raft.tla`, `jetpack_copilot.tla`, and `jetpack_mencius.tla` remain the mid-step.
   - All 3 wrappers must pass the intended small config first.
   - Large configs may remain bounded/partial due to search-space size, but logs must show
@@ -951,6 +951,15 @@ Expected abstraction direction:
     three is still open.
   - Do **not** claim wrapper completion from SANY-only success, from one historical log, or
     from logs produced before the latest property/interface changes.
+  - **Done** (post-unification commit 00c318b6). All three wrappers verified with unified
+    `jetpack.tla` properties (`CommittedLogAgreement`, `LogOrderMatchesExecution`,
+    `ExecutionDedupMatches` with `FilterNoOps`):
+    - **Small configs** (exhaustive): Raft 82,375 states, CoPilot 515 states (both complete).
+      Mencius partial 31M+ (state space too large for exhaustive).
+    - **Large configs** (partial, no violations):
+      - Raft: 10.9M+ states, 1.4M+ distinct, depth 15 → `tla/log/jetpack_raft_unified.log`
+      - CoPilot: 14.2M+ states, 1.5M+ distinct, depth 13 → `tla/log/jetpack_copilot_unified.log`
+      - Mencius: 31.1M+ states, 3.0M+ distinct, depth 13 → `tla/log/jetpack_mencius_unified.log`
 - [ ] Complete the final abstraction step with the same shared `jetpack.tla`
   - Run the same `jetpack.tla` with each abstracted base protocol:
     - `base_raft.tla` + `jetpack.tla`
