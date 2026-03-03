@@ -925,6 +925,11 @@ Expected abstraction direction:
     - All 3 wrappers now call `J!CommittedLogAgreement` and `J!ExecutionDedupMatches` identically
     - TLC: Raft exhaustive 82K, CoPilot exhaustive 515, Mencius partial 31M+ (2026-03-03)
   - [ ] Sub-task 2: Introduce `base_raft.tla`, `base_copilot.tla`, `base_mencius.tla`
+    - [x] `base_raft.tla`: extracted Raft protocol from monolithic `jetpack_raft.tla` (~280 lines)
+      - Refactored `jetpack_raft.tla` to `B == INSTANCE base_raft` + thin wrappers (~250 lines, was 533)
+      - TLC: exhaustive 82,375 states (exact match with pre-refactoring baseline)
+    - [ ] `base_copilot.tla`: extract CoPilot protocol from `jetpack_copilot.tla`
+    - [ ] `base_mencius.tla`: extract Mencius protocol from `jetpack_mencius.tla`
   - Current `tla/jetpack.tla` still reads `log[i][k]`; that is not enough for the final proof target.
   - The abstraction must support:
     - base-protocol local/original log copies,
