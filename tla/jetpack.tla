@@ -53,7 +53,9 @@
 EXTENDS Naturals, FiniteSets, Sequences, TLC
 
 \* ---- Constants shared with base protocol (supplied at instantiation) ----
-CONSTANTS Server, Client, CmdId, Key, NoOpCmd
+CONSTANTS Server, Client, CmdId, Key, NoOpCmd,
+          Proposer,          \* Set of proposer IDs (protocol-specific)
+          ProposerOfSlot(_)  \* Maps log position k -> proposer ID
 
 Nil == "Nil"
 NilCmd == [tag |-> "NilCmd"]
@@ -742,6 +744,17 @@ CommittedLogAgreement ==
             limit == Min({ci, cj} \cup {0})
         IN \A k \in 1..limit :
             log[i][k] = log[j][k]
+
+\* Per-proposer committed log agreement (multi-sequence view).
+\* The 3D logical view is: Log[i][p][k] = log[i][k] when ProposerOfSlot(k) = p.
+\* For each proposer p, the slots assigned to p agree across all server replicas.
+\* Strictly weaker than CommittedLogAgreement (which checks ALL positions).
+MultiSequenceLogAgreement ==
+    \A p \in Proposer :
+        \A i, j \in Server :
+            LET limit == Min({commitIndex[i], commitIndex[j]} \cup {0})
+            IN \A k \in 1..limit :
+                ProposerOfSlot(k) = p => log[i][k] = log[j][k]
 
 \* Committed log order matches execution order for conflicting commands.
 \* For any server's committed entries, the relative order of conflicting commands

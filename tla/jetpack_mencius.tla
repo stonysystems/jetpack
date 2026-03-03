@@ -75,7 +75,13 @@ vars == <<messages, serverVars, candidateVars, leaderVars,
 (***************************************************************************)
 
 B == INSTANCE base_mencius
-J == INSTANCE jetpack WITH NoOpCmd <- B!NoOp
+
+\* Mencius: N sequences via round-robin. Slot k's proposer is its coordinator.
+MenciusProposerOfSlot(k) == B!CoordinatorOf(k)
+
+J == INSTANCE jetpack WITH NoOpCmd <- B!NoOp,
+                          Proposer <- Server,
+                          ProposerOfSlot <- MenciusProposerOfSlot
 
 (***************************************************************************)
 (* Re-exported constants                                                   *)
@@ -358,6 +364,7 @@ TinyStateConstraint ==
 (***************************************************************************)
 
 CommittedLogAgreement == J!CommittedLogAgreement
+MultiSequenceLogAgreement == J!MultiSequenceLogAgreement
 LogOrderMatchesExecution == J!LogOrderMatchesExecution
 ExecutionDedupMatches == J!ExecutionDedupMatches
 
@@ -369,7 +376,7 @@ SlotAgreement ==
              /\ slotState[j][sl] \in {B!Learned, B!Skipped})
             => slotValue[i][sl] = slotValue[j][sl]
 
-Safety == [](CommittedLogAgreement /\ SlotAgreement /\ LogOrderMatchesExecution /\ ExecutionDedupMatches)
+Safety == [](CommittedLogAgreement /\ MultiSequenceLogAgreement /\ SlotAgreement /\ LogOrderMatchesExecution /\ ExecutionDedupMatches)
 
 SpecSafety == Spec => Safety
 

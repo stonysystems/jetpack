@@ -74,7 +74,13 @@ vars == <<messages, serverVars, candidateVars, leaderVars,
 (***************************************************************************)
 
 B == INSTANCE base_copilot
-J == INSTANCE jetpack WITH NoOpCmd <- [tag |-> "CoPilotNoOp"]
+
+\* CoPilot: single merged log (pilot + copilot append to same sequence).
+CoPilotProposerOfSlot(k) == "sole"
+
+J == INSTANCE jetpack WITH NoOpCmd <- [tag |-> "CoPilotNoOp"],
+                          Proposer <- {"sole"},
+                          ProposerOfSlot <- CoPilotProposerOfSlot
 
 (***************************************************************************)
 (* Re-exported constants                                                   *)
@@ -326,6 +332,7 @@ SmallStateConstraint ==
 (***************************************************************************)
 
 CommittedLogAgreement == J!CommittedLogAgreement
+MultiSequenceLogAgreement == J!MultiSequenceLogAgreement
 LogOrderMatchesExecution == J!LogOrderMatchesExecution
 ExecutionDedupMatches == J!ExecutionDedupMatches
 
@@ -333,7 +340,7 @@ ExecutionDedupMatches == J!ExecutionDedupMatches
 ActiveProposerBound ==
     Cardinality({i \in Server : role[i] \in {B!Pilot, B!Copilot}}) <= 2
 
-Safety == [](CommittedLogAgreement /\ LogOrderMatchesExecution /\ ExecutionDedupMatches /\ ActiveProposerBound)
+Safety == [](CommittedLogAgreement /\ MultiSequenceLogAgreement /\ LogOrderMatchesExecution /\ ExecutionDedupMatches /\ ActiveProposerBound)
 
 SpecSafety == Spec => Safety
 

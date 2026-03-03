@@ -63,7 +63,13 @@ vars == <<messages, serverVars, candidateVars, leaderVars,
 (***************************************************************************)
 
 B == INSTANCE base_raft
-J == INSTANCE jetpack WITH NoOpCmd <- [tag |-> "RaftNoOp"]
+
+\* Raft: single proposer, all slots belong to one sequence.
+RaftProposerOfSlot(k) == "sole"
+
+J == INSTANCE jetpack WITH NoOpCmd <- [tag |-> "RaftNoOp"],
+                          Proposer <- {"sole"},
+                          ProposerOfSlot <- RaftProposerOfSlot
 
 (***************************************************************************)
 (* Re-exported constants                                                   *)
@@ -309,10 +315,11 @@ SmallStateConstraint ==
 (***************************************************************************)
 
 CommittedLogAgreement == J!CommittedLogAgreement
+MultiSequenceLogAgreement == J!MultiSequenceLogAgreement
 LogOrderMatchesExecution == J!LogOrderMatchesExecution
 ExecutionDedupMatches == J!ExecutionDedupMatches
 
-Safety == [](CommittedLogAgreement /\ LogOrderMatchesExecution /\ ExecutionDedupMatches)
+Safety == [](CommittedLogAgreement /\ MultiSequenceLogAgreement /\ LogOrderMatchesExecution /\ ExecutionDedupMatches)
 
 SpecSafety == Spec => Safety
 
