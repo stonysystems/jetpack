@@ -930,13 +930,11 @@ Expected abstraction direction:
 - If Claude uses a different internal representation, it must write down an explicit
   refinement mapping that shows it is equivalent to this 3D logical view.
 
-Important status note:
-- The checked items below record useful intermediate refactors and TLC runs, but they do **not**
-  close the real 3-D abstraction task if the model still reasons primarily over flattened
-  `log[i][k]` slots.
-- In particular, keeping the current `CONSTANT Proposer, ProposerOfSlot(_)` overlay while leaving
-  `jetpack.tla`'s core agreement / ordering logic indexed only by global slot is **not**
-  sufficient for the final goal.
+Status note (resolved 2026-03-07):
+- The 3-D abstraction task is now complete. `ProposerOfSlot(_)` has been replaced by
+  `ProposerOfEntry(_, _)`, and all agreement/ordering logic uses the 3D projection operators
+  (`Log3D`, `Log3DLen`, `ProposerCmdSeq`) with per-sequence local indices.
+- See "Re-opened After 2026-03-07 Shared Log / Fast-Path Review" below for full details.
 
 ### Re-opened After 2026-03-07 Shared Log / Fast-Path Review
 

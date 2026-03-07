@@ -289,10 +289,6 @@ ChosenExecutedInView(i) ==
         \A s \in new_view[i].replica_ids :
             cmd \in SeqToSet(CommittedCmds(s))
 
-CommittedCmdSeq(i) ==
-    IF commitIndex[i] = 0 THEN <<>>
-    ELSE FilterNoOps([k \in 1..commitIndex[i] |-> log[i][k].value])
-
 (***************************************************************************)
 (* Jetpack initialization                                                  *)
 (***************************************************************************)
