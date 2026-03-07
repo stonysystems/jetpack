@@ -1,0 +1,39 @@
+TLC2 Version 2026.03.05.210854 (rev: ec1a488)
+Running breadth-first search Model-Checking with fp 54 and seed 8971324389711391353 with 4 workers on 64 cores with 21445MB heap and 64MB offheap memory [pid: 1588685] (Linux 6.2.16-3-pve amd64, Debian 17.0.18 x86_64, MSBDiskFPSet, DiskStateQueue).
+Parsing file /home/users/zihao/janus/tla/jetpack_raft.tla
+Parsing file /tmp/tlc-6130776915471825698/Naturals.tla (jar:file:/home/users/zihao/janus/tla/tla2tools.jar!/tla2sany/StandardModules/Naturals.tla)
+Parsing file /tmp/tlc-6130776915471825698/FiniteSets.tla (jar:file:/home/users/zihao/janus/tla/tla2tools.jar!/tla2sany/StandardModules/FiniteSets.tla)
+Parsing file /tmp/tlc-6130776915471825698/Sequences.tla (jar:file:/home/users/zihao/janus/tla/tla2tools.jar!/tla2sany/StandardModules/Sequences.tla)
+Parsing file /tmp/tlc-6130776915471825698/TLC.tla (jar:file:/home/users/zihao/janus/tla/tla2tools.jar!/tla2sany/StandardModules/TLC.tla)
+Parsing file /tmp/tlc-6130776915471825698/_TLCTrace.tla (jar:file:/home/users/zihao/janus/tla/tla2tools.jar!/tla2sany/StandardModules/_TLCTrace.tla)
+Parsing file /home/users/zihao/janus/tla/base_raft.tla
+Parsing file /home/users/zihao/janus/tla/jetpack.tla
+Parsing file /tmp/tlc-6130776915471825698/TLCExt.tla (jar:file:/home/users/zihao/janus/tla/tla2tools.jar!/tla2sany/StandardModules/TLCExt.tla)
+Parsing file /tmp/tlc-6130776915471825698/Integers.tla (jar:file:/home/users/zihao/janus/tla/tla2tools.jar!/tla2sany/StandardModules/Integers.tla)
+Semantic processing of module Naturals
+Semantic processing of module Sequences
+Semantic processing of module FiniteSets
+Semantic processing of module TLC
+Semantic processing of module Integers
+Semantic processing of module TLCExt
+Semantic processing of module _TLCTrace
+Semantic processing of module base_raft
+Semantic processing of module jetpack
+Semantic processing of module jetpack_raft
+Linting of module TLCExt
+Linting of module _TLCTrace
+Linting of module base_raft
+Linting of module jetpack
+Linting of module jetpack_raft
+Starting... (2026-03-07 09:45:29)
+Computing initial states...
+Finished computing initial states: 1 distinct state generated at 2026-03-07 09:45:29.
+Progress(18) at 2026-03-07 09:45:32: 59,025 states generated (59,025 s/min), 4,830 distinct states found (4,830 ds/min), 565 states left on queue.
+Model checking completed. No error has been found.
+  Estimates of the probability that TLC did not check all reachable states
+  because two distinct states had the same fingerprint:
+  calculated (optimistic):  val = 2.5E-11
+82375 states generated, 6029 distinct states found, 0 states left on queue.
+The depth of the complete state graph search is 26.
+The average outdegree of the complete state graph is 1 (minimum is 0, the maximum 6 and the 95th percentile is 3).
+Finished in 05s at (2026-03-07 09:45:33)

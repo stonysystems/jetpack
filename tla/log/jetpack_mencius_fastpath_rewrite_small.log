@@ -1,0 +1,39 @@
+TLC2 Version 2026.03.05.210854 (rev: ec1a488)
+Running breadth-first search Model-Checking with fp 23 and seed -7346138705182371203 with 4 workers on 64 cores with 21445MB heap and 64MB offheap memory [pid: 1589617] (Linux 6.2.16-3-pve amd64, Debian 17.0.18 x86_64, MSBDiskFPSet, DiskStateQueue).
+Parsing file /home/users/zihao/janus/tla/jetpack_mencius.tla
+Parsing file /tmp/tlc-7239149308827654068/Naturals.tla (jar:file:/home/users/zihao/janus/tla/tla2tools.jar!/tla2sany/StandardModules/Naturals.tla)
+Parsing file /tmp/tlc-7239149308827654068/FiniteSets.tla (jar:file:/home/users/zihao/janus/tla/tla2tools.jar!/tla2sany/StandardModules/FiniteSets.tla)
+Parsing file /tmp/tlc-7239149308827654068/Sequences.tla (jar:file:/home/users/zihao/janus/tla/tla2tools.jar!/tla2sany/StandardModules/Sequences.tla)
+Parsing file /tmp/tlc-7239149308827654068/TLC.tla (jar:file:/home/users/zihao/janus/tla/tla2tools.jar!/tla2sany/StandardModules/TLC.tla)
+Parsing file /tmp/tlc-7239149308827654068/_TLCTrace.tla (jar:file:/home/users/zihao/janus/tla/tla2tools.jar!/tla2sany/StandardModules/_TLCTrace.tla)
+Parsing file /home/users/zihao/janus/tla/base_mencius.tla
+Parsing file /home/users/zihao/janus/tla/jetpack.tla
+Parsing file /tmp/tlc-7239149308827654068/TLCExt.tla (jar:file:/home/users/zihao/janus/tla/tla2tools.jar!/tla2sany/StandardModules/TLCExt.tla)
+Parsing file /tmp/tlc-7239149308827654068/Integers.tla (jar:file:/home/users/zihao/janus/tla/tla2tools.jar!/tla2sany/StandardModules/Integers.tla)
+Semantic processing of module Naturals
+Semantic processing of module Sequences
+Semantic processing of module FiniteSets
+Semantic processing of module TLC
+Semantic processing of module Integers
+Semantic processing of module TLCExt
+Semantic processing of module _TLCTrace
+Semantic processing of module base_mencius
+Semantic processing of module jetpack
+Semantic processing of module jetpack_mencius
+Linting of module TLCExt
+Linting of module _TLCTrace
+Linting of module base_mencius
+Linting of module jetpack
+Linting of module jetpack_mencius
+Starting... (2026-03-07 09:45:33)
+Computing initial states...
+Finished computing initial states: 1 distinct state generated at 2026-03-07 09:45:34.
+Progress(6) at 2026-03-07 09:45:37: 15,507 states generated (15,507 s/min), 1,405 distinct states found (1,405 ds/min), 944 states left on queue.
+Progress(10) at 2026-03-07 09:46:37: 1,036,911 states generated (1,021,404 s/min), 94,898 distinct states found (93,493 ds/min), 63,057 states left on queue.
+Progress(10) at 2026-03-07 09:47:37: 2,267,361 states generated (1,230,450 s/min), 218,246 distinct states found (123,348 ds/min), 146,845 states left on queue.
+Progress(11) at 2026-03-07 09:48:37: 3,537,435 states generated (1,270,074 s/min), 334,846 distinct states found (116,600 ds/min), 221,306 states left on queue.
+Progress(11) at 2026-03-07 09:49:37: 4,815,873 states generated (1,278,438 s/min), 496,727 distinct states found (161,881 ds/min), 342,824 states left on queue.
+Progress(11) at 2026-03-07 09:50:37: 6,087,778 states generated (1,271,905 s/min), 673,039 distinct states found (176,312 ds/min), 480,715 states left on queue.
+Progress(11) at 2026-03-07 09:51:37: 7,366,694 states generated (1,278,916 s/min), 829,908 distinct states found (156,869 ds/min), 597,277 states left on queue.
+Progress(12) at 2026-03-07 09:52:37: 8,623,724 states generated (1,257,030 s/min), 978,237 distinct states found (148,329 ds/min), 704,914 states left on queue.
+Progress(12) at 2026-03-07 09:53:37: 9,898,991 states generated (1,275,267 s/min), 1,164,074 distinct states found (185,837 ds/min), 849,306 states left on queue.

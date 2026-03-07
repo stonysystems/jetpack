@@ -9,7 +9,7 @@
 \*   Jetpack-own: jstate, jepoch, oepoch, old_view, new_view, jpool,
 \*                recovery_set, chosen_value, br_responses, prep_responses,
 \*                accept_responses
-\*   Client: client_view, client_pending, client_successes
+\*   Client: client_view, client_pending, client_successes, client_heard_from
 \*   Execution: original_execution_cmds, execution_cmds
 \*
 \* The wrapper must:
@@ -157,6 +157,7 @@ VARIABLES
     client_view,
     client_pending,
     client_successes,
+    client_heard_from,
 
     \* Execution tracking.
     original_execution_cmds,
@@ -166,7 +167,7 @@ baseVars == <<currentTerm, ostate, log, commitIndex>>
 jetpackVars == <<jstate, jepoch, oepoch, old_view, new_view, jpool,
                  recovery_set, chosen_value, br_responses,
                  prep_responses, accept_responses>>
-clientVars == <<client_view, client_pending, client_successes>>
+clientVars == <<client_view, client_pending, client_successes, client_heard_from>>
 executionVars == <<original_execution_cmds, execution_cmds>>
 
 (***************************************************************************)
@@ -313,6 +314,7 @@ InitClientVars ==
     /\ client_view = [c \in Client |-> DefaultView]
     /\ client_pending = [c \in Client |-> NilCmd]
     /\ client_successes = [c \in Client |-> {}]
+    /\ client_heard_from = [c \in Client |-> {}]
 
 InitExecutionVars ==
     /\ original_execution_cmds = <<>>
@@ -340,6 +342,7 @@ ClientSendPreaccept(c) ==
           IN /\ messages' = AddMessages(msgSet, messages)
              /\ client_pending' = [client_pending EXCEPT ![c] = cmd]
              /\ client_successes' = [client_successes EXCEPT ![c] = {}]
+             /\ client_heard_from' = [client_heard_from EXCEPT ![c] = {}]
              /\ UNCHANGED <<baseVars, jetpackVars, client_view, executionVars>>
 
 \* Server handles Preaccept from client.
@@ -374,25 +377,50 @@ HandlePreacceptRequest(i, m) ==
                          clientVars, executionVars>>
 
 \* Client handles Preaccept responses.
+\*
+\* Quorum-based fast-path: the client accumulates successful responders and
+\* declares fast-path success once they form a FastpathQuorum. A reject does
+\* NOT immediately kill the attempt — fast-path failure is declared only when
+\* the remaining unheard servers plus current successes can no longer form any
+\* FastpathQuorum.
+\*
+\* client_view update: only adopt a newer view from a reject when the response
+\* carries a strictly higher epoch than the client's current view.
+\*
+\* Completion events that clear client_pending[c]:
+\*   - Fast-path success: newSuccesses \in FastpathQuorum(view)
+\*   - Fast-path abandoned: no remaining possibility to reach a FastpathQuorum
 HandlePreacceptResponse(c, m) ==
     /\ m.mtype = PreacceptResponse
     /\ m.mdest = c
     /\ client_pending[c] = m.mcmd
     /\ LET view == client_view[c]
+           newHeard == client_heard_from[c] \cup {m.msource}
            newSuccesses == IF m.msuccess
                            THEN client_successes[c] \cup {m.msource}
                            ELSE client_successes[c]
            fastOk == newSuccesses \in FastpathQuorum(view)
+           \* Fast-path is still achievable if the current successes plus all
+           \* remaining unheard replicas could form some FastpathQuorum.
+           remaining == view.replica_ids \ newHeard
+           canStillSucceed ==
+               \E q \in FastpathQuorum(view) : q \subseteq (newSuccesses \cup remaining)
+           abandon == \lnot fastOk /\ \lnot canStillSucceed
        IN /\ client_successes' =
-              IF fastOk \/ \lnot m.msuccess
+              IF fastOk \/ abandon
               THEN [client_successes EXCEPT ![c] = {}]
               ELSE [client_successes EXCEPT ![c] = newSuccesses]
+          /\ client_heard_from' =
+              IF fastOk \/ abandon
+              THEN [client_heard_from EXCEPT ![c] = {}]
+              ELSE [client_heard_from EXCEPT ![c] = newHeard]
           /\ client_pending' =
-              IF fastOk \/ \lnot m.msuccess
+              IF fastOk \/ abandon
               THEN [client_pending EXCEPT ![c] = NilCmd]
-              ELSE [client_pending EXCEPT ![c] = client_pending[c]]
+              ELSE client_pending
           /\ client_view' =
-              IF \lnot m.msuccess
+              IF /\ \lnot m.msuccess
+                 /\ m.mview.epoch > client_view[c].epoch
               THEN [client_view EXCEPT ![c] = m.mview]
               ELSE client_view
           /\ execution_cmds' =

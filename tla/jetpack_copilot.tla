@@ -47,7 +47,7 @@ VARIABLES
     recovery_set, chosen_value, br_responses, prep_responses, accept_responses,
 
     \* Client-side variables.
-    client_view, client_pending, client_successes,
+    client_view, client_pending, client_successes, client_heard_from,
 
     \* Execution tracking.
     original_execution_cmds, execution_cmds
@@ -63,7 +63,7 @@ copilotVars   == <<role, cpLog, cpBallot>>
 jetpackVars   == <<jstate, jepoch, oepoch, old_view, new_view, jpool,
                    recovery_set, chosen_value, br_responses,
                    prep_responses, accept_responses>>
-clientVars    == <<client_view, client_pending, client_successes>>
+clientVars    == <<client_view, client_pending, client_successes, client_heard_from>>
 executionVars == <<original_execution_cmds, execution_cmds>>
 
 vars == <<messages, serverVars, candidateVars, leaderVars,
