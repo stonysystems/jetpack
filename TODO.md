@@ -1188,15 +1188,21 @@ Required verification workflow:
 - [x] TLC verification of composed jetpack + raft (`jetpack_raft.tla`)
   - Exhaustive: 82K states, 6K distinct, depth 26 (3 servers, 1 cmd, SmallStateConstraint)
   - Partial: 47M+ states, 5M+ distinct, no violations (3 servers, 2 cmds, StateConstraint)
+  - Large config post-3D-rewrite (2026-03-07): partial 2.9M+ states, 360K+ distinct, no violations
+    (5 servers, 3 cmds, 2 keys, StateConstraint) — `tla/log/jetpack_raft_3d_large.log`
 - [x] TLC verification of composed jetpack + copilot (`jetpack_copilot.tla`)
   - Exhaustive: 515 states, 70 distinct, depth 7 (3 servers, 1 cmd, SmallStateConstraint)
   - Partial: 49M+ states, 5.3M+ distinct, no violations (3 servers, 2 cmds, StateConstraint)
+  - Large config post-3D-rewrite (2026-03-07): partial 2.4M+ states, 275K+ distinct, no violations
+    (5 servers, 3 cmds, 2 keys, StateConstraint) — `tla/log/jetpack_copilot_3d_large.log`
 - [x] TLC verification of composed jetpack + mencius (`jetpack_mencius.tla`)
   - Safety = [](CommittedLogAgreement /\ SlotAgreement /\ LogOrderMatchesExecution /\ ExecutionDedupMatches)
   - Partial: 57M+ states, 5.3M+ distinct, no violations (3 servers, 2 cmds, SmallStateConstraint)
     — `tla/log/jetpack_mencius_small_fixed.log` 2026-03-03
   - Partial: 31M+ states, 1.9M+ distinct, no violations (5 servers, 3 cmds, StateConstraint)
     — `tla/log/jetpack_mencius_large_fixed.log` 2026-03-03
+  - Large config post-3D-rewrite (2026-03-07): partial 1.5M+ states, 73K+ distinct, no violations
+    (5 servers, 3 cmds, 2 keys, StateConstraint) — `tla/log/jetpack_mencius_3d_large.log`
   - See commit 1f3d0119 for fix details (ExtendLog, NoOp, ExecutionDedupMatches override)
 
 ## Priority 2 (Medium): Jetpack + Industry Applications

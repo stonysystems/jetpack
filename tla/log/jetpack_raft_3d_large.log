@@ -1,0 +1,40 @@
+TLC2 Version 2026.03.05.210854 (rev: ec1a488)
+Running breadth-first search Model-Checking with fp 125 and seed -4240428477839001527 with 4 workers on 64 cores with 21445MB heap and 64MB offheap memory [pid: 1784678] (Linux 6.2.16-3-pve amd64, Debian 17.0.18 x86_64, MSBDiskFPSet, DiskStateQueue).
+Parsing file /home/users/zihao/janus/tla/jetpack_raft.tla
+Parsing file /tmp/tlc-16138168304513669478/Naturals.tla (jar:file:/home/users/zihao/janus/tla/tla2tools.jar!/tla2sany/StandardModules/Naturals.tla)
+Parsing file /tmp/tlc-16138168304513669478/FiniteSets.tla (jar:file:/home/users/zihao/janus/tla/tla2tools.jar!/tla2sany/StandardModules/FiniteSets.tla)
+Parsing file /tmp/tlc-16138168304513669478/Sequences.tla (jar:file:/home/users/zihao/janus/tla/tla2tools.jar!/tla2sany/StandardModules/Sequences.tla)
+Parsing file /tmp/tlc-16138168304513669478/TLC.tla (jar:file:/home/users/zihao/janus/tla/tla2tools.jar!/tla2sany/StandardModules/TLC.tla)
+Parsing file /tmp/tlc-16138168304513669478/_TLCTrace.tla (jar:file:/home/users/zihao/janus/tla/tla2tools.jar!/tla2sany/StandardModules/_TLCTrace.tla)
+Parsing file /home/users/zihao/janus/tla/base_raft.tla
+Parsing file /home/users/zihao/janus/tla/jetpack.tla
+Parsing file /tmp/tlc-16138168304513669478/TLCExt.tla (jar:file:/home/users/zihao/janus/tla/tla2tools.jar!/tla2sany/StandardModules/TLCExt.tla)
+Parsing file /tmp/tlc-16138168304513669478/Integers.tla (jar:file:/home/users/zihao/janus/tla/tla2tools.jar!/tla2sany/StandardModules/Integers.tla)
+Semantic processing of module Naturals
+Semantic processing of module Sequences
+Semantic processing of module FiniteSets
+Semantic processing of module TLC
+Semantic processing of module Integers
+Semantic processing of module TLCExt
+Semantic processing of module _TLCTrace
+Semantic processing of module base_raft
+Semantic processing of module jetpack
+Semantic processing of module jetpack_raft
+Linting of module TLCExt
+Linting of module _TLCTrace
+Linting of module base_raft
+Linting of module jetpack
+Linting of module jetpack_raft
+Starting... (2026-03-07 10:44:15)
+Computing initial states...
+Finished computing initial states: 1 distinct state generated at 2026-03-07 10:44:16.
+Progress(6) at 2026-03-07 10:44:19: 2,749 states generated (2,749 s/min), 430 distinct states found (430 ds/min), 319 states left on queue.
+Progress(9) at 2026-03-07 10:45:19: 222,862 states generated (220,113 s/min), 31,322 distinct states found (30,892 ds/min), 23,324 states left on queue.
+Progress(10) at 2026-03-07 10:46:19: 559,666 states generated (336,804 s/min), 76,240 distinct states found (44,918 ds/min), 56,857 states left on queue.
+Progress(10) at 2026-03-07 10:47:19: 827,078 states generated (267,412 s/min), 109,824 distinct states found (33,584 ds/min), 81,015 states left on queue.
+Progress(11) at 2026-03-07 10:48:19: 1,156,823 states generated (329,745 s/min), 152,420 distinct states found (42,596 ds/min), 113,339 states left on queue.
+Progress(11) at 2026-03-07 10:49:19: 1,582,500 states generated (425,677 s/min), 207,791 distinct states found (55,371 ds/min), 155,286 states left on queue.
+Progress(11) at 2026-03-07 10:50:19: 2,031,886 states generated (449,386 s/min), 264,721 distinct states found (56,930 ds/min), 197,228 states left on queue.
+Progress(11) at 2026-03-07 10:51:19: 2,337,035 states generated (305,149 s/min), 297,791 distinct states found (33,070 ds/min), 219,094 states left on queue.
+Progress(11) at 2026-03-07 10:52:19: 2,586,593 states generated (249,558 s/min), 325,653 distinct states found (27,862 ds/min), 238,094 states left on queue.
+Progress(11) at 2026-03-07 10:53:19: 2,881,286 states generated (294,693 s/min), 360,505 distinct states found (34,852 ds/min), 262,011 states left on queue.
