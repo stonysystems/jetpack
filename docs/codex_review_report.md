@@ -2,7 +2,7 @@
 
 ## 1. Scope
 
-This report currently covers the first thirteen high-priority leaf tasks from `TODO_codex.md`:
+This report currently covers the first fourteen high-priority leaf tasks from `TODO_codex.md`:
 
 - `Phase 1A`: Low-concurrency latency sanity check.
 - `Phase 1B`: Throughput sweep consistency check.
@@ -17,6 +17,7 @@ This report currently covers the first thirteen high-priority leaf tasks from `T
 - `Phase 2` next leaf: throughput sweep rerun (`etcd original` / `none_etcd.yml`).
 - `Phase 2` next leaf: throughput sweep rerun (`etcd fastpath100` / `rule_etcd.yml -m 100`).
 - `Phase 2` next leaf: throughput sweep rerun (`etcd adaptive` / `rule_etcd.yml`).
+- `Phase 2` next leaf: throughput sweep rerun (`mongodb original` / `none_mongodb.yml`).
 
 Included in this pass:
 
@@ -26,16 +27,16 @@ Included in this pass:
 - Recovery-model checks against `docs/failure_recovery_evaluation.md`, `result.md`, and committed recovery logs.
 - Phase-2 prerequisite verification (Docker, compose, submodules, ulimit, backend image build attempts).
 - Low-concurrency rerun execution (`etcd OFF`, `etcd ON`, `mongodb OFF`, `mongodb ON`, `zookeeper OFF`, `zookeeper ON`) with captured command transcripts and per-run metrics.
-- Throughput-sweep rerun execution (`etcd original`, `etcd fastpath100`, `etcd adaptive`) with per-concurrency comparison to canonical sweep artifacts.
+- Throughput-sweep rerun execution (`etcd original`, `etcd fastpath100`, `etcd adaptive`, `mongodb original`) with per-concurrency comparison to canonical sweep artifacts.
 
 Not yet executed in this report:
 
-- Remaining `Phase 2` throughput sweep reruns (6 of 9 matrix cases still pending).
+- Remaining `Phase 2` throughput sweep reruns (5 of 9 matrix cases still pending).
 - `Phase 3` recovery reruns.
 
 ## 2. Environment
 
-- UTC timestamp (this iteration): 2026-03-07T22:35:53Z
+- UTC timestamp (this iteration): 2026-03-07T23:27:40Z
 - Git branch: `jetpack`
 - Repository root: `/home/shuai/workspace/jetpack`
 - Build/test environment blockers observed:
@@ -535,6 +536,36 @@ Interpretation (`etcd adaptive` throughput sweep rerun):
 - Rerun peak is `6013.20 @ c=150`, below canonical peak `7323.30 @ c=200` (about `-17.9%`).
 - This case is partially supporting: low/mid-concurrency behavior reproduces well, but published high-concurrency capacity was not reproduced.
 
+Fourth throughput-sweep rerun set (`mongodb original`, `none_mongodb.yml`):
+
+```bash
+sed 's|LOG_DIR="docs/sweep_2026-02-28/logs/${IMAGE_SHORT}_${MODE_SHORT}"|LOG_DIR="/tmp/codex_sweep_logs/${IMAGE_SHORT}_${MODE_SHORT}"|' scripts/sweep_benchmark.sh > /tmp/codex_sweep_benchmark.sh
+chmod +x /tmp/codex_sweep_benchmark.sh
+timeout 7200s /tmp/codex_sweep_benchmark.sh jetpack-mongodb none_mongodb.yml > /tmp/codex_phase2_sweep_mongodb_original_final_20260307T224600Z.tsv 2> /tmp/codex_phase2_sweep_mongodb_original_final_20260307T224600Z.stderr.log
+```
+
+| Concurrency | Rerun throughput | Canonical throughput | Delta vs canonical | Rerun status |
+|---:|---:|---:|---:|---|
+| 1 | 40.00 | 40.90 | -2.20% | OK |
+| 5 | 273.60 | 275.40 | -0.65% | OK |
+| 10 | 571.70 | 569.10 | +0.46% | OK |
+| 25 | 1466.00 | 1457.40 | +0.59% | OK |
+| 50 | 2960.80 | 2969.90 | -0.31% | OK |
+| 75 | 3162.60 | 3728.40 | -15.18% | OK |
+| 100 | 2896.00 | 3799.30 | -23.78% | OK |
+| 150 | 2647.40 | 3766.80 | -29.72% | OK |
+| 200 | 2939.90 | 3641.80 | -19.27% | OK |
+| 300 | 2539.70 | 3460.00 | -26.60% | OK |
+| 400 | 2080.00 | 3148.70 | -33.94% | OK |
+
+Interpretation (`mongodb original` throughput sweep rerun):
+
+- Final sweep completed `11/11` points with `status=OK` on all points.
+- Throughput is close to canonical up to `c=50` (within about `-2.2%` to `+0.6%`), then drops well below canonical from `c=75` onward (`-15.2%` to `-33.9%`).
+- Rerun peak is `3162.60 @ c=75`, below canonical peak `3799.30 @ c=100` (about `-16.8%`), and capacity falls further at higher concurrency.
+- Several points required retries (`c=50`, `c=100`, `c=200`, `c=400` with retry counts `1/1/1/2`), indicating stability pressure at moderate/high load.
+- Two exploratory attempts in this iteration were terminated before any data row was emitted while characterizing unusually long point runtime; the completed run above is the authoritative evidence.
+
 ## 7. Failure Recovery Rerun Attempts
 
 No failure-recovery rerun executed yet. Pending `Phase 3`.
@@ -567,6 +598,8 @@ No failure-recovery rerun executed yet. Pending `Phase 3`.
   - Risk: fast-path capacity curves appear environment-sensitive, so single-run peak comparisons can be misleading without variance bounds.
 - The `etcd adaptive` throughput sweep rerun also matches canonical at `c <= 100` but underperforms canonical at `c >= 150` by about `14%` to `18%`.
   - Risk: adaptive high-concurrency capacity appears sensitive to runtime conditions, reducing confidence in single-run peak claims.
+- The `mongodb original` throughput sweep rerun matches canonical through `c <= 50` but underperforms canonical at `c >= 75` by about `15%` to `34%`, with retries needed on several points.
+  - Risk: MongoDB moderate/high-concurrency capacity appears environment-sensitive, so single-run peak and tail-throughput claims should be treated as provisional without variance bounds.
 - Runtime regression testing still blocked in this environment by build prerequisites/toolchain compatibility.
   - Risk: this report can currently confirm artifact consistency, not runtime reproducibility.
 
@@ -587,7 +620,8 @@ No failure-recovery rerun executed yet. Pending `Phase 3`.
     - `etcd original` completed with `11/11 OK`; low/mid-concurrency matches canonical closely, but high-concurrency throughput is lower and peak is `6322.9` vs canonical `7686.6` (about `-17.7%`).
     - `etcd fastpath100` completed with `11/11 OK`; low/mid-concurrency closely matches canonical, but high-concurrency points diverge and peak shifts to `5939.4@c=100` vs canonical `6749.3@c=400`.
     - `etcd adaptive` completed with `11/11 OK`; low/mid-concurrency closely matches canonical, while high-concurrency points are lower and peak is `6013.2@c=150` vs canonical `7323.3@c=200`.
-- `Phase 2` throughput sweep matrix status: 3 of 9 cases rerun; remaining 6 cases are still pending.
+    - `mongodb original` completed with `11/11 OK`; throughput matches canonical through `c <= 50`, then drops at higher concurrency (`-15%` to `-34%`), with peak `3162.6@c=75` vs canonical `3799.3@c=100` and retries at `c=50/100/200/400`.
+- `Phase 2` throughput sweep matrix status: 4 of 9 cases rerun; remaining 5 cases are still pending.
 - Open discrepancies:
   - Throughput numbers in `result.md` are not consistent with canonical sweep artifacts.
   - Recovery sections mix metrics and contain internal status conflicts; pre-fix RTT=40ms gap claims are not fully traceable to committed logs.
@@ -626,6 +660,8 @@ timeout 7200s /tmp/codex_sweep_benchmark.sh jetpack-etcd rule_etcd.yml "-m 100" 
 join -t $'\t' -1 1 -2 1 <(awk -F'\t' '!/^#/&&$1!="concurrency"{print $1"\t"$2"\t"$13}' /tmp/codex_phase2_sweep_etcd_fastpath100_20260307T215653Z.tsv | sort -n) <(awk -F'\t' '!/^#/&&$1!="concurrency"{print $1"\t"$2"\t"$13}' docs/sweep_2026-02-28/etcd_fastpath100.tsv | sort -n)
 timeout 7200s /tmp/codex_sweep_benchmark.sh jetpack-etcd rule_etcd.yml > /tmp/codex_phase2_sweep_etcd_adaptive_20260307T221731Z.tsv 2> /tmp/codex_phase2_sweep_etcd_adaptive_20260307T221731Z.stderr.log
 join -t $'\t' -1 1 -2 1 <(awk -F'\t' '!/^#/&&$1!="concurrency"{print $1"\t"$2"\t"$13}' /tmp/codex_phase2_sweep_etcd_adaptive_20260307T221731Z.tsv | sort -n) <(awk -F'\t' '!/^#/&&$1!="concurrency"{print $1"\t"$2"\t"$13}' docs/sweep_2026-02-28/etcd_adaptive.tsv | sort -n)
+timeout 7200s /tmp/codex_sweep_benchmark.sh jetpack-mongodb none_mongodb.yml > /tmp/codex_phase2_sweep_mongodb_original_final_20260307T224600Z.tsv 2> /tmp/codex_phase2_sweep_mongodb_original_final_20260307T224600Z.stderr.log
+join -t $'\t' -1 1 -2 1 <(awk -F'\t' '!/^#/&&$1!="concurrency"{print $1"\t"$2"\t"$13}' /tmp/codex_phase2_sweep_mongodb_original_final_20260307T224600Z.tsv | sort -n) <(awk -F'\t' '!/^#/&&$1!="concurrency"{print $1"\t"$2"\t"$13}' docs/sweep_2026-02-28/mongodb_original.tsv | sort -n)
 docker kill <jetpack-mongodb-container-id>
 ```
 
