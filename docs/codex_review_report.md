@@ -2,38 +2,40 @@
 
 ## 1. Scope
 
-This report currently covers the first two high-priority leaf tasks from `TODO_codex.md`:
+This report currently covers the first three high-priority leaf tasks from `TODO_codex.md`:
 
 - `Phase 1A`: Low-concurrency latency sanity check.
 - `Phase 1B`: Throughput sweep consistency check.
+- `Phase 1C`: Failure-recovery sanity check.
 
 Included in this pass:
 
 - Internal consistency checks across `docs/latency_analysis.md`, `result.md`, and sweep artifacts.
 - Numerical checks of latency deltas and sweep peak/status claims.
 - Cross-check of canonical sweep files vs rerun/archive history for contradictions.
+- Recovery-model checks against `docs/failure_recovery_evaluation.md`, `result.md`, and committed recovery logs.
 
 Not yet executed in this report:
 
-- `Phase 1C` failure-recovery sanity check.
 - `Phase 2` benchmark reruns.
 - `Phase 3` recovery reruns.
 
 ## 2. Environment
 
-- UTC timestamp (this iteration): 2026-03-07T20:03:36Z
+- UTC timestamp (this iteration): 2026-03-07T20:09:07Z
 - Git branch: `jetpack`
 - Repository root: `/home/shuai/workspace/jetpack`
 - Build/test environment blockers observed:
   - `./test_run.py` fails when `build/deptran_server` is missing, then hits a pre-existing `NameError` (`except Error`) in the script.
   - `python3 waf configure build -d` fails on Python 3.13 (`ModuleNotFoundError: imp` in waflib).
-  - `python2 waf configure build -d -D` starts compiling but fails due missing backend client headers/libraries (`mongocxx/instance.hpp`, `zookeeper/zookeeper.h`).
+  - `python2 waf configure build -d -D` starts compiling but fails due missing backend client headers/libraries (`mongocxx/instance.hpp`, `zookeeper/zookeeper.h`, `etcd/SyncClient.hpp`).
 
 ## 3. Docs Reviewed
 
 - `TODO_codex.md`
 - `docs/benchmark_runbook.md`
 - `docs/latency_analysis.md`
+- `docs/failure_recovery_evaluation.md`
 - `result.md`
 - `docs/sweep_2026-02-28/README.md`
 - `docs/sweep_2026-02-28/CANONICAL_INDEX.md`
@@ -42,6 +44,9 @@ Not yet executed in this report:
 - `docs/sweep_2026-02-28/rerun_results.tsv`
 - `docs/sweep_2026-02-28/archive/*.tsv`
 - `docs/sweep_2026-02-28/consolidated.csv`
+- `docs/logs/*_recovery_gap_fix_wan_r*.txt`
+- `docs/logs/*_recovery_v2.txt`
+- `docs/logs/*_recovery.txt`
 
 ## 4. Existing Claims Checked
 
@@ -64,6 +69,17 @@ Checked claims in `docs/latency_analysis.md` and sweep docs:
 - Status claim: `99/99 OK` points in canonical sweep.
 
 Also checked throughput tables in `result.md` (high-concurrency and max-throughput sections) against canonical TSVs.
+
+### C. Failure Recovery (Phase 1C)
+
+Checked claims in `docs/failure_recovery_evaluation.md`, `result.md`, and committed recovery logs:
+
+- Formula claim at RTT=40ms: expected Jetpack downtime/recovery duration near `1ms poll + 2*RTT = ~81ms`.
+- Published 3x3 WAN repetitions (etcd/MongoDB/ZooKeeper, 3 reps each).
+- Qualitative backend re-election claims:
+  - etcd variable and can reach multi-second.
+  - MongoDB around 10-13 seconds.
+  - ZooKeeper sub-second to about 1 second.
 
 ## 5. Sanity Check Review
 
@@ -118,6 +134,36 @@ Rerun/archive contradiction check:
 - `rerun_results.tsv` values for those 12 points differ from final canonical TSV rows at the same dataset/concurrency by roughly `-10.6%` to `+12.4%` in some cases.
 - This is not a direct contradiction (ledger is explicitly historical/superseded), but it indicates non-trivial run-to-run variance for several points.
 
+### C. Failure-Recovery Consistency Verdict
+
+Artifact-backed WAN 3x3 check (from committed logs `docs/logs/*_recovery_gap_fix_wan_r*.txt`):
+
+| Backend | Rep1 internal (ms) | Rep2 internal (ms) | Rep3 internal (ms) | Expected (~81ms) | Status |
+|---|---:|---:|---:|---:|---|
+| etcd | 82 | 81 | 81 | ~81 | Match |
+| MongoDB | 83 | 81 | 81 | ~81 | Match |
+| ZooKeeper | 83 | 82 | 81 | ~81 | Match |
+
+Backend re-election from the same logs:
+
+| Backend | Rep1 (ms) | Rep2 (ms) | Rep3 (ms) | Qualitative claim check |
+|---|---:|---:|---:|---|
+| etcd | 1106 | 6973 | 1556 | Variable, includes multi-second cases -> consistent |
+| MongoDB | 10496 | 12710 | 11091 | Around 10-13s -> consistent |
+| ZooKeeper | 862 | 789 | 776 | Sub-second to about 1s -> consistent |
+
+Key interpretation:
+
+- The 3x3 WAN internal durations (`81-83ms`) support the RTT-based recovery model.
+- However, logs also include script-measured `Jetpack downtime` lines that differ substantially (for example MongoDB rep2 shows `323ms`) while the internal recovery line is `81ms`.
+- Therefore the docs are only consistent if "sanity-check metric" is interpreted as internal recovery duration (`duration=`), not script detection time.
+
+Internal-document consistency review:
+
+- `docs/failure_recovery_evaluation.md` and `result.md` include both pre-fix gap narratives and post-fix 81-83ms PASS narratives.
+- In `docs/failure_recovery_evaluation.md`, some status rows are marked `RESOLVED` while later sections still mark related items `OPEN`, which is internally inconsistent.
+- The pre-fix RTT=40ms internal-duration numbers (`~124-128ms`, `~162-184ms`) are described, but I did not find matching committed `docs/logs/*.txt` artifacts containing those exact internal-duration lines; available committed logs clearly support the post-fix 81-83ms runs plus older 0ms/single-process runs.
+
 ## 6. Benchmark Rerun Attempts
 
 No benchmark rerun executed yet. Pending `Phase 2`.
@@ -134,6 +180,12 @@ No failure-recovery rerun executed yet. Pending `Phase 3`.
   - Risk: traceability friction when matching files/scripts/tables.
 - Historical rerun vs canonical differences reach about +/-10% to +/-12% on some points.
   - Risk: single-point comparisons may overstate precision without variance bounds.
+- Recovery metric naming is ambiguous in docs/logs (`Jetpack downtime` vs internal `duration=`), and these can differ substantially.
+  - Risk: readers may compare the wrong metric against the 81ms formula.
+- `docs/failure_recovery_evaluation.md` contains internally conflicting status statements (`RESOLVED` tables vs later `OPEN` subsections for related issues).
+  - Risk: confidence level is overstated unless each claim is tied to a specific evidence set/date.
+- Some pre-fix RTT=40ms internal-duration claims are not directly backed by committed log files in `docs/logs/`.
+  - Risk: those pre-fix values remain plausible narrative context rather than directly artifact-backed in this repository snapshot.
 - Runtime regression testing still blocked in this environment by build prerequisites/toolchain compatibility.
   - Risk: this report can currently confirm artifact consistency, not runtime reproducibility.
 
@@ -141,7 +193,10 @@ No failure-recovery rerun executed yet. Pending `Phase 3`.
 
 - `Phase 1A`: Documented low-concurrency latency claims are internally consistent and follow the expected RTT-delta model, with a small MongoDB ON overhead above the simple 40ms ideal.
 - `Phase 1B`: Canonical sweep claims in `docs/latency_analysis.md` and `docs/sweep_2026-02-28/` are internally consistent and artifact-backed (`99/99 OK`, peak values match TSVs after rounding).
-- Open discrepancy: throughput numbers in `result.md` are not consistent with canonical sweep artifacts and should be treated as unresolved/stale until reconciled.
+- `Phase 1C`: The WAN 3x3 recovery logs support the 81-83ms internal recovery claim and the qualitative backend election ranking/ranges (etcd variable, MongoDB ~10-13s, ZooKeeper ~0.8s).
+- Open discrepancies:
+  - Throughput numbers in `result.md` are not consistent with canonical sweep artifacts.
+  - Recovery sections mix metrics and contain internal status conflicts; pre-fix RTT=40ms gap claims are not fully traceable to committed logs.
 
 ## 10. Appendix: Commands and Evidence
 
@@ -151,6 +206,23 @@ Key commands used in this and previous iteration:
 git pull
 rg -n "h1|h2-h5|40ms|Jetpack OFF|Jetpack ON|etcd|MongoDB|ZooKeeper|low-concurrency|sanity" docs/latency_analysis.md result.md docs/benchmark_runbook.md
 rg -n "Peak Throughput|Maximum Throughput|99/99|OK|adaptive|original|fastpath100|FP 100%|none_" docs/latency_analysis.md result.md docs/sweep_2026-02-28/README.md docs/sweep_2026-02-28/CANONICAL_INDEX.md docs/sweep_2026-02-28/FAILURE_LEDGER.md
+rg -n "81ms|2\\*RTT|RTT=40|WAN|recovery|downtime|leader election|new leader|Run A|Run B|Run C|expected" docs/failure_recovery_evaluation.md result.md docs/benchmark_runbook.md
+```
+
+Recovery-log extraction checks:
+
+```bash
+ls -la docs/logs
+git ls-files docs/logs
+rg -n "downtime|Jetpack recovery completed|duration=|new leader|new primary|signal|RTT|recovery" docs/logs/*_recovery_gap_fix_wan_r*.txt
+
+printf 'file\tbackend_downtime_ms\tjetpack_downtime_ms\tinternal_duration_ms\n'
+for f in docs/logs/*_recovery_gap_fix_wan_r*.txt; do
+  bd=$(sed -nE 's/.*(etcd|MongoDB|ZooKeeper) downtime: ([0-9]+)ms.*/\2/p' "$f" | head -n1)
+  jd=$(sed -nE 's/.*Jetpack downtime: ([0-9]+)ms.*/\1/p' "$f" | head -n1)
+  id=$(sed -nE 's/.*Jetpack recovery completed \(duration=([0-9]+)ms\).*/\1/p' "$f" | head -n1)
+  printf '%s\t%s\t%s\t%s\n' "$(basename "$f")" "$bd" "$jd" "$id"
+done | sort
 ```
 
 Canonical sweep status/peak checks:
