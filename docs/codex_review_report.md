@@ -2,7 +2,7 @@
 
 ## 1. Scope
 
-This report currently covers the first twelve high-priority leaf tasks from `TODO_codex.md`:
+This report currently covers the first thirteen high-priority leaf tasks from `TODO_codex.md`:
 
 - `Phase 1A`: Low-concurrency latency sanity check.
 - `Phase 1B`: Throughput sweep consistency check.
@@ -16,6 +16,7 @@ This report currently covers the first twelve high-priority leaf tasks from `TOD
 - `Phase 2` next leaf: low-concurrency benchmark rerun (`zookeeper ON` / rule mode).
 - `Phase 2` next leaf: throughput sweep rerun (`etcd original` / `none_etcd.yml`).
 - `Phase 2` next leaf: throughput sweep rerun (`etcd fastpath100` / `rule_etcd.yml -m 100`).
+- `Phase 2` next leaf: throughput sweep rerun (`etcd adaptive` / `rule_etcd.yml`).
 
 Included in this pass:
 
@@ -25,16 +26,16 @@ Included in this pass:
 - Recovery-model checks against `docs/failure_recovery_evaluation.md`, `result.md`, and committed recovery logs.
 - Phase-2 prerequisite verification (Docker, compose, submodules, ulimit, backend image build attempts).
 - Low-concurrency rerun execution (`etcd OFF`, `etcd ON`, `mongodb OFF`, `mongodb ON`, `zookeeper OFF`, `zookeeper ON`) with captured command transcripts and per-run metrics.
-- Throughput-sweep rerun execution (`etcd original`, `etcd fastpath100`) with per-concurrency comparison to canonical sweep artifacts.
+- Throughput-sweep rerun execution (`etcd original`, `etcd fastpath100`, `etcd adaptive`) with per-concurrency comparison to canonical sweep artifacts.
 
 Not yet executed in this report:
 
-- Remaining `Phase 2` throughput sweep reruns (7 of 9 matrix cases still pending).
+- Remaining `Phase 2` throughput sweep reruns (6 of 9 matrix cases still pending).
 - `Phase 3` recovery reruns.
 
 ## 2. Environment
 
-- UTC timestamp (this iteration): 2026-03-07T22:15:55Z
+- UTC timestamp (this iteration): 2026-03-07T22:35:53Z
 - Git branch: `jetpack`
 - Repository root: `/home/shuai/workspace/jetpack`
 - Build/test environment blockers observed:
@@ -504,6 +505,36 @@ Interpretation (`etcd fastpath100` throughput sweep rerun):
 - Rerun peak is `5939.40 @ c=100`, while canonical peak is `6749.30 @ c=400` (about `-12.0%` lower and at a different concurrency).
 - This case is also partially supporting: low/mid-concurrency reproduction is strong, but high-concurrency shape and peak location do not reproduce.
 
+Third throughput-sweep rerun set (`etcd adaptive`, `rule_etcd.yml`):
+
+```bash
+sed 's|LOG_DIR="docs/sweep_2026-02-28/logs/${IMAGE_SHORT}_${MODE_SHORT}"|LOG_DIR="/tmp/codex_sweep_logs/${IMAGE_SHORT}_${MODE_SHORT}"|' scripts/sweep_benchmark.sh > /tmp/codex_sweep_benchmark.sh
+chmod +x /tmp/codex_sweep_benchmark.sh
+timeout 7200s /tmp/codex_sweep_benchmark.sh jetpack-etcd rule_etcd.yml > /tmp/codex_phase2_sweep_etcd_adaptive_20260307T221731Z.tsv 2> /tmp/codex_phase2_sweep_etcd_adaptive_20260307T221731Z.stderr.log
+```
+
+| Concurrency | Rerun throughput | Canonical throughput | Delta vs canonical | Rerun status |
+|---:|---:|---:|---:|---|
+| 1 | 39.20 | 39.70 | -1.26% | OK |
+| 5 | 274.10 | 271.60 | +0.92% | OK |
+| 10 | 568.30 | 574.40 | -1.06% | OK |
+| 25 | 1470.80 | 1465.50 | +0.36% | OK |
+| 50 | 2966.40 | 2964.20 | +0.07% | OK |
+| 75 | 4466.60 | 4462.90 | +0.08% | OK |
+| 100 | 5964.00 | 5925.00 | +0.66% | OK |
+| 150 | 6013.20 | 6955.60 | -13.55% | OK |
+| 200 | 5997.90 | 7323.30 | -18.10% | OK |
+| 300 | 5583.00 | 6789.50 | -17.77% | OK |
+| 400 | 5158.70 | 6051.40 | -14.75% | OK |
+
+Interpretation (`etcd adaptive` throughput sweep rerun):
+
+- Sweep completed `11/11` points with `status=OK` and `retry_count=0` for all points.
+- Throughput closely matches canonical at `c <= 100` (within roughly `-1.3%` to `+0.9%`).
+- High-concurrency points are lower than canonical (`c=150..400` about `-13.6%` to `-18.1%`).
+- Rerun peak is `6013.20 @ c=150`, below canonical peak `7323.30 @ c=200` (about `-17.9%`).
+- This case is partially supporting: low/mid-concurrency behavior reproduces well, but published high-concurrency capacity was not reproduced.
+
 ## 7. Failure Recovery Rerun Attempts
 
 No failure-recovery rerun executed yet. Pending `Phase 3`.
@@ -534,6 +565,8 @@ No failure-recovery rerun executed yet. Pending `Phase 3`.
   - Risk: peak-capacity claims are sensitive to runtime/environment conditions and should be presented with variance context.
 - The `etcd fastpath100` throughput sweep rerun matches canonical at `c <= 100` but diverges at high concurrency and shifts peak from `c=400` (canonical) to `c=100` (rerun).
   - Risk: fast-path capacity curves appear environment-sensitive, so single-run peak comparisons can be misleading without variance bounds.
+- The `etcd adaptive` throughput sweep rerun also matches canonical at `c <= 100` but underperforms canonical at `c >= 150` by about `14%` to `18%`.
+  - Risk: adaptive high-concurrency capacity appears sensitive to runtime conditions, reducing confidence in single-run peak claims.
 - Runtime regression testing still blocked in this environment by build prerequisites/toolchain compatibility.
   - Risk: this report can currently confirm artifact consistency, not runtime reproducibility.
 
@@ -553,7 +586,8 @@ No failure-recovery rerun executed yet. Pending `Phase 3`.
   - Throughput sweep progress:
     - `etcd original` completed with `11/11 OK`; low/mid-concurrency matches canonical closely, but high-concurrency throughput is lower and peak is `6322.9` vs canonical `7686.6` (about `-17.7%`).
     - `etcd fastpath100` completed with `11/11 OK`; low/mid-concurrency closely matches canonical, but high-concurrency points diverge and peak shifts to `5939.4@c=100` vs canonical `6749.3@c=400`.
-- `Phase 2` throughput sweep matrix status: 2 of 9 cases rerun; remaining 7 cases are still pending.
+    - `etcd adaptive` completed with `11/11 OK`; low/mid-concurrency closely matches canonical, while high-concurrency points are lower and peak is `6013.2@c=150` vs canonical `7323.3@c=200`.
+- `Phase 2` throughput sweep matrix status: 3 of 9 cases rerun; remaining 6 cases are still pending.
 - Open discrepancies:
   - Throughput numbers in `result.md` are not consistent with canonical sweep artifacts.
   - Recovery sections mix metrics and contain internal status conflicts; pre-fix RTT=40ms gap claims are not fully traceable to committed logs.
@@ -590,6 +624,8 @@ timeout 7200s /tmp/codex_sweep_benchmark.sh jetpack-etcd none_etcd.yml > /tmp/co
 join -t $'\t' -1 1 -2 1 <(awk -F'\t' '!/^#/&&$1!="concurrency"{print $1"\t"$2"\t"$13}' /tmp/codex_phase2_sweep_etcd_original_20260307T213527Z.tsv | sort -n) <(awk -F'\t' '!/^#/&&$1!="concurrency"{print $1"\t"$2"\t"$13}' docs/sweep_2026-02-28/etcd_original.tsv | sort -n)
 timeout 7200s /tmp/codex_sweep_benchmark.sh jetpack-etcd rule_etcd.yml "-m 100" > /tmp/codex_phase2_sweep_etcd_fastpath100_20260307T215653Z.tsv 2> /tmp/codex_phase2_sweep_etcd_fastpath100_20260307T215653Z.stderr.log
 join -t $'\t' -1 1 -2 1 <(awk -F'\t' '!/^#/&&$1!="concurrency"{print $1"\t"$2"\t"$13}' /tmp/codex_phase2_sweep_etcd_fastpath100_20260307T215653Z.tsv | sort -n) <(awk -F'\t' '!/^#/&&$1!="concurrency"{print $1"\t"$2"\t"$13}' docs/sweep_2026-02-28/etcd_fastpath100.tsv | sort -n)
+timeout 7200s /tmp/codex_sweep_benchmark.sh jetpack-etcd rule_etcd.yml > /tmp/codex_phase2_sweep_etcd_adaptive_20260307T221731Z.tsv 2> /tmp/codex_phase2_sweep_etcd_adaptive_20260307T221731Z.stderr.log
+join -t $'\t' -1 1 -2 1 <(awk -F'\t' '!/^#/&&$1!="concurrency"{print $1"\t"$2"\t"$13}' /tmp/codex_phase2_sweep_etcd_adaptive_20260307T221731Z.tsv | sort -n) <(awk -F'\t' '!/^#/&&$1!="concurrency"{print $1"\t"$2"\t"$13}' docs/sweep_2026-02-28/etcd_adaptive.tsv | sort -n)
 docker kill <jetpack-mongodb-container-id>
 ```
 
