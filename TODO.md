@@ -1118,8 +1118,7 @@ actual model described in `tla/TLA_PLUS_BIG_PICTURE.md`.
   - All 3 wrappers must pass the intended small config first.
   - Large configs may remain bounded/partial due to search-space size, but logs must show
     no error for the actual duration run.
-  - This item stays open unless all three wrappers have checked-in TLC evidence. Two out of
-    three is still open.
+  - All three wrappers now have checked-in TLC evidence (see **Done** below).
   - Do **not** claim wrapper completion from SANY-only success, from one historical log, or
     from logs produced before the latest property/interface changes.
   - **Done** (post-unification commit 00c318b6). All three wrappers verified with unified
