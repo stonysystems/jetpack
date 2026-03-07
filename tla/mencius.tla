@@ -2,8 +2,8 @@
 \* Mencius consensus protocol — a multi-leader Paxos variant with
 \* round-robin slot assignment.  Based on the OSDI 2008 paper.
 \*
-\* This module runs standalone AND provides the same interface as raft.tla
-\* so that jetpack.tla can compose with it as a base protocol.
+\* This module runs standalone for independent verification.
+\* For Jetpack composition, use base_mencius.tla.
 \*
 \* Key design: consensus instances are partitioned round-robin among servers.
 \* Instance (c * N + p) is coordinated by server p.
@@ -411,7 +411,8 @@ ClientRequest(i, v) ==
     /\ ostate[i] = Leader
     /\ Suggest(i, v)
 
-\* Raft-compatible BecomeLeader (no-op in Mencius, all are leaders).
+\* Raft-compatible BecomeLeader (only reachable after Restart, since all
+\* servers initialize as Leader in Mencius).
 BecomeLeader(i) ==
     /\ ostate[i] = Candidate
     /\ votesGranted[i] \in Quorum

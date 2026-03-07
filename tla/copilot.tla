@@ -3,8 +3,8 @@
 \* two distinguished replicas (Pilot and Copilot) that both order and
 \* execute all commands.  Based on the OSDI 2020 paper.
 \*
-\* This module runs standalone AND provides the same interface as raft.tla
-\* so that jetpack.tla can compose with it as a base protocol.
+\* This module runs standalone for independent verification.
+\* For Jetpack composition, use base_copilot.tla.
 \*
 \* Key design: two replicas (pilot, copilot) each maintain their own log.
 \* A fast pilot can safely complete the work of a slow pilot through a

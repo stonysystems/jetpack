@@ -1,7 +1,7 @@
 --------------------------------- MODULE raft ---------------------------------
-\* Standalone Raft consensus protocol extracted from jetpack_raft.tla.
-\* This module can run independently AND serve as a base protocol for
-\* jetpack.tla (which overrides BecomeLeader with its recovery mechanism).
+\* Standalone Raft consensus protocol for independent verification.
+\* For Jetpack composition, use base_raft.tla (which adds the ToBeLeader
+\* state that jetpack.tla intercepts for recovery).
 
 EXTENDS Naturals, FiniteSets, Sequences, TLC
 
