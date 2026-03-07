@@ -100,7 +100,6 @@ UsedCmdIds == LogCmdIds \cup ExecCmdIds
 
 AvailableCommands == {cmd \in Commands : cmd.cmd_id \notin UsedCmdIds}
 
-LogEntryAt(i, k) == IF k <= Len(log[i]) THEN log[i][k] ELSE Nil
 LogCmdAt(i, k) == IF k <= Len(log[i]) THEN log[i][k].value ELSE NilCmd
 
 MaxLogLen == Max({Len(log[i]) : i \in Server} \cup {0})

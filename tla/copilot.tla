@@ -132,9 +132,6 @@ UsedCmdIds == LogCmdIds \cup ExecCmdIds
 
 AvailableCommands == {cmd \in Commands : cmd.cmd_id \notin UsedCmdIds}
 
-LogEntryAt(i, k) == IF k <= Len(log[i]) THEN log[i][k] ELSE Nil
-LogCmdAt(i, k) == IF k <= Len(log[i]) THEN log[i][k].value ELSE NilCmd
-
 MaxLogLen == Max({Len(log[i]) : i \in Server} \cup {0})
 
 ExecAt(k) == IF k <= Len(execution_cmds) THEN execution_cmds[k] ELSE NilCmd
@@ -413,8 +410,6 @@ CommittedLogAgreement ==
 \* At most two active proposers (pilot + copilot) at any time.
 ActiveProposerBound ==
     Cardinality({i \in Server : role[i] \in {Pilot, Copilot}}) <= 2
-
-MaxLogExecLen == Max({MaxLogLen, Len(execution_cmds)})
 
 \* Logs agree at each index (using length guards to avoid TLC type errors).
 LogAgreement ==
