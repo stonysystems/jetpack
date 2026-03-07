@@ -2,11 +2,12 @@
 
 ## 1. Scope
 
-This report currently covers the first three high-priority leaf tasks from `TODO_codex.md`:
+This report currently covers the first four high-priority leaf tasks from `TODO_codex.md`:
 
 - `Phase 1A`: Low-concurrency latency sanity check.
 - `Phase 1B`: Throughput sweep consistency check.
 - `Phase 1C`: Failure-recovery sanity check.
+- `Phase 2` first leaf: benchmark rerun prerequisites/build check.
 
 Included in this pass:
 
@@ -14,15 +15,16 @@ Included in this pass:
 - Numerical checks of latency deltas and sweep peak/status claims.
 - Cross-check of canonical sweep files vs rerun/archive history for contradictions.
 - Recovery-model checks against `docs/failure_recovery_evaluation.md`, `result.md`, and committed recovery logs.
+- Phase-2 prerequisite verification (Docker, compose, submodules, ulimit, backend image build attempts).
 
 Not yet executed in this report:
 
-- `Phase 2` benchmark reruns.
+- `Phase 2` benchmark execution matrix reruns (low-concurrency OFF/ON and sweep reruns).
 - `Phase 3` recovery reruns.
 
 ## 2. Environment
 
-- UTC timestamp (this iteration): 2026-03-07T20:09:07Z
+- UTC timestamp (this iteration): 2026-03-07T20:27:00Z
 - Git branch: `jetpack`
 - Repository root: `/home/shuai/workspace/jetpack`
 - Build/test environment blockers observed:
@@ -47,6 +49,9 @@ Not yet executed in this report:
 - `docs/logs/*_recovery_gap_fix_wan_r*.txt`
 - `docs/logs/*_recovery_v2.txt`
 - `docs/logs/*_recovery.txt`
+- `docker/etcd/docker-compose.yml`
+- `docker/mongodb/docker-compose.yml`
+- `docker/zookeeper/docker-compose.yml`
 
 ## 4. Existing Claims Checked
 
@@ -80,6 +85,19 @@ Checked claims in `docs/failure_recovery_evaluation.md`, `result.md`, and commit
   - etcd variable and can reach multi-second.
   - MongoDB around 10-13 seconds.
   - ZooKeeper sub-second to about 1 second.
+
+### D. Phase 2 Prerequisites/Build Readiness
+
+Checked prerequisite claims before reruns:
+
+- `docker --version`: available.
+- `docker compose version`: available.
+- `git submodule status --recursive`: submodules present/initialized.
+- `ulimit -n`: `524288` (well above `65536` guidance).
+- Backend image build readiness:
+  - etcd build attempt from runbook command did not reach compile stage within bounded window due very large Docker context transfer.
+  - MongoDB build attempt likewise timed out during large context transfer.
+  - ZooKeeper build failed quickly with upstream fetch error (`invalid response status 404` from `downloads.apache.org` URL in Dockerfile).
 
 ## 5. Sanity Check Review
 
@@ -166,7 +184,19 @@ Internal-document consistency review:
 
 ## 6. Benchmark Rerun Attempts
 
-No benchmark rerun executed yet. Pending `Phase 2`.
+Phase 2 prerequisite/build checks executed, but benchmark reruns are currently blocked by image build readiness:
+
+- Prerequisite checks:
+  - Docker: PASS
+  - Docker Compose: PASS
+  - Submodule availability: PASS
+  - File descriptor limit (`ulimit -n`): PASS
+- Build checks:
+  - etcd image: BLOCKED (context-transfer timeout; command did not reach build completion)
+  - MongoDB image: BLOCKED (context-transfer timeout; command did not reach build completion)
+  - ZooKeeper image: FAILED (upstream tarball URL returned 404 during `ADD`)
+
+No low-concurrency benchmark cases were rerun in this iteration due these blockers.
 
 ## 7. Failure Recovery Rerun Attempts
 
@@ -186,6 +216,8 @@ No failure-recovery rerun executed yet. Pending `Phase 3`.
   - Risk: confidence level is overstated unless each claim is tied to a specific evidence set/date.
 - Some pre-fix RTT=40ms internal-duration claims are not directly backed by committed log files in `docs/logs/`.
   - Risk: those pre-fix values remain plausible narrative context rather than directly artifact-backed in this repository snapshot.
+- Phase 2 benchmark reruns are blocked by backend image build issues in current environment/workspace state.
+  - Risk: reproducibility claims remain document-audit-only until image build path is stabilized.
 - Runtime regression testing still blocked in this environment by build prerequisites/toolchain compatibility.
   - Risk: this report can currently confirm artifact consistency, not runtime reproducibility.
 
@@ -194,6 +226,7 @@ No failure-recovery rerun executed yet. Pending `Phase 3`.
 - `Phase 1A`: Documented low-concurrency latency claims are internally consistent and follow the expected RTT-delta model, with a small MongoDB ON overhead above the simple 40ms ideal.
 - `Phase 1B`: Canonical sweep claims in `docs/latency_analysis.md` and `docs/sweep_2026-02-28/` are internally consistent and artifact-backed (`99/99 OK`, peak values match TSVs after rounding).
 - `Phase 1C`: The WAN 3x3 recovery logs support the 81-83ms internal recovery claim and the qualitative backend election ranking/ranges (etcd variable, MongoDB ~10-13s, ZooKeeper ~0.8s).
+- `Phase 2` prerequisite check: core prerequisites pass, but backend image builds are currently blocked (etcd/mongodb context-transfer timeouts; zookeeper source URL 404), so benchmark rerun phase is not yet executable in this environment.
 - Open discrepancies:
   - Throughput numbers in `result.md` are not consistent with canonical sweep artifacts.
   - Recovery sections mix metrics and contain internal status conflicts; pre-fix RTT=40ms gap claims are not fully traceable to committed logs.
@@ -207,6 +240,13 @@ git pull
 rg -n "h1|h2-h5|40ms|Jetpack OFF|Jetpack ON|etcd|MongoDB|ZooKeeper|low-concurrency|sanity" docs/latency_analysis.md result.md docs/benchmark_runbook.md
 rg -n "Peak Throughput|Maximum Throughput|99/99|OK|adaptive|original|fastpath100|FP 100%|none_" docs/latency_analysis.md result.md docs/sweep_2026-02-28/README.md docs/sweep_2026-02-28/CANONICAL_INDEX.md docs/sweep_2026-02-28/FAILURE_LEDGER.md
 rg -n "81ms|2\\*RTT|RTT=40|WAN|recovery|downtime|leader election|new leader|Run A|Run B|Run C|expected" docs/failure_recovery_evaluation.md result.md docs/benchmark_runbook.md
+docker --version
+docker compose version
+git submodule status --recursive
+ulimit -n
+timeout 90s docker compose -f docker/etcd/docker-compose.yml build
+timeout 90s docker compose -f docker/mongodb/docker-compose.yml build
+timeout 90s docker compose -f docker/zookeeper/docker-compose.yml build
 ```
 
 Recovery-log extraction checks:
