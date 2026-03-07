@@ -97,8 +97,6 @@ Symmetry == Permutations(Server)
 
 Quorum == {q \in SUBSET(Server) : Cardinality(q) * 2 > Cardinality(Server)}
 
-LastTerm(xlog) == IF Len(xlog) = 0 THEN 0 ELSE xlog[Len(xlog)].term
-
 Min(s) == CHOOSE x \in s : \A y \in s : x <= y
 Max(s) == CHOOSE x \in s : \A y \in s : x >= y
 

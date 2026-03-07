@@ -89,8 +89,6 @@ Max(s) == CHOOSE x \in s : \A y \in s : x >= y
 
 SeqToSet(s) == {s[i] : i \in 1..Len(s)}
 
-LastTerm(xlog) == IF Len(xlog) = 0 THEN 0 ELSE xlog[Len(xlog)].term
-
 N == Cardinality(Server)
 
 Symmetry == Permutations(Server)
