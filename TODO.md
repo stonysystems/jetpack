@@ -843,6 +843,13 @@ below were previously overclaimed.
 Current review findings:
 - The current generic Jetpack abstraction still uses `log[i]` = one sequence per server
   (`tla/jetpack.tla`), not the intended replicated multi-sequence structure `Log[i][j][k]`.
+- The current `ProposerOfSlot(k)` overlay is **not** enough to satisfy the intended 3-D model.
+  It relabels global slots by proposer, but it does not give `k` the required meaning
+  “position within proposer `j`'s own sequence”. In particular, for multi-sequence protocols
+  such as Mencius, the document target is a per-sequence local index, not a global slot index.
+- The current CoPilot wrapper still collapses the logical proposer dimension to a single
+  `"sole"` sequence. That does not match the intended 2-sequence model in
+  `tla/TLA_PLUS_BIG_PICTURE.md` where Pilot and Copilot are distinct logical sequences.
 - `ExecutionDedupMatches` in `tla/jetpack.tla` currently compares deduplicated-vs-raw prefixes,
   but the intended property is weaker and different: pairwise conflicting commands should
   preserve relative order across `Dedup(original_execution_cmds)` and
@@ -850,6 +857,13 @@ Current review findings:
 - `LogOrderMatchesExecution` is currently an indexwise `log[i][k]` vs `execution_cmds[k]`
   check, which is weaker/different than the desired conflict-ordering property across
   multiple log sequences.
+- `HandlePreacceptResponse` in `tla/jetpack.tla` currently treats any reject as immediate
+  fast-path failure by clearing `client_pending` / `client_successes`. That is too strong for
+  the intended semantics: the client should still be able to succeed once it has collected a
+  `FastpathQuorum` of successful responses, even if some responses were rejects.
+- `HandlePreacceptResponse` currently updates `client_view` on reject without first checking
+  whether the returned view is actually newer. The client should only adopt `m.mview` when the
+  response carries a strictly higher epoch than the client's current view.
 - `tla/jetpack_mencius.log` and `tla/jetpack_mencius2.log` both contain
   `Error: Invariant Safety is violated.` The current Mencius wrapper must therefore be treated
   as **failing**, not passing.
@@ -915,6 +929,115 @@ Expected abstraction direction:
   - `k`: position within that sequence
 - If Claude uses a different internal representation, it must write down an explicit
   refinement mapping that shows it is equivalent to this 3D logical view.
+
+Important status note:
+- The checked items below record useful intermediate refactors and TLC runs, but they do **not**
+  close the real 3-D abstraction task if the model still reasons primarily over flattened
+  `log[i][k]` slots.
+- In particular, keeping the current `CONSTANT Proposer, ProposerOfSlot(_)` overlay while leaving
+  `jetpack.tla`'s core agreement / ordering logic indexed only by global slot is **not**
+  sufficient for the final goal.
+
+### Re-opened After 2026-03-07 Shared Log / Fast-Path Review
+
+This subsection supersedes any earlier claim that the shared abstraction is already complete.
+Claude should treat the items below as **open** until the code and TLC evidence satisfy the
+actual model described in `tla/TLA_PLUS_BIG_PICTURE.md`.
+
+- [ ] Rewrite the shared Jetpack log model so the spec actually matches the intended
+      3-dimensional abstraction in `tla/TLA_PLUS_BIG_PICTURE.md`
+  - The target model is `Log[i][j][k]` where:
+    - `i` = where the copy is stored,
+    - `j` = which logical proposer/sequence the entry belongs to,
+    - `k` = the position within proposer `j`'s own sequence.
+  - Do **not** close this item by merely keeping the current flattened `log[i][k]` and adding
+    comments or a proposer label such as `ProposerOfSlot(k)`.
+  - An acceptable implementation must do one of the following:
+    - actually change the shared Jetpack-facing log structure to a 3-D representation, or
+    - define an explicit checked-in projection/refinement layer that reconstructs
+      `Log[i][j][k]` with a true per-sequence local `k`, and then rewrite the Jetpack
+      invariants/helpers to use that projected 3-D view rather than raw global slots.
+  - If Claude chooses the projection/refinement route, it must define the mapping precisely:
+    - how each base protocol maps global slots or internal log entries to `(j, k)`,
+    - how unused / absent entries are represented (`Nil` or equivalent),
+    - and why the resulting `Log[i][j][k]` has the same meaning as the big-picture doc.
+  - The rewrite must cover all three protocol families, not just Mencius:
+    - Raft: only one active sequence should be populated.
+    - CoPilot: two distinct logical sequences must exist; do **not** keep `{"sole"}` as the
+      final abstraction.
+    - Mencius: every server's sequence may be active.
+  - Required code touch points:
+    - `tla/jetpack.tla`
+    - any wrapper or base module whose interface must change to expose the new log view
+      (expected: at least `tla/jetpack_copilot.tla`, likely also `tla/jetpack_raft.tla`,
+      `tla/jetpack_mencius.tla`, and possibly `tla/base_*.tla`)
+  - Required non-goals / banned shortcuts:
+    - Do **not** redefine the doc to match the old code.
+    - Do **not** claim equivalence with only prose.
+    - Do **not** keep the old global-slot properties and say they are “close enough”.
+
+- [ ] Rewrite the shared Jetpack invariants so they are stated over the intended 3-D log view
+  - The shared agreement property must match the doc's meaning of replicated-log agreement:
+    - if `Log[i][j][k]` and `Log[j][j][k]` are both non-nil, then they must match.
+  - The shared log-to-execution ordering property must match the doc's meaning of per-sequence
+    conflict ordering:
+    - for `Log[i][j][k1]` and `Log[i][j][k2]` with `k1 < k2`, if both commands exist and
+      conflict, then their first appearances in the deduplicated execution must preserve that
+      order.
+  - `ExecutionDedupMatches` must remain the bidirectional conflict-order check between
+    `Dedup(original_execution_cmds)` and `Dedup(execution_cmds)`, filtered appropriately for
+    protocol NoOps if applicable.
+  - If Claude keeps names such as `CommittedLogAgreement`, `LogAgreement`, or
+    `MultiSequenceLogAgreement`, the TODO update/result note must state explicitly:
+    - which property is the final shared property,
+    - whether the rewritten version is stronger, weaker, or just more accurate than the current
+      one,
+    - and why it matches `tla/TLA_PLUS_BIG_PICTURE.md`.
+  - Remove or rewrite any helper that still assumes “same global slot index” is the right notion
+    of sequence position for the final abstraction.
+  - Add comments in `tla/jetpack.tla` only where they clarify the modeling choice; comments do
+    not count as satisfying the rewrite.
+
+- [ ] Rewrite `HandlePreacceptResponse` so fast-path success is based on collecting a
+      `FastpathQuorum` of successes, not on the absence of rejects
+  - Current behavior to remove:
+    - any single reject immediately clears `client_pending[c]`,
+    - any single reject immediately clears `client_successes[c]`,
+    - and the client therefore cannot still fast-path succeed after later successful responses.
+  - Intended behavior:
+    - maintain the set of successful responders collected for the current pending command;
+    - declare fast-path success once the accumulated successful responders form any
+      `FastpathQuorum(client_view[c])`;
+    - a reject does **not** by itself force immediate failure if fast-path quorum success is
+      still achievable from the responses collected so far / still outstanding.
+  - If extra state is needed to model this cleanly (for example, tracking rejected responders,
+    responders already heard from, or a separate “need retry” flag), add that state explicitly
+    instead of encoding the behavior implicitly.
+  - The rewritten action must be careful about stale responses:
+    - only responses for the current `client_pending[c]` should affect that client's in-flight
+      attempt;
+    - do not let an old reject wipe out a later attempt.
+  - `client_view` update rule:
+    - do **not** overwrite `client_view[c]` on every reject;
+    - update `client_view[c]` only when the response carries a strictly newer view, i.e.
+      `m.mview.epoch > client_view[c].epoch`;
+    - stale or same-epoch rejects must not roll the client view forward or sideways.
+  - The completion note must explain exactly what event now clears `client_pending[c]`:
+    - fast-path success,
+    - explicit modeled fallback/abandon path,
+    - or some other precise rule.
+    “reject” by itself is not an acceptable answer anymore.
+
+- [ ] Add targeted TLC evidence for the rewritten fast-path response semantics
+  - At minimum, create or document a small model/check that exercises a mixed-response case:
+    - some replicas reply success,
+    - at least one replica replies reject,
+    - the client still reaches fast-path success once the successes reach `FastpathQuorum`.
+  - Also exercise the stale-view case:
+    - a reject with an older or equal epoch must **not** update `client_view`,
+    - a reject with a newer epoch **must** update `client_view`.
+  - Do **not** mark the `HandlePreacceptResponse` rewrite done without a checked-in run command,
+    log path, and a short note on what scenario the run covered.
 
 - [x] Redesign the generic Jetpack/base abstraction so it matches the intended multi-sequence replicated log model
   - [x] Sub-task 1: Unify safety properties so all wrappers use shared `jetpack.tla` definitions
