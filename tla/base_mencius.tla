@@ -105,8 +105,6 @@ CoordinatorOf(sl) == ServerSeq[((sl - 1) % N) + 1]
 
 MaxSlot == N * 3
 
-MySlotsUpTo(i, limit) == {sl \in 1..limit : CoordinatorOf(sl) = i}
-
 \* Extend log[i] through all consecutive Learned/Skipped slots from current length.
 \* newSS: the post-transition slotState for server i (function 1..MaxSlot -> state)
 \* newSV: the post-transition slotValue for server i (function 1..MaxSlot -> value)

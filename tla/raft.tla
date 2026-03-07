@@ -106,10 +106,6 @@ MaxLogLen == Max({Len(log[i]) : i \in Server} \cup {0})
 
 ExecAt(k) == IF k <= Len(execution_cmds) THEN execution_cmds[k] ELSE NilCmd
 
-CommittedCmds(i) ==
-    IF commitIndex[i] = 0 THEN <<>>
-    ELSE [k \in 1..commitIndex[i] |-> log[i][k].value]
-
 (***************************************************************************)
 (* Initialization                                                          *)
 (***************************************************************************)

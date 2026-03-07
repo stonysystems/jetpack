@@ -144,10 +144,6 @@ MaxLogLen == Max({Len(log[i]) : i \in Server} \cup {0})
 
 ExecAt(k) == IF k <= Len(execution_cmds) THEN execution_cmds[k] ELSE NilCmd
 
-CommittedCmds(i) ==
-    IF commitIndex[i] = 0 THEN <<>>
-    ELSE [k \in 1..commitIndex[i] |-> log[i][k].value]
-
 \* Map server to a unique index 1..N for round-robin assignment.
 ServerSeq == CHOOSE f \in [1..N -> Server] :
                 \A i, j \in 1..N : i /= j => f[i] /= f[j]
@@ -159,9 +155,6 @@ CoordinatorOf(sl) == ServerSeq[((sl - 1) % N) + 1]
 
 \* Maximum slot number we model (bounded for model checking).
 MaxSlot == N * 3
-
-\* Slot range for a server: all slots this server coordinates.
-MySlotsUpTo(i, limit) == {sl \in 1..limit : CoordinatorOf(sl) = i}
 
 (***************************************************************************)
 (* Initialization                                                          *)

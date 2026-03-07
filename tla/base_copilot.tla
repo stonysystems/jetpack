@@ -21,7 +21,6 @@ EXTENDS Naturals, FiniteSets, Sequences, TLC
 CONSTANTS Server, CmdId, Key
 
 Nil == "Nil"
-NilDep == [tag |-> "NilDep"]
 NilCmd == [tag |-> "NilCmd"]
 
 \* Server states.
@@ -43,8 +42,6 @@ Committed   == "Committed"
 \* CoPilot message types.
 CoPilotPreAcceptRequest   == "CoPilotPreAcceptRequest"
 CoPilotPreAcceptResponse  == "CoPilotPreAcceptResponse"
-CoPilotAcceptRequest      == "CoPilotAcceptRequest"
-CoPilotAcceptResponse     == "CoPilotAcceptResponse"
 CoPilotCommitRequest      == "CoPilotCommitRequest"
 
 (***************************************************************************)
