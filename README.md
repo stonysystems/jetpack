@@ -85,7 +85,10 @@ TLA+ specifications live in the `tla/` directory. All model checking runs in Doc
 | `raft.tla` | Standalone Raft protocol | `raft.cfg` / `raft_small.cfg` |
 | `copilot.tla` | Standalone CoPilot protocol | `copilot.cfg` / `copilot_small.cfg` |
 | `mencius.tla` | Standalone Mencius protocol | `mencius.cfg` / `mencius_small.cfg` |
-| `jetpack.tla` | Jetpack plugin layer (not standalone) | - |
+| `base_raft.tla` | Raft base module (INSTANCE'd by wrapper) | - |
+| `base_copilot.tla` | CoPilot base module (INSTANCE'd by wrapper) | - |
+| `base_mencius.tla` | Mencius base module (INSTANCE'd by wrapper) | - |
+| `jetpack.tla` | Jetpack plugin layer (shared across all wrappers) | - |
 | `jetpack_raft.tla` | Jetpack + Raft composition | `jetpack_raft.cfg` / `jetpack_raft_small.cfg` |
 | `jetpack_copilot.tla` | Jetpack + CoPilot composition | `jetpack_copilot.cfg` / `jetpack_copilot_small.cfg` |
 | `jetpack_mencius.tla` | Jetpack + Mencius composition | `jetpack_mencius.cfg` / `jetpack_mencius_small.cfg` |
@@ -128,12 +131,19 @@ docker run --rm --privileged -v $(pwd)/tla:/tla tlaplus \
 
 ### Verified properties
 
-- **Raft**: CommittedLogAgreement, ElectionSafety (195M+ states explored)
-- **CoPilot**: CommittedLogAgreement, ActiveProposerBound (114M+ states explored)
-- **Mencius**: SlotAgreement (119M+ states explored)
-- **Jetpack + Raft**: CommittedLogAgreement, ElectionSafety (47M+ states explored)
-- **Jetpack + CoPilot**: CommittedLogAgreement, ActiveProposerBound (49M+ states explored)
-- **Jetpack + Mencius**: SlotAgreement (37M+ states explored)
+Standalone base protocols (5 servers, 3 cmds, 2 keys):
+
+- **Raft**: CommittedLogAgreement, ElectionSafety, LogOrderMatchesExecution (21M+ states)
+- **CoPilot**: CommittedLogAgreement, ActiveProposerBound, LogOrderMatchesExecution (11M+ states)
+- **Mencius**: SlotAgreement, CommittedLogAgreement, LogOrderMatchesExecution (13M+ states)
+
+Jetpack wrapper compositions (5 servers, 3 cmds, 2 keys):
+
+- **Jetpack + Raft**: CommittedLogAgreement, MultiSequenceLogAgreement, LogOrderMatchesExecution, ExecutionDedupMatches (2.9M+ states)
+- **Jetpack + CoPilot**: CommittedLogAgreement, MultiSequenceLogAgreement, LogOrderMatchesExecution, ExecutionDedupMatches, ActiveProposerBound (2.4M+ states)
+- **Jetpack + Mencius**: CommittedLogAgreement, MultiSequenceLogAgreement, LogOrderMatchesExecution, ExecutionDedupMatches, SlotAgreement (1.5M+ states)
+
+Jetpack wrappers use a shared 3D log projection (`Log[i][j][k]`) where `i` = server, `j` = proposer, `k` = per-sequence position. See `tla/TLA_PLUS_BIG_PICTURE.md` for the design. TLC logs are saved in `tla/log/`.
 
 ## Integration Testing
 
