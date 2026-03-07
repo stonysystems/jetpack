@@ -2,12 +2,13 @@
 
 ## 1. Scope
 
-This report currently covers the first four high-priority leaf tasks from `TODO_codex.md`:
+This report currently covers the first five high-priority leaf tasks from `TODO_codex.md`:
 
 - `Phase 1A`: Low-concurrency latency sanity check.
 - `Phase 1B`: Throughput sweep consistency check.
 - `Phase 1C`: Failure-recovery sanity check.
 - `Phase 2` first leaf: benchmark rerun prerequisites/build check.
+- `Phase 2` next leaf: low-concurrency benchmark rerun (`etcd OFF`).
 
 Included in this pass:
 
@@ -16,15 +17,17 @@ Included in this pass:
 - Cross-check of canonical sweep files vs rerun/archive history for contradictions.
 - Recovery-model checks against `docs/failure_recovery_evaluation.md`, `result.md`, and committed recovery logs.
 - Phase-2 prerequisite verification (Docker, compose, submodules, ulimit, backend image build attempts).
+- First low-concurrency rerun execution (etcd OFF) with captured command transcripts and per-run metrics.
 
 Not yet executed in this report:
 
-- `Phase 2` benchmark execution matrix reruns (low-concurrency OFF/ON and sweep reruns).
+- Remaining `Phase 2` low-concurrency reruns (`etcd ON`, `mongodb OFF/ON`, `zookeeper OFF/ON`).
+- `Phase 2` throughput sweep reruns.
 - `Phase 3` recovery reruns.
 
 ## 2. Environment
 
-- UTC timestamp (this iteration): 2026-03-07T20:27:00Z
+- UTC timestamp (this iteration): 2026-03-07T20:34:53Z
 - Git branch: `jetpack`
 - Repository root: `/home/shuai/workspace/jetpack`
 - Build/test environment blockers observed:
@@ -98,6 +101,12 @@ Checked prerequisite claims before reruns:
   - etcd build attempt from runbook command did not reach compile stage within bounded window due very large Docker context transfer.
   - MongoDB build attempt likewise timed out during large context transfer.
   - ZooKeeper build failed quickly with upstream fetch error (`invalid response status 404` from `downloads.apache.org` URL in Dockerfile).
+
+### E. Phase 2 Low-Concurrency Rerun: etcd OFF
+
+Checked rerun target:
+
+- `etcd OFF` low-concurrency sanity case using runbook-compatible command shape with explicit overrides to match documented topology (`60c1s5r5p.yml`, `concurrent_1.yml`, `none_etcd.yml`, `LATENCY_MS=20`).
 
 ## 5. Sanity Check Review
 
@@ -184,7 +193,7 @@ Internal-document consistency review:
 
 ## 6. Benchmark Rerun Attempts
 
-Phase 2 prerequisite/build checks executed, but benchmark reruns are currently blocked by image build readiness:
+Phase 2 prerequisite/build checks executed. Full benchmark rerun matrix remains blocked by image build readiness, but partial reruns were still possible using pre-existing local images:
 
 - Prerequisite checks:
   - Docker: PASS
@@ -196,7 +205,33 @@ Phase 2 prerequisite/build checks executed, but benchmark reruns are currently b
   - MongoDB image: BLOCKED (context-transfer timeout; command did not reach build completion)
   - ZooKeeper image: FAILED (upstream tarball URL returned 404 during `ADD`)
 
-No low-concurrency benchmark cases were rerun in this iteration due these blockers.
+Low-concurrency rerun attempts executed using pre-existing local `jetpack-etcd` image:
+
+Command used:
+
+```bash
+docker run --rm --privileged \
+  -e SITE_CONFIG=60c1s5r5p.yml \
+  -e MODE_CONFIG=none_etcd.yml \
+  -e CLIENT_CONFIG=client_open.yml \
+  -e CONCURRENT_CONFIG=concurrent_1.yml \
+  -e LATENCY_MS=20 \
+  -e LATENCY_JITTER=0 \
+  -e TEST_DURATION=30 \
+  jetpack-etcd benchmark
+```
+
+| Attempt UTC | Status | Stdout/stderr capture | h1 avg (ms) | h2-h5 avg (ms) | h2-h5 - h1 (ms) | Total throughput | Assessment vs docs |
+|---|---|---|---:|---:|---:|---:|---|
+| 2026-03-07T20:29:26Z | Completed | `/tmp/codex_phase2_etcd_off_20260307T202926Z.log` | 22.99 | 62.76 | 39.77 | 39.80 | Contradicts absolute latency level (too low), but matches +40ms delta model |
+| 2026-03-07T20:32:00Z | Completed | `/tmp/codex_phase2_etcd_off_20260307T203200Z.log` | 43.91 | 83.35 | 39.44 | 40.10 | Roughly matches published etcd OFF (`43.6/83.7`) and +40ms delta |
+| 2026-03-07T20:34:50Z | Completed | `/tmp/codex_phase2_etcd_off_20260307T203450Z.log` | 43.09 | 83.30 | 40.21 | 40.30 | Roughly matches published etcd OFF (`43.6/83.7`) and +40ms delta |
+
+Interpretation:
+
+- 2/3 reruns support the published etcd OFF latency range.
+- 1/3 rerun is an outlier with ~20ms lower absolute latencies while preserving the expected +40ms h1->h2-h5 gap.
+- This increases confidence in the latency-delta model but indicates run-to-run instability in absolute backend write latency.
 
 ## 7. Failure Recovery Rerun Attempts
 
@@ -218,6 +253,8 @@ No failure-recovery rerun executed yet. Pending `Phase 3`.
   - Risk: those pre-fix values remain plausible narrative context rather than directly artifact-backed in this repository snapshot.
 - Phase 2 benchmark reruns are blocked by backend image build issues in current environment/workspace state.
   - Risk: reproducibility claims remain document-audit-only until image build path is stabilized.
+- The etcd OFF rerun shows one significant absolute-latency outlier (22.99/62.76ms) among otherwise matching runs (~43/83ms).
+  - Risk: absolute latency conclusions may be sensitive to uncontrolled runtime conditions even when topology/mode settings are fixed.
 - Runtime regression testing still blocked in this environment by build prerequisites/toolchain compatibility.
   - Risk: this report can currently confirm artifact consistency, not runtime reproducibility.
 
@@ -227,6 +264,7 @@ No failure-recovery rerun executed yet. Pending `Phase 3`.
 - `Phase 1B`: Canonical sweep claims in `docs/latency_analysis.md` and `docs/sweep_2026-02-28/` are internally consistent and artifact-backed (`99/99 OK`, peak values match TSVs after rounding).
 - `Phase 1C`: The WAN 3x3 recovery logs support the 81-83ms internal recovery claim and the qualitative backend election ranking/ranges (etcd variable, MongoDB ~10-13s, ZooKeeper ~0.8s).
 - `Phase 2` prerequisite check: core prerequisites pass, but backend image builds are currently blocked (etcd/mongodb context-transfer timeouts; zookeeper source URL 404), so benchmark rerun phase is not yet executable in this environment.
+- `Phase 2` low-concurrency rerun progress: `etcd OFF` was rerun 3 times using existing local image; 2 runs roughly match published 43.6/83.7ms, 1 run is a low-latency outlier while still matching the +40ms delta rule.
 - Open discrepancies:
   - Throughput numbers in `result.md` are not consistent with canonical sweep artifacts.
   - Recovery sections mix metrics and contain internal status conflicts; pre-fix RTT=40ms gap claims are not fully traceable to committed logs.
@@ -247,6 +285,7 @@ ulimit -n
 timeout 90s docker compose -f docker/etcd/docker-compose.yml build
 timeout 90s docker compose -f docker/mongodb/docker-compose.yml build
 timeout 90s docker compose -f docker/zookeeper/docker-compose.yml build
+timeout 900s docker run --rm --privileged -e SITE_CONFIG=60c1s5r5p.yml -e MODE_CONFIG=none_etcd.yml -e CLIENT_CONFIG=client_open.yml -e CONCURRENT_CONFIG=concurrent_1.yml -e LATENCY_MS=20 -e LATENCY_JITTER=0 -e TEST_DURATION=30 jetpack-etcd benchmark
 ```
 
 Recovery-log extraction checks:
