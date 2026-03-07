@@ -2,7 +2,7 @@
 
 ## 1. Scope
 
-This report currently covers the first nine high-priority leaf tasks from `TODO_codex.md`:
+This report currently covers the first ten high-priority leaf tasks from `TODO_codex.md`:
 
 - `Phase 1A`: Low-concurrency latency sanity check.
 - `Phase 1B`: Throughput sweep consistency check.
@@ -13,6 +13,7 @@ This report currently covers the first nine high-priority leaf tasks from `TODO_
 - `Phase 2` next leaf: low-concurrency benchmark rerun (`mongodb OFF`).
 - `Phase 2` next leaf: low-concurrency benchmark rerun (`mongodb ON` / rule mode).
 - `Phase 2` next leaf: low-concurrency benchmark rerun (`zookeeper OFF`).
+- `Phase 2` next leaf: low-concurrency benchmark rerun (`zookeeper ON` / rule mode).
 
 Included in this pass:
 
@@ -21,17 +22,16 @@ Included in this pass:
 - Cross-check of canonical sweep files vs rerun/archive history for contradictions.
 - Recovery-model checks against `docs/failure_recovery_evaluation.md`, `result.md`, and committed recovery logs.
 - Phase-2 prerequisite verification (Docker, compose, submodules, ulimit, backend image build attempts).
-- Low-concurrency rerun execution (`etcd OFF`, `etcd ON`, `mongodb OFF`, `mongodb ON`, `zookeeper OFF`) with captured command transcripts and per-run metrics.
+- Low-concurrency rerun execution (`etcd OFF`, `etcd ON`, `mongodb OFF`, `mongodb ON`, `zookeeper OFF`, `zookeeper ON`) with captured command transcripts and per-run metrics.
 
 Not yet executed in this report:
 
-- Remaining `Phase 2` low-concurrency reruns (`zookeeper ON`).
 - `Phase 2` throughput sweep reruns.
 - `Phase 3` recovery reruns.
 
 ## 2. Environment
 
-- UTC timestamp (this iteration): 2026-03-07T21:25:04Z
+- UTC timestamp (this iteration): 2026-03-07T21:31:59Z
 - Git branch: `jetpack`
 - Repository root: `/home/shuai/workspace/jetpack`
 - Build/test environment blockers observed:
@@ -137,6 +137,12 @@ Checked rerun target:
 Checked rerun target:
 
 - `zookeeper OFF` low-concurrency sanity case under runbook-aligned settings (`none_zookeeper.yml`, `60c1s5r5p.yml`, `concurrent_1.yml`, `LATENCY_MS=20`).
+
+### J. Phase 2 Low-Concurrency Rerun: zookeeper ON (rule mode)
+
+Checked rerun target:
+
+- `zookeeper ON` low-concurrency sanity case under runbook-aligned settings (`rule_zookeeper.yml`, `60c1s5r5p.yml`, `concurrent_1.yml`, `LATENCY_MS=20`).
 
 ## 5. Sanity Check Review
 
@@ -407,6 +413,32 @@ Interpretation (`zookeeper OFF`):
 - All runs preserve the expected OFF-mode host delta of about +40ms (`h2-h5 ~= h1 + 40ms`).
 - Absolute levels are consistently ~2-3ms lower than the published `45.5/86.0`, but still in the same rough range and fully consistent with the stated latency model.
 
+Sixth low-concurrency rerun set (`zookeeper ON`, rule mode):
+
+```bash
+docker run --rm --privileged \
+  -e SITE_CONFIG=60c1s5r5p.yml \
+  -e MODE_CONFIG=rule_zookeeper.yml \
+  -e CLIENT_CONFIG=client_open.yml \
+  -e CONCURRENT_CONFIG=concurrent_1.yml \
+  -e LATENCY_MS=20 \
+  -e LATENCY_JITTER=0 \
+  -e TEST_DURATION=30 \
+  jetpack-zookeeper benchmark
+```
+
+| Attempt UTC | Status | Stdout/stderr capture | h1 avg (ms) | h2-h5 avg (ms) | h2-h5 - h1 (ms) | Total throughput | Fast-path success rate | Assessment vs docs |
+|---|---|---|---:|---:|---:|---:|---:|---|
+| 2026-03-07T21:27:27Z | Completed | `/tmp/codex_phase2_zookeeper_on_20260307T212727Z.log` | 40.28 | 40.37 | 0.09 | 41.00 | 100.00% | Roughly matches published ZK ON (`40.3/40.5`); consistent one-RTT behavior |
+| 2026-03-07T21:28:52Z | Completed | `/tmp/codex_phase2_zookeeper_on_20260307T212852Z.log` | 40.33 | 40.44 | 0.11 | 40.70 | 100.00% | Roughly matches published ZK ON (`40.3/40.5`); consistent one-RTT behavior |
+| 2026-03-07T21:30:23Z | Completed | `/tmp/codex_phase2_zookeeper_on_20260307T213023Z.log` | 40.28 | 40.37 | 0.09 | 40.00 | 100.00% | Roughly matches published ZK ON (`40.3/40.5`); consistent one-RTT behavior |
+
+Interpretation (`zookeeper ON`):
+
+- 3/3 reruns completed and were tightly clustered.
+- `h1` and `h2-h5` remain within ~0.1ms, consistent with ON-mode one-RTT behavior.
+- Fast-path success was `100%` in all three runs at concurrency 1.
+
 ## 7. Failure Recovery Rerun Attempts
 
 No failure-recovery rerun executed yet. Pending `Phase 3`.
@@ -448,6 +480,7 @@ No failure-recovery rerun executed yet. Pending `Phase 3`.
   - `mongodb OFF` rerun is currently non-supporting overall: default command failed pre-benchmark in repeated attempts, and the only completed override run contradicted published absolute latency levels.
   - `mongodb ON` rerun is currently non-supporting overall: completed runs (`h1 ~8.9`, `h2-h5 ~42.2`) contradict published `45.2/45.9`, and additional attempts failed or timed out before summaries.
   - `zookeeper OFF` rerun is supporting overall: 3/3 completed runs preserved the +40ms OFF-mode delta and stayed in the same rough absolute range (slightly lower than published values).
+  - `zookeeper ON` rerun is supporting overall: 3/3 completed runs roughly match published `40.3/40.5` and show 100% fast-path success at concurrency 1.
 - Open discrepancies:
   - Throughput numbers in `result.md` are not consistent with canonical sweep artifacts.
   - Recovery sections mix metrics and contain internal status conflicts; pre-fix RTT=40ms gap claims are not fully traceable to committed logs.
@@ -477,6 +510,7 @@ timeout 240s docker run --rm --privileged -e SITE_CONFIG=60c1s5r5p.yml -e MODE_C
 timeout 240s docker run --rm --privileged -e SITE_CONFIG=60c1s5r5p.yml -e MODE_CONFIG=rule_mongodb.yml -e CLIENT_CONFIG=client_open.yml -e CONCURRENT_CONFIG=concurrent_1.yml -e MONGODB_ENDPOINTS='mongodb://127.0.0.1:27017,127.0.0.2:27017,127.0.0.3:27017/?replicaSet=jetpack-rs' -e LATENCY_MS=20 -e LATENCY_JITTER=0 -e TEST_DURATION=30 jetpack-mongodb benchmark
 timeout 360s docker run --rm --privileged -e SITE_CONFIG=60c1s5r5p.yml -e MODE_CONFIG=rule_mongodb.yml -e CLIENT_CONFIG=client_open.yml -e CONCURRENT_CONFIG=concurrent_1.yml -e LATENCY_MS=20 -e LATENCY_JITTER=0 -e TEST_DURATION=30 jetpack-mongodb benchmark
 timeout 900s docker run --rm --privileged -e SITE_CONFIG=60c1s5r5p.yml -e MODE_CONFIG=none_zookeeper.yml -e CLIENT_CONFIG=client_open.yml -e CONCURRENT_CONFIG=concurrent_1.yml -e LATENCY_MS=20 -e LATENCY_JITTER=0 -e TEST_DURATION=30 jetpack-zookeeper benchmark
+timeout 900s docker run --rm --privileged -e SITE_CONFIG=60c1s5r5p.yml -e MODE_CONFIG=rule_zookeeper.yml -e CLIENT_CONFIG=client_open.yml -e CONCURRENT_CONFIG=concurrent_1.yml -e LATENCY_MS=20 -e LATENCY_JITTER=0 -e TEST_DURATION=30 jetpack-zookeeper benchmark
 docker kill <jetpack-mongodb-container-id>
 ```
 
