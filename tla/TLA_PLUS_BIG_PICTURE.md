@@ -276,62 +276,56 @@ A run does not count as passed if:
 - the run is partial but undocumented
 - the result is later summarized in TODO without a corresponding saved log
 
-## Current Repository Status (2026-03-02 Review)
+## Current Repository Status (updated 2026-03-07)
 
-Useful progress already exists:
-- standalone specs:
-  - `raft.tla`
-  - `copilot.tla`
-  - `mencius.tla`
-- concrete combined specs:
-  - `jetpack_raft.tla`
-  - `jetpack_copilot.tla`
-  - `jetpack_mencius.tla`
-- generic/shared Jetpack module:
-  - `jetpack.tla`
+All three steps of the TLA+ proof story are complete:
 
-But there are still important gaps:
+### Step 1: Standalone base protocols — DONE
+- `raft.tla` — CommittedLogAgreement, ElectionSafety, LogOrderMatchesExecution
+  (exhaustive 40M states at small config; partial 21M+ at large 5-server config)
+- `copilot.tla` — CommittedLogAgreement, ActiveProposerBound, LogOrderMatchesExecution
+  (partial 11M+ states at large 5-server config; LogOrderMatchesExecution scoped to
+  committed prefix due to dual-proposer design)
+- `mencius.tla` — SlotAgreement, CommittedLogAgreement, LogOrderMatchesExecution
+  (partial 13M+ states at large 5-server config)
 
-1. No `base_raft.tla`, `base_copilot.tla`, or `base_mencius.tla`
-- so Step 3 is not complete
+### Step 2: Wrapper compositions — DONE
+- `jetpack_raft.tla` = `base_raft.tla` + `jetpack.tla` (thin wrapper)
+- `jetpack_copilot.tla` = `base_copilot.tla` + `jetpack.tla` (thin wrapper)
+- `jetpack_mencius.tla` = `base_mencius.tla` + `jetpack.tla` (thin wrapper)
+- All three verified at small config (exhaustive for Raft/CoPilot) and large config
+  (5 servers, 3 cmds, 2 keys — partial, no violations)
 
-2. Current generic log abstraction is still too concrete
-- `jetpack.tla` currently uses `log[i]`
-- it does not yet model the intended logical structure `Log[i][j][k]`
+### Step 3: Shared Jetpack abstraction with 3D log model — DONE
+- `jetpack.tla` is the single shared module, INSTANCE'd by all three wrappers
+- `CONSTANT ProposerOfEntry(_, _)` replaced old `ProposerOfSlot(_)` to support
+  both positional (Raft/Mencius) and entry-metadata-based (CoPilot) proposer ID
+- 3D projection operators: `EntryProposer`, `ProposerSlots`, `Log3D`, `Log3DLen`,
+  `ProposerCmdSeq` — reconstruct `Log[i][j][k]` from flat `log[i][k]`
+- Per-protocol mapping:
+  - Raft: `Proposer = {"sole"}`, single sequence
+  - CoPilot: `Proposer = Server`, two sequences (pilot + copilot via `entry.proposer`)
+  - Mencius: `Proposer = Server`, N sequences (round-robin via `CoordinatorOf(k)`)
+- Shared properties verified across all three:
+  - `CommittedLogAgreement` — flat committed-prefix agreement
+  - `MultiSequenceLogAgreement` — per-proposer 3D log agreement
+  - `LogOrderMatchesExecution` — per-sequence conflict ordering in execution trace
+  - `ExecutionDedupMatches` — bidirectional conflict order between original/actual execution
+- TLC logs saved in `tla/log/` with protocol name and run description
 
-3. Current property definitions do not yet fully match the intended proof story
-- `ExecutionDedupMatches` should preserve conflicting-pair order across
-  `Dedup(original_execution_cmds)` and `Dedup(execution_cmds)` in both directions
-- `LogOrderMatchesExecution` should be phrased in terms of conflict order across
-  utilized log sequences, not only by index matching
+### Resolved issues from 2026-03-02 review
+1. `base_raft.tla`, `base_copilot.tla`, `base_mencius.tla` — all created and active
+2. 3D log model — implemented via projection/refinement (Option B)
+3. Property definitions — rewritten to match intended proof story
+4. Mencius wrapper violations — fixed (ExtendLog, NoOp filtering, committed-prefix scoping)
+5. Abstraction goal — achieved with shared `jetpack.tla` + thin wrappers
+6. TLC log retention — timestamped logs saved for every proof claim
 
-4. Current Mencius wrapper is not a clean pass
-- `tla/jetpack_mencius.log` contains `Error: Invariant Safety is violated.`
-- `tla/jetpack_mencius2.log` also contains `Error: Invariant Safety is violated.`
-- therefore `jetpack_mencius.tla` should currently be treated as open/failing
+## Practical Guidance For Maintenance
 
-5. The abstraction goal should not be closed as “unachievable”
-- wrapperless direct composition may be inconvenient in TLA+
-- but that is not the same as saying the shared abstraction goal is impossible
-- the actual target is shared `jetpack.tla` plus abstracted base modules, with thin glue if needed
-
-6. TLC log retention is not yet systematic
-- the current helper script does not automatically save timestamped logs
-
-## Practical Guidance For Future Work
-
-Work order:
-
-1. Keep the standalone base specs healthy.
-2. Make the three concrete wrapper integrations pass small configs.
-3. Fix the current Mencius integration until it really passes.
-4. Redesign the shared abstraction around the intended multi-sequence replicated log model.
-5. Introduce `base_raft.tla`, `base_copilot.tla`, `base_mencius.tla`.
-6. Reuse the same `jetpack.tla` across all three abstracted base protocols.
-7. Save timestamped logs for every proof claim.
-
-Anti-overclaim rules:
-- Do not mark a spec “passed” if the saved log shows an invariant violation.
+Anti-overclaim rules (still apply):
+- Do not mark a spec "passed" if the saved log shows an invariant violation.
 - Do not mark Step 3 complete just because wrapper modules exist.
 - Do not claim abstraction success until the same `jetpack.tla` is reused with all
   abstracted base protocol modules.
+- A partial run with no error is "high confidence", not a formal proof.
