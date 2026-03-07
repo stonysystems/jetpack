@@ -1,0 +1,288 @@
+TLC2 Version 2026.03.05.210854 (rev: ec1a488)
+Running breadth-first search Model-Checking with fp 111 and seed 472489244958499459 with 4 workers on 64 cores with 21445MB heap and 64MB offheap memory [pid: 1745573] (Linux 6.2.16-3-pve amd64, Debian 17.0.18 x86_64, MSBDiskFPSet, DiskStateQueue).
+Parsing file /home/users/zihao/janus/tla/copilot.tla
+Parsing file /tmp/tlc-5744910831108293477/Naturals.tla (jar:file:/home/users/zihao/janus/tla/tla2tools.jar!/tla2sany/StandardModules/Naturals.tla)
+Parsing file /tmp/tlc-5744910831108293477/FiniteSets.tla (jar:file:/home/users/zihao/janus/tla/tla2tools.jar!/tla2sany/StandardModules/FiniteSets.tla)
+Parsing file /tmp/tlc-5744910831108293477/Sequences.tla (jar:file:/home/users/zihao/janus/tla/tla2tools.jar!/tla2sany/StandardModules/Sequences.tla)
+Parsing file /tmp/tlc-5744910831108293477/TLC.tla (jar:file:/home/users/zihao/janus/tla/tla2tools.jar!/tla2sany/StandardModules/TLC.tla)
+Parsing file /tmp/tlc-5744910831108293477/_TLCTrace.tla (jar:file:/home/users/zihao/janus/tla/tla2tools.jar!/tla2sany/StandardModules/_TLCTrace.tla)
+Parsing file /tmp/tlc-5744910831108293477/TLCExt.tla (jar:file:/home/users/zihao/janus/tla/tla2tools.jar!/tla2sany/StandardModules/TLCExt.tla)
+Parsing file /tmp/tlc-5744910831108293477/Integers.tla (jar:file:/home/users/zihao/janus/tla/tla2tools.jar!/tla2sany/StandardModules/Integers.tla)
+Semantic processing of module Naturals
+Semantic processing of module Sequences
+Semantic processing of module FiniteSets
+Semantic processing of module TLC
+Semantic processing of module Integers
+Semantic processing of module TLCExt
+Semantic processing of module _TLCTrace
+Semantic processing of module copilot
+Linting of module TLCExt
+Linting of module _TLCTrace
+Linting of module copilot
+Starting... (2026-03-07 10:30:14)
+Computing initial states...
+Finished computing initial states: 1 distinct state generated at 2026-03-07 10:30:15.
+Progress(6) at 2026-03-07 10:30:18: 13,921 states generated (13,921 s/min), 2,757 distinct states found (2,757 ds/min), 2,240 states left on queue.
+Progress(9) at 2026-03-07 10:31:18: 1,358,068 states generated (1,344,147 s/min), 167,614 distinct states found (164,857 ds/min), 116,287 states left on queue.
+Error: Invariant LogOrderMatchesExecution is violated.
+Error: The behavior up to this point is:
+State 1: <Initial predicate>
+/\ messages = <<>>
+/\ matchIndex = ( s1 :> (s1 :> 0 @@ s2 :> 0 @@ s3 :> 0 @@ s4 :> 0 @@ s5 :> 0) @@
+  s2 :> (s1 :> 0 @@ s2 :> 0 @@ s3 :> 0 @@ s4 :> 0 @@ s5 :> 0) @@
+  s3 :> (s1 :> 0 @@ s2 :> 0 @@ s3 :> 0 @@ s4 :> 0 @@ s5 :> 0) @@
+  s4 :> (s1 :> 0 @@ s2 :> 0 @@ s3 :> 0 @@ s4 :> 0 @@ s5 :> 0) @@
+  s5 :> (s1 :> 0 @@ s2 :> 0 @@ s3 :> 0 @@ s4 :> 0 @@ s5 :> 0) )
+/\ log = (s1 :> <<>> @@ s2 :> <<>> @@ s3 :> <<>> @@ s4 :> <<>> @@ s5 :> <<>>)
+/\ cpLog = (s1 :> <<>> @@ s2 :> <<>> @@ s3 :> <<>> @@ s4 :> <<>> @@ s5 :> <<>>)
+/\ commitIndex = (s1 :> 0 @@ s2 :> 0 @@ s3 :> 0 @@ s4 :> 0 @@ s5 :> 0)
+/\ currentTerm = (s1 :> 1 @@ s2 :> 1 @@ s3 :> 1 @@ s4 :> 1 @@ s5 :> 1)
+/\ votesResponded = (s1 :> {} @@ s2 :> {} @@ s3 :> {} @@ s4 :> {} @@ s5 :> {})
+/\ execution_cmds = <<>>
+/\ ostate = ( s1 :> "Follower" @@
+  s2 :> "Follower" @@
+  s3 :> "Follower" @@
+  s4 :> "Follower" @@
+  s5 :> "Follower" )
+/\ nextIndex = ( s1 :> (s1 :> 1 @@ s2 :> 1 @@ s3 :> 1 @@ s4 :> 1 @@ s5 :> 1) @@
+  s2 :> (s1 :> 1 @@ s2 :> 1 @@ s3 :> 1 @@ s4 :> 1 @@ s5 :> 1) @@
+  s3 :> (s1 :> 1 @@ s2 :> 1 @@ s3 :> 1 @@ s4 :> 1 @@ s5 :> 1) @@
+  s4 :> (s1 :> 1 @@ s2 :> 1 @@ s3 :> 1 @@ s4 :> 1 @@ s5 :> 1) @@
+  s5 :> (s1 :> 1 @@ s2 :> 1 @@ s3 :> 1 @@ s4 :> 1 @@ s5 :> 1) )
+/\ votesGranted = (s1 :> {} @@ s2 :> {} @@ s3 :> {} @@ s4 :> {} @@ s5 :> {})
+/\ role = ( s1 :> "Pilot" @@
+  s2 :> "Copilot" @@
+  s3 :> "Acceptor" @@
+  s4 :> "Acceptor" @@
+  s5 :> "Acceptor" )
+/\ votedFor = (s1 :> "Nil" @@ s2 :> "Nil" @@ s3 :> "Nil" @@ s4 :> "Nil" @@ s5 :> "Nil")
+/\ cpBallot = (s1 :> 0 @@ s2 :> 0 @@ s3 :> 0 @@ s4 :> 0 @@ s5 :> 0)
+
+State 2: <ClientRequest(s1,[cmd_id |-> id1, key |-> k1]) line 312, col 5 to line 313, col 20 of module copilot>
+/\ messages = ([mtype |-> "CoPilotPreAcceptRequest", mterm |-> 1, msource |-> s1, mdest |-> s2, mcmd |-> [cmd_id |-> id1, key |-> k1], mdeps |-> {}, mballot |-> 0, mindex |-> 1] :> 1 @@ [mtype |-> "CoPilotPreAcceptRequest", mterm |-> 1, msource |-> s1, mdest |-> s3, mcmd |-> [cmd_id |-> id1, key |-> k1], mdeps |-> {}, mballot |-> 0, mindex |-> 1] :> 1 @@ [mtype |-> "CoPilotPreAcceptRequest", mterm |-> 1, msource |-> s1, mdest |-> s4, mcmd |-> [cmd_id |-> id1, key |-> k1], mdeps |-> {}, mballot |-> 0, mindex |-> 1] :> 1 @@ [mtype |-> "CoPilotPreAcceptRequest", mterm |-> 1, msource |-> s1, mdest |-> s5, mcmd |-> [cmd_id |-> id1, key |-> k1], mdeps |-> {}, mballot |-> 0, mindex |-> 1] :> 1)
+/\ matchIndex = ( s1 :> (s1 :> 0 @@ s2 :> 0 @@ s3 :> 0 @@ s4 :> 0 @@ s5 :> 0) @@
+  s2 :> (s1 :> 0 @@ s2 :> 0 @@ s3 :> 0 @@ s4 :> 0 @@ s5 :> 0) @@
+  s3 :> (s1 :> 0 @@ s2 :> 0 @@ s3 :> 0 @@ s4 :> 0 @@ s5 :> 0) @@
+  s4 :> (s1 :> 0 @@ s2 :> 0 @@ s3 :> 0 @@ s4 :> 0 @@ s5 :> 0) @@
+  s5 :> (s1 :> 0 @@ s2 :> 0 @@ s3 :> 0 @@ s4 :> 0 @@ s5 :> 0) )
+/\ log = (s1 :> <<[term |-> 1, value |-> [cmd_id |-> id1, key |-> k1]]>> @@ s2 :> <<>> @@ s3 :> <<>> @@ s4 :> <<>> @@ s5 :> <<>>)
+/\ cpLog = (s1 :> <<[cmd |-> [cmd_id |-> id1, key |-> k1], deps |-> {}, status |-> "PreAccepted", ballot |-> 0]>> @@ s2 :> <<>> @@ s3 :> <<>> @@ s4 :> <<>> @@ s5 :> <<>>)
+/\ commitIndex = (s1 :> 0 @@ s2 :> 0 @@ s3 :> 0 @@ s4 :> 0 @@ s5 :> 0)
+/\ currentTerm = (s1 :> 1 @@ s2 :> 1 @@ s3 :> 1 @@ s4 :> 1 @@ s5 :> 1)
+/\ votesResponded = (s1 :> {} @@ s2 :> {} @@ s3 :> {} @@ s4 :> {} @@ s5 :> {})
+/\ execution_cmds = <<>>
+/\ ostate = ( s1 :> "Follower" @@
+  s2 :> "Follower" @@
+  s3 :> "Follower" @@
+  s4 :> "Follower" @@
+  s5 :> "Follower" )
+/\ nextIndex = ( s1 :> (s1 :> 1 @@ s2 :> 1 @@ s3 :> 1 @@ s4 :> 1 @@ s5 :> 1) @@
+  s2 :> (s1 :> 1 @@ s2 :> 1 @@ s3 :> 1 @@ s4 :> 1 @@ s5 :> 1) @@
+  s3 :> (s1 :> 1 @@ s2 :> 1 @@ s3 :> 1 @@ s4 :> 1 @@ s5 :> 1) @@
+  s4 :> (s1 :> 1 @@ s2 :> 1 @@ s3 :> 1 @@ s4 :> 1 @@ s5 :> 1) @@
+  s5 :> (s1 :> 1 @@ s2 :> 1 @@ s3 :> 1 @@ s4 :> 1 @@ s5 :> 1) )
+/\ votesGranted = (s1 :> {} @@ s2 :> {} @@ s3 :> {} @@ s4 :> {} @@ s5 :> {})
+/\ role = ( s1 :> "Pilot" @@
+  s2 :> "Copilot" @@
+  s3 :> "Acceptor" @@
+  s4 :> "Acceptor" @@
+  s5 :> "Acceptor" )
+/\ votedFor = (s1 :> "Nil" @@ s2 :> "Nil" @@ s3 :> "Nil" @@ s4 :> "Nil" @@ s5 :> "Nil")
+/\ cpBallot = (s1 :> 0 @@ s2 :> 0 @@ s3 :> 0 @@ s4 :> 0 @@ s5 :> 0)
+
+State 3: <Next line 375, col 8 to line 375, col 68 of module copilot>
+/\ messages = ([mtype |-> "CoPilotPreAcceptResponse", mterm |-> 1, msource |-> s3, mdest |-> s1, mdeps |-> {}, mindex |-> 1, mok |-> TRUE] :> 1 @@ [mtype |-> "CoPilotPreAcceptRequest", mterm |-> 1, msource |-> s1, mdest |-> s2, mcmd |-> [cmd_id |-> id1, key |-> k1], mdeps |-> {}, mballot |-> 0, mindex |-> 1] :> 1 @@ [mtype |-> "CoPilotPreAcceptRequest", mterm |-> 1, msource |-> s1, mdest |-> s4, mcmd |-> [cmd_id |-> id1, key |-> k1], mdeps |-> {}, mballot |-> 0, mindex |-> 1] :> 1 @@ [mtype |-> "CoPilotPreAcceptRequest", mterm |-> 1, msource |-> s1, mdest |-> s5, mcmd |-> [cmd_id |-> id1, key |-> k1], mdeps |-> {}, mballot |-> 0, mindex |-> 1] :> 1)
+/\ matchIndex = ( s1 :> (s1 :> 0 @@ s2 :> 0 @@ s3 :> 0 @@ s4 :> 0 @@ s5 :> 0) @@
+  s2 :> (s1 :> 0 @@ s2 :> 0 @@ s3 :> 0 @@ s4 :> 0 @@ s5 :> 0) @@
+  s3 :> (s1 :> 0 @@ s2 :> 0 @@ s3 :> 0 @@ s4 :> 0 @@ s5 :> 0) @@
+  s4 :> (s1 :> 0 @@ s2 :> 0 @@ s3 :> 0 @@ s4 :> 0 @@ s5 :> 0) @@
+  s5 :> (s1 :> 0 @@ s2 :> 0 @@ s3 :> 0 @@ s4 :> 0 @@ s5 :> 0) )
+/\ log = (s1 :> <<[term |-> 1, value |-> [cmd_id |-> id1, key |-> k1]]>> @@ s2 :> <<>> @@ s3 :> <<[term |-> 1, value |-> [cmd_id |-> id1, key |-> k1]]>> @@ s4 :> <<>> @@ s5 :> <<>>)
+/\ cpLog = (s1 :> <<[cmd |-> [cmd_id |-> id1, key |-> k1], deps |-> {}, status |-> "PreAccepted", ballot |-> 0]>> @@ s2 :> <<>> @@ s3 :> <<[cmd |-> [cmd_id |-> id1, key |-> k1], deps |-> {}, status |-> "PreAccepted", ballot |-> 0]>> @@ s4 :> <<>> @@ s5 :> <<>>)
+/\ commitIndex = (s1 :> 0 @@ s2 :> 0 @@ s3 :> 0 @@ s4 :> 0 @@ s5 :> 0)
+/\ currentTerm = (s1 :> 1 @@ s2 :> 1 @@ s3 :> 1 @@ s4 :> 1 @@ s5 :> 1)
+/\ votesResponded = (s1 :> {} @@ s2 :> {} @@ s3 :> {} @@ s4 :> {} @@ s5 :> {})
+/\ execution_cmds = <<>>
+/\ ostate = ( s1 :> "Follower" @@
+  s2 :> "Follower" @@
+  s3 :> "Follower" @@
+  s4 :> "Follower" @@
+  s5 :> "Follower" )
+/\ nextIndex = ( s1 :> (s1 :> 1 @@ s2 :> 1 @@ s3 :> 1 @@ s4 :> 1 @@ s5 :> 1) @@
+  s2 :> (s1 :> 1 @@ s2 :> 1 @@ s3 :> 1 @@ s4 :> 1 @@ s5 :> 1) @@
+  s3 :> (s1 :> 1 @@ s2 :> 1 @@ s3 :> 1 @@ s4 :> 1 @@ s5 :> 1) @@
+  s4 :> (s1 :> 1 @@ s2 :> 1 @@ s3 :> 1 @@ s4 :> 1 @@ s5 :> 1) @@
+  s5 :> (s1 :> 1 @@ s2 :> 1 @@ s3 :> 1 @@ s4 :> 1 @@ s5 :> 1) )
+/\ votesGranted = (s1 :> {} @@ s2 :> {} @@ s3 :> {} @@ s4 :> {} @@ s5 :> {})
+/\ role = ( s1 :> "Pilot" @@
+  s2 :> "Copilot" @@
+  s3 :> "Acceptor" @@
+  s4 :> "Acceptor" @@
+  s5 :> "Acceptor" )
+/\ votedFor = (s1 :> "Nil" @@ s2 :> "Nil" @@ s3 :> "Nil" @@ s4 :> "Nil" @@ s5 :> "Nil")
+/\ cpBallot = (s1 :> 0 @@ s2 :> 0 @@ s3 :> 0 @@ s4 :> 0 @@ s5 :> 0)
+
+State 4: <Next line 379, col 8 to line 379, col 48 of module copilot>
+/\ messages = ([mtype |-> "CoPilotPreAcceptResponse", mterm |-> 1, msource |-> s3, mdest |-> s1, mdeps |-> {}, mindex |-> 1, mok |-> TRUE] :> 1 @@ [mtype |-> "CoPilotPreAcceptRequest", mterm |-> 1, msource |-> s1, mdest |-> s4, mcmd |-> [cmd_id |-> id1, key |-> k1], mdeps |-> {}, mballot |-> 0, mindex |-> 1] :> 1 @@ [mtype |-> "CoPilotPreAcceptRequest", mterm |-> 1, msource |-> s1, mdest |-> s5, mcmd |-> [cmd_id |-> id1, key |-> k1], mdeps |-> {}, mballot |-> 0, mindex |-> 1] :> 1)
+/\ matchIndex = ( s1 :> (s1 :> 0 @@ s2 :> 0 @@ s3 :> 0 @@ s4 :> 0 @@ s5 :> 0) @@
+  s2 :> (s1 :> 0 @@ s2 :> 0 @@ s3 :> 0 @@ s4 :> 0 @@ s5 :> 0) @@
+  s3 :> (s1 :> 0 @@ s2 :> 0 @@ s3 :> 0 @@ s4 :> 0 @@ s5 :> 0) @@
+  s4 :> (s1 :> 0 @@ s2 :> 0 @@ s3 :> 0 @@ s4 :> 0 @@ s5 :> 0) @@
+  s5 :> (s1 :> 0 @@ s2 :> 0 @@ s3 :> 0 @@ s4 :> 0 @@ s5 :> 0) )
+/\ log = (s1 :> <<[term |-> 1, value |-> [cmd_id |-> id1, key |-> k1]]>> @@ s2 :> <<>> @@ s3 :> <<[term |-> 1, value |-> [cmd_id |-> id1, key |-> k1]]>> @@ s4 :> <<>> @@ s5 :> <<>>)
+/\ cpLog = (s1 :> <<[cmd |-> [cmd_id |-> id1, key |-> k1], deps |-> {}, status |-> "PreAccepted", ballot |-> 0]>> @@ s2 :> <<>> @@ s3 :> <<[cmd |-> [cmd_id |-> id1, key |-> k1], deps |-> {}, status |-> "PreAccepted", ballot |-> 0]>> @@ s4 :> <<>> @@ s5 :> <<>>)
+/\ commitIndex = (s1 :> 0 @@ s2 :> 0 @@ s3 :> 0 @@ s4 :> 0 @@ s5 :> 0)
+/\ currentTerm = (s1 :> 1 @@ s2 :> 1 @@ s3 :> 1 @@ s4 :> 1 @@ s5 :> 1)
+/\ votesResponded = (s1 :> {} @@ s2 :> {} @@ s3 :> {} @@ s4 :> {} @@ s5 :> {})
+/\ execution_cmds = <<>>
+/\ ostate = ( s1 :> "Follower" @@
+  s2 :> "Follower" @@
+  s3 :> "Follower" @@
+  s4 :> "Follower" @@
+  s5 :> "Follower" )
+/\ nextIndex = ( s1 :> (s1 :> 1 @@ s2 :> 1 @@ s3 :> 1 @@ s4 :> 1 @@ s5 :> 1) @@
+  s2 :> (s1 :> 1 @@ s2 :> 1 @@ s3 :> 1 @@ s4 :> 1 @@ s5 :> 1) @@
+  s3 :> (s1 :> 1 @@ s2 :> 1 @@ s3 :> 1 @@ s4 :> 1 @@ s5 :> 1) @@
+  s4 :> (s1 :> 1 @@ s2 :> 1 @@ s3 :> 1 @@ s4 :> 1 @@ s5 :> 1) @@
+  s5 :> (s1 :> 1 @@ s2 :> 1 @@ s3 :> 1 @@ s4 :> 1 @@ s5 :> 1) )
+/\ votesGranted = (s1 :> {} @@ s2 :> {} @@ s3 :> {} @@ s4 :> {} @@ s5 :> {})
+/\ role = ( s1 :> "Pilot" @@
+  s2 :> "Copilot" @@
+  s3 :> "Acceptor" @@
+  s4 :> "Acceptor" @@
+  s5 :> "Acceptor" )
+/\ votedFor = (s1 :> "Nil" @@ s2 :> "Nil" @@ s3 :> "Nil" @@ s4 :> "Nil" @@ s5 :> "Nil")
+/\ cpBallot = (s1 :> 0 @@ s2 :> 0 @@ s3 :> 0 @@ s4 :> 0 @@ s5 :> 0)
+
+State 5: <Next line 379, col 8 to line 379, col 48 of module copilot>
+/\ messages = ([mtype |-> "CoPilotPreAcceptResponse", mterm |-> 1, msource |-> s3, mdest |-> s1, mdeps |-> {}, mindex |-> 1, mok |-> TRUE] :> 1 @@ [mtype |-> "CoPilotPreAcceptRequest", mterm |-> 1, msource |-> s1, mdest |-> s5, mcmd |-> [cmd_id |-> id1, key |-> k1], mdeps |-> {}, mballot |-> 0, mindex |-> 1] :> 1)
+/\ matchIndex = ( s1 :> (s1 :> 0 @@ s2 :> 0 @@ s3 :> 0 @@ s4 :> 0 @@ s5 :> 0) @@
+  s2 :> (s1 :> 0 @@ s2 :> 0 @@ s3 :> 0 @@ s4 :> 0 @@ s5 :> 0) @@
+  s3 :> (s1 :> 0 @@ s2 :> 0 @@ s3 :> 0 @@ s4 :> 0 @@ s5 :> 0) @@
+  s4 :> (s1 :> 0 @@ s2 :> 0 @@ s3 :> 0 @@ s4 :> 0 @@ s5 :> 0) @@
+  s5 :> (s1 :> 0 @@ s2 :> 0 @@ s3 :> 0 @@ s4 :> 0 @@ s5 :> 0) )
+/\ log = (s1 :> <<[term |-> 1, value |-> [cmd_id |-> id1, key |-> k1]]>> @@ s2 :> <<>> @@ s3 :> <<[term |-> 1, value |-> [cmd_id |-> id1, key |-> k1]]>> @@ s4 :> <<>> @@ s5 :> <<>>)
+/\ cpLog = (s1 :> <<[cmd |-> [cmd_id |-> id1, key |-> k1], deps |-> {}, status |-> "PreAccepted", ballot |-> 0]>> @@ s2 :> <<>> @@ s3 :> <<[cmd |-> [cmd_id |-> id1, key |-> k1], deps |-> {}, status |-> "PreAccepted", ballot |-> 0]>> @@ s4 :> <<>> @@ s5 :> <<>>)
+/\ commitIndex = (s1 :> 0 @@ s2 :> 0 @@ s3 :> 0 @@ s4 :> 0 @@ s5 :> 0)
+/\ currentTerm = (s1 :> 1 @@ s2 :> 1 @@ s3 :> 1 @@ s4 :> 1 @@ s5 :> 1)
+/\ votesResponded = (s1 :> {} @@ s2 :> {} @@ s3 :> {} @@ s4 :> {} @@ s5 :> {})
+/\ execution_cmds = <<>>
+/\ ostate = ( s1 :> "Follower" @@
+  s2 :> "Follower" @@
+  s3 :> "Follower" @@
+  s4 :> "Follower" @@
+  s5 :> "Follower" )
+/\ nextIndex = ( s1 :> (s1 :> 1 @@ s2 :> 1 @@ s3 :> 1 @@ s4 :> 1 @@ s5 :> 1) @@
+  s2 :> (s1 :> 1 @@ s2 :> 1 @@ s3 :> 1 @@ s4 :> 1 @@ s5 :> 1) @@
+  s3 :> (s1 :> 1 @@ s2 :> 1 @@ s3 :> 1 @@ s4 :> 1 @@ s5 :> 1) @@
+  s4 :> (s1 :> 1 @@ s2 :> 1 @@ s3 :> 1 @@ s4 :> 1 @@ s5 :> 1) @@
+  s5 :> (s1 :> 1 @@ s2 :> 1 @@ s3 :> 1 @@ s4 :> 1 @@ s5 :> 1) )
+/\ votesGranted = (s1 :> {} @@ s2 :> {} @@ s3 :> {} @@ s4 :> {} @@ s5 :> {})
+/\ role = ( s1 :> "Pilot" @@
+  s2 :> "Copilot" @@
+  s3 :> "Acceptor" @@
+  s4 :> "Acceptor" @@
+  s5 :> "Acceptor" )
+/\ votedFor = (s1 :> "Nil" @@ s2 :> "Nil" @@ s3 :> "Nil" @@ s4 :> "Nil" @@ s5 :> "Nil")
+/\ cpBallot = (s1 :> 0 @@ s2 :> 0 @@ s3 :> 0 @@ s4 :> 0 @@ s5 :> 0)
+
+State 6: <Next line 376, col 8 to line 376, col 76 of module copilot>
+/\ messages = ([mtype |-> "CoPilotCommitRequest", mterm |-> 1, msource |-> s1, mdest |-> s2, mcmd |-> [cmd_id |-> id1, key |-> k1], mdeps |-> {}, mindex |-> 1] :> 1 @@ [mtype |-> "CoPilotCommitRequest", mterm |-> 1, msource |-> s1, mdest |-> s3, mcmd |-> [cmd_id |-> id1, key |-> k1], mdeps |-> {}, mindex |-> 1] :> 1 @@ [mtype |-> "CoPilotCommitRequest", mterm |-> 1, msource |-> s1, mdest |-> s4, mcmd |-> [cmd_id |-> id1, key |-> k1], mdeps |-> {}, mindex |-> 1] :> 1 @@ [mtype |-> "CoPilotCommitRequest", mterm |-> 1, msource |-> s1, mdest |-> s5, mcmd |-> [cmd_id |-> id1, key |-> k1], mdeps |-> {}, mindex |-> 1] :> 1 @@ [mtype |-> "CoPilotPreAcceptRequest", mterm |-> 1, msource |-> s1, mdest |-> s5, mcmd |-> [cmd_id |-> id1, key |-> k1], mdeps |-> {}, mballot |-> 0, mindex |-> 1] :> 1)
+/\ matchIndex = ( s1 :> (s1 :> 0 @@ s2 :> 0 @@ s3 :> 0 @@ s4 :> 0 @@ s5 :> 0) @@
+  s2 :> (s1 :> 0 @@ s2 :> 0 @@ s3 :> 0 @@ s4 :> 0 @@ s5 :> 0) @@
+  s3 :> (s1 :> 0 @@ s2 :> 0 @@ s3 :> 0 @@ s4 :> 0 @@ s5 :> 0) @@
+  s4 :> (s1 :> 0 @@ s2 :> 0 @@ s3 :> 0 @@ s4 :> 0 @@ s5 :> 0) @@
+  s5 :> (s1 :> 0 @@ s2 :> 0 @@ s3 :> 0 @@ s4 :> 0 @@ s5 :> 0) )
+/\ log = (s1 :> <<[term |-> 1, value |-> [cmd_id |-> id1, key |-> k1]]>> @@ s2 :> <<>> @@ s3 :> <<[term |-> 1, value |-> [cmd_id |-> id1, key |-> k1]]>> @@ s4 :> <<>> @@ s5 :> <<>>)
+/\ cpLog = (s1 :> <<[cmd |-> [cmd_id |-> id1, key |-> k1], deps |-> {}, status |-> "Committed", ballot |-> 0]>> @@ s2 :> <<>> @@ s3 :> <<[cmd |-> [cmd_id |-> id1, key |-> k1], deps |-> {}, status |-> "PreAccepted", ballot |-> 0]>> @@ s4 :> <<>> @@ s5 :> <<>>)
+/\ commitIndex = (s1 :> 1 @@ s2 :> 0 @@ s3 :> 0 @@ s4 :> 0 @@ s5 :> 0)
+/\ currentTerm = (s1 :> 1 @@ s2 :> 1 @@ s3 :> 1 @@ s4 :> 1 @@ s5 :> 1)
+/\ votesResponded = (s1 :> {} @@ s2 :> {} @@ s3 :> {} @@ s4 :> {} @@ s5 :> {})
+/\ execution_cmds = <<>>
+/\ ostate = ( s1 :> "Follower" @@
+  s2 :> "Follower" @@
+  s3 :> "Follower" @@
+  s4 :> "Follower" @@
+  s5 :> "Follower" )
+/\ nextIndex = ( s1 :> (s1 :> 1 @@ s2 :> 1 @@ s3 :> 1 @@ s4 :> 1 @@ s5 :> 1) @@
+  s2 :> (s1 :> 1 @@ s2 :> 1 @@ s3 :> 1 @@ s4 :> 1 @@ s5 :> 1) @@
+  s3 :> (s1 :> 1 @@ s2 :> 1 @@ s3 :> 1 @@ s4 :> 1 @@ s5 :> 1) @@
+  s4 :> (s1 :> 1 @@ s2 :> 1 @@ s3 :> 1 @@ s4 :> 1 @@ s5 :> 1) @@
+  s5 :> (s1 :> 1 @@ s2 :> 1 @@ s3 :> 1 @@ s4 :> 1 @@ s5 :> 1) )
+/\ votesGranted = (s1 :> {} @@ s2 :> {} @@ s3 :> {} @@ s4 :> {} @@ s5 :> {})
+/\ role = ( s1 :> "Pilot" @@
+  s2 :> "Copilot" @@
+  s3 :> "Acceptor" @@
+  s4 :> "Acceptor" @@
+  s5 :> "Acceptor" )
+/\ votedFor = (s1 :> "Nil" @@ s2 :> "Nil" @@ s3 :> "Nil" @@ s4 :> "Nil" @@ s5 :> "Nil")
+/\ cpBallot = (s1 :> 0 @@ s2 :> 0 @@ s3 :> 0 @@ s4 :> 0 @@ s5 :> 0)
+
+State 7: <ApplyCommitted(s1) line 301, col 5 to line 308, col 32 of module copilot>
+/\ messages = ([mtype |-> "CoPilotCommitRequest", mterm |-> 1, msource |-> s1, mdest |-> s2, mcmd |-> [cmd_id |-> id1, key |-> k1], mdeps |-> {}, mindex |-> 1] :> 1 @@ [mtype |-> "CoPilotCommitRequest", mterm |-> 1, msource |-> s1, mdest |-> s3, mcmd |-> [cmd_id |-> id1, key |-> k1], mdeps |-> {}, mindex |-> 1] :> 1 @@ [mtype |-> "CoPilotCommitRequest", mterm |-> 1, msource |-> s1, mdest |-> s4, mcmd |-> [cmd_id |-> id1, key |-> k1], mdeps |-> {}, mindex |-> 1] :> 1 @@ [mtype |-> "CoPilotCommitRequest", mterm |-> 1, msource |-> s1, mdest |-> s5, mcmd |-> [cmd_id |-> id1, key |-> k1], mdeps |-> {}, mindex |-> 1] :> 1 @@ [mtype |-> "CoPilotPreAcceptRequest", mterm |-> 1, msource |-> s1, mdest |-> s5, mcmd |-> [cmd_id |-> id1, key |-> k1], mdeps |-> {}, mballot |-> 0, mindex |-> 1] :> 1)
+/\ matchIndex = ( s1 :> (s1 :> 0 @@ s2 :> 0 @@ s3 :> 0 @@ s4 :> 0 @@ s5 :> 0) @@
+  s2 :> (s1 :> 0 @@ s2 :> 0 @@ s3 :> 0 @@ s4 :> 0 @@ s5 :> 0) @@
+  s3 :> (s1 :> 0 @@ s2 :> 0 @@ s3 :> 0 @@ s4 :> 0 @@ s5 :> 0) @@
+  s4 :> (s1 :> 0 @@ s2 :> 0 @@ s3 :> 0 @@ s4 :> 0 @@ s5 :> 0) @@
+  s5 :> (s1 :> 0 @@ s2 :> 0 @@ s3 :> 0 @@ s4 :> 0 @@ s5 :> 0) )
+/\ log = (s1 :> <<[term |-> 1, value |-> [cmd_id |-> id1, key |-> k1]]>> @@ s2 :> <<>> @@ s3 :> <<[term |-> 1, value |-> [cmd_id |-> id1, key |-> k1]]>> @@ s4 :> <<>> @@ s5 :> <<>>)
+/\ cpLog = (s1 :> <<[cmd |-> [cmd_id |-> id1, key |-> k1], deps |-> {}, status |-> "Committed", ballot |-> 0]>> @@ s2 :> <<>> @@ s3 :> <<[cmd |-> [cmd_id |-> id1, key |-> k1], deps |-> {}, status |-> "PreAccepted", ballot |-> 0]>> @@ s4 :> <<>> @@ s5 :> <<>>)
+/\ commitIndex = (s1 :> 1 @@ s2 :> 0 @@ s3 :> 0 @@ s4 :> 0 @@ s5 :> 0)
+/\ currentTerm = (s1 :> 1 @@ s2 :> 1 @@ s3 :> 1 @@ s4 :> 1 @@ s5 :> 1)
+/\ votesResponded = (s1 :> {} @@ s2 :> {} @@ s3 :> {} @@ s4 :> {} @@ s5 :> {})
+/\ execution_cmds = <<[cmd_id |-> id1, key |-> k1]>>
+/\ ostate = ( s1 :> "Follower" @@
+  s2 :> "Follower" @@
+  s3 :> "Follower" @@
+  s4 :> "Follower" @@
+  s5 :> "Follower" )
+/\ nextIndex = ( s1 :> (s1 :> 1 @@ s2 :> 1 @@ s3 :> 1 @@ s4 :> 1 @@ s5 :> 1) @@
+  s2 :> (s1 :> 1 @@ s2 :> 1 @@ s3 :> 1 @@ s4 :> 1 @@ s5 :> 1) @@
+  s3 :> (s1 :> 1 @@ s2 :> 1 @@ s3 :> 1 @@ s4 :> 1 @@ s5 :> 1) @@
+  s4 :> (s1 :> 1 @@ s2 :> 1 @@ s3 :> 1 @@ s4 :> 1 @@ s5 :> 1) @@
+  s5 :> (s1 :> 1 @@ s2 :> 1 @@ s3 :> 1 @@ s4 :> 1 @@ s5 :> 1) )
+/\ votesGranted = (s1 :> {} @@ s2 :> {} @@ s3 :> {} @@ s4 :> {} @@ s5 :> {})
+/\ role = ( s1 :> "Pilot" @@
+  s2 :> "Copilot" @@
+  s3 :> "Acceptor" @@
+  s4 :> "Acceptor" @@
+  s5 :> "Acceptor" )
+/\ votedFor = (s1 :> "Nil" @@ s2 :> "Nil" @@ s3 :> "Nil" @@ s4 :> "Nil" @@ s5 :> "Nil")
+/\ cpBallot = (s1 :> 0 @@ s2 :> 0 @@ s3 :> 0 @@ s4 :> 0 @@ s5 :> 0)
+
+State 8: <ClientRequest(s2,[cmd_id |-> id2, key |-> k1]) line 312, col 5 to line 313, col 20 of module copilot>
+/\ messages = ([mtype |-> "CoPilotCommitRequest", mterm |-> 1, msource |-> s1, mdest |-> s2, mcmd |-> [cmd_id |-> id1, key |-> k1], mdeps |-> {}, mindex |-> 1] :> 1 @@ [mtype |-> "CoPilotCommitRequest", mterm |-> 1, msource |-> s1, mdest |-> s3, mcmd |-> [cmd_id |-> id1, key |-> k1], mdeps |-> {}, mindex |-> 1] :> 1 @@ [mtype |-> "CoPilotCommitRequest", mterm |-> 1, msource |-> s1, mdest |-> s4, mcmd |-> [cmd_id |-> id1, key |-> k1], mdeps |-> {}, mindex |-> 1] :> 1 @@ [mtype |-> "CoPilotCommitRequest", mterm |-> 1, msource |-> s1, mdest |-> s5, mcmd |-> [cmd_id |-> id1, key |-> k1], mdeps |-> {}, mindex |-> 1] :> 1 @@ [mtype |-> "CoPilotPreAcceptRequest", mterm |-> 1, msource |-> s1, mdest |-> s5, mcmd |-> [cmd_id |-> id1, key |-> k1], mdeps |-> {}, mballot |-> 0, mindex |-> 1] :> 1 @@ [mtype |-> "CoPilotPreAcceptRequest", mterm |-> 1, msource |-> s2, mdest |-> s1, mcmd |-> [cmd_id |-> id2, key |-> k1], mdeps |-> {}, mballot |-> 0, mindex |-> 1] :> 1 @@ [mtype |-> "CoPilotPreAcceptRequest", mterm |-> 1, msource |-> s2, mdest |-> s3, mcmd |-> [cmd_id |-> id2, key |-> k1], mdeps |-> {}, mballot |-> 0, mindex |-> 1] :> 1 @@ [mtype |-> "CoPilotPreAcceptRequest", mterm |-> 1, msource |-> s2, mdest |-> s4, mcmd |-> [cmd_id |-> id2, key |-> k1], mdeps |-> {}, mballot |-> 0, mindex |-> 1] :> 1 @@ [mtype |-> "CoPilotPreAcceptRequest", mterm |-> 1, msource |-> s2, mdest |-> s5, mcmd |-> [cmd_id |-> id2, key |-> k1], mdeps |-> {}, mballot |-> 0, mindex |-> 1] :> 1)
+/\ matchIndex = ( s1 :> (s1 :> 0 @@ s2 :> 0 @@ s3 :> 0 @@ s4 :> 0 @@ s5 :> 0) @@
+  s2 :> (s1 :> 0 @@ s2 :> 0 @@ s3 :> 0 @@ s4 :> 0 @@ s5 :> 0) @@
+  s3 :> (s1 :> 0 @@ s2 :> 0 @@ s3 :> 0 @@ s4 :> 0 @@ s5 :> 0) @@
+  s4 :> (s1 :> 0 @@ s2 :> 0 @@ s3 :> 0 @@ s4 :> 0 @@ s5 :> 0) @@
+  s5 :> (s1 :> 0 @@ s2 :> 0 @@ s3 :> 0 @@ s4 :> 0 @@ s5 :> 0) )
+/\ log = (s1 :> <<[term |-> 1, value |-> [cmd_id |-> id1, key |-> k1]]>> @@ s2 :> <<[term |-> 1, value |-> [cmd_id |-> id2, key |-> k1]]>> @@ s3 :> <<[term |-> 1, value |-> [cmd_id |-> id1, key |-> k1]]>> @@ s4 :> <<>> @@ s5 :> <<>>)
+/\ cpLog = (s1 :> <<[cmd |-> [cmd_id |-> id1, key |-> k1], deps |-> {}, status |-> "Committed", ballot |-> 0]>> @@ s2 :> <<[cmd |-> [cmd_id |-> id2, key |-> k1], deps |-> {}, status |-> "PreAccepted", ballot |-> 0]>> @@ s3 :> <<[cmd |-> [cmd_id |-> id1, key |-> k1], deps |-> {}, status |-> "PreAccepted", ballot |-> 0]>> @@ s4 :> <<>> @@ s5 :> <<>>)
+/\ commitIndex = (s1 :> 1 @@ s2 :> 0 @@ s3 :> 0 @@ s4 :> 0 @@ s5 :> 0)
+/\ currentTerm = (s1 :> 1 @@ s2 :> 1 @@ s3 :> 1 @@ s4 :> 1 @@ s5 :> 1)
+/\ votesResponded = (s1 :> {} @@ s2 :> {} @@ s3 :> {} @@ s4 :> {} @@ s5 :> {})
+/\ execution_cmds = <<[cmd_id |-> id1, key |-> k1]>>
+/\ ostate = ( s1 :> "Follower" @@
+  s2 :> "Follower" @@
+  s3 :> "Follower" @@
+  s4 :> "Follower" @@
+  s5 :> "Follower" )
+/\ nextIndex = ( s1 :> (s1 :> 1 @@ s2 :> 1 @@ s3 :> 1 @@ s4 :> 1 @@ s5 :> 1) @@
+  s2 :> (s1 :> 1 @@ s2 :> 1 @@ s3 :> 1 @@ s4 :> 1 @@ s5 :> 1) @@
+  s3 :> (s1 :> 1 @@ s2 :> 1 @@ s3 :> 1 @@ s4 :> 1 @@ s5 :> 1) @@
+  s4 :> (s1 :> 1 @@ s2 :> 1 @@ s3 :> 1 @@ s4 :> 1 @@ s5 :> 1) @@
+  s5 :> (s1 :> 1 @@ s2 :> 1 @@ s3 :> 1 @@ s4 :> 1 @@ s5 :> 1) )
+/\ votesGranted = (s1 :> {} @@ s2 :> {} @@ s3 :> {} @@ s4 :> {} @@ s5 :> {})
+/\ role = ( s1 :> "Pilot" @@
+  s2 :> "Copilot" @@
+  s3 :> "Acceptor" @@
+  s4 :> "Acceptor" @@
+  s5 :> "Acceptor" )
+/\ votedFor = (s1 :> "Nil" @@ s2 :> "Nil" @@ s3 :> "Nil" @@ s4 :> "Nil" @@ s5 :> "Nil")
+/\ cpBallot = (s1 :> 0 @@ s2 :> 0 @@ s3 :> 0 @@ s4 :> 0 @@ s5 :> 0)
+
+1616872 states generated, 196878 distinct states found, 135507 states left on queue.
+The depth of the complete state graph search is 10.
+Finished in 01min 16s at (2026-03-07 10:31:30)
+Trace exploration spec path: ./copilot_TTrace_1772915414.tla

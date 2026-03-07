@@ -1163,12 +1163,26 @@ Required verification workflow:
 - [x] `raft.tla`: TLC model check (CommittedLogAgreement, ElectionSafety, LogOrderMatchesExecution)
   - Exhaustive: 40M states, 2.8M distinct, depth 56 (3 servers, 1 cmd, SmallStateConstraint)
   - Partial: 145M+ states, 20M+ distinct, no violations (3 servers, 2 cmds, StateConstraint)
+  - Large config (2026-03-07): partial 21M+ states, 2.4M+ distinct, no violations
+    (5 servers, 3 cmds, 2 keys, StateConstraint) — `tla/log/raft_large_aligned.log`
 - [x] `copilot.tla`: TLC model check (CommittedLogAgreement, ActiveProposerBound, LogOrderMatchesExecution)
   - Exhaustive: 186K states, 21K distinct, depth 16 (3 servers, 1 cmd, SmallStateConstraint)
   - Partial: 114M+ states, 21M+ distinct, no violations (3 servers, 2 cmds, StateConstraint)
+  - **Bug found (2026-03-07)**: Upgrading `copilot.cfg` to 5 servers / 3 cmds / 2 keys exposed
+    an `LogOrderMatchesExecution` invariant violation. The old property checked ALL log entries
+    (including uncommitted) against `execution_cmds`, but CoPilot's dual-proposer design allows
+    the Pilot and Copilot to independently propose different commands at the same log index before
+    commitment. Counterexample: Pilot commits id1 at index 1, executes it; Copilot then proposes
+    id2 at its own log index 1 (before receiving the commit message).
+  - **Fix**: Scoped `LogOrderMatchesExecution` to committed prefix only (`commitIndex[i]`), matching
+    `CommittedLogAgreement`'s scope. Uncommitted entries may legitimately diverge in CoPilot.
+  - Large config after fix (2026-03-07): partial 11.3M+ states, 1.4M+ distinct, no violations
+    (5 servers, 3 cmds, 2 keys, StateConstraint) — `tla/log/copilot_large_aligned_fixed.log`
 - [x] `mencius.tla`: TLC model check (SlotAgreement, CommittedLogAgreement, LogOrderMatchesExecution)
   - Partial: 104M+ states, 11.6M+ distinct, no violations (3 servers, 1 cmd, SmallStateConstraint)
   - Note: Mencius slot state space is too large for exhaustive checking in bounded time
+  - Large config (2026-03-07): partial 13M+ states, 651K+ distinct, no violations
+    (5 servers, 3 cmds, 2 keys, StateConstraint) — `tla/log/mencius_large_aligned.log`
 - [x] `jetpack.tla`: SANY parse check (not standalone, needs base protocol to run)
 - [x] `jetpack_raft.tla`: SANY parse check (original combined spec preserved)
 - [x] TLC verification of composed jetpack + raft (`jetpack_raft.tla`)

@@ -1,0 +1,35 @@
+TLC2 Version 2026.03.05.210854 (rev: ec1a488)
+Running breadth-first search Model-Checking with fp 100 and seed 6108968770745677046 with 4 workers on 64 cores with 21445MB heap and 64MB offheap memory [pid: 1746043] (Linux 6.2.16-3-pve amd64, Debian 17.0.18 x86_64, MSBDiskFPSet, DiskStateQueue).
+Parsing file /home/users/zihao/janus/tla/mencius.tla
+Parsing file /tmp/tlc-16363421373012090217/Naturals.tla (jar:file:/home/users/zihao/janus/tla/tla2tools.jar!/tla2sany/StandardModules/Naturals.tla)
+Parsing file /tmp/tlc-16363421373012090217/FiniteSets.tla (jar:file:/home/users/zihao/janus/tla/tla2tools.jar!/tla2sany/StandardModules/FiniteSets.tla)
+Parsing file /tmp/tlc-16363421373012090217/Sequences.tla (jar:file:/home/users/zihao/janus/tla/tla2tools.jar!/tla2sany/StandardModules/Sequences.tla)
+Parsing file /tmp/tlc-16363421373012090217/TLC.tla (jar:file:/home/users/zihao/janus/tla/tla2tools.jar!/tla2sany/StandardModules/TLC.tla)
+Parsing file /tmp/tlc-16363421373012090217/_TLCTrace.tla (jar:file:/home/users/zihao/janus/tla/tla2tools.jar!/tla2sany/StandardModules/_TLCTrace.tla)
+Parsing file /tmp/tlc-16363421373012090217/TLCExt.tla (jar:file:/home/users/zihao/janus/tla/tla2tools.jar!/tla2sany/StandardModules/TLCExt.tla)
+Parsing file /tmp/tlc-16363421373012090217/Integers.tla (jar:file:/home/users/zihao/janus/tla/tla2tools.jar!/tla2sany/StandardModules/Integers.tla)
+Semantic processing of module Naturals
+Semantic processing of module Sequences
+Semantic processing of module FiniteSets
+Semantic processing of module TLC
+Semantic processing of module Integers
+Semantic processing of module TLCExt
+Semantic processing of module _TLCTrace
+Semantic processing of module mencius
+Linting of module TLCExt
+Linting of module _TLCTrace
+Linting of module mencius
+Starting... (2026-03-07 10:30:17)
+Computing initial states...
+Finished computing initial states: 1 distinct state generated at 2026-03-07 10:30:17.
+Progress(5) at 2026-03-07 10:30:20: 17,618 states generated (17,618 s/min), 2,748 distinct states found (2,748 ds/min), 2,569 states left on queue.
+Progress(7) at 2026-03-07 10:31:20: 1,193,816 states generated (1,176,198 s/min), 61,957 distinct states found (59,209 ds/min), 49,618 states left on queue.
+Progress(7) at 2026-03-07 10:32:20: 2,426,864 states generated (1,233,048 s/min), 95,506 distinct states found (33,549 ds/min), 70,658 states left on queue.
+Progress(8) at 2026-03-07 10:33:20: 3,756,582 states generated (1,329,718 s/min), 141,162 distinct states found (45,656 ds/min), 101,850 states left on queue.
+Progress(8) at 2026-03-07 10:34:20: 5,062,891 states generated (1,306,309 s/min), 180,420 distinct states found (39,258 ds/min), 127,140 states left on queue.
+Progress(8) at 2026-03-07 10:35:20: 6,416,863 states generated (1,353,972 s/min), 219,316 distinct states found (38,896 ds/min), 151,595 states left on queue.
+Progress(8) at 2026-03-07 10:36:20: 7,708,197 states generated (1,291,334 s/min), 342,658 distinct states found (123,342 ds/min), 261,115 states left on queue.
+Progress(8) at 2026-03-07 10:37:20: 9,050,103 states generated (1,341,906 s/min), 423,234 distinct states found (80,576 ds/min), 328,132 states left on queue.
+Progress(9) at 2026-03-07 10:38:20: 10,417,825 states generated (1,367,722 s/min), 468,619 distinct states found (45,385 ds/min), 358,399 states left on queue.
+Progress(9) at 2026-03-07 10:39:20: 11,739,531 states generated (1,321,706 s/min), 532,740 distinct states found (64,121 ds/min), 407,310 states left on queue.
+Progress(9) at 2026-03-07 10:40:20: 13,085,519 states generated (1,345,988 s/min), 651,070 distinct states found (118,330 ds/min), 510,814 states left on queue.

@@ -425,15 +425,16 @@ LogAgreement ==
             \/ k > Len(log[j])
             \/ log[i][k] = log[j][k]
 
-\* Log order matches execution_cmds, allowing NilCmd for missing entries.
+\* Committed log entries preserve conflict ordering in execution trace.
+\* Scoped to committed prefix only — CoPilot's dual-proposer design allows
+\* uncommitted entries to diverge across servers.
 LogOrderMatchesExecution ==
-    /\ MaxLogExecLen >= 0
-    /\ \A i \in Server :
-         \A k \in 1..MaxLogExecLen :
-            LET lc == LogCmdAt(i, k)
+    \A i \in Server :
+        LET ci == commitIndex[i]
+        IN \A k \in 1..ci :
+            LET lc == log[i][k].value
                 ec == ExecAt(k)
             IN \/ lc = ec
-               \/ lc = NilCmd
                \/ ec = NilCmd
 
 Safety == [](CommittedLogAgreement /\ ActiveProposerBound /\ LogOrderMatchesExecution)
