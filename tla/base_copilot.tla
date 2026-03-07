@@ -47,10 +47,6 @@ CoPilotAcceptRequest      == "CoPilotAcceptRequest"
 CoPilotAcceptResponse     == "CoPilotAcceptResponse"
 CoPilotCommitRequest      == "CoPilotCommitRequest"
 
-CoPilotMessageTypes == {CoPilotPreAcceptRequest, CoPilotPreAcceptResponse,
-                        CoPilotAcceptRequest, CoPilotAcceptResponse,
-                        CoPilotCommitRequest}
-
 (***************************************************************************)
 (* Variables                                                               *)
 (***************************************************************************)

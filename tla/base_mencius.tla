@@ -45,10 +45,6 @@ RevokeRequest   == "RevokeRequest"
 RevokeResponse  == "RevokeResponse"
 LearnMessage    == "LearnMessage"
 
-MenciusMessageTypes == {SuggestRequest, SuggestResponse,
-                        SkipMessage, RevokeRequest,
-                        RevokeResponse, LearnMessage}
-
 (***************************************************************************)
 (* Variables                                                               *)
 (***************************************************************************)

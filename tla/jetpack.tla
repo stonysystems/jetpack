@@ -88,12 +88,6 @@ JetpackAcceptRequest  == "JetpackAcceptRequest"
 JetpackAcceptResponse == "JetpackAcceptResponse"
 FinishRecoveryRequest == "FinishRecoveryRequest"
 
-JetpackMessageTypes == {PreacceptRequest, PreacceptResponse,
-                        BeginRecoveryRequest, BeginRecoveryResponse,
-                        JetpackPrepareRequest, JetpackPrepareResponse,
-                        JetpackAcceptRequest, JetpackAcceptResponse,
-                        FinishRecoveryRequest}
-
 (***************************************************************************)
 (* Shared data types                                                       *)
 (***************************************************************************)

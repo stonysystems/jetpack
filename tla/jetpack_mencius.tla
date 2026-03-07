@@ -351,15 +351,6 @@ SmallStateConstraint ==
     /\ Len(original_execution_cmds) <= 2
     /\ Len(execution_cmds) <= 2
 
-\* Minimal constraint for fast smoke testing (no restarts).
-TinyStateConstraint ==
-    /\ \A i \in Server : currentTerm[i] <= 1
-    /\ \A m \in DOMAIN messages : messages[m] <= 1
-    /\ Cardinality(DOMAIN messages) <= 2
-    /\ \A i \in Server : Len(log[i]) <= 2
-    /\ Len(original_execution_cmds) <= 2
-    /\ Len(execution_cmds) <= 2
-
 (***************************************************************************)
 (* Properties                                                              *)
 (***************************************************************************)
