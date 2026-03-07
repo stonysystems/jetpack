@@ -64,12 +64,13 @@ vars == <<messages, serverVars, candidateVars, leaderVars,
 
 B == INSTANCE base_raft
 
-\* Raft: single proposer, all slots belong to one sequence.
-RaftProposerOfSlot(k) == "sole"
+\* Raft: single proposer, all entries belong to one sequence.
+\* The entry argument is ignored — Raft assigns all positions to "sole".
+RaftProposerOfEntry(k, entry) == "sole"
 
 J == INSTANCE jetpack WITH NoOpCmd <- [tag |-> "RaftNoOp"],
                           Proposer <- {"sole"},
-                          ProposerOfSlot <- RaftProposerOfSlot
+                          ProposerOfEntry <- RaftProposerOfEntry
 
 (***************************************************************************)
 (* Re-exported constants                                                   *)

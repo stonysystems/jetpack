@@ -77,11 +77,12 @@ vars == <<messages, serverVars, candidateVars, leaderVars,
 B == INSTANCE base_mencius
 
 \* Mencius: N sequences via round-robin. Slot k's proposer is its coordinator.
-MenciusProposerOfSlot(k) == B!CoordinatorOf(k)
+\* The entry argument is ignored — Mencius assigns by position (round-robin).
+MenciusProposerOfEntry(k, entry) == B!CoordinatorOf(k)
 
 J == INSTANCE jetpack WITH NoOpCmd <- B!NoOp,
                           Proposer <- Server,
-                          ProposerOfSlot <- MenciusProposerOfSlot
+                          ProposerOfEntry <- MenciusProposerOfEntry
 
 (***************************************************************************)
 (* Re-exported constants                                                   *)

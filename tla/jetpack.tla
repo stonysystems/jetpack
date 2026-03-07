@@ -54,8 +54,8 @@ EXTENDS Naturals, FiniteSets, Sequences, TLC
 
 \* ---- Constants shared with base protocol (supplied at instantiation) ----
 CONSTANTS Server, Client, CmdId, Key, NoOpCmd,
-          Proposer,          \* Set of proposer IDs (protocol-specific)
-          ProposerOfSlot(_)  \* Maps log position k -> proposer ID
+          Proposer,              \* Set of proposer IDs (protocol-specific)
+          ProposerOfEntry(_, _)  \* (k, entry) -> proposer ID for log position k
 
 Nil == "Nil"
 NilCmd == [tag |-> "NilCmd"]
@@ -758,38 +758,101 @@ JetpackNext ==
     \/ \E i \in Server : FinishRecovery(i)
 
 (***************************************************************************)
+(* 3-D Log Projection                                                      *)
+(*                                                                         *)
+(* The base protocol maintains a flat log[i][k] (one sequence per server). *)
+(* The 3-D abstraction is Log3D[i][j][k] where:                           *)
+(*   i = where the copy is stored,                                         *)
+(*   j = which logical proposer/sequence the entry belongs to,             *)
+(*   k = position within proposer j's own sequence (local index).          *)
+(*                                                                         *)
+(* The projection reconstructs Log3D from the flat log:                    *)
+(*   - ProposerOfEntry(k, entry) maps each global position to a proposer  *)
+(*   - For Raft: all entries belong to "sole" (single leader)              *)
+(*   - For CoPilot: entry.proposer identifies pilot vs copilot             *)
+(*   - For Mencius: CoordinatorOf(k) assigns by round-robin position       *)
+(*                                                                         *)
+(* The local index k in Log3D is the ordinal position within proposer j's  *)
+(* subsequence, NOT the global slot index.                                 *)
+(***************************************************************************)
+
+\* Proposer of the log entry at global position k on server i.
+EntryProposer(i, k) == ProposerOfEntry(k, log[i][k])
+
+\* Sorted sequence of committed global positions belonging to proposer j on server i.
+ProposerSlots(i, j) ==
+    LET ci == commitIndex[i]
+        allSlots == [k \in 1..ci |-> k]
+    IN SelectSeq(allSlots, LAMBDA k : EntryProposer(i, k) = j)
+
+\* 3-D log projection: the local-k-th committed entry in proposer j's
+\* subsequence on server i. Returns Nil if out of range.
+Log3D(i, j, k) ==
+    LET slots == ProposerSlots(i, j)
+    IN IF k >= 1 /\ k <= Len(slots)
+       THEN log[i][slots[k]]
+       ELSE Nil
+
+\* Number of committed entries in proposer j's subsequence on server i.
+Log3DLen(i, j) == Len(ProposerSlots(i, j))
+
+\* Command sequence for proposer j's committed entries on server i (NoOps filtered).
+ProposerCmdSeq(i, j) ==
+    LET slots == ProposerSlots(i, j)
+    IN FilterNoOps([k \in 1..Len(slots) |-> log[i][slots[k]].value])
+
+(***************************************************************************)
 (* Properties                                                              *)
 (***************************************************************************)
 
 \* Committed log entries agree across servers.
 \* Only committed entries (up to commitIndex) must match. Uncommitted entries may
 \* legitimately diverge (e.g. Mencius servers independently propose to different slots).
-\* This is strictly weaker than requiring all entries to agree, so it holds for all protocols.
+\* Compares .term and .value fields only — extra metadata fields (e.g. .proposer for
+\* CoPilot) may differ between base-protocol-appended and Jetpack-appended entries.
 CommittedLogAgreement ==
     \A i, j \in Server :
         LET ci == commitIndex[i]
             cj == commitIndex[j]
             limit == Min({ci, cj} \cup {0})
         IN \A k \in 1..limit :
-            log[i][k] = log[j][k]
+            /\ log[i][k].term = log[j][k].term
+            /\ log[i][k].value = log[j][k].value
 
-\* Per-proposer committed log agreement (multi-sequence view).
-\* The 3D logical view is: Log[i][p][k] = log[i][k] when ProposerOfSlot(k) = p.
-\* For each proposer p, the slots assigned to p agree across all server replicas.
-\* Strictly weaker than CommittedLogAgreement (which checks ALL positions).
+\* Per-proposer committed log agreement using the 3-D projection.
+\*
+\* For each proposer j, the local-indexed subsequence must agree across replicas:
+\*   if Log3D(i, j, k) and Log3D(i', j, k) are both non-nil, they must match.
+\*
+\* This matches the big-picture doc's "replicated-log agreement":
+\*   if Log[i][j][k] and Log[j'][j][k] are both non-nil, then they must match.
+\*
+\* Strictly weaker than CommittedLogAgreement (which compares all committed
+\* positions regardless of proposer).
 MultiSequenceLogAgreement ==
     \A p \in Proposer :
         \A i, j \in Server :
-            LET limit == Min({commitIndex[i], commitIndex[j]} \cup {0})
+            LET lenI == Log3DLen(i, p)
+                lenJ == Log3DLen(j, p)
+                limit == Min({lenI, lenJ} \cup {0})
             IN \A k \in 1..limit :
-                ProposerOfSlot(k) = p => log[i][k] = log[j][k]
+                /\ Log3D(i, p, k).term = Log3D(j, p, k).term
+                /\ Log3D(i, p, k).value = Log3D(j, p, k).value
 
-\* Committed log order matches execution order for conflicting commands.
-\* For any server's committed entries, the relative order of conflicting commands
-\* must match their order in the execution trace. NoOps are filtered out.
+\* Per-sequence committed log order matches execution order for conflicting commands.
+\*
+\* For each server i and each proposer j, the committed entries in proposer j's
+\* subsequence must preserve conflict order in the execution trace:
+\*   for Log3D(i, j, k1) and Log3D(i, j, k2) with k1 < k2, if both commands
+\*   exist and conflict, their first appearances in the deduplicated execution
+\*   must preserve that order.
+\*
+\* This is stated per-sequence (matching the big-picture doc), not over the
+\* flat global log.
 LogOrderMatchesExecution ==
     \A i \in Server :
-        ConflictOrderPreserved(CommittedCmdSeq(i), FilterNoOps(execution_cmds))
+        \A p \in Proposer :
+            ConflictOrderPreserved(ProposerCmdSeq(i, p), FilterNoOps(execution_cmds))
 
 \* Conflict order between deduplicated original and replicated execution traces.
 \* NoOp entries are filtered out as they are protocol-internal bookkeeping.

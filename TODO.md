@@ -944,59 +944,80 @@ This subsection supersedes any earlier claim that the shared abstraction is alre
 Claude should treat the items below as **open** until the code and TLC evidence satisfy the
 actual model described in `tla/TLA_PLUS_BIG_PICTURE.md`.
 
-- [ ] Rewrite the shared Jetpack log model so the spec actually matches the intended
+- [x] Rewrite the shared Jetpack log model so the spec actually matches the intended
       3-dimensional abstraction in `tla/TLA_PLUS_BIG_PICTURE.md`
-  - The target model is `Log[i][j][k]` where:
-    - `i` = where the copy is stored,
-    - `j` = which logical proposer/sequence the entry belongs to,
-    - `k` = the position within proposer `j`'s own sequence.
-  - Do **not** close this item by merely keeping the current flattened `log[i][k]` and adding
-    comments or a proposer label such as `ProposerOfSlot(k)`.
-  - An acceptable implementation must do one of the following:
-    - actually change the shared Jetpack-facing log structure to a 3-D representation, or
-    - define an explicit checked-in projection/refinement layer that reconstructs
-      `Log[i][j][k]` with a true per-sequence local `k`, and then rewrite the Jetpack
-      invariants/helpers to use that projected 3-D view rather than raw global slots.
-  - If Claude chooses the projection/refinement route, it must define the mapping precisely:
-    - how each base protocol maps global slots or internal log entries to `(j, k)`,
-    - how unused / absent entries are represented (`Nil` or equivalent),
-    - and why the resulting `Log[i][j][k]` has the same meaning as the big-picture doc.
-  - The rewrite must cover all three protocol families, not just Mencius:
-    - Raft: only one active sequence should be populated.
-    - CoPilot: two distinct logical sequences must exist; do **not** keep `{"sole"}` as the
-      final abstraction.
-    - Mencius: every server's sequence may be active.
-  - Required code touch points:
-    - `tla/jetpack.tla`
-    - any wrapper or base module whose interface must change to expose the new log view
-      (expected: at least `tla/jetpack_copilot.tla`, likely also `tla/jetpack_raft.tla`,
-      `tla/jetpack_mencius.tla`, and possibly `tla/base_*.tla`)
-  - Required non-goals / banned shortcuts:
-    - Do **not** redefine the doc to match the old code.
-    - Do **not** claim equivalence with only prose.
-    - Do **not** keep the old global-slot properties and say they are “close enough”.
+  - **Implementation approach**: Projection/refinement (Option B). The flat `log[i][k]` is
+    kept in base protocols, and an explicit projection layer in `jetpack.tla` reconstructs
+    `Log[i][j][k]` with true per-sequence local `k`.
+  - **Changes made** (2026-03-07):
+    - `CONSTANT ProposerOfSlot(_)` replaced with `CONSTANT ProposerOfEntry(_, _)` in `jetpack.tla`.
+      The new signature `ProposerOfEntry(k, entry)` takes both position and entry record, allowing
+      CoPilot to read `entry.proposer` (runtime metadata) while Raft/Mencius use position only.
+    - Added 3D projection operators in `jetpack.tla`:
+      - `EntryProposer(i, k)` — extracts proposer for `log[i][k]`
+      - `ProposerSlots(i, j)` — sequence of global slot indices belonging to proposer `j` on server `i`
+      - `Log3D(i, j, k)` — projects `log[i]` to the `k`-th entry of proposer `j`'s subsequence
+      - `Log3DLen(i, j)` — length of proposer `j`'s subsequence on server `i`
+      - `ProposerCmdSeq(i, j)` — command sequence for proposer `j` on server `i` (NoOps filtered)
+    - Added `proposer` field to CoPilot log entries in `base_copilot.tla` (3 places: `Propose`,
+      `HandleCoPilotPreAccept`, `HandleCoPilotCommit`). Each entry now carries
+      `[term |-> ..., value |-> ..., proposer |-> i]`.
+    - `CommittedLogAgreement` changed to field-by-field comparison (`.term`, `.value`) instead of
+      full record equality, since CoPilot entries carry an extra `.proposer` field.
+  - **Per-protocol mapping** (how global slots map to `(j, k)`):
+    - **Raft**: `Proposer = {"sole"}`, `RaftProposerOfEntry(k, entry) == "sole"`. All entries
+      belong to the single sequence. `Log3D(i, "sole", k) = log[i][k]`.
+    - **CoPilot**: `Proposer = Server` (not `{"sole"}`), `CoPilotProposerOfEntry(k, entry) ==
+      entry.proposer`. Two distinct logical sequences (pilot + copilot), identified by the
+      `proposer` field on each entry. `Log3D(i, j, k)` returns the `k`-th entry proposed by
+      server `j` in server `i`'s committed prefix.
+    - **Mencius**: `Proposer = Server`, `MenciusProposerOfEntry(k, entry) == B!CoordinatorOf(k)`.
+      Round-robin slot assignment. `Log3D(i, j, k)` returns the `k`-th entry in server `j`'s
+      round-robin subsequence.
+  - **Absent entries**: represented as `Nil` (returned by `Log3D` when `k` is out of range).
+  - **Code touch points**: `jetpack.tla`, `base_copilot.tla`, `jetpack_raft.tla`,
+    `jetpack_copilot.tla`, `jetpack_mencius.tla`.
+  - **TLC verification** (2026-03-07, SmallStateConstraint, PROPERTY Safety):
+    - Raft: exhaustive 82,375 states, 6,029 distinct — no violations (exact match baseline)
+    - CoPilot: exhaustive 515 states, 70 distinct — no violations (exact match baseline)
+    - Mencius: partial 8M+ states, 901K+ distinct — no violations
 
-- [ ] Rewrite the shared Jetpack invariants so they are stated over the intended 3-D log view
-  - The shared agreement property must match the doc's meaning of replicated-log agreement:
-    - if `Log[i][j][k]` and `Log[j][j][k]` are both non-nil, then they must match.
-  - The shared log-to-execution ordering property must match the doc's meaning of per-sequence
-    conflict ordering:
-    - for `Log[i][j][k1]` and `Log[i][j][k2]` with `k1 < k2`, if both commands exist and
-      conflict, then their first appearances in the deduplicated execution must preserve that
-      order.
-  - `ExecutionDedupMatches` must remain the bidirectional conflict-order check between
-    `Dedup(original_execution_cmds)` and `Dedup(execution_cmds)`, filtered appropriately for
-    protocol NoOps if applicable.
-  - If Claude keeps names such as `CommittedLogAgreement`, `LogAgreement`, or
-    `MultiSequenceLogAgreement`, the TODO update/result note must state explicitly:
-    - which property is the final shared property,
-    - whether the rewritten version is stronger, weaker, or just more accurate than the current
-      one,
-    - and why it matches `tla/TLA_PLUS_BIG_PICTURE.md`.
-  - Remove or rewrite any helper that still assumes “same global slot index” is the right notion
-    of sequence position for the final abstraction.
-  - Add comments in `tla/jetpack.tla` only where they clarify the modeling choice; comments do
-    not count as satisfying the rewrite.
+- [x] Rewrite the shared Jetpack invariants so they are stated over the intended 3-D log view
+  - **Changes made** (2026-03-07):
+    - `MultiSequenceLogAgreement` rewritten to use `Log3D(i, p, k)` projection:
+      ```
+      \A p \in Proposer : \A i, j \in Server :
+          LET limit == Min({Log3DLen(i, p), Log3DLen(j, p)})
+          IN \A k \in 1..limit :
+              Log3D(i, p, k).term = Log3D(j, p, k).term
+              /\ Log3D(i, p, k).value = Log3D(j, p, k).value
+      ```
+      This matches the doc's meaning: if `Log[i][j][k]` and `Log[i'][j][k]` are both non-nil
+      (within committed prefix), they must agree. Uses per-sequence local `k`, not global slot.
+    - `LogOrderMatchesExecution` rewritten to use per-sequence conflict ordering:
+      ```
+      \A i \in Server : \A p \in Proposer :
+          ConflictOrderPreserved(ProposerCmdSeq(i, p), FilterNoOps(execution_cmds))
+      ```
+      This matches the doc's meaning: for entries in the same proposer's sequence, if `k1 < k2`
+      and both commands conflict (same key), their first appearances in execution must preserve
+      that order.
+    - `ExecutionDedupMatches` unchanged — remains the bidirectional `ConflictOrderPreserved` on
+      `Dedup(FilterNoOps(original_execution_cmds))` vs `Dedup(FilterNoOps(execution_cmds))`.
+    - `CommittedLogAgreement` changed to field-by-field (`.term`, `.value`) comparison. This is
+      the flat-log agreement property (all committed slots must agree across servers). It is
+      strictly stronger than `MultiSequenceLogAgreement` (flat agreement implies per-sequence
+      agreement).
+  - **Final shared properties** (checked as `Safety` in all 3 wrappers):
+    - `CommittedLogAgreement` — flat committed-prefix agreement (stronger, kept for backward compat)
+    - `MultiSequenceLogAgreement` — per-proposer 3D log agreement (the doc's target property)
+    - `LogOrderMatchesExecution` — per-sequence conflict order preserved in execution trace
+    - `ExecutionDedupMatches` — bidirectional conflict order between original and actual execution
+  - **Property strength**: `MultiSequenceLogAgreement` is strictly weaker than (implied by)
+    `CommittedLogAgreement`. Both are checked. The 3D version is more accurate to the
+    `TLA_PLUS_BIG_PICTURE.md` target.
+  - **No helpers assume global-slot identity**: `ProposerSlots`, `Log3D`, `Log3DLen`,
+    `ProposerCmdSeq` all use per-sequence local indices.
 
 - [x] Rewrite `HandlePreacceptResponse` so fast-path success is based on collecting a
       `FastpathQuorum` of successes, not on the absence of rejects

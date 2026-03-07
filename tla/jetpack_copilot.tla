@@ -75,12 +75,14 @@ vars == <<messages, serverVars, candidateVars, leaderVars,
 
 B == INSTANCE base_copilot
 
-\* CoPilot: single merged log (pilot + copilot append to same sequence).
-CoPilotProposerOfSlot(k) == "sole"
+\* CoPilot: two logical sequences (pilot + copilot), interleaved in one log.
+\* Each log entry carries a .proposer field identifying which server proposed it.
+\* Proposer = Server because any server may become pilot or copilot.
+CoPilotProposerOfEntry(k, entry) == entry.proposer
 
 J == INSTANCE jetpack WITH NoOpCmd <- [tag |-> "CoPilotNoOp"],
-                          Proposer <- {"sole"},
-                          ProposerOfSlot <- CoPilotProposerOfSlot
+                          Proposer <- Server,
+                          ProposerOfEntry <- CoPilotProposerOfEntry
 
 (***************************************************************************)
 (* Re-exported constants                                                   *)

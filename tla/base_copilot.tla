@@ -166,7 +166,7 @@ Propose(i, v) ==
     /\ LET deps == DepsFor(i, v)
            newEntry == [cmd |-> v, deps |-> deps,
                         status |-> PreAccepted, ballot |-> cpBallot[i]]
-           newLogEntry == [term |-> currentTerm[i], value |-> v]
+           newLogEntry == [term |-> currentTerm[i], value |-> v, proposer |-> i]
            msgSet == { [mtype |-> CoPilotPreAcceptRequest,
                         mterm |-> currentTerm[i],
                         msource |-> i,
@@ -190,7 +190,7 @@ HandleCoPilotPreAccept(i, m) ==
            unionDeps == m.mdeps \cup localDeps
            newEntry == [cmd |-> cmd, deps |-> unionDeps,
                         status |-> PreAccepted, ballot |-> m.mballot]
-           newLogEntry == [term |-> m.mterm, value |-> cmd]
+           newLogEntry == [term |-> m.mterm, value |-> cmd, proposer |-> m.msource]
        IN /\ cpLog' = [cpLog EXCEPT ![i] =
                           IF Len(cpLog[i]) < m.mindex
                           THEN Append(cpLog[i], newEntry)
@@ -239,7 +239,7 @@ HandleCoPilotCommit(i, m) ==
     /\ LET cmd == m.mcmd
            newEntry == [cmd |-> cmd, deps |-> m.mdeps,
                         status |-> Committed, ballot |-> cpBallot[i]]
-           newLogEntry == [term |-> m.mterm, value |-> cmd]
+           newLogEntry == [term |-> m.mterm, value |-> cmd, proposer |-> m.msource]
        IN /\ cpLog' = [cpLog EXCEPT ![i] =
                           IF Len(cpLog[i]) < m.mindex
                           THEN Append(cpLog[i], newEntry)
