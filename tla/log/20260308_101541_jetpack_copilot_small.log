@@ -1,0 +1,48 @@
+=== TLC Small-Config Run ===
+Spec: jetpack_copilot.tla
+Config: jetpack_copilot_small.cfg
+Started: 2026-03-08T10:15:41+00:00
+--- Config contents ---
+SPECIFICATION Spec
+SYMMETRY Symmetry
+
+CONSTANTS
+  Server = {s1, s2, s3}
+  Client = {c1}
+  CmdId = {id1}
+  Key = {k1}
+
+CONSTRAINT SmallStateConstraint
+
+PROPERTY Safety
+--- End config ---
+
+TLC2 Version 2.16 of 31 December 2020 (rev: cdddf55)
+Running breadth-first search Model-Checking with fp 91 and seed -5498655749349014093 with 1 worker on 64 cores with 910MB heap and 64MB offheap memory (Linux 5.15.0-133-generic i386, Oracle Corporation 1.8.0_101 x86, MSBDiskFPSet, DiskStateQueue).
+Parsing file /home/users/ztang/janus/tla/jetpack_copilot.tla
+Parsing file /tmp/Naturals.tla
+Parsing file /tmp/FiniteSets.tla
+Parsing file /tmp/Sequences.tla
+Parsing file /tmp/TLC.tla
+Parsing file /home/users/ztang/janus/tla/base_copilot.tla
+Parsing file /home/users/ztang/janus/tla/jetpack.tla
+Semantic processing of module Naturals
+Semantic processing of module Sequences
+Semantic processing of module FiniteSets
+Semantic processing of module TLC
+Semantic processing of module base_copilot
+Semantic processing of module jetpack
+Semantic processing of module jetpack_copilot
+Starting... (2026-03-08 10:15:41)
+Computing initial states...
+Finished computing initial states: 1 distinct state generated at 2026-03-08 10:15:42.
+Model checking completed. No error has been found.
+  Estimates of the probability that TLC did not check all reachable states
+  because two distinct states had the same fingerprint:
+  calculated (optimistic):  val = 1.7E-15
+515 states generated, 70 distinct states found, 0 states left on queue.
+The depth of the complete state graph search is 7.
+The average outdegree of the complete state graph is 1 (minimum is 0, the maximum 6 and the 95th percentile is 3).
+Finished in 01s at (2026-03-08 10:15:42)
+
+Finished: 2026-03-08T10:15:42+00:00

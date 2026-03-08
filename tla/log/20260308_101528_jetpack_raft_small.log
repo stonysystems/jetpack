@@ -1,0 +1,49 @@
+=== TLC Small-Config Run ===
+Spec: jetpack_raft.tla
+Config: jetpack_raft_small.cfg
+Started: 2026-03-08T10:15:28+00:00
+--- Config contents ---
+SPECIFICATION Spec
+SYMMETRY Symmetry
+
+CONSTANTS
+  Server = {s1, s2, s3}
+  Client = {c1}
+  CmdId = {id1}
+  Key = {k1}
+
+CONSTRAINT SmallStateConstraint
+
+PROPERTY Safety
+--- End config ---
+
+TLC2 Version 2.16 of 31 December 2020 (rev: cdddf55)
+Running breadth-first search Model-Checking with fp 88 and seed 1543023585457900211 with 1 worker on 64 cores with 910MB heap and 64MB offheap memory (Linux 5.15.0-133-generic i386, Oracle Corporation 1.8.0_101 x86, MSBDiskFPSet, DiskStateQueue).
+Parsing file /home/users/ztang/janus/tla/jetpack_raft.tla
+Parsing file /tmp/Naturals.tla
+Parsing file /tmp/FiniteSets.tla
+Parsing file /tmp/Sequences.tla
+Parsing file /tmp/TLC.tla
+Parsing file /home/users/ztang/janus/tla/base_raft.tla
+Parsing file /home/users/ztang/janus/tla/jetpack.tla
+Semantic processing of module Naturals
+Semantic processing of module Sequences
+Semantic processing of module FiniteSets
+Semantic processing of module TLC
+Semantic processing of module base_raft
+Semantic processing of module jetpack
+Semantic processing of module jetpack_raft
+Starting... (2026-03-08 10:15:29)
+Computing initial states...
+Finished computing initial states: 1 distinct state generated at 2026-03-08 10:15:29.
+Progress(14) at 2026-03-08 10:15:32: 32,599 states generated (32,599 s/min), 3,069 distinct states found (3,069 ds/min), 734 states left on queue.
+Model checking completed. No error has been found.
+  Estimates of the probability that TLC did not check all reachable states
+  because two distinct states had the same fingerprint:
+  calculated (optimistic):  val = 2.5E-11
+82375 states generated, 6029 distinct states found, 0 states left on queue.
+The depth of the complete state graph search is 26.
+The average outdegree of the complete state graph is 1 (minimum is 0, the maximum 6 and the 95th percentile is 3).
+Finished in 07s at (2026-03-08 10:15:35)
+
+Finished: 2026-03-08T10:15:36+00:00
