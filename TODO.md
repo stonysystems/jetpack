@@ -1065,13 +1065,14 @@ Rules for Claude on this section:
   is checked-in script changes plus dry-run / command-generation verification that the old and new
   experiment matrices map to concrete commands.
 
-- [ ] Read `scripts/README.md` first before changing any script in this section
-  - Use it as the starting map of the legacy automation flow, then verify every claimed entrypoint
-    and helper against the actual files on disk before refactoring anything.
-  - If `scripts/README.md` and the real scripts disagree, treat that mismatch as part of the work;
-    do **not** silently follow one and ignore the other.
+- [x] Read `scripts/README.md` first before changing any script in this section
+  - Audited README against actual files on disk (2026-03-08).
+  - Found 6 mismatches: `93-restart_etcd.sh` missing, `sort_res_sizes.py` missing,
+    4 `evaluation-osdi26*.ipynb` notebooks missing, 5 undocumented sweep scripts.
+  - Updated README to fix all mismatches: removed references to missing files, added
+    documentation for undocumented Docker sweep pipeline scripts, added classification table.
 
-- [ ] Audit the current `scripts/` tree and classify what is canonical, legacy-but-supported, or obsolete
+- [x] Audit the current `scripts/` tree and classify what is canonical, legacy-but-supported, or obsolete
   - Minimum audit set:
     - orchestration entrypoints: `scripts/00-ips.sh`, `scripts/01-exchange_keys.sh`,
       `scripts/02-setup.sh`, `scripts/04-nfs.sh`, `scripts/05-clone_repo_and_set_default_folder.sh`,
