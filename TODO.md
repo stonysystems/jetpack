@@ -34,15 +34,29 @@
 - Phase 2I reproducibility (2026-03-08): `tla/run-tlc.sh` updated to support local Java
   (auto-detect tla2tools.jar) and Docker modes. `tla/VERIFICATION.md` created with full
   workflow documentation. Runner tested and verified functional.
+- Phase 1H script automation (2026-03-08): Created `scripts/experiment_defs.sh` centralizing
+  protocol/backend families, mode mappings, concurrency arrays, and command-generation helpers.
+  All 4 entry scripts source it. Backward compatibility verified (CLI, result naming, parsers).
+  Docker backend matrix extended with failover configs, compose/test paths. 47 unit tests pass.
+  AWS/Zoo validation blocked with documented re-validation matrix.
 
 ### Undone In Priority Order
 
-1. Phase 2I: small-config TLC runs in progress (Raft + CoPilot pass, Mencius running without errors); next: complete Mencius exhaustive, then big-config 12-hour runs for all 3 combinations.
-2. Phase 2I / Phase 2H: TLA+ experiment flow now reproducible — `tla/run-tlc.sh` supports local Java and Docker, auto-detects mode, produces timestamp-prefixed logs. `tla/VERIFICATION.md` documents the workflow. Remaining: check in accepted log files once Mencius small completes; big-config 12-hour runs still needed.
-3. Phase 1D: make Codex able to reproduce the evaluation end to end, from fresh image build to regenerated result artifacts.
-4. Phase 1D / Phase 1F: make the runbook-backed WAN recovery flow reproducible for all three backends and align recovery docs with the correct metrics.
-5. Phase 3 and Phase 4: keep the integration docs, README, leader-watcher notes, and supporting alignment work consistent with the accepted workflows.
-6. Phase 1H: after the local benchmark/recovery path is accepted, upgrade `scripts/` so the legacy AWS / Zoo automation also supports the current MongoDB / etcd / ZooKeeper benchmark and failure-recovery workflows without breaking old results.
+1. Phase 2I: Mencius small-config TLC exhaustive run in progress (150M+ states, no errors);
+   when complete, check in log and update verification docs. Then big-config 12-hour runs
+   for all 3 combinations (needs Docker or Java 11+).
+2. Phase 1D: make Codex able to reproduce the evaluation end to end, from fresh image build
+   to regenerated result artifacts. **Blocked on Docker access.**
+3. Phase 1D / Phase 1F: make the runbook-backed WAN recovery flow reproducible for all three
+   backends and align recovery docs with the correct metrics. **Blocked on Docker access.**
+
+All remaining tasks require Docker or AWS access. Code-only tasks are complete:
+- Phase 0: done
+- Phase 1A/1B/1C (sweep/benchmark code): done
+- Phase 1H (script automation): done (2026-03-08)
+- Phase 2 (TLA+ specs): done except Mencius exhaustive + big-config runs
+- Phase 3 (integrations): done
+- Phase 4 (supporting docs): done
 
 ### Phase Map
 
