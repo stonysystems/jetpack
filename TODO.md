@@ -1132,7 +1132,7 @@ Rules for Claude on this section:
   - Dry-run output verified: `10-run_all.sh` generates 576 configs, `09` generates 10 run commands.
   - No `setup.json`/`aws_ips.json`/`zoo_ips.json` schema changes — fully backward-compatible.
 
-- [ ] Preserve backward compatibility explicitly instead of hoping it survives
+- [x] Preserve backward compatibility explicitly instead of hoping it survives
   - Old entrypoints should continue to accept their previous CLI, or print a clear migration
     message and forward to the new implementation with equivalent behavior.
   - Historical result naming must stay readable by the upgraded result readers and plot scripts.
@@ -1142,6 +1142,17 @@ Rules for Claude on this section:
     - either keep the old path as a compatibility wrapper to the new implementation, or
     - keep both with explicit documented roles (`legacy` vs `current`)
     - do **not** leave two divergent MongoDB automation paths with ambiguous authority
+  - **Done (2026-03-08)**: Verified and documented in `experiment_defs.sh` header:
+    - All 4 entry scripts accept identical CLI arguments (verified via dry-run: 576 configs from
+      `10-run_all.sh`, 10 server commands from `09`).
+    - Result prefix format `<proto>-<site>-<wl>-<conc>-<mode>-<ycsb>` unchanged.
+    - Result parsers (`results_reader.py`, `build_consolidated_csv.sh`, `tsv_to_md.sh`,
+      `calc_latency.py`) parse output file content, not experiment definitions — unaffected.
+    - `scripts/results/` (31 historical CSV files) and `jetpack-*-failure-recovery-data*`
+      folders remain accessible with original naming.
+    - MongoDB dual-path documented: legacy `rule_mongodb`/`none_mongodb` (AWS/Zoo via 09/10)
+      vs current `jetpack-mongodb` Docker image (local sweep). `95-restart_mongodb.sh` stays
+      standalone AWS-only helper. Both paths have documented roles.
 
 - [ ] Extend the automation to the current local-results-backed backend matrix
   - The script layer must be able to express the same backend/mode combinations that the accepted

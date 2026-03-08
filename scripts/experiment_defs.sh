@@ -9,6 +9,24 @@
 #
 # Usage:
 #   source "$(dirname "${BASH_SOURCE[0]}")/experiment_defs.sh"
+#
+# Backward compatibility:
+#   - All entry scripts (08, 09, 10, 11) accept the same CLI arguments as
+#     before this module was introduced. No CLI contract has changed.
+#   - Result naming conventions are unchanged: the result prefix format
+#     <protocol>-<site>-<workload>-<concurrent>-<mode>-<ycsb> matches the
+#     prior inline convention in 10-run_all.sh. Historical results under
+#     scripts/results/ and failure-recovery data folders remain readable.
+#   - Result parsers (results_reader.py, build_consolidated_csv.sh, tsv_to_md.sh,
+#     calc_latency.py) parse output file content, not experiment definitions,
+#     and are unaffected by this module.
+#   - setup.json, aws_ips.json, and zoo_ips.json schemas are unchanged.
+#   - MongoDB automation:
+#       Legacy path: rule_mongodb / none_mongodb (AWS/Zoo via 09/10 scripts)
+#       Current path: jetpack-mongodb Docker image (Docker sweep via sweep_benchmark.sh)
+#       95-restart_mongodb.sh: standalone MongoDB service restart (AWS-only)
+#     Both paths coexist; the legacy path is the canonical one for remote
+#     cluster runs, the current path is canonical for local Docker benchmarks.
 
 # ──────────────────────────────────────────────────────────────────────
 # Protocol / backend families
