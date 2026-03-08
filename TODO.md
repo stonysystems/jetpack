@@ -6,6 +6,44 @@
      command(s) to run and verify it in the README.md (clean up README as needed).
      This ensures reproducibility and serves as living documentation. -->
 
+## Review Snapshot
+
+- Latest active phase: `Phase 1D: Codex End-to-End Reproducibility Review`
+
+### Recently Done / Updated
+
+- Phase 0 documentation foundations are in place: `doc/` was merged into `docs/`,
+  leader-election signaling was documented, and the Jetpack pseudocode docs were written and validated.
+- Phase 1 now has one operator-facing runbook in [`docs/benchmark_runbook.md`](docs/benchmark_runbook.md),
+  canonical sweep artifacts under `docs/sweep_2026-02-28/`, and explicit reopen / review notes for
+  benchmark and recovery reproducibility.
+- Phase 2 records the TLA+ base/wrapper split, shared Jetpack abstraction work, TLC logs, and the
+  latest shared-log / fast-path review findings.
+
+### Undone In Priority Order
+
+1. Phase 1D: make Codex able to reproduce the evaluation end to end, from fresh image build to regenerated result artifacts.
+2. Phase 1D / Phase 1F: make the runbook-backed WAN recovery flow reproducible for all three backends and align recovery docs with the correct metrics.
+3. Phase 1D: reconcile published benchmark/recovery docs with what Codex can actually rerun from the current repo state.
+4. Phase 2G / Phase 2H: finish the remaining TLA+ shared-abstraction / proof-story cleanup with disciplined TLC evidence.
+5. Phase 3 and Phase 4: keep the integration docs, README, leader-watcher notes, and supporting alignment work consistent with the accepted workflows.
+
+### Phase Map
+
+- Phase 0: Documentation Foundations
+- Phase 1: Evaluation Reproducibility (benchmark + recovery)
+- Phase 2: TLA+ Specifications and Verification
+- Phase 3: Jetpack + Industry Applications
+- Phase 4: Supporting Docs and Project Alignment
+
+## Update Rules
+
+- Add each new major workstream as a new `## Phase N`.
+- If an existing phase is reopened, append a new dated `### Phase NX` subsection inside that phase
+  rather than overwriting the earlier history.
+- Keep `Review Snapshot` current: update `Latest active phase`, `Recently Done / Updated`, and
+  `Undone In Priority Order` whenever a major task lands or a major task is reopened.
+
 ## Goal
 
 Jetpack is a plugin consensus protocol that sits on top of a base protocol (e.g. Raft,
@@ -27,7 +65,7 @@ All TLA+ related work (specifications, configs, Docker environment) lives in the
 All TLA+ model checking runs in Docker (`tla/Dockerfile`).
 TLC logs are saved to `tla/log/` with protocol name and timestamp.
 
-## Priority 0 (Top): Documentation Cleanup
+## Phase 0: Documentation Foundations
 
 - [x] Merge `doc/` files into `docs/` (single documentation folder)
   - Moved all files from `doc/` to `docs/` using `git mv`
@@ -46,7 +84,7 @@ TLC logs are saved to `tla/log/` with protocol name and timestamp.
     - [x] ZooKeeper: signal write in `Leader.java:lead()` after `setZabState(BROADCAST)`
       (`third_party/zookeeper/`)
 
-### Jetpack pseudocode documentation refresh
+### Phase 0A: Jetpack pseudocode documentation refresh
 
 - [x] Extract the current Jetpack algorithm flow from implementation (normal case + failure recovery)
   - Used Explore agent to map scheduler.cc → algorithm steps
@@ -66,7 +104,7 @@ TLC logs are saved to `tla/log/` with protocol name and timestamp.
   - formatting/style matches jetpack_pseudocode_old.tex (algorithm2e, twocolumn)
   - Optimized vs non-optimized mapping documented in optimized.tex overview paragraph
 
-## Priority 0 (Top): Benchmark Data Collection (`docs/latency_analysis.md`)
+## Phase 1: Evaluation Reproducibility (`docs/latency_analysis.md`, `docs/failure_recovery_evaluation.md`)
 
 **Re-opened benchmark scope (2026-02-27)**:
 - The existing benchmark tables in this TODO are historical reference only. They are
@@ -83,7 +121,7 @@ TLC logs are saved to `tla/log/` with protocol name and timestamp.
 - If a mode, concurrency point, or client-count choice was not actually run, say it is
   missing. Do not infer or copy numbers from a different mode.
 
-### Performance chart (18 experiments)
+### Phase 1A: Performance chart (18 experiments)
 
 All tests use 5 replicas, **open-loop**, multi-process mode with 20ms one-way simulated
 network latency (tc/netem). The original protocol leader is on h1.
@@ -243,7 +281,7 @@ replaced or expanded in `docs/latency_analysis.md`.
 - [x] Run ZK Setting C (5c, c=1, Jetpack ON / rule mode) — h1=40.3ms, h2-h5=40.5ms (re-run after fix)
 - [x] Run ZK Setting D (near-peak throughput, Jetpack ON / rule mode) — 5,498 txn/s (re-run after fix)
 
-### Maximum throughput search (9 cases, reopened again after 2026-02-28 review)
+### Phase 1B: Maximum throughput search (9 cases, reopened again after 2026-02-28 review)
 
 The old 6-case off/on-only sweep is insufficient. The required matrix is still:
 3 protocols x 3 modes = 9 cases.
@@ -460,7 +498,7 @@ Column definitions for the sweep matrix:
     has ~13% gap which is inherent rule mode overhead (FP100% shows same gap),
     not an adaptive policy issue. Throttle optimized to best achievable within rule mode.
 
-### Re-opened After 2026-03-02 Review (Highest Priority For Claude)
+### Phase 1C: Re-opened After 2026-03-02 Review
 
 The benchmark/reporting work above is **not accepted as final** yet. The items above record
 what was attempted; the checklist below is the acceptance gate that must be satisfied before
@@ -623,7 +661,7 @@ this section can be closed again.
         `README.md`, and `docs/latency_analysis.md` all updated from the same rerun pass.
       - Docker images rebuilt 2026-03-02 with CPU instrumentation from `c1368ef4`.
 
-### Re-opened After 2026-03-08 Codex End-to-End Reproducibility Review (Highest Priority For Claude)
+### Phase 1D: Re-opened After 2026-03-08 Codex End-to-End Reproducibility Review (Highest Priority For Claude)
 
 This section **supersedes** the 2026-03-02 acceptance claim above.
 
@@ -829,7 +867,7 @@ Why this is re-opened based on `docs/codex_review_report.md`:
     then the docs/results must be updated to the narrower, honest claim set that **is**
     reproducible. Do not preserve stronger historical claims just because they were already written.
 
-### Docker test script improvements
+### Phase 1E: Docker test script improvements
 
 Improve the Docker run scripts (`run-{mongodb,etcd,zookeeper}-test.sh`) and benchmark mode
 for easier debugging and onboarding:
@@ -859,7 +897,7 @@ for easier debugging and onboarding:
   - Note about disabling `SIMULATE_WAN` for tc/netem tests
   - Rewrote with new benchmark mode commands, environment variable table, output guide.
 
-### Failure recovery downtime (3 experiments)
+### Phase 1F: Failure recovery downtime (3 experiments)
 
 Downtime definitions:
 - **Original protocol downtime**: from triggering original protocol failure to the original
@@ -971,7 +1009,7 @@ measures from signal file write to `recovery_finish_after_failure` detection.
         written → Jetpack hooker detects → `JetpackRecoveryEntry()` → recovery complete
       - Document: `docs/failure_recovery_design.md`
 
-### Export
+### Phase 1G: Export
 
 - [x] Export the **post-fix** benchmark matrices, CPU/bottleneck tables, and full throughput sweeps to `docs/latency_analysis.md`
   - Do not treat the current 2026-02-27 sweep export as final; it is diagnostic only.
@@ -982,7 +1020,7 @@ measures from signal file write to `recovery_finish_after_failure` detection.
 - [x] If `result.md` is kept for compatibility, treat it as a mirror only; the benchmark source of truth should be under `docs/`
   - `docs/latency_analysis.md` is the benchmark source of truth. `result.md` is historical only.
 
-## Priority 2 (Medium, after evaluation): TLA+ Specifications
+## Phase 2: TLA+ Specifications and Verification
 
 Priority note:
 - TLA+ work is important, but it is **medium priority** and should not displace the
@@ -990,7 +1028,7 @@ Priority note:
 - Do **not** overclaim TLA+ completion. A long TLC run with no error yet is not the same as
   a passed model check, and a wrapper-only result is not the same as the final abstraction proof.
 
-### Completion Discipline
+### Phase 2A: Completion Discipline
 
 Rules for Claude on this section:
 - Do **not** check a TLA+ TODO item as done based only on code written, SANY parsing,
@@ -1018,7 +1056,7 @@ Rules for Claude on this section:
 - For any final “done” claim in this section, include concrete artifact references in the TODO
   note itself: spec path, cfg/path, log path, and run date.
 
-### Properties
+### Phase 2B: Properties
 
 Properties to prove in `jetpack.tla` (refer to `jetpack_raft.tla` for reference):
 - LogAgreement
@@ -1037,7 +1075,7 @@ Properties for original base protocols (`raft.tla`, `copilot.tla`, `mencius.tla`
   does not hold because logs temporarily diverge before committed entries are reconciled)
 - LogOrderMatchesExecution (pairwise conflict-ordering as above)
 
-### Specifications
+### Phase 2C: Specifications
 
 - [x] Docker environment for TLA+ model checking (`tla/Dockerfile`, `tla/run-tlc.sh`)
 - [x] Separate `tla/jetpack_raft.tla` into `tla/raft.tla` and `tla/jetpack.tla`
@@ -1049,7 +1087,7 @@ Properties for original base protocols (`raft.tla`, `copilot.tla`, `mencius.tla`
   - `jetpack_copilot.tla`: Jetpack + CoPilot composition (SANY verified)
   - `jetpack_mencius.tla`: Jetpack + Mencius composition (SANY verified)
 
-### Re-opened After 2026-03-02 TLA+ Review
+### Phase 2D: Re-opened After 2026-03-02 TLA+ Review
 
 The TLA+ area has useful progress, but the proof story is **not complete** yet and some items
 below were previously overclaimed.
@@ -1088,7 +1126,7 @@ Current review findings:
 - `tla/run-tlc.sh` does not currently save timestamped log files automatically, so the
   verification trail is weaker than required.
 
-### Mid-step: wrapper module verification
+### Phase 2E: Mid-step: wrapper module verification
 
 <!-- "composed jetpack + X" means running jetpack.tla together with X.tla as the base
      protocol (e.g. via a wrapper module). This is NOT the same as jetpack_raft.tla,
@@ -1128,7 +1166,7 @@ than abstraction at this stage.
     does not hold for base protocols — CoPilot violates it when terms differ across
     replicas for uncommitted entries. CommittedLogAgreement is the correct adaptation.
 
-### Final goal: shared Jetpack abstraction across base protocols
+### Phase 2F: Final goal: shared Jetpack abstraction across base protocols
 
 Achieve one shared Jetpack model that can be composed with abstracted base protocols
 for Raft, CoPilot, and Mencius, without falling back to protocol-specific Jetpack logic.
@@ -1150,7 +1188,7 @@ Status note (resolved 2026-03-07):
   (`Log3D`, `Log3DLen`, `ProposerCmdSeq`) with per-sequence local indices.
 - See "Re-opened After 2026-03-07 Shared Log / Fast-Path Review" below for full details.
 
-### Re-opened After 2026-03-07 Shared Log / Fast-Path Review
+### Phase 2G: Re-opened After 2026-03-07 Shared Log / Fast-Path Review
 
 This subsection supersedes any earlier claim that the shared abstraction is already complete.
 Claude should treat the items below as **open** until the code and TLC evidence satisfy the
@@ -1356,7 +1394,7 @@ actual model described in `tla/TLA_PLUS_BIG_PICTURE.md`.
     - CoPilot: 515 states exhaustive → `tla/log/jetpack_copilot_multiseq_small.log`
     - Mencius: 31M+ states partial, no violations → `tla/log/jetpack_mencius_multiseq_small.log`
 
-### TLA+ Verification (via Docker)
+### Phase 2H: TLA+ Verification (via Docker)
 
 Required verification workflow:
 - Small config: run an exhaustive/small bounded model first.
@@ -1418,7 +1456,7 @@ Required verification workflow:
     (5 servers, 3 cmds, 2 keys, StateConstraint) — `tla/log/jetpack_mencius_3d_large.log`
   - See commit 1f3d0119 for fix details (ExtendLog, NoOp, ExecutionDedupMatches override)
 
-## Priority 2 (Medium): Jetpack + Industry Applications
+## Phase 3: Jetpack + Industry Applications
 
 Integrate Jetpack with real-world consensus/coordination systems. For each integration,
 the Jetpack framework calls the original protocol's API for read/write commands (prefer
@@ -1427,7 +1465,7 @@ async API if available, otherwise use sync API). Existing integration code lives
 
 All experiments run in Docker containers. Create a new Dockerfile if needed.
 
-### 2a. Jetpack + MongoDB
+### Phase 3A: Jetpack + MongoDB
 
 Existing integration code: `src/deptran/mongodb/`, `src/deptran/mongodb_*.h`
 
@@ -1466,7 +1504,7 @@ Existing integration code: `src/deptran/mongodb/`, `src/deptran/mongodb_*.h`
 - [x] Write integration notes for anything interesting/noteworthy/suitable for the paper
   - Document: `docs/mongodb_integration_notes.md`
 
-### 2b. Jetpack + etcd (higher priority within this section)
+### Phase 3B: Jetpack + etcd (higher priority within this section)
 
 Existing integration code: `src/deptran/etcd/`, `src/deptran/etcd_*.h`
 
@@ -1494,7 +1532,7 @@ Existing integration code: `src/deptran/etcd/`, `src/deptran/etcd_*.h`
 - [x] Write integration notes for anything interesting/noteworthy/suitable for the paper
   - Document: `docs/etcd_integration_notes.md`
 
-### 2c. Jetpack + ZooKeeper
+### Phase 3C: Jetpack + ZooKeeper
 
 No existing integration code. Needs to be implemented from scratch.
 
@@ -1522,7 +1560,9 @@ No existing integration code. Needs to be implemented from scratch.
 - [x] Write integration notes for anything interesting/noteworthy/suitable for the paper
   - Document: `docs/zookeeper_integration_notes.md`
 
-## Priority 2 (Medium): Leader Watcher Analysis Doc
+## Phase 4: Supporting Docs and Project Alignment
+
+### Phase 4A: Leader Watcher Analysis Doc
 
 - [x] Write a doc (`docs/leader_watcher_analysis.md`) explaining how each leader watcher
       detects leader election, and what problems each approach may have:
@@ -1534,7 +1574,7 @@ No existing integration code. Needs to be implemented from scratch.
     events, race conditions, session expiry, network partition scenarios)
   - Document: `docs/leader_watcher_analysis.md`
 
-## TLA+ Config Alignment
+### Phase 4B: TLA+ Config Alignment
 
 - [x] Update `tla/jetpack_mencius.cfg` and `tla/jetpack_copilot.cfg` to match `tla/jetpack_raft.cfg`:
       5 servers (`{s1, s2, s3, s4, s5}`), 3 CmdIds (`{id1, id2, id3}`), 2 Keys (`{k1, k2}`)
@@ -1549,7 +1589,7 @@ No existing integration code. Needs to be implemented from scratch.
   - Note: state spaces too large for exhaustive checking with 5 servers; partial verification consistent
     with prior results
 
-## Priority 1 (High): README Documentation
+### Phase 4C: README Documentation
 
 - [x] Document Docker and Docker Compose version requirements in README
 - [x] For every completed task above, document the command(s) to run and verify it in
@@ -1560,7 +1600,7 @@ No existing integration code. Needs to be implemented from scratch.
   - [x] ZooKeeper integration: how to build, run single/multi/recovery tests
   - [x] Benchmark results: quick benchmark commands and link to `result.md`
 
-## Priority 3 (Low): TLA+ Debugging
+### Phase 4D: TLA+ Debugging
 
 - [x] Read `tla/jetpack_mencius.log` and debug `tla/jetpack_mencius.tla`
   - Root cause: `Safety` property used `LogAgreement` (unrestricted log equality at every index),
