@@ -11,6 +11,12 @@
 \*   - No execution_cmds or ApplyCommitted (delegated to wrapper/Jetpack)
 \*   - All servers start as Leader (multi-leader Paxos)
 \*
+\* 3-D Log: log[i][j][k], commitIndex[i][j]
+\* Mencius uses per-server proposer IDs (Proposer = Server). Each server owns
+\* round-robin slots and maintains its own per-proposer sequence. Slot sl
+\* belongs to proposer CoordinatorOf(sl). Position k within proposer j's
+\* sequence maps to slot ServerIdx(j) + (k-1) * N.
+\*
 \* Variables declared here (the "base protocol interface"):
 \*   messages, currentTerm, ostate, votedFor, log, commitIndex,
 \*   votesResponded, votesGranted, nextIndex, matchIndex,
@@ -103,17 +109,27 @@ CoordinatorOf(sl) == ServerSeq[((sl - 1) % N) + 1]
 
 MaxSlot == N * 3
 
-\* Extend log[i] through all consecutive Learned/Skipped slots from current length.
+\* Slot for position k in proposer j's sequence.
+SlotFor(j, k) == ServerIdx(j) + (k - 1) * N
+
+\* Max number of positions for any proposer (each has MaxSlot/N slots).
+MaxLocalPos == ((MaxSlot - 1) \div N) + 1
+
+\* Extend log[i][j] through all consecutive Learned/Skipped slots for proposer j.
 \* newSS: the post-transition slotState for server i (function 1..MaxSlot -> state)
 \* newSV: the post-transition slotValue for server i (function 1..MaxSlot -> value)
-ExtendLog(i, newSS, newSV) ==
-    LET curLen == Len(log[i])
-        maxExt == CHOOSE n \in curLen..MaxSlot :
-                    /\ \A k \in (curLen+1)..n : newSS[k] \in {Learned, Skipped}
-                    /\ (n = MaxSlot \/ newSS[n+1] \notin {Learned, Skipped})
+ExtendLogForProposer(i, j, newSS, newSV) ==
+    LET curLen == Len(log[i][j])
+        maxExt == CHOOSE n \in curLen..MaxLocalPos :
+                    /\ \A k \in (curLen+1)..n :
+                         /\ SlotFor(j, k) <= MaxSlot
+                         /\ newSS[SlotFor(j, k)] \in {Learned, Skipped}
+                    /\ (n = MaxLocalPos \/
+                        SlotFor(j, n+1) > MaxSlot \/
+                        newSS[SlotFor(j, n+1)] \notin {Learned, Skipped})
         newEntries == [k \in 1..(maxExt - curLen) |->
-                        [term |-> currentTerm[i], value |-> newSV[curLen + k]]]
-    IN log[i] \o newEntries
+                        [term |-> currentTerm[i], value |-> newSV[SlotFor(j, curLen + k)]]]
+    IN log[i][j] \o newEntries
 
 \* Message bag helpers.
 WithMessage(m, msgs) ==
@@ -149,8 +165,8 @@ InitBaseVars ==
     /\ currentTerm = [i \in Server |-> 1]
     /\ ostate = [i \in Server |-> Leader]    \* In Mencius, all servers are leaders
     /\ votedFor = [i \in Server |-> Nil]
-    /\ log = [i \in Server |-> <<>>]
-    /\ commitIndex = [i \in Server |-> 0]
+    /\ log = [i \in Server |-> [j \in Server |-> <<>>]]
+    /\ commitIndex = [i \in Server |-> [j \in Server |-> 0]]
     /\ votesResponded = [i \in Server |-> {}]
     /\ votesGranted = [i \in Server |-> {}]
     /\ nextIndex = [i \in Server |-> [j \in Server |-> 1]]
@@ -195,16 +211,20 @@ Skip(i) ==
     /\ CoordinatorOf(localIndex[i]) = i
     /\ slotState[i][localIndex[i]] = Empty
     /\ LET sl == localIndex[i]
+           j == CoordinatorOf(sl)
            msgSet == { [mtype |-> SkipMessage,
                         mterm |-> currentTerm[i],
                         msource |-> i,
                         mdest |-> s,
                         mslot |-> sl] : s \in Server \ {i} }
-       IN /\ slotState' = [slotState EXCEPT ![i][sl] = Skipped]
-          /\ slotValue' = [slotValue EXCEPT ![i][sl] = NoOp]
+           newSS == [slotState[i] EXCEPT ![sl] = Skipped]
+           newSV == [slotValue[i] EXCEPT ![sl] = NoOp]
+       IN /\ slotState' = [slotState EXCEPT ![i] = newSS]
+          /\ slotValue' = [slotValue EXCEPT ![i] = newSV]
           /\ localIndex' = [localIndex EXCEPT ![i] = sl + N]
+          /\ log' = [log EXCEPT ![i][j] = ExtendLogForProposer(i, j, newSS, newSV)]
           /\ messages' = AddMessages(msgSet, messages)
-          /\ UNCHANGED <<serverVars, candidateVars, leaderVars, logVars,
+          /\ UNCHANGED <<serverVars, candidateVars, leaderVars, commitIndex,
                          slotBallot, acceptCount>>
 
 HandleSuggest(i, m) ==
@@ -232,20 +252,22 @@ HandleSuggestResponse(i, m) ==
     /\ i = m.mdest
     /\ m.mok
     /\ LET sl == m.mslot
+           j == CoordinatorOf(sl)
        IN /\ sl <= MaxSlot
           /\ slotState[i][sl] = Proposed
           /\ acceptCount' = [acceptCount EXCEPT ![i][sl] = acceptCount[i][sl] + 1]
           /\ IF acceptCount[i][sl] + 1 >= (N \div 2 + 1)
              THEN
                /\ LET newSS == [slotState[i] EXCEPT ![sl] = Learned]
-                      newLog == ExtendLog(i, newSS, slotValue[i])
+                      newLog == ExtendLogForProposer(i, j, newSS, slotValue[i])
                   IN /\ slotState' = [slotState EXCEPT ![i] = newSS]
-                     /\ log' = [log EXCEPT ![i] = newLog]
-                     /\ LET newCI == commitIndex[i] + 1
+                     /\ log' = [log EXCEPT ![i][j] = newLog]
+                     /\ LET newCI == commitIndex[i][j] + 1
+                            ciSlot == SlotFor(j, newCI)
                         IN IF /\ newCI <= Len(newLog)
-                              /\ newCI <= MaxSlot
-                              /\ newSS[newCI] \in {Learned, Skipped}
-                           THEN commitIndex' = [commitIndex EXCEPT ![i] = newCI]
+                              /\ ciSlot <= MaxSlot
+                              /\ newSS[ciSlot] \in {Learned, Skipped}
+                           THEN commitIndex' = [commitIndex EXCEPT ![i][j] = newCI]
                            ELSE UNCHANGED commitIndex
                /\ LET learnMsgs == { [mtype |-> LearnMessage,
                                        mterm |-> currentTerm[i],
@@ -264,13 +286,14 @@ HandleSkip(i, m) ==
     /\ m.mtype = SkipMessage
     /\ i = m.mdest
     /\ LET sl == m.mslot
+           j == CoordinatorOf(sl)
        IN /\ sl <= MaxSlot
           /\ slotState[i][sl] \in {Empty, Proposed}
           /\ LET newSS == [slotState[i] EXCEPT ![sl] = Skipped]
                  newSV == [slotValue[i] EXCEPT ![sl] = NoOp]
              IN /\ slotState' = [slotState EXCEPT ![i] = newSS]
                 /\ slotValue' = [slotValue EXCEPT ![i] = newSV]
-                /\ log' = [log EXCEPT ![i] = ExtendLog(i, newSS, newSV)]
+                /\ log' = [log EXCEPT ![i][j] = ExtendLogForProposer(i, j, newSS, newSV)]
           /\ Discard(m)
           /\ UNCHANGED <<serverVars, candidateVars, leaderVars, commitIndex,
                          slotBallot, localIndex, acceptCount>>
@@ -279,18 +302,20 @@ HandleLearn(i, m) ==
     /\ m.mtype = LearnMessage
     /\ i = m.mdest
     /\ LET sl == m.mslot
+           j == CoordinatorOf(sl)
        IN /\ sl <= MaxSlot
           /\ LET newSS == [slotState[i] EXCEPT ![sl] = Learned]
                  newSV == [slotValue[i] EXCEPT ![sl] = m.mvalue]
-                 newLog == ExtendLog(i, newSS, newSV)
+                 newLog == ExtendLogForProposer(i, j, newSS, newSV)
              IN /\ slotState' = [slotState EXCEPT ![i] = newSS]
                 /\ slotValue' = [slotValue EXCEPT ![i] = newSV]
-                /\ log' = [log EXCEPT ![i] = newLog]
-                /\ LET newCI == commitIndex[i] + 1
+                /\ log' = [log EXCEPT ![i][j] = newLog]
+                /\ LET newCI == commitIndex[i][j] + 1
+                       ciSlot == SlotFor(j, newCI)
                    IN IF /\ newCI <= Len(newLog)
-                         /\ newCI <= MaxSlot
-                         /\ newSS[newCI] \in {Learned, Skipped}
-                      THEN commitIndex' = [commitIndex EXCEPT ![i] = newCI]
+                         /\ ciSlot <= MaxSlot
+                         /\ newSS[ciSlot] \in {Learned, Skipped}
+                      THEN commitIndex' = [commitIndex EXCEPT ![i][j] = newCI]
                       ELSE UNCHANGED commitIndex
           /\ Discard(m)
           /\ UNCHANGED <<serverVars, candidateVars, leaderVars,
@@ -338,6 +363,7 @@ HandleRevokeResponse(i, m) ==
     /\ i = m.mdest
     /\ m.mok
     /\ LET sl == m.mslot
+           j == CoordinatorOf(sl)
        IN /\ sl <= MaxSlot
           /\ slotState[i][sl] = Proposed
           /\ acceptCount' = [acceptCount EXCEPT ![i][sl] = acceptCount[i][sl] + 1]
@@ -345,7 +371,8 @@ HandleRevokeResponse(i, m) ==
              THEN
                /\ LET newSS == [slotState[i] EXCEPT ![sl] = Skipped]
                   IN /\ slotState' = [slotState EXCEPT ![i] = newSS]
-                     /\ log' = [log EXCEPT ![i] = ExtendLog(i, newSS, slotValue[i])]
+                     /\ log' = [log EXCEPT ![i][j] =
+                                    ExtendLogForProposer(i, j, newSS, slotValue[i])]
                /\ LET learnMsgs == { [mtype |-> SkipMessage,
                                        mterm |-> currentTerm[i],
                                        msource |-> i,
@@ -358,13 +385,15 @@ HandleRevokeResponse(i, m) ==
           /\ UNCHANGED <<serverVars, candidateVars, leaderVars, commitIndex,
                          slotValue, slotBallot, localIndex>>
 
-\* Mencius AdvanceCommitIndex.
+\* Mencius AdvanceCommitIndex: advance any proposer's commit index by 1.
 AdvanceCommitIndex(i) ==
-    /\ LET newCI == commitIndex[i] + 1
-       IN /\ newCI <= Len(log[i])
-          /\ newCI <= MaxSlot
-          /\ slotState[i][newCI] \in {Learned, Skipped}
-          /\ commitIndex' = [commitIndex EXCEPT ![i] = newCI]
+    \E j \in Server :
+        LET newCI == commitIndex[i][j] + 1
+            sl == SlotFor(j, newCI)
+        IN /\ newCI <= Len(log[i][j])
+           /\ sl <= MaxSlot
+           /\ slotState[i][sl] \in {Learned, Skipped}
+           /\ commitIndex' = [commitIndex EXCEPT ![i][j] = newCI]
     /\ UNCHANGED <<messages, serverVars, candidateVars, leaderVars, log, menciusVars>>
 
 \* Mencius ClientRequest: suggest via Mencius protocol.
@@ -379,7 +408,7 @@ Restart(i) ==
     /\ votesGranted' = [votesGranted EXCEPT ![i] = {}]
     /\ nextIndex' = [nextIndex EXCEPT ![i] = [j \in Server |-> 1]]
     /\ matchIndex' = [matchIndex EXCEPT ![i] = [j \in Server |-> 0]]
-    /\ commitIndex' = [commitIndex EXCEPT ![i] = 0]
+    /\ commitIndex' = [commitIndex EXCEPT ![i] = [j \in Server |-> 0]]
     /\ UNCHANGED <<messages, currentTerm, votedFor, log, menciusVars>>
 
 \* BecomeToBeLeader (Jetpack recovery before becoming Leader).
@@ -390,7 +419,7 @@ BecomeToBeLeader(i) ==
     /\ votesGranted[i] \in Quorum
     /\ ostate' = [ostate EXCEPT ![i] = ToBeLeader]
     /\ nextIndex' = [nextIndex EXCEPT ![i] =
-                        [j \in Server |-> Len(log[i]) + 1]]
+                        [j \in Server |-> 1]]
     /\ matchIndex' = [matchIndex EXCEPT ![i] =
                         [j \in Server |-> 0]]
     /\ UNCHANGED <<messages, currentTerm, votedFor, candidateVars, logVars, menciusVars>>

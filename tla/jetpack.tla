@@ -23,39 +23,48 @@
 \* Protocol-specific actions NOT defined here (wrapper provides them):
 \*   - BecomeToBeLeader(i): intercepts base protocol leader promotion
 \*   - ApplyCommitted(i): applies next committed log entry to execution_cmds
+\*     (execution order across proposers is protocol-specific)
 \*
-\* ---- N-Sequence Log Abstraction Design ----
+\* ---- True 3-D Log Architecture ----
 \*
-\* Goal: compose jetpack.tla with any base protocol without writing a new
-\* monolithic wrapper for each combination. The base protocols differ in
-\* leadership model:
-\*   - Raft: 1 sequence (single leader per term)
-\*   - CoPilot: 2 sequences (pilot + copilot)
-\*   - Mencius: N sequences (round-robin, one per server)
+\* The base protocol maintains a genuine 3-D log as TLA+ state:
+\*
+\*   log[i][j][k]
+\*     i: where the copy is stored (server)
+\*     j: which logical proposer/sequence (element of Proposer)
+\*     k: position within that sequence
+\*
+\*   commitIndex[i][j]
+\*     Per-proposer commit progress on server i for proposer j's sequence.
+\*
+\* Jetpack reads and writes this 3-D log directly. There are no projection
+\* or refinement operators. The base protocol owns and maintains the 3-D
+\* structure; Jetpack consumes it.
+\*
+\* Protocol-specific log shapes:
+\*   - Raft: Proposer = {"sole"}, one active sequence
+\*   - CoPilot: Proposer = Server, two active sequences (pilot + copilot)
+\*   - Mencius: Proposer = Server, N sequences (round-robin)
 \*
 \* Abstract interface each base protocol wrapper must provide:
 \*
 \*   Variables (mapped via INSTANCE):
-\*     log[i]          - per-server replicated log (sequence of [term, value])
-\*     commitIndex[i]  - per-server commit progress
+\*     log[i][j]       - per-server, per-proposer replicated log
+\*     commitIndex[i][j] - per-server, per-proposer commit progress
 \*     ostate[i]       - per-server role (must include Follower, Leader)
 \*     currentTerm[i]  - per-server epoch/term
-\*     messages         - shared message bag
+\*     messages        - shared message bag
 \*
-\*   The six coupling seams between jetpack.tla and the base protocol:
-\*     1. Log entry format: [term |-> currentTerm[i], value |-> cmd]
-\*     2. Leader election interception: BecomeToBeLeader (wrapper-defined)
-\*     3. ostate state machine: {Follower, Candidate, ToBeLeader, Leader}
-\*     4. Log append on preaccept (leader-only)
-\*     5. CommittedCmds/ChosenExecutedInView (reads commitIndex + log)
-\*     6. ApplyCommitted (wrapper-defined, reads leader's log sequentially)
+\*   Constants:
+\*     Proposer        - set of proposer IDs
+\*     ProposerOf(_)   - maps server to its active proposer ID when leading
 
 EXTENDS Naturals, FiniteSets, Sequences, TLC
 
 \* ---- Constants shared with base protocol (supplied at instantiation) ----
 CONSTANTS Server, Client, CmdId, Key, NoOpCmd,
-          Proposer,              \* Set of proposer IDs (protocol-specific)
-          ProposerOfEntry(_, _)  \* (k, entry) -> proposer ID for log position k
+          Proposer,          \* Set of proposer IDs (protocol-specific)
+          ProposerOf(_)      \* Server -> Proposer (which proposer a server uses)
 
 Nil == "Nil"
 NilCmd == [tag |-> "NilCmd"]
@@ -129,6 +138,8 @@ VARIABLES
     messages,
 
     \* Base protocol variables (Jetpack reads/writes these).
+    \* log[i][j] = sequence of entries for proposer j on server i
+    \* commitIndex[i][j] = commit progress for proposer j on server i
     currentTerm,
     ostate,
     log,
@@ -251,8 +262,10 @@ ConflictOrderPreserved(s1, s2) ==
          /\ IndexOf(s2, s1[k2]) > 0)
         => IndexOf(s2, s1[k1]) < IndexOf(s2, s1[k2])
 
+\* Collect all command IDs across all proposer sequences on all servers.
 LogCmdIds ==
-    UNION { {log[i][k].value.cmd_id : k \in 1..Len(log[i])} : i \in Server }
+    UNION { {log[i][j][k].value.cmd_id : k \in 1..Len(log[i][j])}
+            : i \in Server, j \in Proposer }
 
 ExecCmdIds ==
     {cmd.cmd_id : cmd \in SeqToSet(execution_cmds)}
@@ -274,14 +287,19 @@ RecoveryCommands(i, qs) ==
         Cardinality({s \in qs : cmd \in JPoolCommands(br_responses[i][s])}) * 2
             > Cardinality(qs)}
 
-CommittedCmds(i) ==
-    IF commitIndex[i] = 0 THEN <<>>
-    ELSE [k \in 1..commitIndex[i] |-> log[i][k].value]
+\* Committed commands for proposer j on server i.
+CommittedCmds(i, j) ==
+    IF commitIndex[i][j] = 0 THEN <<>>
+    ELSE [k \in 1..commitIndex[i][j] |-> log[i][j][k].value]
+
+\* All committed commands across all proposers on server i.
+AllCommittedCmds(i) ==
+    UNION { SeqToSet(CommittedCmds(i, j)) : j \in Proposer }
 
 ChosenExecutedInView(i) ==
     \A cmd \in chosen_value[i] :
         \A s \in new_view[i].replica_ids :
-            cmd \in SeqToSet(CommittedCmds(s))
+            cmd \in AllCommittedCmds(s)
 
 (***************************************************************************)
 (* Jetpack initialization                                                  *)
@@ -336,6 +354,7 @@ ClientSendPreaccept(c) ==
              /\ UNCHANGED <<baseVars, jetpackVars, client_view, executionVars>>
 
 \* Server handles Preaccept from client.
+\* When the leader accepts, it appends to its own proposer's sequence in the 3-D log.
 HandlePreacceptRequest(i, m) ==
     /\ m.mtype = PreacceptRequest
     /\ i = m.mdest
@@ -351,13 +370,14 @@ HandlePreacceptRequest(i, m) ==
                      mcmd    |-> cmd,
                      msource |-> i,
                      mdest   |-> m.msource]
-           newLog == Append(log[i], [term |-> currentTerm[i], value |-> cmd])
+           j == ProposerOf(i)
+           newLog == Append(log[i][j], [term |-> currentTerm[i], value |-> cmd])
        IN /\ jpool' = IF accept THEN
                           [jpool EXCEPT ![i].pool[cmd.key] = cmd]
                       ELSE
                           jpool
           /\ log' = IF epochOk /\ readyOk /\ ostate[i] = Leader
-                    THEN [log EXCEPT ![i] = newLog]
+                    THEN [log EXCEPT ![i][j] = newLog]
                     ELSE log
           /\ Reply(reply, m)
           /\ UNCHANGED <<currentTerm, ostate, commitIndex,
@@ -720,17 +740,6 @@ HandleFinishRecovery(i, m) ==
                    br_responses, prep_responses,
                    accept_responses, clientVars, executionVars>>
 
-\* Leader executes the next committed log entry.
-ApplyCommitted(i) ==
-    /\ ostate[i] = Leader
-    /\ commitIndex[i] > Len(original_execution_cmds)
-    /\ LET nextExecIndex == Len(original_execution_cmds) + 1
-           nextCmd == log[i][nextExecIndex].value
-       IN /\ original_execution_cmds' =
-              Append(original_execution_cmds, nextCmd)
-          /\ execution_cmds' = Append(execution_cmds, nextCmd)
-    /\ UNCHANGED <<messages, baseVars, jetpackVars, clientVars>>
-
 (***************************************************************************)
 (* Jetpack-only Next (to be composed with base protocol Next)              *)
 (***************************************************************************)
@@ -748,101 +757,37 @@ JetpackNext ==
     \/ \E i \in Server : FinishRecovery(i)
 
 (***************************************************************************)
-(* 3-D Log Projection                                                      *)
-(*                                                                         *)
-(* The base protocol maintains a flat log[i][k] (one sequence per server). *)
-(* The 3-D abstraction is Log3D[i][j][k] where:                           *)
-(*   i = where the copy is stored,                                         *)
-(*   j = which logical proposer/sequence the entry belongs to,             *)
-(*   k = position within proposer j's own sequence (local index).          *)
-(*                                                                         *)
-(* The projection reconstructs Log3D from the flat log:                    *)
-(*   - ProposerOfEntry(k, entry) maps each global position to a proposer  *)
-(*   - For Raft: all entries belong to "sole" (single leader)              *)
-(*   - For CoPilot: entry.proposer identifies pilot vs copilot             *)
-(*   - For Mencius: CoordinatorOf(k) assigns by round-robin position       *)
-(*                                                                         *)
-(* The local index k in Log3D is the ordinal position within proposer j's  *)
-(* subsequence, NOT the global slot index.                                 *)
-(***************************************************************************)
-
-\* Proposer of the log entry at global position k on server i.
-EntryProposer(i, k) == ProposerOfEntry(k, log[i][k])
-
-\* Sorted sequence of committed global positions belonging to proposer j on server i.
-ProposerSlots(i, j) ==
-    LET ci == commitIndex[i]
-        allSlots == [k \in 1..ci |-> k]
-    IN SelectSeq(allSlots, LAMBDA k : EntryProposer(i, k) = j)
-
-\* 3-D log projection: the local-k-th committed entry in proposer j's
-\* subsequence on server i. Returns Nil if out of range.
-Log3D(i, j, k) ==
-    LET slots == ProposerSlots(i, j)
-    IN IF k >= 1 /\ k <= Len(slots)
-       THEN log[i][slots[k]]
-       ELSE Nil
-
-\* Number of committed entries in proposer j's subsequence on server i.
-Log3DLen(i, j) == Len(ProposerSlots(i, j))
-
-\* Command sequence for proposer j's committed entries on server i (NoOps filtered).
-ProposerCmdSeq(i, j) ==
-    LET slots == ProposerSlots(i, j)
-    IN FilterNoOps([k \in 1..Len(slots) |-> log[i][slots[k]].value])
-
-(***************************************************************************)
 (* Properties                                                              *)
+(* These quantify directly over the genuine 3-D log maintained by the      *)
+(* base protocol. No projection operators are used.                        *)
 (***************************************************************************)
 
-\* Committed log entries agree across servers.
-\* Only committed entries (up to commitIndex) must match. Uncommitted entries may
-\* legitimately diverge (e.g. Mencius servers independently propose to different slots).
-\* Compares .term and .value fields only — extra metadata fields (e.g. .proposer for
-\* CoPilot) may differ between base-protocol-appended and Jetpack-appended entries.
+\* Per-proposer committed log entries agree across servers.
+\* For each proposer j, the committed prefix on server i must match server i2.
 CommittedLogAgreement ==
-    \A i, j \in Server :
-        LET ci == commitIndex[i]
-            cj == commitIndex[j]
-            limit == Min({ci, cj} \cup {0})
-        IN \A k \in 1..limit :
-            /\ log[i][k].term = log[j][k].term
-            /\ log[i][k].value = log[j][k].value
-
-\* Per-proposer committed log agreement using the 3-D projection.
-\*
-\* For each proposer j, the local-indexed subsequence must agree across replicas:
-\*   if Log3D(i, j, k) and Log3D(i', j, k) are both non-nil, they must match.
-\*
-\* This matches the big-picture doc's "replicated-log agreement":
-\*   if Log[i][j][k] and Log[j'][j][k] are both non-nil, then they must match.
-\*
-\* Strictly weaker than CommittedLogAgreement (which compares all committed
-\* positions regardless of proposer).
-MultiSequenceLogAgreement ==
-    \A p \in Proposer :
-        \A i, j \in Server :
-            LET lenI == Log3DLen(i, p)
-                lenJ == Log3DLen(j, p)
-                limit == Min({lenI, lenJ} \cup {0})
+    \A i, i2 \in Server :
+        \A p \in Proposer :
+            LET ci == commitIndex[i][p]
+                ci2 == commitIndex[i2][p]
+                limit == Min({ci, ci2} \cup {0})
             IN \A k \in 1..limit :
-                /\ Log3D(i, p, k).term = Log3D(j, p, k).term
-                /\ Log3D(i, p, k).value = Log3D(j, p, k).value
+                /\ log[i][p][k].term = log[i2][p][k].term
+                /\ log[i][p][k].value = log[i2][p][k].value
+
+\* Per-proposer committed log agreement (same as CommittedLogAgreement
+\* when commitIndex is per-proposer). Kept for backward compatibility
+\* with the big-picture doc's naming.
+MultiSequenceLogAgreement == CommittedLogAgreement
 
 \* Per-sequence committed log order matches execution order for conflicting commands.
-\*
-\* For each server i and each proposer j, the committed entries in proposer j's
-\* subsequence must preserve conflict order in the execution trace:
-\*   for Log3D(i, j, k1) and Log3D(i, j, k2) with k1 < k2, if both commands
-\*   exist and conflict, their first appearances in the deduplicated execution
-\*   must preserve that order.
-\*
-\* This is stated per-sequence (matching the big-picture doc), not over the
-\* flat global log.
+\* For each server i and each proposer p, the committed entries in proposer p's
+\* sequence must preserve conflict order in the execution trace.
 LogOrderMatchesExecution ==
     \A i \in Server :
         \A p \in Proposer :
-            ConflictOrderPreserved(ProposerCmdSeq(i, p), FilterNoOps(execution_cmds))
+            LET ci == commitIndex[i][p]
+                cmdSeq == FilterNoOps([k \in 1..ci |-> log[i][p][k].value])
+            IN ConflictOrderPreserved(cmdSeq, FilterNoOps(execution_cmds))
 
 \* Conflict order between deduplicated original and replicated execution traces.
 \* NoOp entries are filtered out as they are protocol-internal bookkeeping.

@@ -11,6 +11,11 @@
 \*   - Propose uses v \in Commands (wrapper adds Jetpack's AvailableCommands filter)
 \*   - No execution_cmds or ApplyCommitted (delegated to wrapper/Jetpack)
 \*
+\* 3-D Log: log[i][j][k], commitIndex[i][j]
+\* CoPilot uses per-server proposer IDs (Proposer = Server). Two sequences
+\* are active at any time (pilot + copilot). cpLog remains interleaved for
+\* dependency tracking; log[i][j] stores per-proposer sequences.
+\*
 \* Variables declared here (the "base protocol interface"):
 \*   messages, currentTerm, ostate, votedFor, log, commitIndex,
 \*   votesResponded, votesGranted, nextIndex, matchIndex,
@@ -134,8 +139,8 @@ InitBaseVars ==
     /\ currentTerm = [i \in Server |-> 1]
     /\ ostate = [i \in Server |-> Follower]
     /\ votedFor = [i \in Server |-> Nil]
-    /\ log = [i \in Server |-> <<>>]
-    /\ commitIndex = [i \in Server |-> 0]
+    /\ log = [i \in Server |-> [j \in Server |-> <<>>]]
+    /\ commitIndex = [i \in Server |-> [j \in Server |-> 0]]
     /\ votesResponded = [i \in Server |-> {}]
     /\ votesGranted = [i \in Server |-> {}]
     /\ nextIndex = [i \in Server |-> [j \in Server |-> 1]]
@@ -160,6 +165,7 @@ Propose(i, v) ==
            newEntry == [cmd |-> v, deps |-> deps,
                         status |-> PreAccepted, ballot |-> cpBallot[i]]
            newLogEntry == [term |-> currentTerm[i], value |-> v, proposer |-> i]
+           seqnum == Len(log[i][i]) + 1
            msgSet == { [mtype |-> CoPilotPreAcceptRequest,
                         mterm |-> currentTerm[i],
                         msource |-> i,
@@ -167,9 +173,10 @@ Propose(i, v) ==
                         mcmd |-> v,
                         mdeps |-> deps,
                         mballot |-> cpBallot[i],
-                        mindex |-> Len(cpLog[i]) + 1] : s \in Server \ {i} }
+                        mindex |-> Len(cpLog[i]) + 1,
+                        mseqnum |-> seqnum] : s \in Server \ {i} }
        IN /\ cpLog' = [cpLog EXCEPT ![i] = Append(cpLog[i], newEntry)]
-          /\ log' = [log EXCEPT ![i] = Append(log[i], newLogEntry)]
+          /\ log' = [log EXCEPT ![i][i] = Append(log[i][i], newLogEntry)]
           /\ messages' = AddMessages(msgSet, messages)
           /\ UNCHANGED <<serverVars, candidateVars, leaderVars, commitIndex,
                          role, cpBallot>>
@@ -188,10 +195,10 @@ HandleCoPilotPreAccept(i, m) ==
                           IF Len(cpLog[i]) < m.mindex
                           THEN Append(cpLog[i], newEntry)
                           ELSE [cpLog[i] EXCEPT ![m.mindex] = newEntry]]
-          /\ log' = [log EXCEPT ![i] =
-                        IF Len(log[i]) < m.mindex
-                        THEN Append(log[i], newLogEntry)
-                        ELSE log[i]]
+          /\ log' = [log EXCEPT ![i][m.msource] =
+                        IF Len(log[i][m.msource]) < m.mseqnum
+                        THEN Append(log[i][m.msource], newLogEntry)
+                        ELSE log[i][m.msource]]
           /\ cpBallot' = [cpBallot EXCEPT ![i] = m.mballot]
           /\ Reply([mtype |-> CoPilotPreAcceptResponse,
                     mterm |-> currentTerm[i],
@@ -199,6 +206,7 @@ HandleCoPilotPreAccept(i, m) ==
                     mdest |-> m.msource,
                     mdeps |-> unionDeps,
                     mindex |-> m.mindex,
+                    mseqnum |-> m.mseqnum,
                     mok |-> TRUE],
                     m)
           /\ UNCHANGED <<serverVars, candidateVars, leaderVars, commitIndex, role>>
@@ -213,15 +221,16 @@ HandleCoPilotPreAcceptResponse(i, m) ==
            finalDeps == entry.deps \cup m.mdeps
            newEntry == [entry EXCEPT !.deps = finalDeps, !.status = Committed]
        IN /\ cpLog' = [cpLog EXCEPT ![i][m.mindex] = newEntry]
-          /\ commitIndex' = [commitIndex EXCEPT ![i] =
-                               Max({commitIndex[i], m.mindex})]
+          /\ commitIndex' = [commitIndex EXCEPT ![i][i] =
+                               Max({commitIndex[i][i], m.mseqnum})]
           /\ LET commitMsgs == { [mtype |-> CoPilotCommitRequest,
                                   mterm |-> currentTerm[i],
                                   msource |-> i,
                                   mdest |-> s,
                                   mcmd |-> entry.cmd,
                                   mdeps |-> finalDeps,
-                                  mindex |-> m.mindex] : s \in Server \ {i} }
+                                  mindex |-> m.mindex,
+                                  mseqnum |-> m.mseqnum] : s \in Server \ {i} }
              IN messages' = AddMessages(commitMsgs, WithoutMessage(m, messages))
           /\ UNCHANGED <<serverVars, candidateVars, leaderVars, log,
                          role, cpBallot>>
@@ -237,12 +246,12 @@ HandleCoPilotCommit(i, m) ==
                           IF Len(cpLog[i]) < m.mindex
                           THEN Append(cpLog[i], newEntry)
                           ELSE [cpLog[i] EXCEPT ![m.mindex] = newEntry]]
-          /\ log' = [log EXCEPT ![i] =
-                        IF Len(log[i]) < m.mindex
-                        THEN Append(log[i], newLogEntry)
-                        ELSE log[i]]
-          /\ commitIndex' = [commitIndex EXCEPT ![i] =
-                               Max({commitIndex[i], m.mindex})]
+          /\ log' = [log EXCEPT ![i][m.msource] =
+                        IF Len(log[i][m.msource]) < m.mseqnum
+                        THEN Append(log[i][m.msource], newLogEntry)
+                        ELSE log[i][m.msource]]
+          /\ commitIndex' = [commitIndex EXCEPT ![i][m.msource] =
+                               Max({commitIndex[i][m.msource], m.mseqnum})]
           /\ Discard(m)
           /\ UNCHANGED <<serverVars, candidateVars, leaderVars,
                          role, cpBallot>>
@@ -264,7 +273,7 @@ Restart(i) ==
     /\ votesGranted' = [votesGranted EXCEPT ![i] = {}]
     /\ nextIndex' = [nextIndex EXCEPT ![i] = [j \in Server |-> 1]]
     /\ matchIndex' = [matchIndex EXCEPT ![i] = [j \in Server |-> 0]]
-    /\ commitIndex' = [commitIndex EXCEPT ![i] = 0]
+    /\ commitIndex' = [commitIndex EXCEPT ![i] = [j \in Server |-> 0]]
     /\ UNCHANGED <<messages, currentTerm, votedFor, log, cpLog, cpBallot>>
 
 \* Election timeout.
@@ -286,7 +295,7 @@ BecomeToBeLeader(i) ==
                                   ELSE IF role[j] = Pilot THEN Copilot
                                   ELSE role[j]]
     /\ nextIndex' = [nextIndex EXCEPT ![i] =
-                        [j \in Server |-> Len(log[i]) + 1]]
+                        [j \in Server |-> 1]]
     /\ matchIndex' = [matchIndex EXCEPT ![i] =
                         [j \in Server |-> 0]]
     /\ UNCHANGED <<messages, currentTerm, votedFor, candidateVars, logVars,

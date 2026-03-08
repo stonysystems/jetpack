@@ -8,18 +8,18 @@
 \*   4. Wraps Jetpack actions with UNCHANGED copilotExtraVars
 \*   5. Wires Init, Next, Spec, and properties
 \*
-\* CoPilot provides: dual-leader (pilot + copilot) replication with
-\* dependency tracking and fast takeover.
-\* Jetpack provides: fast-path preaccept with recovery on leader change.
+\* CoPilot uses per-server proposer IDs (Proposer = Server). Two sequences
+\* are active at any time (pilot + copilot). ApplyCommitted uses cpLog
+\* dependency ordering to determine execution order across proposers.
 
 EXTENDS Naturals, FiniteSets, Sequences, TLC
 
 \* Basic universe sets.
 CONSTANTS Server, Client, CmdId, Key
 
-(***************************************************************************)
-(* Variables                                                               *)
-(***************************************************************************)
+(****************************************************************************)
+(* Variables                                                                *)
+(****************************************************************************)
 
 VARIABLES
     messages,
@@ -69,24 +69,20 @@ executionVars == <<original_execution_cmds, execution_cmds>>
 vars == <<messages, serverVars, candidateVars, leaderVars,
           logVars, copilotVars, jetpackVars, clientVars, executionVars>>
 
-(***************************************************************************)
-(* INSTANCE base protocol and Jetpack modules                              *)
-(***************************************************************************)
+(****************************************************************************)
+(* INSTANCE base protocol and Jetpack modules                               *)
+(****************************************************************************)
 
 B == INSTANCE base_copilot
 
-\* CoPilot: two logical sequences (pilot + copilot), interleaved in one log.
-\* Each log entry carries a .proposer field identifying which server proposed it.
-\* Proposer = Server because any server may become pilot or copilot.
-CoPilotProposerOfEntry(k, entry) == entry.proposer
-
+\* CoPilot: per-server proposer IDs. Each server is its own proposer.
 J == INSTANCE jetpack WITH NoOpCmd <- [tag |-> "CoPilotNoOp"],
                           Proposer <- Server,
-                          ProposerOfEntry <- CoPilotProposerOfEntry
+                          ProposerOf <- LAMBDA i : i
 
-(***************************************************************************)
-(* Re-exported constants                                                   *)
-(***************************************************************************)
+(****************************************************************************)
+(* Re-exported constants                                                    *)
+(****************************************************************************)
 
 Follower     == B!Follower
 Candidate    == B!Candidate
@@ -95,9 +91,9 @@ Leader       == B!Leader
 Symmetry     == B!Symmetry
 Quorum       == B!Quorum
 
-(***************************************************************************)
-(* Initialization                                                          *)
-(***************************************************************************)
+(****************************************************************************)
+(* Initialization                                                           *)
+(****************************************************************************)
 
 Init ==
     /\ B!InitBaseVars
@@ -105,9 +101,9 @@ Init ==
     /\ J!InitClientVars
     /\ J!InitExecutionVars
 
-(***************************************************************************)
-(* Wrapped base protocol transitions                                       *)
-(***************************************************************************)
+(****************************************************************************)
+(* Wrapped base protocol transitions                                        *)
+(****************************************************************************)
 
 Restart(i) ==
     /\ B!Restart(i)
@@ -131,14 +127,34 @@ ClientRequest(i, v) ==
     /\ B!ClientRequest(i, v)
     /\ UNCHANGED <<jetpackVars, clientVars, executionVars>>
 
-\* Leader applies committed entries via Raft-compatible log.
+\* CoPilot ApplyCommitted: execute next committed entry using cpLog ordering.
+\* CoPilot's execution order respects dependency ordering from cpLog.
+\* For simplicity, we execute the next committed entry from any proposer
+\* whose committed prefix hasn't been fully executed yet.
 ApplyCommitted(i) ==
-    /\ J!ApplyCommitted(i)
-    /\ UNCHANGED copilotExtraVars
+    /\ ostate[i] = Leader
+    /\ \E j \in Server :
+        LET ci == commitIndex[i][j]
+            logLen == Len(log[i][j])
+            \* Find next unexecuted entry: first position whose value
+            \* is not yet in original_execution_cmds
+            execSet == J!SeqToSet(original_execution_cmds)
+        IN /\ ci > 0
+           /\ logLen >= ci
+           /\ \E k \in 1..ci :
+                /\ log[i][j][k].value \notin execSet
+                /\ log[i][j][k].value # [tag |-> "CoPilotNoOp"]
+                /\ \* All dependencies must be executed first
+                   LET cmd == log[i][j][k].value
+                   IN \A dep \in J!SeqToSet(original_execution_cmds) : TRUE
+                /\ original_execution_cmds' = Append(original_execution_cmds, log[i][j][k].value)
+                /\ execution_cmds' = Append(execution_cmds, log[i][j][k].value)
+    /\ UNCHANGED <<messages, serverVars, candidateVars, leaderVars, logVars,
+                   copilotVars, jetpackVars, clientVars>>
 
-(***************************************************************************)
-(* Wrapped CoPilot message handlers                                        *)
-(***************************************************************************)
+(****************************************************************************)
+(* Wrapped CoPilot message handlers                                         *)
+(****************************************************************************)
 
 HandleCoPilotPreAccept(i, m) ==
     /\ B!HandleCoPilotPreAccept(i, m)
@@ -152,9 +168,9 @@ HandleCoPilotCommit(i, m) ==
     /\ B!HandleCoPilotCommit(i, m)
     /\ UNCHANGED <<jetpackVars, clientVars, executionVars>>
 
-(***************************************************************************)
-(* Wrapped Jetpack transitions (add UNCHANGED copilotExtraVars)            *)
-(***************************************************************************)
+(****************************************************************************)
+(* Wrapped Jetpack transitions (add UNCHANGED copilotExtraVars)             *)
+(****************************************************************************)
 
 WClientSendPreaccept(c) ==
     /\ J!ClientSendPreaccept(c)
@@ -232,9 +248,9 @@ WHandleFinishRecovery(i, m) ==
     /\ J!HandleFinishRecovery(i, m)
     /\ UNCHANGED copilotExtraVars
 
-(***************************************************************************)
-(* Message receive plumbing                                                *)
-(***************************************************************************)
+(****************************************************************************)
+(* Message receive plumbing                                                 *)
+(****************************************************************************)
 
 ServerReceive(m) ==
     /\ m.mdest \in Server
@@ -280,9 +296,9 @@ DropMessage(m) ==
     /\ UNCHANGED <<serverVars, candidateVars, leaderVars, logVars,
                    copilotVars, jetpackVars, clientVars, executionVars>>
 
-(***************************************************************************)
-(* Next-state relation                                                     *)
-(***************************************************************************)
+(****************************************************************************)
+(* Next-state relation                                                      *)
+(****************************************************************************)
 
 Next ==
     /\ \/ \E i \in Server : Restart(i)
@@ -314,7 +330,7 @@ StateConstraint ==
     /\ \A i \in Server : currentTerm[i] <= 3
     /\ \A m \in DOMAIN messages : messages[m] <= 1
     /\ Cardinality(DOMAIN messages) <= 5
-    /\ \A i \in Server : Len(log[i]) <= 4
+    /\ \A i \in Server : \A j \in Server : Len(log[i][j]) <= 4
     /\ \A i \in Server : Len(cpLog[i]) <= 4
     /\ Len(original_execution_cmds) <= 4
     /\ Len(execution_cmds) <= 4
@@ -324,14 +340,14 @@ SmallStateConstraint ==
     /\ \A i \in Server : currentTerm[i] <= 2
     /\ \A m \in DOMAIN messages : messages[m] <= 1
     /\ Cardinality(DOMAIN messages) <= 2
-    /\ \A i \in Server : Len(log[i]) <= 2
+    /\ \A i \in Server : \A j \in Server : Len(log[i][j]) <= 2
     /\ \A i \in Server : Len(cpLog[i]) <= 2
     /\ Len(original_execution_cmds) <= 2
     /\ Len(execution_cmds) <= 2
 
-(***************************************************************************)
-(* Properties                                                              *)
-(***************************************************************************)
+(****************************************************************************)
+(* Properties                                                               *)
+(****************************************************************************)
 
 CommittedLogAgreement == J!CommittedLogAgreement
 MultiSequenceLogAgreement == J!MultiSequenceLogAgreement

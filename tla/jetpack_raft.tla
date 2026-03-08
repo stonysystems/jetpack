@@ -7,15 +7,18 @@
 \*   3. Wraps base protocol actions with UNCHANGED <<jetpackVars, clientVars, executionVars>>
 \*   4. Wraps Jetpack actions with UNCHANGED raftVars
 \*   5. Wires Init, Next, Spec, and properties
+\*
+\* Raft uses a single proposer "sole" — all entries belong to one sequence.
+\* ApplyCommitted simply walks the sole sequence in order.
 
 EXTENDS Naturals, FiniteSets, Sequences, TLC
 
 \* Basic universe sets.
 CONSTANTS Server, Client, CmdId, Key
 
-(***************************************************************************)
-(* Variables                                                               *)
-(***************************************************************************)
+(****************************************************************************)
+(* Variables                                                                *)
+(****************************************************************************)
 
 VARIABLES
     messages,
@@ -58,23 +61,20 @@ executionVars == <<original_execution_cmds, execution_cmds>>
 vars == <<messages, serverVars, candidateVars, leaderVars,
           logVars, jetpackVars, clientVars, executionVars>>
 
-(***************************************************************************)
-(* INSTANCE base protocol and Jetpack modules                              *)
-(***************************************************************************)
+(****************************************************************************)
+(* INSTANCE base protocol and Jetpack modules                               *)
+(****************************************************************************)
 
 B == INSTANCE base_raft
 
-\* Raft: single proposer, all entries belong to one sequence.
-\* The entry argument is ignored — Raft assigns all positions to "sole".
-RaftProposerOfEntry(k, entry) == "sole"
-
+\* Raft: single proposer "sole". ProposerOf maps every server to "sole".
 J == INSTANCE jetpack WITH NoOpCmd <- [tag |-> "RaftNoOp"],
                           Proposer <- {"sole"},
-                          ProposerOfEntry <- RaftProposerOfEntry
+                          ProposerOf <- LAMBDA i : "sole"
 
-(***************************************************************************)
-(* Re-exported constants                                                   *)
-(***************************************************************************)
+(****************************************************************************)
+(* Re-exported constants                                                    *)
+(****************************************************************************)
 
 Follower     == B!Follower
 Candidate    == B!Candidate
@@ -83,9 +83,9 @@ Leader       == B!Leader
 Symmetry     == B!Symmetry
 Quorum       == B!Quorum
 
-(***************************************************************************)
-(* Initialization                                                          *)
-(***************************************************************************)
+(****************************************************************************)
+(* Initialization                                                           *)
+(****************************************************************************)
 
 Init ==
     /\ B!InitBaseVars
@@ -93,9 +93,9 @@ Init ==
     /\ J!InitClientVars
     /\ J!InitExecutionVars
 
-(***************************************************************************)
-(* Wrapped base protocol transitions                                       *)
-(***************************************************************************)
+(****************************************************************************)
+(* Wrapped base protocol transitions                                        *)
+(****************************************************************************)
 
 Restart(i) ==
     /\ B!Restart(i)
@@ -125,22 +125,30 @@ AdvanceCommitIndex(i) ==
     /\ B!AdvanceCommitIndex(i)
     /\ UNCHANGED <<jetpackVars, clientVars, executionVars>>
 
-\* Leader executes the next committed log entry.
+\* Raft ApplyCommitted: execute the next committed entry from the sole sequence.
+\* Raft has only one proposer, so execution order is simply log order.
 ApplyCommitted(i) ==
-    /\ J!ApplyCommitted(i)
-    /\ UNCHANGED raftVars
+    /\ ostate[i] = Leader
+    /\ LET ci == commitIndex[i]["sole"]
+           execIdx == Len(original_execution_cmds) + 1
+       IN /\ execIdx <= ci
+          /\ LET entry == log[i]["sole"][execIdx]
+             IN /\ original_execution_cmds' = Append(original_execution_cmds, entry.value)
+                /\ execution_cmds' = Append(execution_cmds, entry.value)
+    /\ UNCHANGED <<messages, serverVars, candidateVars, leaderVars, logVars,
+                   jetpackVars, clientVars>>
 
-(***************************************************************************)
-(* Wrapped Raft message handlers                                           *)
-(***************************************************************************)
+(****************************************************************************)
+(* Wrapped Raft message handlers                                            *)
+(****************************************************************************)
 
 RaftReceive(m) ==
     /\ B!RaftReceive(m)
     /\ UNCHANGED <<jetpackVars, clientVars, executionVars>>
 
-(***************************************************************************)
-(* Wrapped Jetpack transitions (add UNCHANGED raftVars)                    *)
-(***************************************************************************)
+(****************************************************************************)
+(* Wrapped Jetpack transitions (add UNCHANGED raftVars)                     *)
+(****************************************************************************)
 
 WClientSendPreaccept(c) ==
     /\ J!ClientSendPreaccept(c)
@@ -218,9 +226,9 @@ WHandleFinishRecovery(i, m) ==
     /\ J!HandleFinishRecovery(i, m)
     /\ UNCHANGED raftVars
 
-(***************************************************************************)
-(* Message receive plumbing                                                *)
-(***************************************************************************)
+(****************************************************************************)
+(* Message receive plumbing                                                 *)
+(****************************************************************************)
 
 ServerReceive(m) ==
     /\ m.mdest \in Server
@@ -262,9 +270,9 @@ DropMessage(m) ==
     /\ UNCHANGED <<serverVars, candidateVars, leaderVars, logVars,
                    jetpackVars, clientVars, executionVars>>
 
-(***************************************************************************)
-(* Next-state relation                                                     *)
-(***************************************************************************)
+(****************************************************************************)
+(* Next-state relation                                                      *)
+(****************************************************************************)
 
 Next ==
     /\ \/ \E i \in Server : Restart(i)
@@ -298,7 +306,7 @@ StateConstraint ==
     /\ \A i \in Server : currentTerm[i] <= 3
     /\ \A m \in DOMAIN messages : messages[m] <= 1
     /\ Cardinality(DOMAIN messages) <= 5
-    /\ \A i \in Server : Len(log[i]) <= 4
+    /\ \A i \in Server : Len(log[i]["sole"]) <= 4
     /\ Len(original_execution_cmds) <= 4
     /\ Len(execution_cmds) <= 4
 
@@ -307,13 +315,13 @@ SmallStateConstraint ==
     /\ \A i \in Server : currentTerm[i] <= 2
     /\ \A m \in DOMAIN messages : messages[m] <= 1
     /\ Cardinality(DOMAIN messages) <= 2
-    /\ \A i \in Server : Len(log[i]) <= 2
+    /\ \A i \in Server : Len(log[i]["sole"]) <= 2
     /\ Len(original_execution_cmds) <= 2
     /\ Len(execution_cmds) <= 2
 
-(***************************************************************************)
-(* Properties                                                              *)
-(***************************************************************************)
+(****************************************************************************)
+(* Properties                                                               *)
+(****************************************************************************)
 
 CommittedLogAgreement == J!CommittedLogAgreement
 MultiSequenceLogAgreement == J!MultiSequenceLogAgreement

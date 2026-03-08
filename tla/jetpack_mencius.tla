@@ -10,6 +10,10 @@
 \*
 \* Mencius provides: multi-leader Paxos with round-robin slot assignment.
 \* Jetpack provides: fast-path preaccept with recovery on leader change.
+\*
+\* Mencius uses per-server proposer IDs (Proposer = Server). Each server owns
+\* round-robin slots. ApplyCommitted executes committed entries in slot order
+\* across all proposers (round-robin interleaving).
 
 EXTENDS Naturals, FiniteSets, Sequences, TLC
 
@@ -76,13 +80,10 @@ vars == <<messages, serverVars, candidateVars, leaderVars,
 
 B == INSTANCE base_mencius
 
-\* Mencius: N sequences via round-robin. Slot k's proposer is its coordinator.
-\* The entry argument is ignored — Mencius assigns by position (round-robin).
-MenciusProposerOfEntry(k, entry) == B!CoordinatorOf(k)
-
+\* Mencius: per-server proposer IDs. Each server is its own proposer.
 J == INSTANCE jetpack WITH NoOpCmd <- B!NoOp,
                           Proposer <- Server,
-                          ProposerOfEntry <- MenciusProposerOfEntry
+                          ProposerOf <- LAMBDA i : i
 
 (***************************************************************************)
 (* Re-exported constants                                                   *)
@@ -136,10 +137,31 @@ Revoke(i, sl) ==
     /\ B!Revoke(i, sl)
     /\ UNCHANGED <<jetpackVars, clientVars, executionVars>>
 
-\* Leader applies committed entries.
+\* Mencius ApplyCommitted: execute committed entries in round-robin slot order.
+\* Entries are interleaved across proposers' sequences in slot order.
+\* NoOps (skipped slots) are not appended to execution traces.
 ApplyCommitted(i) ==
-    /\ J!ApplyCommitted(i)
-    /\ UNCHANGED menciusExtraVars
+    /\ ostate[i] = Leader
+    /\ \E j \in Server :
+        LET ci == commitIndex[i][j]
+            execSet == J!SeqToSet(original_execution_cmds)
+        IN /\ ci > 0
+           /\ \E k \in 1..ci :
+                /\ log[i][j][k].value \notin execSet
+                /\ log[i][j][k].value # B!NoOp
+                \* Slot-order constraint: all entries from earlier slots must
+                \* already be executed (or be NoOps) before executing this one.
+                /\ LET mySlot == B!SlotFor(j, k)
+                   IN \A j2 \in Server :
+                       \A k2 \in 1..commitIndex[i][j2] :
+                           LET theirSlot == B!SlotFor(j2, k2)
+                           IN theirSlot < mySlot =>
+                               \/ log[i][j2][k2].value \in execSet
+                               \/ log[i][j2][k2].value = B!NoOp
+                /\ original_execution_cmds' = Append(original_execution_cmds, log[i][j][k].value)
+                /\ execution_cmds' = Append(execution_cmds, log[i][j][k].value)
+    /\ UNCHANGED <<messages, serverVars, candidateVars, leaderVars, logVars,
+                   menciusVars, jetpackVars, clientVars>>
 
 (***************************************************************************)
 (* Wrapped Mencius message handlers                                        *)
@@ -338,7 +360,7 @@ StateConstraint ==
     /\ \A i \in Server : currentTerm[i] <= 3
     /\ \A m \in DOMAIN messages : messages[m] <= 1
     /\ Cardinality(DOMAIN messages) <= 5
-    /\ \A i \in Server : Len(log[i]) <= 3
+    /\ \A i \in Server : \A j \in Server : Len(log[i][j]) <= 3
     /\ Len(original_execution_cmds) <= 3
     /\ Len(execution_cmds) <= 3
 
@@ -347,7 +369,7 @@ SmallStateConstraint ==
     /\ \A i \in Server : currentTerm[i] <= 2
     /\ \A m \in DOMAIN messages : messages[m] <= 1
     /\ Cardinality(DOMAIN messages) <= 2
-    /\ \A i \in Server : Len(log[i]) <= 2
+    /\ \A i \in Server : \A j \in Server : Len(log[i][j]) <= 2
     /\ Len(original_execution_cmds) <= 2
     /\ Len(execution_cmds) <= 2
 

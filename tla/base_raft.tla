@@ -10,6 +10,9 @@
 \*   - HandleAppendEntriesRequest steps down from {Candidate, ToBeLeader}
 \*   - No execution_cmds or ApplyCommitted (delegated to wrapper/Jetpack)
 \*
+\* 3-D Log: log[i]["sole"][k], commitIndex[i]["sole"]
+\* Raft uses a single proposer "sole" — all entries belong to one sequence.
+\*
 \* Variables declared here (the "base protocol interface"):
 \*   messages, currentTerm, ostate, votedFor, log, commitIndex,
 \*   votesResponded, votesGranted, nextIndex, matchIndex
@@ -103,8 +106,8 @@ InitBaseVars ==
     /\ currentTerm = [i \in Server |-> 1]
     /\ ostate = [i \in Server |-> Follower]
     /\ votedFor = [i \in Server |-> Nil]
-    /\ log = [i \in Server |-> <<>>]
-    /\ commitIndex = [i \in Server |-> 0]
+    /\ log = [i \in Server |-> ["sole" |-> <<>>]]
+    /\ commitIndex = [i \in Server |-> ["sole" |-> 0]]
     /\ votesResponded = [i \in Server |-> {}]
     /\ votesGranted = [i \in Server |-> {}]
     /\ nextIndex = [i \in Server |-> [j \in Server |-> 1]]
@@ -120,7 +123,7 @@ Restart(i) ==
     /\ votesGranted' = [votesGranted EXCEPT ![i] = {}]
     /\ nextIndex' = [nextIndex EXCEPT ![i] = [j \in Server |-> 1]]
     /\ matchIndex' = [matchIndex EXCEPT ![i] = [j \in Server |-> 0]]
-    /\ commitIndex' = [commitIndex EXCEPT ![i] = 0]
+    /\ commitIndex' = [commitIndex EXCEPT ![i] = ["sole" |-> 0]]
     /\ UNCHANGED <<messages, currentTerm, votedFor, log>>
 
 Timeout(i) ==
@@ -138,8 +141,8 @@ RequestVote(i, j) ==
     /\ j \notin votesResponded[i]
     /\ Send([mtype         |-> RequestVoteRequest,
              mterm         |-> currentTerm[i],
-             mlastLogTerm  |-> LastTerm(log[i]),
-             mlastLogIndex |-> Len(log[i]),
+             mlastLogTerm  |-> LastTerm(log[i]["sole"]),
+             mlastLogIndex |-> Len(log[i]["sole"]),
              msource       |-> i,
              mdest         |-> j])
     /\ UNCHANGED <<serverVars, candidateVars, leaderVars, logVars>>
@@ -149,18 +152,18 @@ AppendEntries(i, j) ==
     /\ ostate[i] = Leader
     /\ LET prevLogIndex == nextIndex[i][j] - 1
            prevLogTerm == IF prevLogIndex > 0 THEN
-                              log[i][prevLogIndex].term
+                              log[i]["sole"][prevLogIndex].term
                           ELSE
                               0
-           lastEntry == Min({Len(log[i]), nextIndex[i][j]})
-           entries == SubSeq(log[i], nextIndex[i][j], lastEntry)
+           lastEntry == Min({Len(log[i]["sole"]), nextIndex[i][j]})
+           entries == SubSeq(log[i]["sole"], nextIndex[i][j], lastEntry)
        IN Send([mtype          |-> AppendEntriesRequest,
                 mterm          |-> currentTerm[i],
                 mprevLogIndex  |-> prevLogIndex,
                 mprevLogTerm   |-> prevLogTerm,
                 mentries       |-> entries,
-                mlog           |-> log[i],
-                mcommitIndex   |-> Min({commitIndex[i], lastEntry}),
+                mlog           |-> log[i]["sole"],
+                mcommitIndex   |-> Min({commitIndex[i]["sole"], lastEntry}),
                 msource        |-> i,
                 mdest          |-> j])
     /\ UNCHANGED <<serverVars, candidateVars, leaderVars, logVars>>
@@ -172,7 +175,7 @@ BecomeToBeLeader(i) ==
     /\ votesGranted[i] \in Quorum
     /\ ostate' = [ostate EXCEPT ![i] = ToBeLeader]
     /\ nextIndex' = [nextIndex EXCEPT ![i] =
-                        [j \in Server |-> Len(log[i]) + 1]]
+                        [j \in Server |-> Len(log[i]["sole"]) + 1]]
     /\ matchIndex' = [matchIndex EXCEPT ![i] =
                         [j \in Server |-> 0]]
     /\ UNCHANGED <<messages, currentTerm, votedFor, candidateVars, logVars>>
@@ -181,21 +184,21 @@ ClientRequest(i, v) ==
     /\ ostate[i] = Leader
     /\ v \in Commands
     /\ LET entry == [term |-> currentTerm[i], value |-> v]
-       IN log' = [log EXCEPT ![i] = Append(log[i], entry)]
+       IN log' = [log EXCEPT ![i]["sole"] = Append(log[i]["sole"], entry)]
     /\ UNCHANGED <<messages, serverVars, candidateVars, leaderVars, commitIndex>>
 
 AdvanceCommitIndex(i) ==
     /\ ostate[i] = Leader
     /\ LET Agree(index) == {i} \cup {k \in Server : matchIndex[i][k] >= index}
-           agreeIndexes == {index \in 1..Len(log[i]) : Agree(index) \in Quorum}
+           agreeIndexes == {index \in 1..Len(log[i]["sole"]) : Agree(index) \in Quorum}
            newCommitIndex ==
               IF /\ agreeIndexes /= {}
-                 /\ log[i][Max(agreeIndexes)].term = currentTerm[i]
+                 /\ log[i]["sole"][Max(agreeIndexes)].term = currentTerm[i]
               THEN
                   Max(agreeIndexes)
               ELSE
-                  commitIndex[i]
-       IN commitIndex' = [commitIndex EXCEPT ![i] = newCommitIndex]
+                  commitIndex[i]["sole"]
+       IN commitIndex' = [commitIndex EXCEPT ![i]["sole"] = newCommitIndex]
     /\ UNCHANGED <<messages, serverVars, candidateVars, leaderVars, log>>
 
 (***************************************************************************)
@@ -203,9 +206,9 @@ AdvanceCommitIndex(i) ==
 (***************************************************************************)
 
 HandleRequestVoteRequest(i, j, m) ==
-    LET logOk == \/ m.mlastLogTerm > LastTerm(log[i])
-                 \/ /\ m.mlastLogTerm = LastTerm(log[i])
-                    /\ m.mlastLogIndex >= Len(log[i])
+    LET logOk == \/ m.mlastLogTerm > LastTerm(log[i]["sole"])
+                 \/ /\ m.mlastLogTerm = LastTerm(log[i]["sole"])
+                    /\ m.mlastLogIndex >= Len(log[i]["sole"])
         grant == /\ m.mterm = currentTerm[i]
                  /\ logOk
                  /\ votedFor[i] \in {Nil, j}
@@ -215,7 +218,7 @@ HandleRequestVoteRequest(i, j, m) ==
        /\ Reply([mtype        |-> RequestVoteResponse,
                  mterm        |-> currentTerm[i],
                  mvoteGranted |-> grant,
-                 mlog         |-> log[i],
+                 mlog         |-> log[i]["sole"],
                  msource      |-> i,
                  mdest        |-> j],
                  m)
@@ -236,8 +239,8 @@ HandleRequestVoteResponse(i, j, m) ==
 HandleAppendEntriesRequest(i, j, m) ==
     LET logOk == \/ m.mprevLogIndex = 0
                  \/ /\ m.mprevLogIndex > 0
-                    /\ m.mprevLogIndex <= Len(log[i])
-                    /\ m.mprevLogTerm = log[i][m.mprevLogIndex].term
+                    /\ m.mprevLogIndex <= Len(log[i]["sole"])
+                    /\ m.mprevLogTerm = log[i]["sole"][m.mprevLogIndex].term
     IN /\ m.mterm <= currentTerm[i]
        /\ \/ /\ \* reject request
                 \/ m.mterm < currentTerm[i]
@@ -265,9 +268,9 @@ HandleAppendEntriesRequest(i, j, m) ==
                 IN \/ \* already done with request
                        /\ \/ m.mentries = <<>>
                           \/ /\ m.mentries /= <<>>
-                             /\ Len(log[i]) >= index
-                             /\ log[i][index].term = m.mentries[1].term
-                       /\ commitIndex' = [commitIndex EXCEPT ![i] =
+                             /\ Len(log[i]["sole"]) >= index
+                             /\ log[i]["sole"][index].term = m.mentries[1].term
+                       /\ commitIndex' = [commitIndex EXCEPT ![i]["sole"] =
                                               m.mcommitIndex]
                        /\ Reply([mtype       |-> AppendEntriesResponse,
                                  mterm       |-> currentTerm[i],
@@ -280,17 +283,17 @@ HandleAppendEntriesRequest(i, j, m) ==
                        /\ UNCHANGED <<serverVars, log>>
                    \/ \* conflict: remove 1 entry
                        /\ m.mentries /= <<>>
-                       /\ Len(log[i]) >= index
-                       /\ log[i][index].term /= m.mentries[1].term
-                       /\ LET new == [index2 \in 1..(Len(log[i]) - 1) |->
-                                          log[i][index2]]
-                          IN log' = [log EXCEPT ![i] = new]
+                       /\ Len(log[i]["sole"]) >= index
+                       /\ log[i]["sole"][index].term /= m.mentries[1].term
+                       /\ LET new == [index2 \in 1..(Len(log[i]["sole"]) - 1) |->
+                                          log[i]["sole"][index2]]
+                          IN log' = [log EXCEPT ![i]["sole"] = new]
                        /\ UNCHANGED <<serverVars, commitIndex, messages>>
                    \/ \* no conflict: append entry
                        /\ m.mentries /= <<>>
-                       /\ Len(log[i]) = m.mprevLogIndex
-                       /\ log' = [log EXCEPT ![i] =
-                                      Append(log[i], m.mentries[1])]
+                       /\ Len(log[i]["sole"]) = m.mprevLogIndex
+                       /\ log' = [log EXCEPT ![i]["sole"] =
+                                      Append(log[i]["sole"], m.mentries[1])]
                        /\ UNCHANGED <<serverVars, commitIndex, messages>>
        /\ UNCHANGED <<candidateVars, leaderVars>>
 
