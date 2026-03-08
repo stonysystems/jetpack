@@ -1089,7 +1089,7 @@ Rules for Claude on this section:
   - Record which scripts remain first-class entrypoints and which ones become thin compatibility
     wrappers over a newer shared driver.
 
-- [ ] Generalize the experiment matrix so the scripts can drive both legacy and current workflows
+- [x] Generalize the experiment matrix so the scripts can drive both legacy and current workflows
   - The upgraded automation must support **both**:
     - legacy protocol families that the scripts already handled: Raft, CoPilot, Mencius, MongoDB
     - current backend integrations that matter for the accepted local results: MongoDB, etcd,
@@ -1115,6 +1115,22 @@ Rules for Claude on this section:
     - result prefix / naming rule
   - If `setup.json`, `aws_ips.json`, or `zoo_ips.json` need schema changes, keep them additive /
     backward-compatible. Do **not** break the old inventory files just to add new metadata.
+  - **Done (2026-03-08)**: Created `scripts/experiment_defs.sh` — centralized module defining:
+    - Legacy protocol families (`LEGACY_JETPACK_PROTOCOLS`, `LEGACY_ORIGIN_PROTOCOLS`)
+    - Current Docker backends (`CURRENT_BACKENDS`, `CURRENT_DOCKER_IMAGES`, `CURRENT_*_PROTOCOLS`)
+    - Mode definitions (`MODE_ORIGINAL`/`MODE_FASTPATH100`/`MODE_ADAPTIVE`, `mode_flag_for()`,
+      `mode_config_for()`)
+    - Protocol-specific concurrency arrays (`RAFT_CONCS`, `COPILOT_CONCS`, `MENCIUS_CONCS`,
+      `MONGODB_CONCS`, `DOCKER_SWEEP_CONCS`)
+    - Command helpers: `derive_client_config()`, `build_deptran_cmd()`, `build_result_prefix()`
+    - Matrix generators: `generate_legacy_matrix()`, `generate_current_matrix()`
+  - All 4 entry scripts (`08`, `09`, `10`, `11`) now source `experiment_defs.sh`.
+  - `10-run_all.sh` uses centralized arrays and `build_deptran_cmd()`/`build_result_prefix()`.
+  - `09-build_and_test_run_wan.sh` uses `derive_client_config()` for AWS client config derivation.
+  - `11-aws-copilot-property.sh` intentionally retained as CoPilot-specific narrow wrapper.
+  - 39 unit tests in `test_experiment_defs.sh` verify helpers, matrix generation, and array counts.
+  - Dry-run output verified: `10-run_all.sh` generates 576 configs, `09` generates 10 run commands.
+  - No `setup.json`/`aws_ips.json`/`zoo_ips.json` schema changes — fully backward-compatible.
 
 - [ ] Preserve backward compatibility explicitly instead of hoping it survives
   - Old entrypoints should continue to accept their previous CLI, or print a clear migration

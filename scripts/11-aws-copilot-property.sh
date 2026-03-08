@@ -3,6 +3,10 @@
 # Usage: ./run_experiments.sh [full|build] [none|rule100|rule101|all]
 # If first arg is "full" or "build", sets build mode. Second arg selects experiment(s): "none", "rule100", "rule101", or "all" (default all).
 
+# Source centralized experiment definitions
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${SCRIPT_DIR}/experiment_defs.sh"
+
 # Constants for configuration files and parameters
 CONFIG_FILE_1="none_copilot.yml"
 CONFIG_FILE_2="client_open.yml"

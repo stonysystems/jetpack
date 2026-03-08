@@ -1,5 +1,9 @@
 #!/bin/bash
 
+# Source centralized experiment definitions
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${SCRIPT_DIR}/experiment_defs.sh"
+
 # Function to handle zoo directory from setup.json
 handle_zoo_directory() {
     zoo_directory=$(jq -r '.zoo_directory' setup.json)

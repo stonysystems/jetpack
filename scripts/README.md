@@ -17,6 +17,7 @@ This repo is an orchestration layer around the main `JetPack` codebase. It handl
 |---|---|---|
 | **Canonical (current)** | `sweep_benchmark.sh`, `run_full_sweep.sh`, `rerun_failed_points.sh`, `patch_canonical_with_reruns.sh`, `test_sweep_benchmark.sh` | Docker-based local benchmark and sweep pipeline |
 | **Canonical (result processing)** | `build_consolidated_csv.sh`, `tsv_to_md.sh`, `calc_latency.py`, `results_reader.py` | Result parsing, conversion, and analysis |
+| **Shared definitions** | `experiment_defs.sh`, `test_experiment_defs.sh` | Centralized protocol/backend/mode definitions, concurrency arrays, and command-generation helpers sourced by entry scripts |
 | **Legacy (AWS/Zoo)** | `00-ips.sh` through `11-aws-copilot-property.sh`, `93-99` ops helpers | AWS/Zoo cluster setup, remote experiment runs, ops |
 
 ## Repo at a glance

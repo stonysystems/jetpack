@@ -1,6 +1,11 @@
 #!/bin/bash
 
+# Source centralized experiment definitions
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${SCRIPT_DIR}/experiment_defs.sh"
+
 # Constants for configuration files and parameters
+# These override the centralized defaults for this single-experiment runner.
 CONFIG_FILE_1="rule_mongodb.yml"
 CONFIG_FILE_2="client_open.yml"
 CONFIG_FILE_3="mongodb_5r_local.yml"
@@ -100,8 +105,9 @@ else
 fi
 
 # Set server_command based on environment (AWS or Zoo)
+# Uses derive_client_config() from experiment_defs.sh for AWS client config derivation.
 if [ "$experiment_env" == "zoo" ]; then
-    # Zoo-specific command
+    # Zoo-specific command (fixed config files, not matrix-driven)
     server_command="cd $repo_directory && build/deptran_server -f config/$CONFIG_FILE_1 -f config/$CONFIG_FILE_2 -f config/$CONFIG_FILE_3 -f config/$CONFIG_FILE_4 -f config/$CONFIG_FILE_5 -m $CONFIG_MODE -d $CONFIG_DURATION"
     if [ "$FAILOVER_TEST" = true ]; then
         server_command+=" -f config/failover.yml"
@@ -111,13 +117,8 @@ else
     if [ "$FAILOVER_TEST" = true ]; then
         effective_aws_config_file_2="client_open_failure_recovery.yml"
     else
-        # Derive client config from AWS_CONFIG_FILE_1: take text after first "_" and before ".yml"
-        effective_aws_config_file_2="$AWS_CONFIG_FILE_2"
-        base_config_name="${AWS_CONFIG_FILE_1%.yml}"
-        if [[ "$base_config_name" == *_* ]]; then
-            config_suffix="${base_config_name#*_}"
-            effective_aws_config_file_2="client_open_${config_suffix}.yml"
-        fi
+        # Use centralized helper from experiment_defs.sh
+        effective_aws_config_file_2=$(derive_client_config "${AWS_CONFIG_FILE_1%.yml}")
     fi
     server_command="cd $repo_directory && build/deptran_server -f config/$AWS_CONFIG_FILE_1 -f config/$effective_aws_config_file_2 -f config/$AWS_CONFIG_FILE_3 -f config/$AWS_CONFIG_FILE_4 -f config/$AWS_CONFIG_FILE_5"
     if [ "$FAILOVER_TEST" = true ]; then

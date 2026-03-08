@@ -52,194 +52,32 @@ done
 
 MAX_RES_SIZE_BYTES=$((50 * 1024 * 1024))  # res files usually should be ~10MB
 
-# Experiment configs
-declare -a jetpack_protocols=(
-	"rule_fpga_raft"
-	"rule_copilot"
-	"rule_mencius"
-	"rule_mongodb"
-)
-declare -a sites=(
-	"60c1s5r10p"
-)
-declare -a origin_protocols=(
-	"none_raft"
-	"none_copilot"
-	"none_mencius"
-	"none_mongodb"
-)
-declare -a workloads=(
-	"rw_1000000"
-	# "rw_zipf_1"
-	# "rw_zipf_0.9"
-	# "rw_zipf_0.4"
-)
-declare -a ycsbs=(
-    "YCSB_A"
-    # "YCSB_B"
-)
+# Source centralized experiment definitions
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${SCRIPT_DIR}/experiment_defs.sh"
+
+# Experiment configs — use centralized definitions from experiment_defs.sh.
+# Local aliases for backward compatibility with the loop structure below.
+declare -a jetpack_protocols=("${LEGACY_JETPACK_PROTOCOLS[@]}")
+declare -a origin_protocols=("${LEGACY_ORIGIN_PROTOCOLS[@]}")
+declare -a sites=("$SITE_AWS_SWEEP")
+declare -a workloads=("rw_1000000")
+declare -a ycsbs=("YCSB_A")
 declare -a zipf_workloads=(
-    "rw_zipf_1"
-    "rw_zipf_0.95"
-    "rw_zipf_0.9"
-    "rw_zipf_0.85"
-    "rw_zipf_0.8"
-    "rw_zipf_0.75"
-    "rw_zipf_0.7"
-    "rw_zipf_0.65"
-    "rw_zipf_0.6"
-    "rw_zipf_0.55"
-    "rw_zipf_0.5"
-    # "rw_zipf_0.4"
-    # "rw_zipf_0.3"
-    # "rw_zipf_0.2"
-    # "rw_zipf_0.1"
-    # "rw_zipf_0"
+    rw_zipf_1 rw_zipf_0.95 rw_zipf_0.9 rw_zipf_0.85 rw_zipf_0.8
+    rw_zipf_0.75 rw_zipf_0.7 rw_zipf_0.65 rw_zipf_0.6 rw_zipf_0.55
+    rw_zipf_0.5
 )
-declare -a key_range_workloads=(
-    "rw_1"
-    "rw_10"
-    "rw_100"
-    "rw_1000"
-    "rw_10000"
-    "rw_100000"
-    "rw_1000000"
-)
-declare -a raft_concs=(
-    "concurrent_1"
-    "concurrent_10"
-    "concurrent_20"
-    # "concurrent_30"
-    "concurrent_40"
-    # "concurrent_50"
-    # # "concurrent_55"
-    "concurrent_60"
-    # # "concurrent_65"
-    # "concurrent_70"
-    # # "concurrent_75"
-    "concurrent_80"
-    # # "concurrent_85"
-    # "concurrent_90"
-    # # "concurrent_95"
-    "concurrent_100"
-    # "concurrent_110"
-    "concurrent_120"
-    # "concurrent_130"
-    "concurrent_140"
-    "concurrent_150"
-    "concurrent_160"
-    "concurrent_170"
-    "concurrent_180"
-    "concurrent_190"
-    "concurrent_200"
-    # "concurrent_225"
-    "concurrent_250"
-    # "concurrent_275"
-    "concurrent_300"
-    "concurrent_400"
-    "concurrent_500"
-    "concurrent_750"
-    "concurrent_1000"
-)
-declare -a copilot_concs=(
-    "concurrent_1"
-    # "concurrent_5"
-    "concurrent_10"
-    "concurrent_20"
-    "concurrent_30"
-    "concurrent_40"
-    "concurrent_50"
-    # "concurrent_55"
-    "concurrent_60"
-    # "concurrent_65"
-    "concurrent_70"
-    "concurrent_72"
-    "concurrent_75"
-    "concurrent_77"
-    "concurrent_80"
-    "concurrent_82"
-    "concurrent_85"
-    "concurrent_87"
-    "concurrent_90"
-    # "concurrent_95"
-    "concurrent_100"
-    # "concurrent_110"
-    "concurrent_120"
-    # "concurrent_130"
-    "concurrent_140"
-    # "concurrent_150"
-    "concurrent_160"
-    # "concurrent_170"
-    "concurrent_180"
-    # "concurrent_190"
-    "concurrent_200"
-)
-declare -a mencius_concs=(
-    "concurrent_1"
-    # "concurrent_5"
-    "concurrent_10"
-    # "concurrent_11"
-    "concurrent_12"
-    # "concurrent_13"
-    "concurrent_14"
-    # "concurrent_15"
-    "concurrent_16"
-    # "concurrent_17"
-    "concurrent_18"
-    # "concurrent_19"
-    "concurrent_20"
-    "concurrent_25"
-    "concurrent_30"
-    "concurrent_35"
-    "concurrent_40"
-    "concurrent_45"
-    "concurrent_50"
-    "concurrent_55"
-    "concurrent_60"
-)
-declare -a mongodb_concs=(
-    "concurrent_1"
-    # "concurrent_5"
-    "concurrent_10"
-    "concurrent_20"
-    "concurrent_30"
-    "concurrent_35"
-    # "concurrent_37"
-    "concurrent_40"
-    # "concurrent_45"
-    "concurrent_50"
-    "concurrent_60"
-    # "concurrent_65"
-    "concurrent_70"
-    # "concurrent_75"
-    "concurrent_80"
-    # "concurrent_85"
-    "concurrent_90"
-    # "concurrent_95"
-    "concurrent_100"
-    "concurrent_110"
-    "concurrent_120"
-)
-declare -a concurrents=(
-    "raft_concs"
-    "copilot_concs"
-    "mencius_concs"
-    "mongodb_concs"
-)
-declare -a fixed_concurrents=(
-    "concurrent_150"
-    "concurrent_50"
-    "concurrent_16"
-    "concurrent_40"
-)
-declare -a fastpath_modes=(
-	"0"
-	# "25"
-	# "50"
-	# "75"
-	"100"
-    "101"
-)
+declare -a key_range_workloads=(rw_1 rw_10 rw_100 rw_1000 rw_10000 rw_100000 rw_1000000)
+
+# Protocol-specific concurrency arrays from experiment_defs.sh
+declare -a raft_concs=("${RAFT_CONCS[@]}")
+declare -a copilot_concs=("${COPILOT_CONCS[@]}")
+declare -a mencius_concs=("${MENCIUS_CONCS[@]}")
+declare -a mongodb_concs=("${MONGODB_CONCS[@]}")
+declare -a concurrents=("raft_concs" "copilot_concs" "mencius_concs" "mongodb_concs")
+declare -a fixed_concurrents=("${LEGACY_FIXED_CONCS[@]}")
+declare -a fastpath_modes=("${ALL_FASTPATH_MODES[@]}")
 
 
 # Build commands
@@ -291,15 +129,8 @@ execute_command() {
     local fastpath_mode=$5
     local ycsb=$6
 
-    exp_name="${protocol}-${site}-${workload}-${concurrent}-${fastpath_mode}-${ycsb}"
-    client_config="client_open.yml"
-    if [[ "$protocol" == *_* ]]; then
-        proto_suffix="${protocol#*_}"
-        if [ -n "$proto_suffix" ]; then
-            client_config="client_open_${proto_suffix}.yml"
-        fi
-    fi
-    server_command="cd ${repo_dir} && build/deptran_server -f config/${client_config} -f config/${protocol}.yml -f config/${site}.yml -f config/${workload}.yml -f config/${concurrent}.yml  -f config/${ycsb}.yml  -d 30 -m ${fastpath_mode}"
+    exp_name=$(build_result_prefix "$protocol" "$site" "$workload" "$concurrent" "$fastpath_mode" "$ycsb")
+    server_command=$(build_deptran_cmd "$repo_dir" "$protocol" "$site" "$workload" "$concurrent" "$fastpath_mode" "30" "$ycsb" "")
 
     # Clean up any previous JM_Jetpack_* files before starting a new run
     local cleanup_target
@@ -523,14 +354,7 @@ if [ "$DRY_RUN" = true ]; then
     echo ""
     echo "--- Sample deptran_server command ---"
     IFS=',' read -r site protocol workload concurrent fastpath_mode ycsb <<< "${all_configs[0]}"
-    client_config="client_open.yml"
-    if [[ "$protocol" == *_* ]]; then
-        proto_suffix="${protocol#*_}"
-        if [ -n "$proto_suffix" ]; then
-            client_config="client_open_${proto_suffix}.yml"
-        fi
-    fi
-    echo "  cd ${repo_dir} && build/deptran_server -f config/${client_config} -f config/${protocol}.yml -f config/${site}.yml -f config/${workload}.yml -f config/${concurrent}.yml -f config/${ycsb}.yml -d 30 -m ${fastpath_mode}"
+    echo "  $(build_deptran_cmd "$repo_dir" "$protocol" "$site" "$workload" "$concurrent" "$fastpath_mode" "30" "$ycsb" "")"
     echo "=== END DRY RUN ==="
     exit 0
 fi
