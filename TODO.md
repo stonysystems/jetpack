@@ -17,6 +17,8 @@
 - Phase 1 now has one operator-facing runbook in [`docs/benchmark_runbook.md`](docs/benchmark_runbook.md),
   canonical sweep artifacts under `docs/sweep_2026-02-28/`, and explicit reopen / review notes for
   benchmark and recovery reproducibility.
+- Phase 1 now also has a deferred `scripts/`-automation upgrade track for future AWS / Zoo reruns;
+  it must preserve the old multi-machine workflows while extending them to the current backend set.
 - Phase 2 records the TLA+ base/wrapper split, shared Jetpack abstraction work, TLC logs, and the
   latest shared-log / fast-path review findings.
 - Phase 2 has now been reopened again around the 3-D log architecture: Jetpack must consume a
@@ -29,6 +31,7 @@
 3. Phase 1D: make Codex able to reproduce the evaluation end to end, from fresh image build to regenerated result artifacts.
 4. Phase 1D / Phase 1F: make the runbook-backed WAN recovery flow reproducible for all three backends and align recovery docs with the correct metrics.
 5. Phase 3 and Phase 4: keep the integration docs, README, leader-watcher notes, and supporting alignment work consistent with the accepted workflows.
+6. Phase 1H: after the local benchmark/recovery path is accepted, upgrade `scripts/` so the legacy AWS / Zoo automation also supports the current MongoDB / etcd / ZooKeeper benchmark and failure-recovery workflows without breaking old results.
 
 ### Phase Map
 
@@ -1026,6 +1029,143 @@ measures from signal file write to `recovery_finish_after_failure` detection.
     CPU/bottleneck table, full 11-point raw sweep table, and notes on MongoDB failures.
 - [x] If `result.md` is kept for compatibility, treat it as a mirror only; the benchmark source of truth should be under `docs/`
   - `docs/latency_analysis.md` is the benchmark source of truth. `result.md` is historical only.
+
+### Phase 1H: Deferred AWS / Zoo automation-script upgrade (`scripts/`) for the current backend matrix
+
+This section is intentionally **low priority** and is blocked on the local Docker / tc-netem
+benchmark and recovery workflows above becoming reproducible from the accepted runbook path.
+The goal here is to upgrade the existing multi-machine automation under `scripts/`, not to replace
+it with a new local-only path. The final destination is still AWS/Zoo execution, but **for now**
+the work is script-level only because the AWS environment is not currently reachable.
+
+Rules for Claude on this section:
+- Treat the current AWS outage as an execution block, **not** as a reason to skip the script
+  upgrade. Assume SSH/public-key access will exist later and make the controller-side scripts ready
+  for that day.
+- Do **not** try to run the real AWS experiments now. Do script-level work only: refactor, add
+  compatibility wrappers, add dry-run/self-check support, and update script-local docs.
+- This is an **upgrade**, not a rewrite that abandons historical workflows. After the change, the
+  scripts must still be able to drive the old experiment families they supported before, unless an
+  old entrypoint is replaced by a checked-in compatibility wrapper that preserves the old CLI and
+  output conventions.
+- Do **not** cut scope by deleting old Raft / CoPilot / Mencius / MongoDB experiment paths just
+  because the recent paper-facing focus is MongoDB / etcd / ZooKeeper.
+- Do **not** mark this section done based only on README edits or TODO edits. The minimum evidence
+  is checked-in script changes plus dry-run / command-generation verification that the old and new
+  experiment matrices map to concrete commands.
+
+- [ ] Read `scripts/README.md` first before changing any script in this section
+  - Use it as the starting map of the legacy automation flow, then verify every claimed entrypoint
+    and helper against the actual files on disk before refactoring anything.
+  - If `scripts/README.md` and the real scripts disagree, treat that mismatch as part of the work;
+    do **not** silently follow one and ignore the other.
+
+- [ ] Audit the current `scripts/` tree and classify what is canonical, legacy-but-supported, or obsolete
+  - Minimum audit set:
+    - orchestration entrypoints: `scripts/00-ips.sh`, `scripts/01-exchange_keys.sh`,
+      `scripts/02-setup.sh`, `scripts/04-nfs.sh`, `scripts/05-clone_repo_and_set_default_folder.sh`,
+      `scripts/06-set_jetpack_env.sh`, `scripts/07-link_mongocxx.sh`,
+      `scripts/08-build_and_test_run_local.sh`, `scripts/09-build_and_test_run_wan.sh`,
+      `scripts/10-run_all.sh`, `scripts/11-aws-copilot-property.sh`
+    - ops/helpers: `scripts/94-check-time-sync.sh`, `scripts/95-restart_mongodb.sh`,
+      `scripts/96-execute.sh`, `scripts/98-kill.sh`, `scripts/99-append_ssh_key.sh`
+    - result/plot utilities: `scripts/results_reader.py`, `scripts/build_consolidated_csv.sh`,
+      `scripts/tsv_to_md.sh`, `scripts/calc_latency.py`, and the notebook/plot workflow
+  - Reconcile `scripts/README.md` with the actual files on disk. If the README mentions a helper
+    that no longer exists (for example, an etcd restart helper), either restore the helper,
+    replace it with the real supported path, or explicitly document the replacement.
+  - Record which scripts remain first-class entrypoints and which ones become thin compatibility
+    wrappers over a newer shared driver.
+
+- [ ] Generalize the experiment matrix so the scripts can drive both legacy and current workflows
+  - The upgraded automation must support **both**:
+    - legacy protocol families that the scripts already handled: Raft, CoPilot, Mencius, MongoDB
+    - current backend integrations that matter for the accepted local results: MongoDB, etcd,
+      ZooKeeper
+  - The upgraded automation must support **both** workload classes that matter now:
+    - benchmark / throughput-latency sweeps
+    - failure-recovery experiments
+  - Remove the current old-only hardcoded assumptions from the entry scripts:
+    - protocol arrays in `scripts/10-run_all.sh`
+    - one-off config constants in `scripts/08-build_and_test_run_local.sh`
+    - one-off config constants in `scripts/09-build_and_test_run_wan.sh`
+    - CoPilot-only specialization in `scripts/11-aws-copilot-property.sh`, unless that file is
+      intentionally retained as a narrow wrapper over a generalized implementation
+  - Centralize experiment definitions so the runner can describe, at minimum:
+    - protocol/backend
+    - mode (`none`, `rule100`, `rule101`, or the exact supported equivalent)
+    - site config
+    - client config
+    - workload
+    - concurrency
+    - duration
+    - failover / recovery flag
+    - result prefix / naming rule
+  - If `setup.json`, `aws_ips.json`, or `zoo_ips.json` need schema changes, keep them additive /
+    backward-compatible. Do **not** break the old inventory files just to add new metadata.
+
+- [ ] Preserve backward compatibility explicitly instead of hoping it survives
+  - Old entrypoints should continue to accept their previous CLI, or print a clear migration
+    message and forward to the new implementation with equivalent behavior.
+  - Historical result naming must stay readable by the upgraded result readers and plot scripts.
+    Do **not** strand `scripts/results/`, legacy failure-recovery data folders, or old CSV naming.
+  - If the MongoDB automation currently has both an older and newer path, it is acceptable to keep
+    either one as the canonical implementation, **but** do it cleanly:
+    - either keep the old path as a compatibility wrapper to the new implementation, or
+    - keep both with explicit documented roles (`legacy` vs `current`)
+    - do **not** leave two divergent MongoDB automation paths with ambiguous authority
+
+- [ ] Extend the automation to the current local-results-backed backend matrix
+  - The script layer must be able to express the same backend/mode combinations that the accepted
+    local runbook path uses today:
+    - MongoDB original / fastpath100 / adaptive
+    - etcd original / fastpath100 / adaptive
+    - ZooKeeper original / fastpath100 / adaptive
+  - The script layer must also be able to express the current failure-recovery flows for all three
+    backends, including result collection and naming that distinguishes backend recovery from
+    Jetpack recovery.
+  - Do **not** paper over backend-specific needs:
+    - if MongoDB restart / bootstrap logic is special, encode it cleanly
+    - if etcd or ZooKeeper need their own restart / recovery helpers, add them or generalize the
+      helper layer; do not leave MongoDB as the only maintained path
+  - Keep the local/tc-netem path and the AWS/Zoo path conceptually aligned. The scripts should
+    not invent a second incompatible experiment vocabulary for remote runs.
+
+- [ ] Add a no-cluster verification path so the script refactor can be checked before AWS returns
+  - Add a dry-run / print-only mode (or equivalent) for the primary controller-side runners so the
+    generated SSH / `deptran_server` / result-copy commands can be inspected without touching AWS.
+  - At minimum, verify the upgraded scripts with:
+    - `bash -n` syntax checks for every modified shell script
+    - dry-run generation for representative old cases and representative new cases
+    - dry-run generation for both `aws` and `zoo` environments from `setup.json`
+  - The dry-run verification should demonstrate that the script layer can still produce commands
+    for the old experiment families **and** for the new MongoDB / etcd / ZooKeeper benchmark and
+    recovery families.
+
+- [ ] Keep the result readers and plot/export helpers compatible with both old and new outputs
+  - Upgrade `scripts/results_reader.py`, `scripts/build_consolidated_csv.sh`, `scripts/tsv_to_md.sh`,
+    `scripts/calc_latency.py`, and any maintained plotting/notebook entrypoint if the new backend
+    names, mode names, or result prefixes would otherwise break them.
+  - Preserve the ability to read already checked-in historical results under `scripts/results/`
+    and the various `*failure-recovery-data*` folders.
+  - If the upgraded runner emits new metadata fields, make the parsers tolerant of both the old
+    and new shapes instead of forcing a one-shot dataset migration.
+
+- [ ] Update `scripts/README.md` only after the script behavior is real
+  - The README should describe the **actual** supported workflow after the refactor:
+    - what is canonical
+    - what is legacy-but-still-supported
+    - how to run the current backend matrix
+    - how to invoke dry-run mode while AWS is unavailable
+  - Do **not** use the README as a placeholder for behavior that the scripts still do not implement.
+
+- [ ] Leave the final AWS / Zoo validation open until the environment is available again
+  - After the script upgrade lands, add a short blocked note describing the future execution matrix
+    to run once access returns:
+    - representative legacy benchmark case(s)
+    - current MongoDB / etcd / ZooKeeper benchmark case(s)
+    - current MongoDB / etcd / ZooKeeper failure-recovery case(s)
+  - Do **not** claim remote reproducibility for this section until those real cluster runs happen.
 
 ## Phase 2: TLA+ Specifications and Verification
 
