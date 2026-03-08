@@ -1,5 +1,28 @@
 #!/bin/bash
 
+# Parse CLI arguments
+DRY_RUN=false
+BUILD_ARG=""
+for arg in "$@"; do
+    case "$arg" in
+        --dry-run|-n)
+            DRY_RUN=true
+            ;;
+        full|build)
+            BUILD_ARG="$arg"
+            ;;
+        --help|-h)
+            echo "Usage: $0 [full|build] [--dry-run]"
+            echo ""
+            echo "Options:"
+            echo "  full        Regenerate RPC + build before running"
+            echo "  build       Build before running"
+            echo "  --dry-run   Print experiment matrix without executing"
+            exit 0
+            ;;
+    esac
+done
+
 # Check if setup.json exists and read values from it
 if [ -f "setup.json" ]; then
     SERVER_USERNAME=$(jq -r '.server_username' setup.json)
@@ -220,37 +243,40 @@ declare -a fastpath_modes=(
 
 
 # Build commands
-if [[ "$1" == "full" ]]; then
+if [[ "$BUILD_ARG" == "full" ]]; then
     initial_commands="cd ${repo_dir} && bin/rpcgen --python --cpp src/deptran/rcc_rpc.rpc && python3 add_virtual.py && python3 waf configure build"
-elif [[ "$1" == "build" ]]; then
+elif [[ "$BUILD_ARG" == "build" ]]; then
     initial_commands="cd ${repo_dir} && python3 waf configure build"
 else
     initial_commands="cd ${repo_dir}"
 fi
 
-# Execute initial commands on SERVER_0
-echo "Executing initial setup on ${servers[0]}..."
-ssh ${SERVER_USERNAME}@"${servers[0]}" "$initial_commands"
+# Skip remote setup in dry-run mode
+if [ "$DRY_RUN" != true ]; then
+    # Execute initial commands on SERVER_0
+    echo "Executing initial setup on ${servers[0]}..."
+    ssh ${SERVER_USERNAME}@"${servers[0]}" "$initial_commands"
 
-# Get the current date and time in the specified format
-current_time=$(date "+%Y-%m-%d-%H:%M:%S")
+    # Get the current date and time in the specified format
+    current_time=$(date "+%Y-%m-%d-%H:%M:%S")
 
-# Get the latest git commit hash
-get_commit_hash_cmd="cd $repo_dir && git rev-parse HEAD"
-latest_commit_hash=$(ssh "${SERVER_USERNAME}@${servers[0]}" "$get_commit_hash_cmd")
+    # Get the latest git commit hash
+    get_commit_hash_cmd="cd $repo_dir && git rev-parse HEAD"
+    latest_commit_hash=$(ssh "${SERVER_USERNAME}@${servers[0]}" "$get_commit_hash_cmd")
 
-if [ -z "$latest_commit_hash" ]; then
-    echo "Failed to retrieve the latest commit hash. Exiting."
-    exit 1
-else
-    echo "Latest commit hash: $latest_commit_hash"
+    if [ -z "$latest_commit_hash" ]; then
+        echo "Failed to retrieve the latest commit hash. Exiting."
+        exit 1
+    else
+        echo "Latest commit hash: $latest_commit_hash"
+    fi
+
+    # Construct the directory path
+    exp_dir="results/${current_time}-${latest_commit_hash}"
+    mkdir -p "$exp_dir"
+    echo "Experiment directory created: $exp_dir"
+    ssh ${SERVER_USERNAME}@"${servers[0]}" "cd ${repo_dir} && mkdir -p ${exp_dir} && mkdir -p results/recent_csv && rm results/recent_csv/*"
 fi
-
-# Construct the directory path
-exp_dir="results/${current_time}-${latest_commit_hash}"
-mkdir -p "$exp_dir"
-echo "Experiment directory created: $exp_dir"
-ssh ${SERVER_USERNAME}@"${servers[0]}" "cd ${repo_dir} && mkdir -p ${exp_dir} && mkdir -p results/recent_csv && rm results/recent_csv/*"
 
 declare -a all_configs todo_configs
 
@@ -478,6 +504,36 @@ e_minutes=$(( (total_seconds % 3600) / 60))
 e_seconds=$((total_seconds % 60))
 echo "Number of experiments: $num_experiments"
 echo "Estimated running time: ${e_hours}h ${e_minutes}m ${e_seconds}s"
+
+# --- Dry-run mode: print experiment matrix and exit ---
+if [ "$DRY_RUN" = true ]; then
+    echo ""
+    echo "=== DRY RUN: Experiment Matrix ==="
+    echo "Environment:  $environment"
+    echo "Username:     $SERVER_USERNAME"
+    echo "Repo dir:     $repo_dir"
+    echo "Servers:      ${#servers[@]} (${servers[*]})"
+    echo "Build mode:   ${BUILD_ARG:-none}"
+    echo "Timeout:      ${TIMEOUT_SEC}s per run"
+    echo ""
+    echo "--- All ${num_experiments} configs (site,protocol,workload,concurrency,fastpath_mode,ycsb) ---"
+    for item in "${all_configs[@]}"; do
+        echo "  $item"
+    done
+    echo ""
+    echo "--- Sample deptran_server command ---"
+    IFS=',' read -r site protocol workload concurrent fastpath_mode ycsb <<< "${all_configs[0]}"
+    client_config="client_open.yml"
+    if [[ "$protocol" == *_* ]]; then
+        proto_suffix="${protocol#*_}"
+        if [ -n "$proto_suffix" ]; then
+            client_config="client_open_${proto_suffix}.yml"
+        fi
+    fi
+    echo "  cd ${repo_dir} && build/deptran_server -f config/${client_config} -f config/${protocol}.yml -f config/${site}.yml -f config/${workload}.yml -f config/${concurrent}.yml -f config/${ycsb}.yml -d 30 -m ${fastpath_mode}"
+    echo "=== END DRY RUN ==="
+    exit 0
+fi
 
 SECONDS=0
 num_experiments_really_run=0

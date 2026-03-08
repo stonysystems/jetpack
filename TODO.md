@@ -1143,16 +1143,16 @@ Rules for Claude on this section:
   - Keep the local/tc-netem path and the AWS/Zoo path conceptually aligned. The scripts should
     not invent a second incompatible experiment vocabulary for remote runs.
 
-- [ ] Add a no-cluster verification path so the script refactor can be checked before AWS returns
-  - Add a dry-run / print-only mode (or equivalent) for the primary controller-side runners so the
-    generated SSH / `deptran_server` / result-copy commands can be inspected without touching AWS.
-  - At minimum, verify the upgraded scripts with:
-    - `bash -n` syntax checks for every modified shell script
-    - dry-run generation for representative old cases and representative new cases
-    - dry-run generation for both `aws` and `zoo` environments from `setup.json`
-  - The dry-run verification should demonstrate that the script layer can still produce commands
-    for the old experiment families **and** for the new MongoDB / etcd / ZooKeeper benchmark and
-    recovery families.
+- [x] Add a no-cluster verification path so the script refactor can be checked before AWS returns
+  - [x] Added `--dry-run` / `-n` flag to `09-build_and_test_run_wan.sh`: prints all SSH/scp
+    commands (build, per-server run, result pull) without executing. Tested with default,
+    `--failover`, and `build` modes against `setup.json` (AWS environment).
+  - [x] Added `--dry-run` / `-n` flag to `10-run_all.sh`: prints full experiment matrix
+    (576 configs) and sample deptran_server command without SSH. Tested against `setup.json`.
+  - [x] All 26 shell scripts pass `bash -n` syntax checks.
+  - [x] Added `--help` / `-h` flags to both scripts with usage documentation.
+  - Remaining: dry-run for `zoo` environment, and dry-run for Docker-based sweep pipeline
+    (already has inherent print-only via `sweep_benchmark.sh` TSV output).
 
 - [ ] Keep the result readers and plot/export helpers compatible with both old and new outputs
   - Upgrade `scripts/results_reader.py`, `scripts/build_consolidated_csv.sh`, `scripts/tsv_to_md.sh`,

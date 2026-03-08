@@ -25,12 +25,20 @@ AWS_CONFIG_MODE="101"  # Added -m value for AWS
 
 # Parse CLI arguments for build mode and optional failover test
 usage() {
-    echo "Usage: $0 [full|build] [--failover] [--filename <name>]"
+    echo "Usage: $0 [full|build] [--failover] [--filename <name>] [--dry-run]"
+    echo ""
+    echo "Options:"
+    echo "  full          Regenerate RPC + build before running"
+    echo "  build         Build before running"
+    echo "  --failover|-F Enable failure recovery mode (duration=70s)"
+    echo "  --filename|-o Set custom result filename prefix"
+    echo "  --dry-run|-n  Print commands without executing them"
 }
 
 FAILOVER_TEST=false
 BUILD_MODE=""
 CUSTOM_FILENAME=""
+DRY_RUN=false
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -49,6 +57,9 @@ while [[ $# -gt 0 ]]; do
                 usage
                 exit 1
             fi
+            ;;
+        --dry-run|-n)
+            DRY_RUN=true
             ;;
         --help|-h)
             usage
@@ -135,6 +146,53 @@ for i in $(seq 0 $((N_SERVER - 1))); do
     replicanames+=($name_var)
 done
 
+# --- Dry-run mode: print generated commands and exit ---
+if [ "$DRY_RUN" = true ]; then
+    echo ""
+    echo "=== DRY RUN ==="
+    echo "Environment:  $experiment_env"
+    echo "Username:     $SERVER_USERNAME"
+    echo "Repo dir:     $repo_directory"
+    echo "Build mode:   ${BUILD_MODE:-none}"
+    echo "Failover:     $FAILOVER_TEST"
+    echo "Duration:     ${CONFIG_DURATION}s"
+    echo "Timeout:      180s"
+    echo "Servers:      ${#servers[@]}"
+    echo ""
+
+    # Build command
+    if [[ "$BUILD_MODE" == "full" ]]; then
+        build_cmd="cd $repo_directory && bin/rpcgen --python --cpp src/deptran/rcc_rpc.rpc && python3 add_virtual.py && python3 waf configure build"
+    elif [[ "$BUILD_MODE" == "build" ]]; then
+        build_cmd="cd $repo_directory && python3 waf configure build"
+    else
+        build_cmd="cd $repo_directory"
+    fi
+
+    echo "[build] ssh ${SERVER_USERNAME}@${servers[0]} \"cd $repo_directory && mkdir -p results/recent_csv && rm -f results/recent_csv/*\""
+    echo "[build] ssh ${SERVER_USERNAME}@${servers[0]} \"$build_cmd\""
+    echo ""
+
+    # Per-server run commands
+    if [ -n "$CUSTOM_FILENAME" ]; then
+        result_base="$CUSTOM_FILENAME"
+    elif [ "$FAILOVER_TEST" = true ]; then
+        result_base="jetpack-failure-recovery"
+    else
+        result_base="$DEFAULT_RESULT_PREFIX"
+    fi
+
+    for i in "${!servers[@]}"; do
+        run_name="${result_base}-${replicanames[$i]}"
+        output_file="test_output/${result_base}-${replicanames[$i]}.res"
+        echo "[run]   timeout 180s ssh ${SERVER_USERNAME}@${servers[$i]} \"${server_command} -P ${replicanames[$i]} -N ${run_name}\" > $output_file 2>&1 &"
+    done
+
+    echo ""
+    echo "[pull]  scp ${SERVER_USERNAME}@${servers[0]}:$repo_directory/results/recent_csv/${result_base}-server*.csv test_output/"
+    echo "=== END DRY RUN ==="
+    exit 0
+fi
 
 # We assume scp_jm_file.sh is in the JetPack repo root on all servers
 SCP_MONITOR_SCRIPT="$repo_directory/scp_jm_file.sh"

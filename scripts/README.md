@@ -140,6 +140,11 @@ Useful variants:
 
 # Failure recovery mode
 ./09-build_and_test_run_wan.sh -F --filename jetpack-failure-recovery
+
+# Dry-run: print commands without executing (no SSH needed)
+./09-build_and_test_run_wan.sh --dry-run
+./09-build_and_test_run_wan.sh --dry-run --failover build
+./10-run_all.sh --dry-run
 ```
 
 ### Full AWS bootstrap (fresh machines)
