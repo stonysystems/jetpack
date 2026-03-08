@@ -2,7 +2,7 @@
 
 ## 1. Scope
 
-This report currently covers the first fourteen high-priority leaf tasks from `TODO_codex.md`:
+This report currently covers the first fifteen high-priority leaf tasks from `TODO_codex.md`:
 
 - `Phase 1A`: Low-concurrency latency sanity check.
 - `Phase 1B`: Throughput sweep consistency check.
@@ -18,6 +18,7 @@ This report currently covers the first fourteen high-priority leaf tasks from `T
 - `Phase 2` next leaf: throughput sweep rerun (`etcd fastpath100` / `rule_etcd.yml -m 100`).
 - `Phase 2` next leaf: throughput sweep rerun (`etcd adaptive` / `rule_etcd.yml`).
 - `Phase 2` next leaf: throughput sweep rerun (`mongodb original` / `none_mongodb.yml`).
+- `Phase 2` next leaf: throughput sweep rerun (`mongodb fastpath100` / `rule_mongodb.yml -m 100`).
 
 Included in this pass:
 
@@ -27,16 +28,16 @@ Included in this pass:
 - Recovery-model checks against `docs/failure_recovery_evaluation.md`, `result.md`, and committed recovery logs.
 - Phase-2 prerequisite verification (Docker, compose, submodules, ulimit, backend image build attempts).
 - Low-concurrency rerun execution (`etcd OFF`, `etcd ON`, `mongodb OFF`, `mongodb ON`, `zookeeper OFF`, `zookeeper ON`) with captured command transcripts and per-run metrics.
-- Throughput-sweep rerun execution (`etcd original`, `etcd fastpath100`, `etcd adaptive`, `mongodb original`) with per-concurrency comparison to canonical sweep artifacts.
+- Throughput-sweep rerun execution (`etcd original`, `etcd fastpath100`, `etcd adaptive`, `mongodb original`, `mongodb fastpath100`) with per-concurrency comparison to canonical sweep artifacts.
 
 Not yet executed in this report:
 
-- Remaining `Phase 2` throughput sweep reruns (5 of 9 matrix cases still pending).
+- Remaining `Phase 2` throughput sweep reruns (4 of 9 matrix cases still pending).
 - `Phase 3` recovery reruns.
 
 ## 2. Environment
 
-- UTC timestamp (this iteration): 2026-03-07T23:27:40Z
+- UTC timestamp (this iteration): 2026-03-08T00:23:55Z
 - Git branch: `jetpack`
 - Repository root: `/home/shuai/workspace/jetpack`
 - Build/test environment blockers observed:
@@ -566,6 +567,45 @@ Interpretation (`mongodb original` throughput sweep rerun):
 - Several points required retries (`c=50`, `c=100`, `c=200`, `c=400` with retry counts `1/1/1/2`), indicating stability pressure at moderate/high load.
 - Two exploratory attempts in this iteration were terminated before any data row was emitted while characterizing unusually long point runtime; the completed run above is the authoritative evidence.
 
+Fifth throughput-sweep rerun set (`mongodb fastpath100`, `rule_mongodb.yml`, `-m 100`):
+
+Exploratory default sweep attempt (terminated during `c=10` stall):
+
+```bash
+timeout 7200s /tmp/codex_sweep_benchmark.sh jetpack-mongodb rule_mongodb.yml "-m 100" > /tmp/codex_phase2_sweep_mongodb_fastpath100_20260307T233231Z.tsv 2> /tmp/codex_phase2_sweep_mongodb_fastpath100_20260307T233231Z.stderr.log
+```
+
+Authoritative timeout-guarded sweep used for final evidence:
+
+```bash
+sed -e 's|LOG_DIR="docs/sweep_2026-02-28/logs/${IMAGE_SHORT}_${MODE_SHORT}"|LOG_DIR="/tmp/codex_sweep_logs/${IMAGE_SHORT}_${MODE_SHORT}"|' -e 's|output=$(docker run --rm --privileged \\|output=$(timeout 360s docker run --rm --privileged \\|' scripts/sweep_benchmark.sh > /tmp/codex_sweep_benchmark_mongodb_fastpath100_timeout.sh
+chmod +x /tmp/codex_sweep_benchmark_mongodb_fastpath100_timeout.sh
+timeout 7200s /tmp/codex_sweep_benchmark_mongodb_fastpath100_timeout.sh jetpack-mongodb rule_mongodb.yml "-m 100" > /tmp/codex_phase2_sweep_mongodb_fastpath100_final_20260307T234259Z.tsv 2> /tmp/codex_phase2_sweep_mongodb_fastpath100_final_20260307T234259Z.stderr.log
+```
+
+| Concurrency | Rerun throughput | Canonical throughput | Delta vs canonical | Rerun status |
+|---:|---:|---:|---:|---|
+| 1 | 39.60 | 40.10 | -1.25% | OK |
+| 5 | 271.20 | 274.00 | -1.02% | OK |
+| 10 | 568.70 | 572.70 | -0.70% | OK |
+| 25 | 1467.00 | 1473.80 | -0.46% | OK |
+| 50 | 2058.50 | 2104.20 | -2.17% | OK |
+| 75 | 2276.30 | 2715.30 | -16.17% | OK |
+| 100 | 2398.70 | 2947.60 | -18.62% | OK |
+| 150 | 2426.60 | 2506.70 | -3.20% | OK |
+| 200 | 2473.40 | 3199.60 | -22.70% | OK |
+| 300 | 2200.00 | 2880.00 | -23.61% | OK |
+| 400 | 1227.10 | 2920.00 | -57.98% | FAILED |
+
+Interpretation (`mongodb fastpath100` throughput sweep rerun):
+
+- Final sweep emitted all `11/11` rows, with `10/11` rows `OK` and one terminal failure (`c=400`, `FAILED`, `retry_count=2`, `docker_exit_1;timeout`).
+- Throughput tracks canonical closely for `c <= 50` (about `-0.5%` to `-2.2%`), then diverges materially at higher concurrency.
+- At `c=75..300`, rerun throughput is generally below canonical by about `16%` to `24%`; `c=400` degrades much further and fails (`-58%` vs canonical throughput value).
+- Rerun peak is `2473.40 @ c=200`, below canonical peak `3199.60 @ c=200` (about `-22.7%`).
+- Fast-path success collapses as concurrency rises (`100%` at `c<=10`, `98.14%` at `c=25`, `2.40%` at `c=50`, `0.45%` at `c=75`, and `0` from `c>=100`).
+- Overall this case is non-supporting for high-concurrency fastpath100 claims in the current environment: low-concurrency behavior is reproducible, but high-concurrency capacity and stability are not.
+
 ## 7. Failure Recovery Rerun Attempts
 
 No failure-recovery rerun executed yet. Pending `Phase 3`.
@@ -600,6 +640,8 @@ No failure-recovery rerun executed yet. Pending `Phase 3`.
   - Risk: adaptive high-concurrency capacity appears sensitive to runtime conditions, reducing confidence in single-run peak claims.
 - The `mongodb original` throughput sweep rerun matches canonical through `c <= 50` but underperforms canonical at `c >= 75` by about `15%` to `34%`, with retries needed on several points.
   - Risk: MongoDB moderate/high-concurrency capacity appears environment-sensitive, so single-run peak and tail-throughput claims should be treated as provisional without variance bounds.
+- The `mongodb fastpath100` throughput sweep rerun matches canonical only at low concurrency, then underperforms substantially at moderate/high concurrency, including a terminal `FAILED` point at `c=400` after retries.
+  - Risk: MongoDB fast-path capacity/stability claims at higher concurrency are currently not reproducible in this environment and may be significantly overstated without variance/failure-rate context.
 - Runtime regression testing still blocked in this environment by build prerequisites/toolchain compatibility.
   - Risk: this report can currently confirm artifact consistency, not runtime reproducibility.
 
@@ -621,7 +663,8 @@ No failure-recovery rerun executed yet. Pending `Phase 3`.
     - `etcd fastpath100` completed with `11/11 OK`; low/mid-concurrency closely matches canonical, but high-concurrency points diverge and peak shifts to `5939.4@c=100` vs canonical `6749.3@c=400`.
     - `etcd adaptive` completed with `11/11 OK`; low/mid-concurrency closely matches canonical, while high-concurrency points are lower and peak is `6013.2@c=150` vs canonical `7323.3@c=200`.
     - `mongodb original` completed with `11/11 OK`; throughput matches canonical through `c <= 50`, then drops at higher concurrency (`-15%` to `-34%`), with peak `3162.6@c=75` vs canonical `3799.3@c=100` and retries at `c=50/100/200/400`.
-- `Phase 2` throughput sweep matrix status: 4 of 9 cases rerun; remaining 5 cases are still pending.
+    - `mongodb fastpath100` emitted `11/11` rows but only `10/11 OK`; low-concurrency points are close to canonical, while moderate/high-concurrency points underperform (roughly `-16%` to `-24%`) and `c=400` fails after retries (`FAILED`, `docker_exit_1;timeout`).
+- `Phase 2` throughput sweep matrix status: 5 of 9 cases rerun; remaining 4 cases are still pending.
 - Open discrepancies:
   - Throughput numbers in `result.md` are not consistent with canonical sweep artifacts.
   - Recovery sections mix metrics and contain internal status conflicts; pre-fix RTT=40ms gap claims are not fully traceable to committed logs.
@@ -662,6 +705,11 @@ timeout 7200s /tmp/codex_sweep_benchmark.sh jetpack-etcd rule_etcd.yml > /tmp/co
 join -t $'\t' -1 1 -2 1 <(awk -F'\t' '!/^#/&&$1!="concurrency"{print $1"\t"$2"\t"$13}' /tmp/codex_phase2_sweep_etcd_adaptive_20260307T221731Z.tsv | sort -n) <(awk -F'\t' '!/^#/&&$1!="concurrency"{print $1"\t"$2"\t"$13}' docs/sweep_2026-02-28/etcd_adaptive.tsv | sort -n)
 timeout 7200s /tmp/codex_sweep_benchmark.sh jetpack-mongodb none_mongodb.yml > /tmp/codex_phase2_sweep_mongodb_original_final_20260307T224600Z.tsv 2> /tmp/codex_phase2_sweep_mongodb_original_final_20260307T224600Z.stderr.log
 join -t $'\t' -1 1 -2 1 <(awk -F'\t' '!/^#/&&$1!="concurrency"{print $1"\t"$2"\t"$13}' /tmp/codex_phase2_sweep_mongodb_original_final_20260307T224600Z.tsv | sort -n) <(awk -F'\t' '!/^#/&&$1!="concurrency"{print $1"\t"$2"\t"$13}' docs/sweep_2026-02-28/mongodb_original.tsv | sort -n)
+timeout 7200s /tmp/codex_sweep_benchmark.sh jetpack-mongodb rule_mongodb.yml "-m 100" > /tmp/codex_phase2_sweep_mongodb_fastpath100_20260307T233231Z.tsv 2> /tmp/codex_phase2_sweep_mongodb_fastpath100_20260307T233231Z.stderr.log
+sed -e 's|LOG_DIR="docs/sweep_2026-02-28/logs/${IMAGE_SHORT}_${MODE_SHORT}"|LOG_DIR="/tmp/codex_sweep_logs/${IMAGE_SHORT}_${MODE_SHORT}"|' -e 's|output=$(docker run --rm --privileged \\|output=$(timeout 360s docker run --rm --privileged \\|' scripts/sweep_benchmark.sh > /tmp/codex_sweep_benchmark_mongodb_fastpath100_timeout.sh
+chmod +x /tmp/codex_sweep_benchmark_mongodb_fastpath100_timeout.sh
+timeout 7200s /tmp/codex_sweep_benchmark_mongodb_fastpath100_timeout.sh jetpack-mongodb rule_mongodb.yml "-m 100" > /tmp/codex_phase2_sweep_mongodb_fastpath100_final_20260307T234259Z.tsv 2> /tmp/codex_phase2_sweep_mongodb_fastpath100_final_20260307T234259Z.stderr.log
+join -t $'\t' -1 1 -2 1 <(awk -F'\t' '!/^#/&&$1!="concurrency"{print $1"\t"$2"\t"$13"\t"$16}' /tmp/codex_phase2_sweep_mongodb_fastpath100_final_20260307T234259Z.tsv | sort -n) <(awk -F'\t' '!/^#/&&$1!="concurrency"{print $1"\t"$2"\t"$13}' docs/sweep_2026-02-28/mongodb_fastpath100.tsv | sort -n)
 docker kill <jetpack-mongodb-container-id>
 ```
 
