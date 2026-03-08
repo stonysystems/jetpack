@@ -24,12 +24,15 @@
 - Phase 2 has now been reopened again around the 3-D log architecture: Jetpack must consume a
   real base-protocol `Log[i][j][k]`, not a projected 3-D view reconstructed from a 2-D base log.
 - Phase 2I design target rewrite completed (2026-03-08): `tla/TLA_PLUS_BIG_PICTURE.md` now
-  explicitly rejects the projection shortcut and marks Step 3 as NOT DONE. Next task: refactor
-  base protocol modules to maintain genuine 3-D log state.
+  explicitly rejects the projection shortcut and marks Step 3 as NOT DONE.
+- Phase 2I 3-D log refactor completed (2026-03-08): All 7 TLA+ files refactored for genuine
+  `log[i][j][k]` and per-proposer `commitIndex[i][j]`. Projection operators removed from
+  `jetpack.tla`. `ApplyCommitted` moved to wrappers. Next task: model checking verification
+  (requires Java 11+ or Docker) and reproducibility runner updates.
 
 ### Undone In Priority Order
 
-1. Phase 2I: rebuild the TLA+ design around a true base-protocol 3-D log `Log[i][j][k]`, update the invariants, and rerun model checking for all three Jetpack/base combinations.
+1. Phase 2I: 3-D log refactor is done; next: rerun model checking for all three Jetpack/base combinations (requires Java 11+ or Docker), then make the experiment flow reproducible.
 2. Phase 2I / Phase 2H: make the whole TLA+ experiment flow reproducible from scratch, with checked-in runner/configs and timestamp-prefixed logs for every small and 12-hour big run.
 3. Phase 1D: make Codex able to reproduce the evaluation end to end, from fresh image build to regenerated result artifacts.
 4. Phase 1D / Phase 1F: make the runbook-backed WAN recovery flow reproducible for all three backends and align recovery docs with the correct metrics.
@@ -1687,7 +1690,7 @@ Non-negotiable rules for Claude on this reopened section:
       directly from the base protocol's state? If yes, the design is correct. If no, it is
       still a projection.
 
-- [ ] Refactor `base_raft.tla`, `base_copilot.tla`, and `base_mencius.tla` so each base protocol
+- [x] Refactor `base_raft.tla`, `base_copilot.tla`, and `base_mencius.tla` so each base protocol
       maintains a genuine Jetpack-facing `Log[i][j][k]`
   - Raft requirement:
     - one active logical sequence
@@ -1701,8 +1704,14 @@ Non-negotiable rules for Claude on this reopened section:
     - replicas store the 3-D structure directly
   - Internal helper state may still exist, but the composition boundary with Jetpack must expose
     a genuine 3-D log, not a projected or reconstructed one.
+  - **Done (2026-03-08)**: All 3 base protocols now maintain genuine 3-D log state:
+    - `base_raft.tla`: `log[i]["sole"][k]`, `commitIndex[i]["sole"]`
+    - `base_copilot.tla`: `log[i][proposer][k]`, `commitIndex[i][proposer]`; added `mseqnum`
+      to CoPilot messages for per-proposer sequence tracking; cpLog stays interleaved
+    - `base_mencius.tla`: `log[i][j][k]`, `commitIndex[i][j]`; rewrote `ExtendLog` →
+      `ExtendLogForProposer` with `SlotFor(j, k)` slot-to-position mapping
 
-- [ ] Rewrite `jetpack.tla` so it consumes the shared 3-D base-log interface directly
+- [x] Rewrite `jetpack.tla` so it consumes the shared 3-D base-log interface directly
   - Remove any proof story that depends on reconstructing `j` or local sequence position `k`
     from a flatter base log.
   - Rewrite the Jetpack-facing invariants to quantify directly over the shared 3-D log.
@@ -1713,12 +1722,22 @@ Non-negotiable rules for Claude on this reopened section:
     - any execution-log helper that currently assumes a flat or projected log
   - If the right final invariant set changes, write down exactly why the new set is stronger,
     weaker, or more accurate than the prior version.
+  - **Done (2026-03-08)**: Removed all projection operators (`Log3D`, `ProposerSlots`,
+    `EntryProposer`, `ProposerCmdSeq`, `Log3DLen`). Replaced `ProposerOfEntry(_, _)` with
+    `ProposerOf(_)`. All invariants now quantify directly over `log[i][j][k]`. `ApplyCommitted`
+    moved to wrappers since execution order is protocol-specific. The new invariant set is
+    equivalent in coverage (CommittedLogAgreement, LogOrderMatchesExecution, ExecutionDedupMatches)
+    but directly references the genuine 3-D log without intermediate projection.
 
-- [ ] Keep the composition thin after the 3-D log redesign
+- [x] Keep the composition thin after the 3-D log redesign
   - `jetpack_raft.tla`, `jetpack_copilot.tla`, and `jetpack_mencius.tla` may remain as thin
     composition drivers for `jetpack.tla + base_<protocol>.tla`.
   - They must not contain protocol-specific Jetpack logic or secret projection helpers.
   - Any protocol-specific work needed to realize the 3-D log belongs in the base module, not in Jetpack.
+  - **Done (2026-03-08)**: Wrappers only wire INSTANCE parameters (`Proposer`, `ProposerOf`,
+    `NoOpCmd`) and provide protocol-specific `ApplyCommitted` (execution ordering is inherently
+    protocol-specific: Raft=linear, CoPilot=dependency-ordered, Mencius=round-robin slot order).
+    No projection helpers or Jetpack logic in wrappers.
 
 - [ ] Re-run model checking for all 3 Jetpack/base combinations after the 3-D redesign
   - Required combinations:

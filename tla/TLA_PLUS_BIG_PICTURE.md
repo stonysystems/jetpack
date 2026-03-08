@@ -379,26 +379,31 @@ A run does not count as passed if:
 - All three verified at small config (exhaustive for Raft/CoPilot) and large config
   (5 servers, 3 cmds, 2 keys — partial, no violations)
 
-### Step 3: Shared Jetpack abstraction with true 3-D base-protocol log — NOT DONE
+### Step 3: Shared Jetpack abstraction with true 3-D base-protocol log — CODE DONE, VERIFICATION PENDING
 
-**Current state (2026-03-08):** The current implementation uses a **projection/refinement
-approach** (Option B) that does NOT satisfy the design target for Step 3.
+**Current state (2026-03-08):** The 3-D log refactor is **code-complete**. All 7 TLA+ files
+have been rewritten so the base protocol owns and maintains a genuine `log[i][j][k]` as TLA+
+state. `jetpack.tla` consumes this directly with no projection operators.
 
-What exists today:
-- `jetpack.tla` has projection operators (`Log3D`, `ProposerSlots`, `EntryProposer`,
-  `ProposerCmdSeq`, etc.) that reconstruct a 3-D view from a flat `log[i][k]`.
-- The base protocols (`base_raft.tla`, `base_copilot.tla`, `base_mencius.tla`) maintain
-  a flat 2-D log `log[i][k]` as their primary state.
-- The invariants (`MultiSequenceLogAgreement`, `LogOrderMatchesExecution`) quantify over
-  the projected 3-D view, not over a genuine 3-D base-protocol variable.
+What was done (commit `fcac8da1`):
+- **`jetpack.tla`**: Removed all projection operators (`Log3D`, `ProposerSlots`,
+  `EntryProposer`, `ProposerCmdSeq`, `Log3DLen`). Replaced `ProposerOfEntry(_, _)`
+  with `ProposerOf(_)`. All invariants now quantify directly over `log[i][j][k]`.
+  `ApplyCommitted` moved to wrappers (execution order is protocol-specific).
+- **`base_raft.tla`**: `log[i]["sole"][k]`, `commitIndex[i]["sole"]`.
+- **`base_copilot.tla`**: `log[i][proposer][k]`, `commitIndex[i][proposer]`.
+  Added `mseqnum` to CoPilot messages for per-proposer sequence tracking.
+- **`base_mencius.tla`**: `log[i][j][k]`, `commitIndex[i][j]`. Rewrote `ExtendLog` →
+  `ExtendLogForProposer` with `SlotFor(j, k)` slot-to-position mapping.
+- **Wrappers** (`jetpack_raft.tla`, `jetpack_copilot.tla`, `jetpack_mencius.tla`):
+  Only wiring (`Proposer`, `ProposerOf`, `NoOpCmd` via INSTANCE). Each provides
+  protocol-specific `ApplyCommitted` with correct execution ordering.
 
-What must change:
-- Each base protocol must maintain a genuine `Log[i][j][k]` as TLA+ state.
-- `jetpack.tla` must consume that 3-D log directly without projection operators.
-- The invariants must quantify directly over the real 3-D log variable.
+What remains:
 - All three Jetpack/base combinations must be re-verified with the 3-D redesign:
   one small run and one 12-hour large run per combination.
 - The TLA+ experiment trail must be reproducible from scratch via checked-in runner/docs.
+  (Runner script updated: `tla/run-tlc.sh` now saves timestamp-prefixed logs automatically.)
 
 See TODO.md Phase 2I for the detailed task breakdown.
 
@@ -408,13 +413,16 @@ See TODO.md Phase 2I for the detailed task breakdown.
 3. Mencius wrapper violations — fixed (ExtendLog, NoOp filtering, committed-prefix scoping)
 4. TLC log retention — timestamped logs saved for every proof claim
 
+### Resolved from 2026-03-08 review
+1. **3-D log ownership** — RESOLVED. All base protocols now maintain genuine 3-D log state
+   (`log[i][j][k]`, `commitIndex[i][j]`). No projection operators remain.
+2. **Invariant formulation** — RESOLVED. All invariants quantify directly over the genuine
+   3-D log variable. No intermediate projection.
+
 ### Unresolved from 2026-03-08 review
-1. **3-D log ownership** — the base protocol does not yet own the 3-D log; the current
-   implementation uses a Jetpack-side projection, which is explicitly rejected above.
-2. **Invariant formulation** — invariants must be rewritten to quantify over genuine 3-D
-   state once the base protocol owns it.
-3. **12-hour large runs** — all three combinations need re-verification after the redesign.
-4. **Reproducibility** — the TLA+ experiment flow must be reproducible from scratch.
+1. **12-hour large runs** — all three combinations need re-verification after the 3-D redesign.
+2. **Reproducibility** — runner script updated with timestamp-prefixed logs; Docker environment
+   required for TLC execution. Full end-to-end verification pending.
 
 ## Practical Guidance For Maintenance
 
