@@ -106,8 +106,8 @@ InitBaseVars ==
     /\ currentTerm = [i \in Server |-> 1]
     /\ ostate = [i \in Server |-> Follower]
     /\ votedFor = [i \in Server |-> Nil]
-    /\ log = [i \in Server |-> ["sole" |-> <<>>]]
-    /\ commitIndex = [i \in Server |-> ["sole" |-> 0]]
+    /\ log = [i \in Server |-> [x \in {"sole"} |-> <<>>]]
+    /\ commitIndex = [i \in Server |-> [x \in {"sole"} |-> 0]]
     /\ votesResponded = [i \in Server |-> {}]
     /\ votesGranted = [i \in Server |-> {}]
     /\ nextIndex = [i \in Server |-> [j \in Server |-> 1]]
@@ -123,7 +123,7 @@ Restart(i) ==
     /\ votesGranted' = [votesGranted EXCEPT ![i] = {}]
     /\ nextIndex' = [nextIndex EXCEPT ![i] = [j \in Server |-> 1]]
     /\ matchIndex' = [matchIndex EXCEPT ![i] = [j \in Server |-> 0]]
-    /\ commitIndex' = [commitIndex EXCEPT ![i] = ["sole" |-> 0]]
+    /\ commitIndex' = [commitIndex EXCEPT ![i] = [x \in {"sole"} |-> 0]]
     /\ UNCHANGED <<messages, currentTerm, votedFor, log>>
 
 Timeout(i) ==
