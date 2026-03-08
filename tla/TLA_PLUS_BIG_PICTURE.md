@@ -85,7 +85,7 @@ Expected integrated checks:
 
 This step gives evidence that Jetpack is probably correct with three concrete integrations.
 
-### Step 3: Shared Jetpack abstraction
+### Step 3: Shared Jetpack abstraction with true 3-D base-protocol log
 
 This is the strongest and most important TLA+ design goal.
 
@@ -112,31 +112,62 @@ Important clarification:
 The success criterion for Step 3 is:
 - the same `jetpack.tla` is reused across all three base protocols
 - the base-specific modules adapt their protocol into a shared Jetpack-facing interface
-- the shared Jetpack-facing log interface is a real 3-dimensional base-protocol log
-  `Log[i][j][k]`, not a projection reconstructed from a flatter base log
+- **the shared Jetpack-facing log interface is a real 3-dimensional base-protocol log
+  `Log[i][j][k]` that is maintained as actual state by the base protocol, not a
+  projection or refinement layer reconstructed from a flatter base log**
 - the resulting model checks satisfy both Jetpack invariants and base-protocol invariants
 
-### Non-negotiable modeling rule
+## Non-Negotiable Modeling Rule: The Base Protocol Owns the 3-D Log
 
-Jetpack should **not** adapt itself downward to a 2-D base log and then reconstruct a fake
-3-D view.
+This is the single most important design constraint for Step 3.
 
-The required direction is the opposite:
-- the base protocol adapts to Jetpack
-- the base protocol exposes / maintains a genuine 3-D replicated log
-- `jetpack.tla` consumes that shared 3-D interface directly
+**Required direction:**
+- The base protocol adapts upward to Jetpack.
+- Each base protocol module (`base_raft.tla`, `base_copilot.tla`, `base_mencius.tla`)
+  **maintains** a genuine 3-D replicated log as protocol state.
+- `jetpack.tla` **consumes** that shared 3-D log interface directly. It reads and
+  writes `Log[i][j][k]` without needing to know how the base protocol implements it
+  internally.
 
-Not acceptable:
-- keeping a 2-D base log `log[i][k]`
-- adding a projection layer such as `Log3D`, `ProposerSlots`, `ProposerOfSlot`, or similar
-  to pretend the base protocol was 3-D all along
-- claiming that such a projection is “close enough” to the intended abstraction
+**What "the base protocol owns the 3-D log" means concretely:**
+- Each base module declares a variable (or structured set of variables) that represents
+  `Log[i][j][k]` — the per-replica, per-proposer, per-position log.
+- The base protocol's transitions (propose, replicate, commit) update this 3-D structure
+  directly. They may also maintain internal helper state (e.g., Raft's `nextIndex`,
+  CoPilot's `matchIndex`, Mencius's slot arrays), but the Jetpack-facing composition
+  boundary must expose the genuine 3-D log.
+- `jetpack.tla` is INSTANCE'd with a mapping to this 3-D log variable. Jetpack's own
+  actions (preaccept, recovery, execution) read and write the 3-D log directly.
+- The wrapper/driver module does only wiring (`Init`, `Next`, `UNCHANGED`,
+  `INSTANCE ... WITH ...`). It does not synthesize a missing log dimension.
 
-Acceptable:
-- thin wrapper wiring for `Init`, `Next`, `UNCHANGED`, or `INSTANCE ... WITH ...`
-- unused logical sequences staying blank / `Nil` for protocols that do not use all sequences
-- protocol-specific internal transition logic, as long as the exported Jetpack-facing log
-  state is truly 3-D
+**What is NOT acceptable (the projection/refinement shortcut):**
+- Keeping a flat 2-D base log `log[i][k]` as the real base-protocol state.
+- Adding projection/refinement operators in `jetpack.tla` (such as `Log3D`, `ProposerSlots`,
+  `ProposerOfSlot`, `ProposerOfEntry`, `EntryProposer`, or any equivalent) to reconstruct
+  a 3-D view from the flat log.
+- Claiming that such a projection is "logically equivalent" to a true 3-D log and closing
+  the abstraction step.
+- Keeping the projection operators as "convenience helpers" while the real state is flat.
+  The proof story must not depend on reconstructing `j` or local sequence position `k`
+  from a flatter base log.
+
+**What IS acceptable:**
+- Thin wrapper wiring for `Init`, `Next`, `UNCHANGED`, or `INSTANCE ... WITH ...`.
+- Unused logical sequences staying blank / `Nil` for protocols that do not use all
+  sequences (e.g., Raft uses only one sequence).
+- Protocol-specific internal transition logic inside the base module, as long as the
+  exported Jetpack-facing log state is truly 3-D.
+- The base module internally deriving its 3-D log from internal structures, as long as
+  the 3-D log is maintained as real TLA+ state that Jetpack reads directly.
+
+**Per-protocol requirements:**
+- **Raft**: one active logical sequence (the leader's). All other sequences remain
+  blank / `Nil`. Replicas still store the 3-D structure, even if only one logical
+  sequence is live.
+- **CoPilot**: two active logical sequences (pilot + copilot). Replicas still store
+  the 3-D structure, even if only two logical sequences are live.
+- **Mencius**: one logical sequence per server. Replicas store the full 3-D structure.
 
 ## Desired Log Abstraction
 
@@ -156,8 +187,9 @@ Interpretation:
 This gives a common logical representation across protocols with different leadership styles.
 
 Important clarification:
-- this 3-D log is not merely a derived view for proofs
+- this 3-D log is **not** a derived view or projection for proofs
 - it is the Jetpack-facing log structure that the base protocol must actually maintain
+  as TLA+ state
 - `jetpack.tla` should reason over this shared 3-D state directly
 - if a base protocol keeps auxiliary flat / slot / local structures internally, that is fine,
   but the shared composition boundary with Jetpack must still expose the genuine 3-D log
@@ -286,12 +318,12 @@ run exactly two accepted cases:
 - first run the small config
 - then run the large config above for a fixed 12-hour window
 
-For the big run, “12 hours with no error” is the required acceptance bar for this phase.
+For the big run, "12 hours with no error" is the required acceptance bar for this phase.
 Do not silently shorten the run window and do not reduce the constants.
 
 Interpretation:
-- “12 hours with no error” means “no bug found in the accepted bounded search window”
-- it does not mean “formally proved”
+- "12 hours with no error" means "no bug found in the accepted bounded search window"
+- it does not mean "formally proved"
 
 ### Log retention policy
 
@@ -323,15 +355,13 @@ A run only counts as passed if:
 - the log file is saved
 
 A run does not count as passed if:
-- it only has “no error yet” mid-run progress
+- it only has "no error yet" mid-run progress
 - TLC crashes
 - TLC reports invariant violation
 - the run is partial but undocumented
 - the result is later summarized in TODO without a corresponding saved log
 
-## Current Repository Status (updated 2026-03-07)
-
-All three steps of the TLA+ proof story are complete:
+## Current Repository Status (updated 2026-03-08)
 
 ### Step 1: Standalone base protocols — DONE
 - `raft.tla` — CommittedLogAgreement, ElectionSafety, LogOrderMatchesExecution
@@ -349,30 +379,42 @@ All three steps of the TLA+ proof story are complete:
 - All three verified at small config (exhaustive for Raft/CoPilot) and large config
   (5 servers, 3 cmds, 2 keys — partial, no violations)
 
-### Step 3: Shared Jetpack abstraction with 3D log model — DONE
-- `jetpack.tla` is the single shared module, INSTANCE'd by all three wrappers
-- `CONSTANT ProposerOfEntry(_, _)` replaced old `ProposerOfSlot(_)` to support
-  both positional (Raft/Mencius) and entry-metadata-based (CoPilot) proposer ID
-- 3D projection operators: `EntryProposer`, `ProposerSlots`, `Log3D`, `Log3DLen`,
-  `ProposerCmdSeq` — reconstruct `Log[i][j][k]` from flat `log[i][k]`
-- Per-protocol mapping:
-  - Raft: `Proposer = {"sole"}`, single sequence
-  - CoPilot: `Proposer = Server`, two sequences (pilot + copilot via `entry.proposer`)
-  - Mencius: `Proposer = Server`, N sequences (round-robin via `CoordinatorOf(k)`)
-- Shared properties verified across all three:
-  - `CommittedLogAgreement` — flat committed-prefix agreement
-  - `MultiSequenceLogAgreement` — per-proposer 3D log agreement
-  - `LogOrderMatchesExecution` — per-sequence conflict ordering in execution trace
-  - `ExecutionDedupMatches` — bidirectional conflict order between original/actual execution
-- TLC logs saved in `tla/log/` with protocol name and run description
+### Step 3: Shared Jetpack abstraction with true 3-D base-protocol log — NOT DONE
 
-### Resolved issues from 2026-03-02 review
+**Current state (2026-03-08):** The current implementation uses a **projection/refinement
+approach** (Option B) that does NOT satisfy the design target for Step 3.
+
+What exists today:
+- `jetpack.tla` has projection operators (`Log3D`, `ProposerSlots`, `EntryProposer`,
+  `ProposerCmdSeq`, etc.) that reconstruct a 3-D view from a flat `log[i][k]`.
+- The base protocols (`base_raft.tla`, `base_copilot.tla`, `base_mencius.tla`) maintain
+  a flat 2-D log `log[i][k]` as their primary state.
+- The invariants (`MultiSequenceLogAgreement`, `LogOrderMatchesExecution`) quantify over
+  the projected 3-D view, not over a genuine 3-D base-protocol variable.
+
+What must change:
+- Each base protocol must maintain a genuine `Log[i][j][k]` as TLA+ state.
+- `jetpack.tla` must consume that 3-D log directly without projection operators.
+- The invariants must quantify directly over the real 3-D log variable.
+- All three Jetpack/base combinations must be re-verified with the 3-D redesign:
+  one small run and one 12-hour large run per combination.
+- The TLA+ experiment trail must be reproducible from scratch via checked-in runner/docs.
+
+See TODO.md Phase 2I for the detailed task breakdown.
+
+### Resolved issues from 2026-03-02 review (historical)
 1. `base_raft.tla`, `base_copilot.tla`, `base_mencius.tla` — all created and active
-2. 3D log model — implemented via projection/refinement (Option B)
-3. Property definitions — rewritten to match intended proof story
-4. Mencius wrapper violations — fixed (ExtendLog, NoOp filtering, committed-prefix scoping)
-5. Abstraction goal — achieved with shared `jetpack.tla` + thin wrappers
-6. TLC log retention — timestamped logs saved for every proof claim
+2. Property definitions — rewritten to match intended proof story
+3. Mencius wrapper violations — fixed (ExtendLog, NoOp filtering, committed-prefix scoping)
+4. TLC log retention — timestamped logs saved for every proof claim
+
+### Unresolved from 2026-03-08 review
+1. **3-D log ownership** — the base protocol does not yet own the 3-D log; the current
+   implementation uses a Jetpack-side projection, which is explicitly rejected above.
+2. **Invariant formulation** — invariants must be rewritten to quantify over genuine 3-D
+   state once the base protocol owns it.
+3. **12-hour large runs** — all three combinations need re-verification after the redesign.
+4. **Reproducibility** — the TLA+ experiment flow must be reproducible from scratch.
 
 ## Practical Guidance For Maintenance
 
@@ -380,5 +422,10 @@ Anti-overclaim rules (still apply):
 - Do not mark a spec "passed" if the saved log shows an invariant violation.
 - Do not mark Step 3 complete just because wrapper modules exist.
 - Do not claim abstraction success until the same `jetpack.tla` is reused with all
-  abstracted base protocol modules.
+  abstracted base protocol modules **and** the 3-D log is maintained as real base-protocol
+  state (not projected from a flat log).
 - A partial run with no error is "high confidence", not a formal proof.
+- **Do not close Step 3 by restating the current projection-based design in different
+  words.** The base protocol must own and maintain the 3-D log as TLA+ state. Any
+  approach that keeps `log[i][k]` flat and reconstructs `j` or local `k` in Jetpack
+  is a projection, regardless of how it is described.

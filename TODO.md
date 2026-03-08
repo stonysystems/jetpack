@@ -23,6 +23,9 @@
   latest shared-log / fast-path review findings.
 - Phase 2 has now been reopened again around the 3-D log architecture: Jetpack must consume a
   real base-protocol `Log[i][j][k]`, not a projected 3-D view reconstructed from a 2-D base log.
+- Phase 2I design target rewrite completed (2026-03-08): `tla/TLA_PLUS_BIG_PICTURE.md` now
+  explicitly rejects the projection shortcut and marks Step 3 as NOT DONE. Next task: refactor
+  base protocol modules to maintain genuine 3-D log state.
 
 ### Undone In Priority Order
 
@@ -1652,11 +1655,37 @@ Non-negotiable rules for Claude on this reopened section:
 - Do **not** count SANY-only, small-only, or “no error for a few minutes” as sufficient evidence.
 - Every accepted model-checking run must save a timestamp-prefixed log under `tla/log/`.
 
-- [ ] Rewrite the TLA+ design target and TODO guidance around the true 3-D base-log contract
+- [x] Rewrite the TLA+ design target and TODO guidance around the true 3-D base-log contract
   - `tla/TLA_PLUS_BIG_PICTURE.md` must explicitly say the 3-D log is base-protocol state,
     not a Jetpack-side projection.
   - `TODO.md` must explicitly reject the projection/refinement shortcut so the next agent
     cannot close the task by restating the current design in nicer words.
+  - **Done (2026-03-08)**: Rewrote `tla/TLA_PLUS_BIG_PICTURE.md`:
+    - Expanded "Non-negotiable modeling rule" into a full section with concrete definitions
+      of what "base protocol owns the 3-D log" means (base module declares 3-D variable,
+      base transitions update it directly, Jetpack INSTANCE maps to it, wrapper does only wiring).
+    - Listed explicit NOT-acceptable patterns (keeping flat `log[i][k]`, adding `Log3D` /
+      `ProposerSlots` / `ProposerOfEntry` / `EntryProposer` projection operators, claiming
+      projection equivalence).
+    - Updated "Current Repository Status" to mark Step 3 as **NOT DONE**: current implementation
+      uses projection/refinement approach that does not satisfy the design target.
+    - Added "Unresolved from 2026-03-08 review" section listing 4 open items: 3-D log
+      ownership, invariant formulation, 12-hour large runs, reproducibility.
+    - Added anti-overclaim rule: "Do not close Step 3 by restating the current projection-based
+      design in different words."
+  - **TODO.md Phase 2I rejection guidance** (this section): The rules above (lines 1624-1653)
+    already reject the projection shortcut. Additionally, the following explicit constraints
+    apply to all remaining Phase 2I tasks:
+    - Any approach that keeps `log[i][k]` as the real base-protocol state and reconstructs
+      the proposer dimension `j` or local sequence position `k` inside `jetpack.tla` is a
+      projection, regardless of naming or description. It does not satisfy Step 3.
+    - Renaming `Log3D` to something else, or moving the projection operators from `jetpack.tla`
+      into the wrapper, does not change the fundamental issue. The base protocol must maintain
+      the 3-D structure as its own state.
+    - The test for whether the design is correct: if you remove all projection/refinement
+      operators from `jetpack.tla` and the wrapper, can `jetpack.tla` still read `Log[i][j][k]`
+      directly from the base protocol's state? If yes, the design is correct. If no, it is
+      still a projection.
 
 - [ ] Refactor `base_raft.tla`, `base_copilot.tla`, and `base_mencius.tla` so each base protocol
       maintains a genuine Jetpack-facing `Log[i][j][k]`
