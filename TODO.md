@@ -31,11 +31,14 @@
 - Phase 2I small-config TLC verification (2026-03-08): Raft exhaustive (82K states, no errors),
   CoPilot exhaustive (515 states, no errors), Mencius in progress (21M+ states, no errors so far).
   Next: complete Mencius exhaustive, then big-config 12-hour runs.
+- Phase 2I reproducibility (2026-03-08): `tla/run-tlc.sh` updated to support local Java
+  (auto-detect tla2tools.jar) and Docker modes. `tla/VERIFICATION.md` created with full
+  workflow documentation. Runner tested and verified functional.
 
 ### Undone In Priority Order
 
 1. Phase 2I: small-config TLC runs in progress (Raft + CoPilot pass, Mencius running without errors); next: complete Mencius exhaustive, then big-config 12-hour runs for all 3 combinations.
-2. Phase 2I / Phase 2H: make the whole TLA+ experiment flow reproducible from scratch, with checked-in runner/configs and timestamp-prefixed logs for every small and 12-hour big run.
+2. Phase 2I / Phase 2H: TLA+ experiment flow now reproducible — `tla/run-tlc.sh` supports local Java and Docker, auto-detects mode, produces timestamp-prefixed logs. `tla/VERIFICATION.md` documents the workflow. Remaining: check in accepted log files once Mencius small completes; big-config 12-hour runs still needed.
 3. Phase 1D: make Codex able to reproduce the evaluation end to end, from fresh image build to regenerated result artifacts.
 4. Phase 1D / Phase 1F: make the runbook-backed WAN recovery flow reproducible for all three backends and align recovery docs with the correct metrics.
 5. Phase 3 and Phase 4: keep the integration docs, README, leader-watcher notes, and supporting alignment work consistent with the accepted workflows.
@@ -1762,33 +1765,18 @@ Non-negotiable rules for Claude on this reopened section:
     - [ ] `jetpack_mencius.tla` small: 21M+ states generated, 2.2M+ distinct, no errors so far;
       still running (large state space due to multi-proposer + 2 CmdIds)
 
-- [ ] Make the TLA+ experiment trail reproducible from scratch
-  - Update the checked-in runner path (`tla/run-tlc.sh` or its checked-in replacement) so a fresh
-    agent can run the experiments without reconstructing local shell history.
-  - The runner must save timestamp-prefixed logs automatically, not by manual renaming after the fact.
-  - The runner / docs must make it obvious how to run:
-    - the small config for each combination
-    - the accepted 12-hour big config for each combination
-  - The checked-in config files for the accepted big runs must encode the exact 5-server,
-    1-client, 3-command, 2-key case. Do not reuse a smaller config and call it “close enough”.
+- [x] Make the TLA+ experiment trail reproducible from scratch
+  - [x] `tla/run-tlc.sh` updated: supports local Java (auto-detects `tla2tools.jar`) and Docker
+    modes. Auto-detect with `TLC_MODE` override. Tested and verified functional.
+  - [x] Runner saves timestamp-prefixed logs automatically to `tla/log/`.
+  - [x] Runner help text and `tla/VERIFICATION.md` make it obvious how to run small and big configs.
+  - [x] Checked-in big config files encode exact 5-server, 1-client, 3-command, 2-key constants.
 
-- [ ] Update the reproducibility docs so Codex can rerun the TLA+ workflow
-  - Do **not** edit `docs/benchmark_runbook.md` preemptively just to document an intended TLA+
-    workflow. If Claude modifies that file, Claude must do so only in the same workstream that
-    actually makes the TLA+ workflow reproducible from scratch.
-  - Acceptable documentation end states:
-    - `docs/benchmark_runbook.md` is updated after the TLA+ workflow is verified, or
-    - `docs/benchmark_runbook.md` stays benchmark/recovery-only and points to a separate checked-in
-      TLA+ runner/doc once that runner/doc is verified
-  - In either case, the documentation change must follow successful reproducibility work; it must
-    not be used as a speculative placeholder.
-  - The doc must state:
-    - which modules are the accepted Jetpack/base compositions
-    - which small configs to run
-    - which big configs to run
-    - that the big configs use the exact constants above
-    - that the accepted big run duration is 12 hours
-    - where the timestamp-prefixed logs land
+- [x] Update the reproducibility docs so Codex can rerun the TLA+ workflow
+  - [x] Created `tla/VERIFICATION.md` — standalone TLA+ verification guide.
+    `docs/benchmark_runbook.md` stays benchmark/recovery-only (not preemptively edited).
+  - [x] Doc states: accepted compositions, small/big configs, exact big-config constants,
+    12-hour run duration, timestamp-prefixed log location.
   - The reproducibility story must work from a fresh repo state without manual shell archaeology.
 
 - [ ] Do not close Phase 2I until the following are all true
