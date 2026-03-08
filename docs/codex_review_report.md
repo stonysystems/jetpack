@@ -2,7 +2,7 @@
 
 ## 1. Scope
 
-This report currently covers the first nineteen high-priority leaf tasks from `TODO_codex.md`:
+This report currently covers the first twenty high-priority leaf tasks from `TODO_codex.md`:
 
 - `Phase 1A`: Low-concurrency latency sanity check.
 - `Phase 1B`: Throughput sweep consistency check.
@@ -23,6 +23,7 @@ This report currently covers the first nineteen high-priority leaf tasks from `T
 - `Phase 2` next leaf: throughput sweep rerun (`zookeeper original` / `none_zookeeper.yml`).
 - `Phase 2` next leaf: throughput sweep rerun (`zookeeper fastpath100` / `rule_zookeeper.yml -m 100`).
 - `Phase 2` next leaf: throughput sweep rerun (`zookeeper adaptive` / `rule_zookeeper.yml`).
+- `Phase 3` first leaf: failure-recovery rerun (`etcd`, WAN latency mode).
 
 Included in this pass:
 
@@ -33,15 +34,15 @@ Included in this pass:
 - Phase-2 prerequisite verification (Docker, compose, submodules, ulimit, backend image build attempts).
 - Low-concurrency rerun execution (`etcd OFF`, `etcd ON`, `mongodb OFF`, `mongodb ON`, `zookeeper OFF`, `zookeeper ON`) with captured command transcripts and per-run metrics.
 - Throughput-sweep rerun execution (`etcd original`, `etcd fastpath100`, `etcd adaptive`, `mongodb original`, `mongodb fastpath100`, `mongodb adaptive`, `zookeeper original`, `zookeeper fastpath100`, `zookeeper adaptive`) with per-concurrency comparison to canonical sweep artifacts.
+- Failure-recovery rerun execution (`etcd`, WAN latency mode) with extracted election/recovery timing and signal-chain evidence.
 
 Not yet executed in this report:
 
-- Remaining `Phase 2` throughput sweep reruns (0 of 9 matrix cases still pending).
-- `Phase 3` recovery reruns.
+- Remaining `Phase 3` recovery reruns (`mongodb`, `zookeeper`; 2 of 3 matrix cases still pending).
 
 ## 2. Environment
 
-- UTC timestamp (this iteration): 2026-03-08T02:03:33Z
+- UTC timestamp (this iteration): 2026-03-08T02:10:28Z
 - Git branch: `jetpack`
 - Repository root: `/home/shuai/workspace/jetpack`
 - Build/test environment blockers observed:
@@ -732,7 +733,36 @@ Interpretation (`zookeeper adaptive` throughput sweep rerun):
 
 ## 7. Failure Recovery Rerun Attempts
 
-No failure-recovery rerun executed yet. Pending `Phase 3`.
+First failure-recovery rerun set (`etcd`, WAN latency mode):
+
+Runbook command attempt (failed under current Docker Compose v5 CLI):
+
+```bash
+timeout 1800s docker compose -f docker/etcd/docker-compose.yml run --rm --privileged -e RECOVERY_LATENCY_MS=20 jetpack-etcd recovery > /tmp/codex_phase3_etcd_recovery_wan20_20260308T020457Z.log 2>&1
+```
+
+Compose-v5-compatible recovery rerun (service already `privileged: true` in compose file):
+
+```bash
+timeout 1800s docker compose -f docker/etcd/docker-compose.yml run --rm -e RECOVERY_LATENCY_MS=20 jetpack-etcd recovery > /tmp/codex_phase3_etcd_recovery_wan20_composev5_20260308T020524Z.log 2>&1
+```
+
+| Attempt UTC | Status | Stdout/stderr capture | etcd leader re-election (ms) | Jetpack detection after signal (ms) | Jetpack internal duration (ms) | Assessment vs docs |
+|---|---|---|---:|---:|---:|---|
+| 2026-03-08T02:04:57Z | Failed pre-run | `/tmp/codex_phase3_etcd_recovery_wan20_20260308T020457Z.log` | N/A | N/A | N/A | Non-supporting runbook invocation in this environment (`unknown flag: --privileged`) |
+| 2026-03-08T02:05:24Z | Completed | `/tmp/codex_phase3_etcd_recovery_wan20_composev5_20260308T020524Z.log` | 6496 | 108 | 123 | Partially supporting: signal chain and etcd election range reproduce, but Jetpack internal duration is above strict 81-83ms claim |
+
+Interpretation (`etcd` failure-recovery rerun):
+
+- Recovery test completed successfully after adapting command syntax to Compose v5 (`run --rm` without CLI `--privileged`).
+- Required evidence points were observed in logs: leader kill, new leader election, Jetpack recovery start, and Jetpack recovery completion.
+- Signal files were all reported as written and detected (`JM_Jetpack_failure_triggered`, `JM_Jetpack_0.0.0.0`, `JM_Jetpack_recovery_finish_after_failure`).
+- etcd re-election timing (`6496ms`) is within the broad expected range documented for etcd failover.
+- Jetpack recovery timing in this run is mixed against docs expectations:
+  - Script-level detection after signal: `108ms`.
+  - Internal Jetpack recovery duration line: `123ms`.
+  - Both are above the strict RTT=40ms claim (`~81-83ms`) used in current docs.
+- This case is therefore partially supporting overall: recovery mechanism and event ordering reproduce, but the strict Jetpack duration claim was not reproduced in this first rerun.
 
 ## 8. Discrepancies and Risks
 
@@ -774,6 +804,10 @@ No failure-recovery rerun executed yet. Pending `Phase 3`.
   - Risk: ZooKeeper fastpath100 high-concurrency behavior appears environment-sensitive and mode-path mixing may differ materially between runs, reducing confidence in single-run capacity/fast-path claims.
 - The `zookeeper adaptive` throughput sweep rerun is close to canonical through `c<=75` but increasingly exceeds canonical at higher concurrency and shifts peak from `c=150` to `c=400`.
   - Risk: ZooKeeper adaptive high-concurrency capacity/shape appears environment-sensitive, so single-run peak and tail-shape claims should be treated as provisional without variance bounds.
+- The runbook recovery command form (`docker compose run --privileged ...`) is not directly compatible with the current Docker Compose v5 CLI in this environment (`unknown flag: --privileged`).
+  - Risk: reproduction may fail at command invocation level unless operators adapt command syntax to the local Compose implementation.
+- The first etcd WAN recovery rerun reproduced failover ordering but yielded Jetpack recovery timings (`108ms` detect, `123ms` internal) above the strict RTT=40ms claim (`~81-83ms`).
+  - Risk: single-run Jetpack recovery-duration claims may be optimistic without variance bounds and updated toolchain/runtime notes.
 - Runtime regression testing still blocked in this environment by build prerequisites/toolchain compatibility.
   - Risk: this report can currently confirm artifact consistency, not runtime reproducibility.
 
@@ -801,6 +835,10 @@ No failure-recovery rerun executed yet. Pending `Phase 3`.
     - `zookeeper fastpath100` completed with `11/11 OK`; low/mid-concurrency points are close to canonical through `c<=100`, but `c>=150` exceeds canonical by about `+0.9%` to `+19.5%`, with peak `5853.4@c=400` vs canonical `5456.4@c=300` and fast-path success dropping to `0` from `c>=100`.
     - `zookeeper adaptive` completed with `11/11 OK`; low/mid-concurrency points (`c<=75`) closely match canonical, while `c>=100` is above canonical by about `+2.4%` to `+9.8%`, with peak `5932.8@c=400` vs canonical `5486.0@c=150` and fast-path success dropping to `0` from `c>=75`.
 - `Phase 2` throughput sweep matrix status: 9 of 9 cases rerun; no cases are pending.
+- `Phase 3` recovery rerun progress:
+  - `etcd` WAN-style recovery rerun completed after Compose-v5 command adaptation; leader failover ordering and signal chain reproduced, with etcd re-election `6496ms`.
+  - Jetpack recovery timing in this run (`108ms` detect, `123ms` internal) is above the strict RTT=40ms `~81-83ms` claim, so this backend is currently only partially supporting.
+- `Phase 3` recovery matrix status: 1 of 3 backends rerun; remaining 2 backends (`mongodb`, `zookeeper`) are pending.
 - Open discrepancies:
   - Throughput numbers in `result.md` are not consistent with canonical sweep artifacts.
   - Recovery sections mix metrics and contain internal status conflicts; pre-fix RTT=40ms gap claims are not fully traceable to committed logs.
@@ -860,6 +898,9 @@ sed -e 's|LOG_DIR="docs/sweep_2026-02-28/logs/${IMAGE_SHORT}_${MODE_SHORT}"|LOG_
 chmod +x /tmp/codex_sweep_benchmark_zookeeper_adaptive_timeout.sh
 timeout 7200s /tmp/codex_sweep_benchmark_zookeeper_adaptive_timeout.sh jetpack-zookeeper rule_zookeeper.yml > /tmp/codex_phase2_sweep_zookeeper_adaptive_final_20260308T014626Z.tsv 2> /tmp/codex_phase2_sweep_zookeeper_adaptive_final_20260308T014626Z.stderr.log
 join -t $'\t' -1 1 -2 1 <(awk -F'\t' '!/^#/&&$1!="concurrency"{printf "%s\t%s\t%s\n",$1,$2,$13}' /tmp/codex_phase2_sweep_zookeeper_adaptive_final_20260308T014626Z.tsv | sort -n) <(awk -F'\t' '!/^#/&&$1!="concurrency"{printf "%s\t%s\n",$1,$2}' docs/sweep_2026-02-28/zookeeper_adaptive.tsv | sort -n)
+timeout 1800s docker compose -f docker/etcd/docker-compose.yml run --rm --privileged -e RECOVERY_LATENCY_MS=20 jetpack-etcd recovery > /tmp/codex_phase3_etcd_recovery_wan20_20260308T020457Z.log 2>&1
+timeout 1800s docker compose -f docker/etcd/docker-compose.yml run --rm -e RECOVERY_LATENCY_MS=20 jetpack-etcd recovery > /tmp/codex_phase3_etcd_recovery_wan20_composev5_20260308T020524Z.log 2>&1
+rg -n "New etcd leader elected|etcd downtime|Jetpack recovery detected|Jetpack recovery completed|JM_Jetpack_|Failure Recovery Test PASSED|unknown flag" /tmp/codex_phase3_etcd_recovery_wan20_20260308T020457Z.log /tmp/codex_phase3_etcd_recovery_wan20_composev5_20260308T020524Z.log
 docker kill <jetpack-mongodb-container-id>
 ```
 
