@@ -128,6 +128,17 @@ assert_eq "current backends count" "${#CURRENT_BACKENDS[@]}" "${#CURRENT_DOCKER_
 assert_eq "current origin count" "${#CURRENT_BACKENDS[@]}" "${#CURRENT_ORIGIN_PROTOCOLS[@]}"
 assert_eq "current jetpack count" "${#CURRENT_BACKENDS[@]}" "${#CURRENT_JETPACK_PROTOCOLS[@]}"
 
+# --- Docker backend definitions ---
+assert_eq "failover config etcd" "failover_etcd.yml" "${FAILOVER_CONFIGS[etcd]}"
+assert_eq "failover config mongodb" "failover_mongodb.yml" "${FAILOVER_CONFIGS[mongodb]}"
+assert_eq "failover config zookeeper" "failover_zookeeper.yml" "${FAILOVER_CONFIGS[zookeeper]}"
+assert_eq "compose file etcd" "docker/etcd/docker-compose.yml" "${DOCKER_COMPOSE_FILES[etcd]}"
+assert_eq "test script mongodb" "docker/mongodb/run-mongodb-test.sh" "${DOCKER_TEST_SCRIPTS[mongodb]}"
+assert_eq "aws restart mongodb" "scripts/95-restart_mongodb.sh" "${AWS_RESTART_SCRIPTS[mongodb]}"
+# etcd and zookeeper have no AWS restart helpers
+assert_eq "aws restart etcd unset" "" "${AWS_RESTART_SCRIPTS[etcd]:-}"
+assert_eq "docker test modes count" "4" "${#DOCKER_TEST_MODES[@]}"
+
 # --- Summary ---
 echo ""
 echo "Results: $PASS passed, $FAIL failed"

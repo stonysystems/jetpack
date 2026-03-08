@@ -143,6 +143,40 @@ SITE_LOCAL_SANITY="3c1s3r1p"      # Single-process local sanity check
 SITE_LOCAL_MULTI="5c1s5r5p"       # Docker 5-process low-client
 
 # ──────────────────────────────────────────────────────────────────────
+# Docker backend failure-recovery definitions
+# ──────────────────────────────────────────────────────────────────────
+
+# Failover config files per backend (used with -f config/<file>)
+declare -A FAILOVER_CONFIGS=(
+    [etcd]="failover_etcd.yml"
+    [mongodb]="failover_mongodb.yml"
+    [zookeeper]="failover_zookeeper.yml"
+)
+
+# Docker compose files per backend (relative to repo root)
+declare -A DOCKER_COMPOSE_FILES=(
+    [etcd]="docker/etcd/docker-compose.yml"
+    [mongodb]="docker/mongodb/docker-compose.yml"
+    [zookeeper]="docker/zookeeper/docker-compose.yml"
+)
+
+# Docker test scripts per backend (relative to repo root)
+declare -A DOCKER_TEST_SCRIPTS=(
+    [etcd]="docker/etcd/run-etcd-test.sh"
+    [mongodb]="docker/mongodb/run-mongodb-test.sh"
+    [zookeeper]="docker/zookeeper/run-zookeeper-test.sh"
+)
+
+# Docker test modes available per backend
+# All 3 backends support: single, multi, benchmark, recovery
+DOCKER_TEST_MODES=("single" "multi" "benchmark" "recovery")
+
+# AWS-only restart helper scripts (only MongoDB has one)
+declare -A AWS_RESTART_SCRIPTS=(
+    [mongodb]="scripts/95-restart_mongodb.sh"
+)
+
+# ──────────────────────────────────────────────────────────────────────
 # Command generation helpers
 # ──────────────────────────────────────────────────────────────────────
 

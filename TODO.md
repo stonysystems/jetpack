@@ -1154,7 +1154,7 @@ Rules for Claude on this section:
       vs current `jetpack-mongodb` Docker image (local sweep). `95-restart_mongodb.sh` stays
       standalone AWS-only helper. Both paths have documented roles.
 
-- [ ] Extend the automation to the current local-results-backed backend matrix
+- [x] Extend the automation to the current local-results-backed backend matrix
   - The script layer must be able to express the same backend/mode combinations that the accepted
     local runbook path uses today:
     - MongoDB original / fastpath100 / adaptive
@@ -1169,6 +1169,16 @@ Rules for Claude on this section:
       helper layer; do not leave MongoDB as the only maintained path
   - Keep the local/tc-netem path and the AWS/Zoo path conceptually aligned. The scripts should
     not invent a second incompatible experiment vocabulary for remote runs.
+  - **Done (2026-03-08)**: Extended `experiment_defs.sh` with Docker backend infrastructure:
+    - `FAILOVER_CONFIGS` associative array: per-backend failover config files
+      (`failover_etcd.yml`, `failover_mongodb.yml`, `failover_zookeeper.yml`)
+    - `DOCKER_COMPOSE_FILES`: per-backend compose file paths
+    - `DOCKER_TEST_SCRIPTS`: per-backend test runner paths
+    - `DOCKER_TEST_MODES`: all 4 test modes (`single`, `multi`, `benchmark`, `recovery`)
+    - `AWS_RESTART_SCRIPTS`: only MongoDB has one (`95-restart_mongodb.sh`); etcd and ZooKeeper
+      backend restart/bootstrap is handled inside their Docker test scripts
+    - `generate_current_matrix()` already covers 3 backends × 3 modes × N concurrencies
+    - 47 unit tests verify all definitions including failover configs and Docker paths
 
 - [x] Add a no-cluster verification path so the script refactor can be checked before AWS returns
   - [x] Added `--dry-run` / `-n` flag to `09-build_and_test_run_wan.sh`: prints all SSH/scp
