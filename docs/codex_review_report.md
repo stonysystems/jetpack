@@ -2,7 +2,7 @@
 
 ## 1. Scope
 
-This report currently covers the first twenty high-priority leaf tasks from `TODO_codex.md`:
+This report currently covers the first twenty-one high-priority leaf tasks from `TODO_codex.md`:
 
 - `Phase 1A`: Low-concurrency latency sanity check.
 - `Phase 1B`: Throughput sweep consistency check.
@@ -24,6 +24,7 @@ This report currently covers the first twenty high-priority leaf tasks from `TOD
 - `Phase 2` next leaf: throughput sweep rerun (`zookeeper fastpath100` / `rule_zookeeper.yml -m 100`).
 - `Phase 2` next leaf: throughput sweep rerun (`zookeeper adaptive` / `rule_zookeeper.yml`).
 - `Phase 3` first leaf: failure-recovery rerun (`etcd`, WAN latency mode).
+- `Phase 3` next leaf: failure-recovery rerun (`mongodb`, WAN latency mode).
 
 Included in this pass:
 
@@ -35,14 +36,15 @@ Included in this pass:
 - Low-concurrency rerun execution (`etcd OFF`, `etcd ON`, `mongodb OFF`, `mongodb ON`, `zookeeper OFF`, `zookeeper ON`) with captured command transcripts and per-run metrics.
 - Throughput-sweep rerun execution (`etcd original`, `etcd fastpath100`, `etcd adaptive`, `mongodb original`, `mongodb fastpath100`, `mongodb adaptive`, `zookeeper original`, `zookeeper fastpath100`, `zookeeper adaptive`) with per-concurrency comparison to canonical sweep artifacts.
 - Failure-recovery rerun execution (`etcd`, WAN latency mode) with extracted election/recovery timing and signal-chain evidence.
+- Failure-recovery rerun attempts (`mongodb`, WAN latency mode) with startup-failure diagnostics and retry/cleanup evidence.
 
 Not yet executed in this report:
 
-- Remaining `Phase 3` recovery reruns (`mongodb`, `zookeeper`; 2 of 3 matrix cases still pending).
+- Remaining `Phase 3` recovery reruns (`zookeeper`; 1 of 3 matrix cases still pending).
 
 ## 2. Environment
 
-- UTC timestamp (this iteration): 2026-03-08T02:10:28Z
+- UTC timestamp (this iteration): 2026-03-08T02:13:19Z
 - Git branch: `jetpack`
 - Repository root: `/home/shuai/workspace/jetpack`
 - Build/test environment blockers observed:
@@ -764,6 +766,38 @@ Interpretation (`etcd` failure-recovery rerun):
   - Both are above the strict RTT=40ms claim (`~81-83ms`) used in current docs.
 - This case is therefore partially supporting overall: recovery mechanism and event ordering reproduce, but the strict Jetpack duration claim was not reproduced in this first rerun.
 
+Second failure-recovery rerun set (`mongodb`, WAN latency mode):
+
+Runbook command attempt (failed under current Docker Compose v5 CLI):
+
+```bash
+timeout 1800s docker compose -f docker/mongodb/docker-compose.yml run --rm --privileged -e RECOVERY_LATENCY_MS=20 jetpack-mongodb recovery > /tmp/codex_phase3_mongodb_recovery_wan20_20260308T021804Z.log 2>&1
+```
+
+Compose-v5-compatible recovery reruns (service already `privileged: true` in compose file):
+
+```bash
+timeout 1800s docker compose -f docker/mongodb/docker-compose.yml run --rm -e RECOVERY_LATENCY_MS=20 jetpack-mongodb recovery > /tmp/codex_phase3_mongodb_recovery_wan20_composev5_20260308T021815Z.log 2>&1
+docker compose -f docker/mongodb/docker-compose.yml down -v
+timeout 1800s docker compose -f docker/mongodb/docker-compose.yml run --rm -e RECOVERY_LATENCY_MS=20 jetpack-mongodb recovery > /tmp/codex_phase3_mongodb_recovery_wan20_composev5_retry1_20260308T021903Z.log 2>&1
+```
+
+| Attempt UTC | Status | Stdout/stderr capture | MongoDB primary re-election (ms) | Jetpack detection after signal (ms) | Jetpack internal duration (ms) | Assessment vs docs |
+|---|---|---|---:|---:|---:|---|
+| 2026-03-08T02:18:04Z | Failed pre-run | `/tmp/codex_phase3_mongodb_recovery_wan20_20260308T021804Z.log` | N/A | N/A | N/A | Non-supporting runbook invocation in this environment (`unknown flag: --privileged`) |
+| 2026-03-08T02:18:15Z | Failed before recovery | `/tmp/codex_phase3_mongodb_recovery_wan20_composev5_20260308T021815Z.log` | N/A | N/A | N/A | Non-supporting: dependency `mongodb` container exits (100) before recovery phases |
+| 2026-03-08T02:19:03Z | Failed before recovery (after cleanup) | `/tmp/codex_phase3_mongodb_recovery_wan20_composev5_retry1_20260308T021903Z.log` | N/A | N/A | N/A | Non-supporting: same dependency startup failure persists after `down -v` |
+
+Interpretation (`mongodb` failure-recovery rerun):
+
+- The documented runbook form with CLI `--privileged` does not run under this Compose v5 CLI (`unknown flag: --privileged`).
+- The Compose-v5-compatible rerun command starts dependency orchestration but fails before any recovery timeline events; `mongodb` exits with code `100` and compose aborts with `dependency failed to start`.
+- Retrying after full stack/volume cleanup (`down -v`) reproduces the same pre-recovery dependency failure.
+- Container logs for `mongodb-mongodb-1` show an immediate mongod startup termination:
+  - `std::exception in initAndListen, terminating`
+  - `error":"open: Permission denied"`
+- Because no recovery phases (`leader kill`, `new primary`, Jetpack recovery start/finish, signal-file chain) become observable, this backend rerun is non-supporting in the current environment.
+
 ## 8. Discrepancies and Risks
 
 - `result.md` throughput tables conflict with canonical sweep artifacts in `docs/sweep_2026-02-28/`.
@@ -808,6 +842,8 @@ Interpretation (`etcd` failure-recovery rerun):
   - Risk: reproduction may fail at command invocation level unless operators adapt command syntax to the local Compose implementation.
 - The first etcd WAN recovery rerun reproduced failover ordering but yielded Jetpack recovery timings (`108ms` detect, `123ms` internal) above the strict RTT=40ms claim (`~81-83ms`).
   - Risk: single-run Jetpack recovery-duration claims may be optimistic without variance bounds and updated toolchain/runtime notes.
+- The mongodb WAN recovery rerun is currently blocked before recovery begins because the dependency container exits at startup (`std::exception ... open: Permission denied`, exit `100`) even after `docker compose down -v`.
+  - Risk: MongoDB recovery reproducibility cannot currently be evaluated in this environment, and recovery claims for this backend remain unverified here.
 - Runtime regression testing still blocked in this environment by build prerequisites/toolchain compatibility.
   - Risk: this report can currently confirm artifact consistency, not runtime reproducibility.
 
@@ -838,7 +874,8 @@ Interpretation (`etcd` failure-recovery rerun):
 - `Phase 3` recovery rerun progress:
   - `etcd` WAN-style recovery rerun completed after Compose-v5 command adaptation; leader failover ordering and signal chain reproduced, with etcd re-election `6496ms`.
   - Jetpack recovery timing in this run (`108ms` detect, `123ms` internal) is above the strict RTT=40ms `~81-83ms` claim, so this backend is currently only partially supporting.
-- `Phase 3` recovery matrix status: 1 of 3 backends rerun; remaining 2 backends (`mongodb`, `zookeeper`) are pending.
+  - `mongodb` WAN-style recovery rerun is currently non-supporting: command-level adaptation is possible, but dependency startup fails before recovery phases (`mongodb` exits `100`, `open: Permission denied`) even after cleanup/retry.
+- `Phase 3` recovery matrix status: 2 of 3 backends rerun; remaining 1 backend (`zookeeper`) is pending.
 - Open discrepancies:
   - Throughput numbers in `result.md` are not consistent with canonical sweep artifacts.
   - Recovery sections mix metrics and contain internal status conflicts; pre-fix RTT=40ms gap claims are not fully traceable to committed logs.
@@ -901,6 +938,12 @@ join -t $'\t' -1 1 -2 1 <(awk -F'\t' '!/^#/&&$1!="concurrency"{printf "%s\t%s\t%
 timeout 1800s docker compose -f docker/etcd/docker-compose.yml run --rm --privileged -e RECOVERY_LATENCY_MS=20 jetpack-etcd recovery > /tmp/codex_phase3_etcd_recovery_wan20_20260308T020457Z.log 2>&1
 timeout 1800s docker compose -f docker/etcd/docker-compose.yml run --rm -e RECOVERY_LATENCY_MS=20 jetpack-etcd recovery > /tmp/codex_phase3_etcd_recovery_wan20_composev5_20260308T020524Z.log 2>&1
 rg -n "New etcd leader elected|etcd downtime|Jetpack recovery detected|Jetpack recovery completed|JM_Jetpack_|Failure Recovery Test PASSED|unknown flag" /tmp/codex_phase3_etcd_recovery_wan20_20260308T020457Z.log /tmp/codex_phase3_etcd_recovery_wan20_composev5_20260308T020524Z.log
+timeout 1800s docker compose -f docker/mongodb/docker-compose.yml run --rm --privileged -e RECOVERY_LATENCY_MS=20 jetpack-mongodb recovery > /tmp/codex_phase3_mongodb_recovery_wan20_20260308T021804Z.log 2>&1
+timeout 1800s docker compose -f docker/mongodb/docker-compose.yml run --rm -e RECOVERY_LATENCY_MS=20 jetpack-mongodb recovery > /tmp/codex_phase3_mongodb_recovery_wan20_composev5_20260308T021815Z.log 2>&1
+docker compose -f docker/mongodb/docker-compose.yml down -v
+timeout 1800s docker compose -f docker/mongodb/docker-compose.yml run --rm -e RECOVERY_LATENCY_MS=20 jetpack-mongodb recovery > /tmp/codex_phase3_mongodb_recovery_wan20_composev5_retry1_20260308T021903Z.log 2>&1
+rg -n "unknown flag|dependency failed to start|exited \\(100\\)|Failure Recovery Test PASSED|JM_Jetpack_" /tmp/codex_phase3_mongodb_recovery_wan20_20260308T021804Z.log /tmp/codex_phase3_mongodb_recovery_wan20_composev5_20260308T021815Z.log /tmp/codex_phase3_mongodb_recovery_wan20_composev5_retry1_20260308T021903Z.log
+docker logs mongodb-mongodb-1 | rg -n "std::exception in initAndListen|Permission denied|exitCode"
 docker kill <jetpack-mongodb-container-id>
 ```
 
