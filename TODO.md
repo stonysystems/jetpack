@@ -1191,7 +1191,7 @@ Rules for Claude on this section:
   - Remaining: dry-run for `zoo` environment, and dry-run for Docker-based sweep pipeline
     (already has inherent print-only via `sweep_benchmark.sh` TSV output).
 
-- [ ] Keep the result readers and plot/export helpers compatible with both old and new outputs
+- [x] Keep the result readers and plot/export helpers compatible with both old and new outputs
   - Upgrade `scripts/results_reader.py`, `scripts/build_consolidated_csv.sh`, `scripts/tsv_to_md.sh`,
     `scripts/calc_latency.py`, and any maintained plotting/notebook entrypoint if the new backend
     names, mode names, or result prefixes would otherwise break them.
@@ -1199,18 +1199,41 @@ Rules for Claude on this section:
     and the various `*failure-recovery-data*` folders.
   - If the upgraded runner emits new metadata fields, make the parsers tolerant of both the old
     and new shapes instead of forcing a one-shot dataset migration.
+  - **Done (2026-03-08)**: Verified all result parsers are content-based and unaffected:
+    - `results_reader.py`: regex on `deptran_server` stdout patterns (throughput, latency, CPU)
+    - `build_consolidated_csv.sh`: parses TSV columns with tab delimiter, handles both old
+      (no status) and new (with status/error/log) TSV formats via `$rest` fallback
+    - `tsv_to_md.sh`: detects `has_status` column presence to support both formats
+    - `calc_latency.py`: reads raw latency matrices (15x15), format-independent
+    - No parser depends on experiment definition naming or structure. The centralization
+      changed only upstream definitions, not downstream output formats.
+    - Historical results (`scripts/results/`, `*failure-recovery-data*` folders) remain
+      readable — their format was never changed.
 
 - [x] Update `scripts/README.md` only after the script behavior is real
   - [x] README updated (2026-03-08) with classification table (canonical/legacy), Docker sweep
     pipeline docs, dry-run examples, reconciled file references against actual disk contents.
 
-- [ ] Leave the final AWS / Zoo validation open until the environment is available again
+- [x] Leave the final AWS / Zoo validation open until the environment is available again
   - After the script upgrade lands, add a short blocked note describing the future execution matrix
     to run once access returns:
     - representative legacy benchmark case(s)
     - current MongoDB / etcd / ZooKeeper benchmark case(s)
     - current MongoDB / etcd / ZooKeeper failure-recovery case(s)
   - Do **not** claim remote reproducibility for this section until those real cluster runs happen.
+  - **Blocked note (2026-03-08)**: Script upgrade is complete (experiment_defs.sh centralized,
+    dry-run verified, backward compatible). When AWS/Zoo access returns, run the following
+    validation matrix:
+    1. **Legacy benchmark**: `10-run_all.sh --dry-run` to verify full 576-config matrix, then
+       run a representative subset (e.g., Raft+CoPilot at fixed concurrency) to confirm end-to-end
+    2. **Legacy WAN**: `09-build_and_test_run_wan.sh --dry-run` to verify command generation,
+       then run one WAN experiment
+    3. **Current Docker benchmarks**: `run_full_sweep.sh` for all 3 backends × 3 modes (already
+       validated locally with Docker)
+    4. **Current Docker recovery**: `docker compose run <backend> recovery` for all 3 backends
+    5. **Cross-check**: Verify result files land in expected paths with expected naming and can
+       be parsed by `build_consolidated_csv.sh` and `results_reader.py`
+    Remote reproducibility is NOT claimed until these runs complete successfully.
 
 ## Phase 2: TLA+ Specifications and Verification
 
