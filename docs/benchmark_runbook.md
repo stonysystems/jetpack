@@ -88,9 +88,9 @@ docker run --rm --privileged \
 
 | Flag | Meaning |
 |------|---------|
-| (none) | Adaptive fast-path throttle (default for rule mode) |
+| (none) | Adaptive fast-path throttle (default for rule mode; current default maps to `-m 101`) |
 | `-m 100` | Force 100% fast-path attempts |
-| `-m 101` | Force 0% fast-path (original coordination path only) |
+| `-m 101` | Adaptive fast-path throttle (explicitly set the adaptive sentinel used by the implementation) |
 
 ## 4. Config Files
 

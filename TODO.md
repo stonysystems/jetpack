@@ -70,7 +70,7 @@ TLC logs are saved to `tla/log/` with protocol name and timestamp.
 
 **Re-opened benchmark scope (2026-02-27)**:
 - The existing benchmark tables in this TODO are historical reference only. They are
-  incomplete because they only cover the old "Jetpack off/on" split and do not include
+  incomplete because they only cover the old "Jetpack OFF / Jetpack ON" split and do not include
   the full throughput sweep data.
 - Do **not** mark the benchmark work complete unless all 3 protocols x 3 modes are rerun
   and documented with the raw sweep points that were actually measured.
@@ -108,7 +108,10 @@ network latency (tc/netem). The original protocol leader is on h1.
 
 Original protocol = `config/none_<protocol>.yml`
 Fast path forced 100% = `config/rule_<protocol>.yml` with `-m 100`
-Adaptive fast path = `config/rule_<protocol>.yml` with `-m 101`
+Adaptive fast path = `config/rule_<protocol>.yml` with no extra `SERVER_EXTRA_ARGS`
+or explicitly with `-m 101`
+Current implementation note: `-m 101` is the adaptive sentinel in `src/deptran/config.cc`;
+omitting `-m` reaches the same adaptive behavior because the default is also `101`.
 
 For Setting A/C/E, use `config/5c1s5r5p.yml` unless a protocol-specific variant is required.
 If a different site config is used, record the exact file and why.
@@ -145,12 +148,12 @@ Latency (median, average) and throughput metrics are computed in `src/deptran/s_
 
 | Setting | h1 expected | h1 actual | h2-h5 expected | h2-h5 actual | Status |
 |---|---|---|---|---|---|
-| etcd A (off) | ~43ms (0 + ~43ms etcd Raft repl) | 43.6ms | ~83ms (40 + ~43ms) | 83.7ms | **PASS** |
-| etcd C (on) | ~40ms | 40.4ms | ~40ms | 40.7ms | **PASS** |
-| MongoDB A (off) | ~48ms (0 + ~48ms Mongo write) | 47.7ms | ~88ms (40 + ~48ms) | 88.0ms | **PASS** |
-| MongoDB C (on) | ~40-45ms | 45.2ms | ~40-46ms | 45.9ms | **PASS** |
-| ZK A (off) | ~45ms (0 + ~45ms ZAB repl+fsync) | 45.5ms | ~86ms (40 + ~45ms) | 86.0ms | **PASS** |
-| ZK C (on) | ~40ms | 40.3ms | ~40ms | 40.5ms | **PASS** |
+| etcd A (Jetpack OFF) | ~43ms (0 + ~43ms etcd Raft repl) | 43.6ms | ~83ms (40 + ~43ms) | 83.7ms | **PASS** |
+| etcd C (Jetpack ON / rule mode) | ~40ms | 40.4ms | ~40ms | 40.7ms | **PASS** |
+| MongoDB A (Jetpack OFF) | ~48ms (0 + ~48ms Mongo write) | 47.7ms | ~88ms (40 + ~48ms) | 88.0ms | **PASS** |
+| MongoDB C (Jetpack ON / rule mode) | ~40-45ms | 45.2ms | ~40-46ms | 45.9ms | **PASS** |
+| ZK A (Jetpack OFF) | ~45ms (0 + ~45ms ZAB repl+fsync) | 45.5ms | ~86ms (40 + ~45ms) | 86.0ms | **PASS** |
+| ZK C (Jetpack ON / rule mode) | ~40ms | 40.3ms | ~40ms | 40.5ms | **PASS** |
 
 **ZK latency investigation** — ZK A was ~167ms while etcd A was ~43ms; both are 3-node
 clusters with the same tc/netem setup. Three root causes found and fixed:
@@ -199,12 +202,12 @@ So "backend write" = backend's own replication RTT (~40ms via tc/netem) + local 
 
 | Setting | h1 expected | h2-h5 expected | Notes |
 |---|---|---|---|
-| etcd A (off) | ~40ms (0 + 40ms etcd Raft) | ~80ms (40 + 40ms etcd Raft) | etcd must replicate |
-| etcd C (on) | ~40ms (Jetpack fast path) | ~40ms | |
-| MongoDB A (off) | ~40ms + MongoDB repl | ~80ms + MongoDB repl | check MongoDB write concern |
-| MongoDB C (on) | ~40ms | ~40ms | |
-| ZK A (off) | ~40ms + ZK ZAB repl | ~80ms + ZK ZAB repl | ZK must replicate via ZAB |
-| ZK C (on) | ~40ms | ~40ms | |
+| etcd A (Jetpack OFF) | ~40ms (0 + 40ms etcd Raft) | ~80ms (40 + 40ms etcd Raft) | etcd must replicate |
+| etcd C (Jetpack ON / rule mode) | ~40ms (Jetpack fast path) | ~40ms | |
+| MongoDB A (Jetpack OFF) | ~40ms + MongoDB repl | ~80ms + MongoDB repl | check MongoDB write concern |
+| MongoDB C (Jetpack ON / rule mode) | ~40ms | ~40ms | |
+| ZK A (Jetpack OFF) | ~40ms + ZK ZAB repl | ~80ms + ZK ZAB repl | ZK must replicate via ZAB |
+| ZK C (Jetpack ON / rule mode) | ~40ms | ~40ms | |
 
 **Historical note**: The results table below is the old off/on-only version. Keep it only as
 reference. It does **not** satisfy the reopened 3-mode benchmark requirement above and must be
@@ -214,31 +217,31 @@ replaced or expanded in `docs/latency_analysis.md`.
 
 | Experiment | h1 Avg (ms) | h2-h5 Avg (ms) | h1-h5 Avg (ms) | Throughput (txn/s) |
 |---|---:|---:|---:|---:|
-| etcd A (5c, c=1, off) | 43.6 | 83.7 | — | — |
-| etcd B (near-peak c=200, off) | — | — | — | 7,927 |
-| etcd C (5c, c=1, on) | 40.4 | 40.7 | — | — |
-| etcd D (near-peak c=200, on) | — | — | — | 7,104 |
-| MongoDB A (5c, c=1, off) | 47.7 | 88.0 | — | — |
-| MongoDB B (near-peak c=200, off) | — | — | — | 2,135 |
-| MongoDB C (5c, c=1, on) | 45.2 | 45.9 | — | — |
-| MongoDB D (near-peak c=200, on) | — | — | — | 2,160 |
-| ZK A (5c, c=1, off) | 45.5 | 86.0 | — | — |
-| ZK B (near-peak c=200, off) | — | — | — | 5,743 |
-| ZK C (5c, c=1, on) | 40.3 | 40.5 | — | — |
-| ZK D (near-peak c=200, on) | — | — | — | 5,498 |
+| etcd A (5c, c=1, Jetpack OFF) | 43.6 | 83.7 | — | — |
+| etcd B (near-peak c=200, Jetpack OFF) | — | — | — | 7,927 |
+| etcd C (5c, c=1, Jetpack ON / rule mode) | 40.4 | 40.7 | — | — |
+| etcd D (near-peak c=200, Jetpack ON / rule mode) | — | — | — | 7,104 |
+| MongoDB A (5c, c=1, Jetpack OFF) | 47.7 | 88.0 | — | — |
+| MongoDB B (near-peak c=200, Jetpack OFF) | — | — | — | 2,135 |
+| MongoDB C (5c, c=1, Jetpack ON / rule mode) | 45.2 | 45.9 | — | — |
+| MongoDB D (near-peak c=200, Jetpack ON / rule mode) | — | — | — | 2,160 |
+| ZK A (5c, c=1, Jetpack OFF) | 45.5 | 86.0 | — | — |
+| ZK B (near-peak c=200, Jetpack OFF) | — | — | — | 5,743 |
+| ZK C (5c, c=1, Jetpack ON / rule mode) | 40.3 | 40.5 | — | — |
+| ZK D (near-peak c=200, Jetpack ON / rule mode) | — | — | — | 5,498 |
 
-- [x] Run etcd Setting A (5c, c=1, Jetpack off) — h1=43.6ms, h2-h5=83.7ms
-- [x] Run etcd Setting B (near-peak throughput, Jetpack off) — 7,927 txn/s
-- [x] Run etcd Setting C (5c, c=1, Jetpack on) — h1=40.4ms, h2-h5=40.7ms
-- [x] Run etcd Setting D (near-peak throughput, Jetpack on) — 7,104 txn/s
-- [x] Run MongoDB Setting A (5c, c=1, Jetpack off) — h1=47.7ms, h2-h5=88.0ms
-- [x] Run MongoDB Setting B (near-peak throughput, Jetpack off) — 2,135 txn/s
-- [x] Run MongoDB Setting C (5c, c=1, Jetpack on) — h1=45.2ms, h2-h5=45.9ms
-- [x] Run MongoDB Setting D (near-peak throughput, Jetpack on) — 2,160 txn/s
-- [x] Run ZK Setting A (5c, c=1, Jetpack off) — h1=45.5ms, h2-h5=86.0ms (re-run after fix)
-- [x] Run ZK Setting B (near-peak throughput, Jetpack off) — 5,743 txn/s (re-run after fix)
-- [x] Run ZK Setting C (5c, c=1, Jetpack on) — h1=40.3ms, h2-h5=40.5ms (re-run after fix)
-- [x] Run ZK Setting D (near-peak throughput, Jetpack on) — 5,498 txn/s (re-run after fix)
+- [x] Run etcd Setting A (5c, c=1, Jetpack OFF) — h1=43.6ms, h2-h5=83.7ms
+- [x] Run etcd Setting B (near-peak throughput, Jetpack OFF) — 7,927 txn/s
+- [x] Run etcd Setting C (5c, c=1, Jetpack ON / rule mode) — h1=40.4ms, h2-h5=40.7ms
+- [x] Run etcd Setting D (near-peak throughput, Jetpack ON / rule mode) — 7,104 txn/s
+- [x] Run MongoDB Setting A (5c, c=1, Jetpack OFF) — h1=47.7ms, h2-h5=88.0ms
+- [x] Run MongoDB Setting B (near-peak throughput, Jetpack OFF) — 2,135 txn/s
+- [x] Run MongoDB Setting C (5c, c=1, Jetpack ON / rule mode) — h1=45.2ms, h2-h5=45.9ms
+- [x] Run MongoDB Setting D (near-peak throughput, Jetpack ON / rule mode) — 2,160 txn/s
+- [x] Run ZK Setting A (5c, c=1, Jetpack OFF) — h1=45.5ms, h2-h5=86.0ms (re-run after fix)
+- [x] Run ZK Setting B (near-peak throughput, Jetpack OFF) — 5,743 txn/s (re-run after fix)
+- [x] Run ZK Setting C (5c, c=1, Jetpack ON / rule mode) — h1=40.3ms, h2-h5=40.5ms (re-run after fix)
+- [x] Run ZK Setting D (near-peak throughput, Jetpack ON / rule mode) — 5,498 txn/s (re-run after fix)
 
 ### Maximum throughput search (9 cases, reopened again after 2026-02-28 review)
 
@@ -280,7 +283,8 @@ Current 2026-02-27 diagnostic peaks (do **not** treat these as final acceptance 
 For each protocol (`mongodb`, `etcd`, `zookeeper`), run all 3 modes:
 - Original protocol: `config/none_<protocol>.yml`
 - Fast path forced 100%: `config/rule_<protocol>.yml` with `-m 100`
-- Adaptive fast path: `config/rule_<protocol>.yml` with `-m 101`
+- Adaptive fast path: `config/rule_<protocol>.yml` with no extra `SERVER_EXTRA_ARGS`
+  (equivalently explicit `-m 101`)
 
 For each of those 9 cases:
 - Use a fixed site config for the maximum-throughput sweep: `config/60c1s5r5p.yml`.
@@ -310,13 +314,16 @@ Minimum reporting format for the doc update:
 Column definitions for the sweep matrix:
 - `MongoDB Original` = `config/none_mongodb.yml`
 - `MongoDB Fast path 100%` = `config/rule_mongodb.yml` with `-m 100`
-- `MongoDB Adaptive` = `config/rule_mongodb.yml` with `-m 101`
+- `MongoDB Adaptive` = `config/rule_mongodb.yml` with no extra `SERVER_EXTRA_ARGS`
+  (same behavior as explicit `-m 101`)
 - `etcd Original` = `config/none_etcd.yml`
 - `etcd Fast path 100%` = `config/rule_etcd.yml` with `-m 100`
-- `etcd Adaptive` = `config/rule_etcd.yml` with `-m 101`
+- `etcd Adaptive` = `config/rule_etcd.yml` with no extra `SERVER_EXTRA_ARGS`
+  (same behavior as explicit `-m 101`)
 - `ZooKeeper Original` = `config/none_zookeeper.yml`
 - `ZooKeeper Fast path 100%` = `config/rule_zookeeper.yml` with `-m 100`
-- `ZooKeeper Adaptive` = `config/rule_zookeeper.yml` with `-m 101`
+- `ZooKeeper Adaptive` = `config/rule_zookeeper.yml` with no extra `SERVER_EXTRA_ARGS`
+  (same behavior as explicit `-m 101`)
 
 **Raw CSV requirements for `docs/sweep*.csv`**:
 - The existing `docs/sweep_results_2026-02-27_diagnostic.csv` is incomplete. Replace it or add a new
@@ -605,7 +612,8 @@ this section can be closed again.
     - updated consolidated CSV,
     - saved per-run logs for retries/failures,
     - and the exact rerun date plus commit hash recorded in the sweep metadata.
-  - Current status as of 2026-03-02:
+  - Current status as of 2026-03-02 (historical only; superseded by the 2026-03-08 Codex
+    end-to-end reproducibility gate below):
     - **All acceptance checks satisfied.** Full 9-case rerun completed 2026-03-02 (commit 194c32c1):
       - 99/99 data points OK, zero failed rows across all 9 datasets.
       - Original-mode CPU measured via external `/proc/stat` (4.6-12.1% system-wide).
@@ -614,6 +622,212 @@ this section can be closed again.
       - Canonical TSV/Markdown, consolidated CSV, `CANONICAL_INDEX.md`, `FAILURE_LEDGER.md`,
         `README.md`, and `docs/latency_analysis.md` all updated from the same rerun pass.
       - Docker images rebuilt 2026-03-02 with CPU instrumentation from `c1368ef4`.
+
+### Re-opened After 2026-03-08 Codex End-to-End Reproducibility Review (Highest Priority For Claude)
+
+This section **supersedes** the 2026-03-02 acceptance claim above.
+
+The Codex review found that the repository snapshot is still not accepted as
+end-to-end reproducible, even though many checked-in artifacts are internally consistent.
+The next acceptance target is **not** “the numbers look plausible” or “the raw files agree
+with each other.” The target is:
+
+- a fresh Codex agent can start from the current repository state,
+- follow `docs/benchmark_runbook.md` as the primary operator guide,
+- build fresh backend images from the current checkout,
+- run the benchmark and recovery matrices from end to end,
+- regenerate the published result artifacts,
+- and obtain results that either match the published claims closely enough to support them,
+  or force the docs/results to be narrowed so they only claim what is actually reproducible.
+
+Non-negotiable rules for Claude on this reopened section:
+
+- `docs/benchmark_runbook.md` is the primary operational source of truth for evaluation
+  reproducibility. If the runbook is wrong, fix the runbook **and** the underlying scripts /
+  Docker / docs. Do not keep a hidden local workaround.
+- `./test_run.py` is an old script and is **not** part of the accepted benchmark/recovery path.
+  Do not use it as evidence for or against evaluation reproducibility unless the runbook is
+  intentionally changed to make it part of the supported workflow.
+- For benchmark mode selection, follow the runbook:
+  - original = `none_<backend>.yml`
+  - fast path forced 100% = `rule_<backend>.yml` with `-m 100`
+  - adaptive = `rule_<backend>.yml` with either **no** extra `SERVER_EXTRA_ARGS`
+    or explicit `-m 101`
+  - current implementation detail: the config default is `101`, and `101` is the adaptive
+    sentinel in the coordinator path
+- Do **not** rely on pre-existing local images as final evidence. Fresh-image reproducibility is
+  part of the task. Using a stale local `jetpack-*` image is acceptable only for diagnosis while
+  fixing the build pipeline; it is not acceptable for final closure.
+- Do **not** accept `--no-deps`, ad hoc environment overrides, local-only compose syntax changes,
+  or manual image surgery as the final path unless those changes become part of the checked-in,
+  documented, runbook-backed workflow.
+- Do **not** close this section based only on artifact consistency, docs cleanup, or partial reruns.
+  The acceptance gate is a clean end-to-end rerun from build to published results.
+
+Why this is re-opened based on `docs/codex_review_report.md`:
+
+- The review report mixed in `./test_run.py` as an environment note, but that script is not part
+  of the runbook and should not drive the reproducibility judgment.
+- The **real** remaining issues are runbook-path issues:
+  - fresh image builds are not yet proven reliable from the current checkout
+  - the current recovery runbook command shape is not accepted until it works on the supported
+    `docker compose` CLI without undocumented syntax hacks
+  - MongoDB low-concurrency benchmark reproduction is currently non-supporting
+  - MongoDB recovery is currently blocked before recovery even begins
+  - ZooKeeper recovery currently needed a fallback path that does not count as final acceptance
+  - `result.md` and recovery docs still contain stale / ambiguous / internally conflicting claims
+
+- [ ] Re-establish a **clean-room build gate** for all 3 backends (`etcd`, `mongodb`, `zookeeper`)
+  - Start from a state that does not depend on previously built `jetpack-*` images.
+    Acceptable proof options:
+    - remove the relevant local images before the acceptance run, or
+    - build with fresh unique tags tied to the current commit and use those tags throughout the rerun
+  - The accepted path must use checked-in Dockerfiles / compose files / scripts from the current repo,
+    not a manually patched local image.
+  - Fix the current blockers identified by Codex in the actual repo:
+    - etcd / MongoDB builds timing out during oversized Docker context transfer
+    - ZooKeeper build failing due to stale upstream download URL (`downloads.apache.org` 404)
+    - any missing dependency or toolchain assumptions that prevent a fresh Docker build
+  - If Docker context size is the blocker, solve it in the repo (`.dockerignore`, Dockerfile copy
+    structure, or equivalent). Do not simply extend the timeout and declare victory.
+  - Acceptance for this item:
+    - Codex can build all 3 backend images from the current checkout in one session
+    - the build commands are the same ones documented in `docs/benchmark_runbook.md`
+    - the rerun metadata records the commit hash, build date, and resulting image tag / image ID
+
+- [ ] Make the **documented runbook commands** the actual accepted commands
+  - `docs/benchmark_runbook.md` must be runnable as written on the supported Docker Compose V2 / V5 CLI.
+  - If `docker compose run --rm --privileged ...` is not accepted by the current CLI, then fix the
+    compose files / wrapper scripts / runbook text so the documented command path works cleanly.
+  - No final acceptance while the nominal runbook recovery command fails with `unknown flag: --privileged`.
+  - If service-level `privileged: true` is the right solution, document that explicitly and update the
+    runbook examples to the command form that actually works.
+  - The same rule applies to benchmark commands, sweep commands, cleanup commands, and log locations:
+    the documented operator path must match the real passing path.
+
+- [ ] Reproduce the **6 low-concurrency sanity runs** from the runbook-backed default path
+  - Required cases:
+    - etcd (Jetpack OFF)
+    - etcd (Jetpack ON / rule mode)
+    - MongoDB (Jetpack OFF)
+    - MongoDB (Jetpack ON / rule mode)
+    - ZooKeeper (Jetpack OFF)
+    - ZooKeeper (Jetpack ON / rule mode)
+  - Use the runbook-compatible path and documented environment variables only.
+  - Do **not** treat hidden emergency overrides as final evidence:
+    - `MONGODB_ENDPOINTS` or similar manual overrides may be used while debugging,
+      but they do not count for final closure unless they are promoted into the checked-in
+      supported workflow and documented in the runbook as required input
+  - MongoDB acceptance bar for this item:
+    - the default documented benchmark path must succeed regardless of which replica becomes primary
+    - completed runs must no longer contradict the published low-concurrency absolute latency levels
+      in a material way without the docs being updated accordingly
+  - Run each low-concurrency case at least 3 times after the relevant fixes.
+  - Record all 3 attempts, not only the best-looking run.
+  - Do not close this item on “delta model looks right” alone if the absolute published values remain
+    materially different and the docs still claim the older numbers as current.
+
+- [ ] Reproduce the **full 9-case throughput sweep** from freshly built images
+  - Required matrix:
+    - etcd original / fastpath100 / adaptive
+    - MongoDB original / fastpath100 / adaptive
+    - ZooKeeper original / fastpath100 / adaptive
+  - Use one consistent generation pass for the accepted dataset:
+    - fresh images from the current checkout
+    - current sweep script
+    - current benchmark parser / instrumentation
+    - one rerun window with recorded date and commit
+  - Do **not** mix rows from old images / old scripts / old commits with new rows and call the result
+    final unless the docs explicitly mark that dataset as interim.
+  - For every point, preserve:
+    - status
+    - retry count
+    - error summary
+    - saved log path
+  - Repeat the best point and its adjacent concurrency values after fixes, or rerun the whole sweep
+    if the sweep pipeline changed materially.
+  - If the high-concurrency tail remains environment-sensitive, do **not** paper over it with one
+    lucky peak number. Either:
+    - improve the system until Codex can reproduce the published peak/shape credibly, or
+    - narrow the docs so they present a repeated-run range / variance-aware conclusion instead of
+      a single over-precise peak claim
+  - Final accepted artifacts for this item must be regenerated from the accepted rerun pass:
+    - canonical TSV files
+    - Markdown exports beside them
+    - consolidated CSV
+    - latency-analysis summary tables
+    - linked logs for failures / retries
+
+- [ ] Reproduce the **3-backend WAN recovery matrix** from the accepted runbook path
+  - Required backends:
+    - etcd
+    - MongoDB
+    - ZooKeeper
+  - Required condition:
+    - actual WAN-mode path is active where `RECOVERY_LATENCY_MS=20` is supposed to matter
+  - A fallback run that bypasses dependencies (`--no-deps`) or uses an old image-local script variant
+    without the WAN branch does **not** satisfy final acceptance.
+  - Fix the actual startup/runtime defects instead:
+    - MongoDB recovery startup failure (`open: Permission denied`, exit 100)
+    - ZooKeeper dependency startup / config-path failure
+    - any runbook/compose incompatibility with current Docker Compose
+  - For each accepted backend, save at least 3 WAN runs after fixes.
+  - Each saved run must show the full chain:
+    - leader kill
+    - backend re-election
+    - signal write / signal detection
+    - Jetpack recovery start
+    - Jetpack recovery completion
+  - Report **both** metrics and label them unambiguously:
+    - script-level detection/downtime metric
+    - internal Jetpack `duration=` metric
+  - The docs must say explicitly which metric is compared against the RTT formula (`1ms poll + 2 * RTT`)
+    and must not mix the two under the same “Jetpack downtime” label.
+
+- [ ] Make the **published docs/results** match what Codex can actually rerun
+  - Reconcile `docs/latency_analysis.md`, `docs/failure_recovery_evaluation.md`, `result.md`,
+    `docs/benchmark_runbook.md`, and the canonical raw artifacts from the same accepted rerun pass.
+  - `result.md` must not keep stale throughput tables that disagree with the canonical sweep files.
+    Either update it to match, mark it historical, or remove benchmark authority from it explicitly.
+  - Recovery docs must not keep contradictory `RESOLVED` / `OPEN` statuses for the same issue.
+  - Pre-fix narrative numbers that are not backed by committed logs must be labeled clearly as
+    historical context rather than artifact-backed accepted evidence.
+  - Final docs must distinguish:
+    - artifact-backed claim
+    - rerun-confirmed claim
+    - claim still open / environment-sensitive
+
+- [ ] Leave behind a **Codex-runnable end-to-end recipe**
+  - After the fixes above, one fresh Codex agent should be able to reproduce the evaluation by following
+    a short, explicit path without tribal knowledge.
+  - Minimum deliverables:
+    - one checked-in runbook section or script sequence that covers:
+      - prerequisites
+      - fresh image build
+      - low-concurrency sanity runs
+      - full 9-case throughput sweep
+      - 3-backend WAN recovery reruns
+      - artifact regeneration / where results land
+    - one short acceptance checklist that says what must be true before calling the evaluation reproducible
+  - The final handoff must not require:
+    - old local images
+    - hidden environment variables
+    - undocumented compose syntax changes
+    - manual patching inside running containers
+    - skipping MongoDB or ZooKeeper because “the rest already works”
+
+- [ ] Do not close this reopened section until **Codex can reproduce build-to-result end to end**
+  - Minimum closure bar:
+    - fresh images built from current repo state
+    - runbook commands pass as documented
+    - 6 low-concurrency runs reproduced from the documented path
+    - 9-case sweep rerun from the accepted fresh images
+    - 3-backend WAN recovery rerun from the accepted fresh images
+    - canonical raw files and published docs regenerated from that rerun pass
+    - no unresolved contradiction between published docs and what Codex can reproduce
+  - If exact old numbers cannot be reproduced after the system is made cleanly rerunnable,
+    then the docs/results must be updated to the narrower, honest claim set that **is**
+    reproducible. Do not preserve stronger historical claims just because they were already written.
 
 ### Docker test script improvements
 
