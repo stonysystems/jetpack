@@ -27,12 +27,14 @@
   explicitly rejects the projection shortcut and marks Step 3 as NOT DONE.
 - Phase 2I 3-D log refactor completed (2026-03-08): All 7 TLA+ files refactored for genuine
   `log[i][j][k]` and per-proposer `commitIndex[i][j]`. Projection operators removed from
-  `jetpack.tla`. `ApplyCommitted` moved to wrappers. Next task: model checking verification
-  (requires Java 11+ or Docker) and reproducibility runner updates.
+  `jetpack.tla`. `ApplyCommitted` moved to wrappers.
+- Phase 2I small-config TLC verification (2026-03-08): Raft exhaustive (82K states, no errors),
+  CoPilot exhaustive (515 states, no errors), Mencius in progress (21M+ states, no errors so far).
+  Next: complete Mencius exhaustive, then big-config 12-hour runs.
 
 ### Undone In Priority Order
 
-1. Phase 2I: 3-D log refactor is done; next: rerun model checking for all three Jetpack/base combinations (requires Java 11+ or Docker), then make the experiment flow reproducible.
+1. Phase 2I: small-config TLC runs in progress (Raft + CoPilot pass, Mencius running without errors); next: complete Mencius exhaustive, then big-config 12-hour runs for all 3 combinations.
 2. Phase 2I / Phase 2H: make the whole TLA+ experiment flow reproducible from scratch, with checked-in runner/configs and timestamp-prefixed logs for every small and 12-hour big run.
 3. Phase 1D: make Codex able to reproduce the evaluation end to end, from fresh image build to regenerated result artifacts.
 4. Phase 1D / Phase 1F: make the runbook-backed WAN recovery flow reproducible for all three backends and align recovery docs with the correct metrics.
@@ -1754,6 +1756,11 @@ Non-negotiable rules for Claude on this reopened section:
     - no constant reduction
     - no shortened substitute window
     - no “this protocol is too expensive, so skip it” shortcut
+  - **Small-config progress (2026-03-08)**:
+    - [x] `jetpack_raft.tla` small: exhaustive, 82,375 states generated, 6,029 distinct, no errors
+    - [x] `jetpack_copilot.tla` small: exhaustive, 515 states generated, 70 distinct, no errors
+    - [ ] `jetpack_mencius.tla` small: 21M+ states generated, 2.2M+ distinct, no errors so far;
+      still running (large state space due to multi-proposer + 2 CmdIds)
 
 - [ ] Make the TLA+ experiment trail reproducible from scratch
   - Update the checked-in runner path (`tla/run-tlc.sh` or its checked-in replacement) so a fresh
