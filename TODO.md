@@ -1163,13 +1163,9 @@ Rules for Claude on this section:
   - If the upgraded runner emits new metadata fields, make the parsers tolerant of both the old
     and new shapes instead of forcing a one-shot dataset migration.
 
-- [ ] Update `scripts/README.md` only after the script behavior is real
-  - The README should describe the **actual** supported workflow after the refactor:
-    - what is canonical
-    - what is legacy-but-still-supported
-    - how to run the current backend matrix
-    - how to invoke dry-run mode while AWS is unavailable
-  - Do **not** use the README as a placeholder for behavior that the scripts still do not implement.
+- [x] Update `scripts/README.md` only after the script behavior is real
+  - [x] README updated (2026-03-08) with classification table (canonical/legacy), Docker sweep
+    pipeline docs, dry-run examples, reconciled file references against actual disk contents.
 
 - [ ] Leave the final AWS / Zoo validation open until the environment is available again
   - After the script upgrade lands, add a short blocked note describing the future execution matrix
