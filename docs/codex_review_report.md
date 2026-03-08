@@ -2,7 +2,7 @@
 
 ## 1. Scope
 
-This report currently covers the first eighteen high-priority leaf tasks from `TODO_codex.md`:
+This report currently covers the first nineteen high-priority leaf tasks from `TODO_codex.md`:
 
 - `Phase 1A`: Low-concurrency latency sanity check.
 - `Phase 1B`: Throughput sweep consistency check.
@@ -22,6 +22,7 @@ This report currently covers the first eighteen high-priority leaf tasks from `T
 - `Phase 2` next leaf: throughput sweep rerun (`mongodb adaptive` / `rule_mongodb.yml`).
 - `Phase 2` next leaf: throughput sweep rerun (`zookeeper original` / `none_zookeeper.yml`).
 - `Phase 2` next leaf: throughput sweep rerun (`zookeeper fastpath100` / `rule_zookeeper.yml -m 100`).
+- `Phase 2` next leaf: throughput sweep rerun (`zookeeper adaptive` / `rule_zookeeper.yml`).
 
 Included in this pass:
 
@@ -31,16 +32,16 @@ Included in this pass:
 - Recovery-model checks against `docs/failure_recovery_evaluation.md`, `result.md`, and committed recovery logs.
 - Phase-2 prerequisite verification (Docker, compose, submodules, ulimit, backend image build attempts).
 - Low-concurrency rerun execution (`etcd OFF`, `etcd ON`, `mongodb OFF`, `mongodb ON`, `zookeeper OFF`, `zookeeper ON`) with captured command transcripts and per-run metrics.
-- Throughput-sweep rerun execution (`etcd original`, `etcd fastpath100`, `etcd adaptive`, `mongodb original`, `mongodb fastpath100`, `mongodb adaptive`, `zookeeper original`, `zookeeper fastpath100`) with per-concurrency comparison to canonical sweep artifacts.
+- Throughput-sweep rerun execution (`etcd original`, `etcd fastpath100`, `etcd adaptive`, `mongodb original`, `mongodb fastpath100`, `mongodb adaptive`, `zookeeper original`, `zookeeper fastpath100`, `zookeeper adaptive`) with per-concurrency comparison to canonical sweep artifacts.
 
 Not yet executed in this report:
 
-- Remaining `Phase 2` throughput sweep reruns (1 of 9 matrix cases still pending).
+- Remaining `Phase 2` throughput sweep reruns (0 of 9 matrix cases still pending).
 - `Phase 3` recovery reruns.
 
 ## 2. Environment
 
-- UTC timestamp (this iteration): 2026-03-08T01:45:12Z
+- UTC timestamp (this iteration): 2026-03-08T02:03:33Z
 - Git branch: `jetpack`
 - Repository root: `/home/shuai/workspace/jetpack`
 - Build/test environment blockers observed:
@@ -699,6 +700,36 @@ Interpretation (`zookeeper fastpath100` throughput sweep rerun):
 - Fast-path success is near 100% through `c<=75`, then drops to `0` from `c>=100`, indicating substantial mode-path behavior shift under load.
 - Overall this case is partially supporting: operational completion and low/mid-concurrency levels reproduce well, but high-concurrency curve shape and mode-path mix differ from canonical.
 
+Ninth throughput-sweep rerun set (`zookeeper adaptive`, `rule_zookeeper.yml`):
+
+```bash
+timeout 7200s /tmp/codex_sweep_benchmark_zookeeper_adaptive_timeout.sh jetpack-zookeeper rule_zookeeper.yml > /tmp/codex_phase2_sweep_zookeeper_adaptive_final_20260308T014626Z.tsv 2> /tmp/codex_phase2_sweep_zookeeper_adaptive_final_20260308T014626Z.stderr.log
+```
+
+| Concurrency | Rerun throughput | Canonical throughput | Delta vs canonical | Rerun status |
+|---:|---:|---:|---:|---|
+| 1 | 40.00 | 39.30 | +1.78% | OK |
+| 5 | 271.90 | 272.70 | -0.29% | OK |
+| 10 | 572.70 | 567.20 | +0.97% | OK |
+| 25 | 1465.80 | 1462.80 | +0.21% | OK |
+| 50 | 2963.70 | 2958.30 | +0.18% | OK |
+| 75 | 4455.70 | 4459.10 | -0.08% | OK |
+| 100 | 5278.00 | 5054.20 | +4.43% | OK |
+| 150 | 5661.50 | 5486.00 | +3.20% | OK |
+| 200 | 4729.50 | 4620.80 | +2.35% | OK |
+| 300 | 5907.40 | 5380.30 | +9.80% | OK |
+| 400 | 5932.80 | 5422.80 | +9.40% | OK |
+
+Interpretation (`zookeeper adaptive` throughput sweep rerun):
+
+- Final sweep completed `11/11` points with `status=OK` on all points and `retry_count=0` for all points.
+- Throughput closely matches canonical through low/mid concurrency (`c<=75`, within about `-0.3%` to `+1.8%`).
+- At `c=100..200`, rerun throughput is modestly above canonical (about `+2.4%` to `+4.4%`).
+- At high concurrency (`c=300..400`), rerun throughput is materially above canonical (about `+9.4%` to `+9.8%`).
+- Rerun peak is `5932.80 @ c=400`, above canonical peak `5486.00 @ c=150` (about `+8.2%`, and at a different concurrency).
+- Fast-path success is `100%` through `c<=50`, then drops to `0` from `c>=75`, indicating a substantial adaptive path-mix shift under load.
+- Overall this case is partially supporting: all points reproduce operationally and low/mid-concurrency values align, but high-concurrency curve shape and peak location differ from canonical.
+
 ## 7. Failure Recovery Rerun Attempts
 
 No failure-recovery rerun executed yet. Pending `Phase 3`.
@@ -741,6 +772,8 @@ No failure-recovery rerun executed yet. Pending `Phase 3`.
   - Risk: ZooKeeper high-concurrency curve shape appears environment-sensitive, so single-run peak-location claims should be treated as provisional without variance bounds.
 - The `zookeeper fastpath100` throughput sweep rerun is close to canonical through `c<=100` but exceeds canonical throughput at `c>=150`, with peak shifting to `c=400` and fast-path success collapsing to `0` from `c>=100`.
   - Risk: ZooKeeper fastpath100 high-concurrency behavior appears environment-sensitive and mode-path mixing may differ materially between runs, reducing confidence in single-run capacity/fast-path claims.
+- The `zookeeper adaptive` throughput sweep rerun is close to canonical through `c<=75` but increasingly exceeds canonical at higher concurrency and shifts peak from `c=150` to `c=400`.
+  - Risk: ZooKeeper adaptive high-concurrency capacity/shape appears environment-sensitive, so single-run peak and tail-shape claims should be treated as provisional without variance bounds.
 - Runtime regression testing still blocked in this environment by build prerequisites/toolchain compatibility.
   - Risk: this report can currently confirm artifact consistency, not runtime reproducibility.
 
@@ -766,7 +799,8 @@ No failure-recovery rerun executed yet. Pending `Phase 3`.
     - `mongodb adaptive` completed with `11/11 OK`; low/mid-concurrency points (`c<=50`) closely match canonical, but `c=75..300` underperform by about `16%` to `26%`, with peak `3242.9@c=75` vs canonical `3858.3@c=100` and an inverted tail at `c=400` (+30% vs canonical).
     - `zookeeper original` completed with `11/11 OK`; low/mid-concurrency points (`c<=75`) closely match canonical, but `c=100..150` underperform by about `13%` to `14%`, and peak shifts to `5879.5@c=400` vs canonical `5647.6@c=150`.
     - `zookeeper fastpath100` completed with `11/11 OK`; low/mid-concurrency points are close to canonical through `c<=100`, but `c>=150` exceeds canonical by about `+0.9%` to `+19.5%`, with peak `5853.4@c=400` vs canonical `5456.4@c=300` and fast-path success dropping to `0` from `c>=100`.
-- `Phase 2` throughput sweep matrix status: 8 of 9 cases rerun; remaining 1 case is still pending.
+    - `zookeeper adaptive` completed with `11/11 OK`; low/mid-concurrency points (`c<=75`) closely match canonical, while `c>=100` is above canonical by about `+2.4%` to `+9.8%`, with peak `5932.8@c=400` vs canonical `5486.0@c=150` and fast-path success dropping to `0` from `c>=75`.
+- `Phase 2` throughput sweep matrix status: 9 of 9 cases rerun; no cases are pending.
 - Open discrepancies:
   - Throughput numbers in `result.md` are not consistent with canonical sweep artifacts.
   - Recovery sections mix metrics and contain internal status conflicts; pre-fix RTT=40ms gap claims are not fully traceable to committed logs.
@@ -822,6 +856,10 @@ sed -e 's|LOG_DIR="docs/sweep_2026-02-28/logs/${IMAGE_SHORT}_${MODE_SHORT}"|LOG_
 chmod +x /tmp/codex_sweep_benchmark_zookeeper_fastpath100_timeout.sh
 timeout 7200s /tmp/codex_sweep_benchmark_zookeeper_fastpath100_timeout.sh jetpack-zookeeper rule_zookeeper.yml "-m 100" > /tmp/codex_phase2_sweep_zookeeper_fastpath100_final_20260308T012804Z.tsv 2> /tmp/codex_phase2_sweep_zookeeper_fastpath100_final_20260308T012804Z.stderr.log
 join -t $'\t' -1 1 -2 1 <(awk -F'\t' '!/^#/&&$1!="concurrency"{printf "%s\t%s\t%s\n",$1,$2,$13}' /tmp/codex_phase2_sweep_zookeeper_fastpath100_final_20260308T012804Z.tsv | sort -n) <(awk -F'\t' '!/^#/&&$1!="concurrency"{printf "%s\t%s\n",$1,$2}' docs/sweep_2026-02-28/zookeeper_fastpath100.tsv | sort -n)
+sed -e 's|LOG_DIR="docs/sweep_2026-02-28/logs/${IMAGE_SHORT}_${MODE_SHORT}"|LOG_DIR="/tmp/codex_sweep_logs/${IMAGE_SHORT}_${MODE_SHORT}"|' -e 's|output=$(docker run --rm --privileged \\|output=$(timeout 360s docker run --rm --privileged \\|' scripts/sweep_benchmark.sh > /tmp/codex_sweep_benchmark_zookeeper_adaptive_timeout.sh
+chmod +x /tmp/codex_sweep_benchmark_zookeeper_adaptive_timeout.sh
+timeout 7200s /tmp/codex_sweep_benchmark_zookeeper_adaptive_timeout.sh jetpack-zookeeper rule_zookeeper.yml > /tmp/codex_phase2_sweep_zookeeper_adaptive_final_20260308T014626Z.tsv 2> /tmp/codex_phase2_sweep_zookeeper_adaptive_final_20260308T014626Z.stderr.log
+join -t $'\t' -1 1 -2 1 <(awk -F'\t' '!/^#/&&$1!="concurrency"{printf "%s\t%s\t%s\n",$1,$2,$13}' /tmp/codex_phase2_sweep_zookeeper_adaptive_final_20260308T014626Z.tsv | sort -n) <(awk -F'\t' '!/^#/&&$1!="concurrency"{printf "%s\t%s\n",$1,$2}' docs/sweep_2026-02-28/zookeeper_adaptive.tsv | sort -n)
 docker kill <jetpack-mongodb-container-id>
 ```
 
