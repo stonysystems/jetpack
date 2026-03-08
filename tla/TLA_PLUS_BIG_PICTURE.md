@@ -112,7 +112,31 @@ Important clarification:
 The success criterion for Step 3 is:
 - the same `jetpack.tla` is reused across all three base protocols
 - the base-specific modules adapt their protocol into a shared Jetpack-facing interface
+- the shared Jetpack-facing log interface is a real 3-dimensional base-protocol log
+  `Log[i][j][k]`, not a projection reconstructed from a flatter base log
 - the resulting model checks satisfy both Jetpack invariants and base-protocol invariants
+
+### Non-negotiable modeling rule
+
+Jetpack should **not** adapt itself downward to a 2-D base log and then reconstruct a fake
+3-D view.
+
+The required direction is the opposite:
+- the base protocol adapts to Jetpack
+- the base protocol exposes / maintains a genuine 3-D replicated log
+- `jetpack.tla` consumes that shared 3-D interface directly
+
+Not acceptable:
+- keeping a 2-D base log `log[i][k]`
+- adding a projection layer such as `Log3D`, `ProposerSlots`, `ProposerOfSlot`, or similar
+  to pretend the base protocol was 3-D all along
+- claiming that such a projection is “close enough” to the intended abstraction
+
+Acceptable:
+- thin wrapper wiring for `Init`, `Next`, `UNCHANGED`, or `INSTANCE ... WITH ...`
+- unused logical sequences staying blank / `Nil` for protocols that do not use all sequences
+- protocol-specific internal transition logic, as long as the exported Jetpack-facing log
+  state is truly 3-D
 
 ## Desired Log Abstraction
 
@@ -131,6 +155,13 @@ Interpretation:
 
 This gives a common logical representation across protocols with different leadership styles.
 
+Important clarification:
+- this 3-D log is not merely a derived view for proofs
+- it is the Jetpack-facing log structure that the base protocol must actually maintain
+- `jetpack.tla` should reason over this shared 3-D state directly
+- if a base protocol keeps auxiliary flat / slot / local structures internally, that is fine,
+  but the shared composition boundary with Jetpack must still expose the genuine 3-D log
+
 ### Raft interpretation
 
 If the leader is server `0`:
@@ -141,6 +172,7 @@ If the leader is server `0`:
 This models:
 - one leader-owned sequence
 - follower replicas storing copies of the leader sequence
+- unused logical sequences still exist in the state but remain blank / `Nil`
 
 ### CoPilot interpretation
 
@@ -152,6 +184,7 @@ If Pilot is `0` and Copilot is `1`:
 This models:
 - two distinguished ordering sequences
 - all replicas storing copies of those sequences
+- unused logical sequences still exist in the state but remain blank / `Nil`
 
 ### Mencius interpretation
 
@@ -229,21 +262,35 @@ Small config:
 - minimal sanity model
 - intended for quick exhaustive or near-exhaustive checking
 
-Large config:
-- at least 5 servers
-- at least 2 keys
-- at least 3 commands
+Large config for the accepted Jetpack/base composition runs:
+
+```tla
+CONSTANTS
+  Server = {s1, s2, s3, s4, s5}
+  Client = {c1}
+  CmdId = {id1, id2, id3}
+  Key = {k1, k2}
+```
+
+Do not reduce these constants for the accepted large run.
+If a smaller config is useful while debugging, keep it clearly labeled as debug-only.
 
 ### Runtime policy
 
-For each standalone or integrated spec:
+For each composed Jetpack/base combination:
+- `jetpack.tla` + `base_raft.tla`
+- `jetpack.tla` + `base_copilot.tla`
+- `jetpack.tla` + `base_mencius.tla`
+
+run exactly two accepted cases:
 - first run the small config
-- then run the larger config
-- if the larger config is too large for exhaustive checking, run for a long window
-  (target: about 2 days)
+- then run the large config above for a fixed 12-hour window
+
+For the big run, “12 hours with no error” is the required acceptance bar for this phase.
+Do not silently shorten the run window and do not reduce the constants.
 
 Interpretation:
-- “2 days with no error” means “probably right / no bug found yet”
+- “12 hours with no error” means “no bug found in the accepted bounded search window”
 - it does not mean “formally proved”
 
 ### Log retention policy
@@ -251,13 +298,19 @@ Interpretation:
 Every run should save a log file.
 
 The filename should include:
-- timestamp
+- timestamp at the **start** of the filename
 - spec/protocol name
 - config name or size marker
 
 Example shape:
-- `tla/log/2026-03-02_jetpack_mencius_small.log`
-- `tla/log/2026-03-02_jetpack_mencius_large.log`
+- `tla/log/2026-03-08_14-30-00_jetpack_mencius_small.log`
+- `tla/log/2026-03-08_14-30-00_jetpack_mencius_large.log`
+
+The reproducibility contract is:
+- the runner command must be checked in
+- the config files must be checked in
+- the log filename policy must be automatic, not manual
+- a fresh agent should be able to rerun the same model-checking workflow from scratch
 
 Do not rely on unsaved terminal output for proof claims.
 

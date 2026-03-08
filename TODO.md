@@ -8,7 +8,7 @@
 
 ## Review Snapshot
 
-- Latest active phase: `Phase 1D: Codex End-to-End Reproducibility Review`
+- Latest active phase: `Phase 2I: 3-D Base-Log Architecture Review`
 
 ### Recently Done / Updated
 
@@ -19,13 +19,15 @@
   benchmark and recovery reproducibility.
 - Phase 2 records the TLA+ base/wrapper split, shared Jetpack abstraction work, TLC logs, and the
   latest shared-log / fast-path review findings.
+- Phase 2 has now been reopened again around the 3-D log architecture: Jetpack must consume a
+  real base-protocol `Log[i][j][k]`, not a projected 3-D view reconstructed from a 2-D base log.
 
 ### Undone In Priority Order
 
-1. Phase 1D: make Codex able to reproduce the evaluation end to end, from fresh image build to regenerated result artifacts.
-2. Phase 1D / Phase 1F: make the runbook-backed WAN recovery flow reproducible for all three backends and align recovery docs with the correct metrics.
-3. Phase 1D: reconcile published benchmark/recovery docs with what Codex can actually rerun from the current repo state.
-4. Phase 2G / Phase 2H: finish the remaining TLA+ shared-abstraction / proof-story cleanup with disciplined TLC evidence.
+1. Phase 2I: rebuild the TLA+ design around a true base-protocol 3-D log `Log[i][j][k]`, update the invariants, and rerun model checking for all three Jetpack/base combinations.
+2. Phase 2I / Phase 2H: make the whole TLA+ experiment flow reproducible from scratch, with checked-in runner/configs and timestamp-prefixed logs for every small and 12-hour big run.
+3. Phase 1D: make Codex able to reproduce the evaluation end to end, from fresh image build to regenerated result artifacts.
+4. Phase 1D / Phase 1F: make the runbook-backed WAN recovery flow reproducible for all three backends and align recovery docs with the correct metrics.
 5. Phase 3 and Phase 4: keep the integration docs, README, leader-watcher notes, and supporting alignment work consistent with the accepted workflows.
 
 ### Phase Map
@@ -43,6 +45,9 @@
   rather than overwriting the earlier history.
 - Keep `Review Snapshot` current: update `Latest active phase`, `Recently Done / Updated`, and
   `Undone In Priority Order` whenever a major task lands or a major task is reopened.
+- This file is a future-work / Claude-facing coordination document. Do **not** copy a
+  turn-scoped instruction given only to Codex (for example, “do not edit file X in this turn”)
+  into this TODO unless the user explicitly wants that rule preserved for future Claude work.
 
 ## Goal
 
@@ -742,6 +747,8 @@ Why this is re-opened based on `docs/codex_review_report.md`:
     runbook examples to the command form that actually works.
   - The same rule applies to benchmark commands, sweep commands, cleanup commands, and log locations:
     the documented operator path must match the real passing path.
+  - Do **not** update the runbook first and leave the code/scripts behind. Any runbook diff in this
+    area must be paired with the actual reproducible command path and the rerun evidence that proves it.
 
 - [ ] Reproduce the **6 low-concurrency sanity runs** from the runbook-backed default path
   - Required cases:
@@ -1023,8 +1030,8 @@ measures from signal file write to `recovery_finish_after_failure` detection.
 ## Phase 2: TLA+ Specifications and Verification
 
 Priority note:
-- TLA+ work is important, but it is **medium priority** and should not displace the
-  benchmark/evaluation reruns above.
+- As of Phase 2I, TLA+ is temporarily a **top priority** workstream until the 3-D base-log
+  architecture and reproducible model-checking story are corrected.
 - Do **not** overclaim TLA+ completion. A long TLC run with no error yet is not the same as
   a passed model check, and a wrapper-only result is not the same as the final abstraction proof.
 
@@ -1047,6 +1054,10 @@ Rules for Claude on this section:
   - the failing invariant or exception,
   - the current suspected root cause,
   - and the next required fix/rerun step.
+- If model checking does **not** pass, do **not** stop after reporting the failing result to me.
+  Claude should use the counterexample / exception / timeout evidence to make the next justified
+  fix, rerun TLC, and continue that fix-and-rerun loop until all requirements for the task are met
+  or there is a concrete blocker that cannot be resolved from this repo state.
 - If only part of a task is done, keep the parent item open and add sub-bullets for partial
   progress. Do **not** check the parent box just because there is some momentum.
 - Do **not** weaken the goal to match the current implementation. If the current model cannot
@@ -1182,7 +1193,7 @@ Expected abstraction direction:
 - If Claude uses a different internal representation, it must write down an explicit
   refinement mapping that shows it is equivalent to this 3D logical view.
 
-Status note (resolved 2026-03-07):
+Status note (resolved 2026-03-07, historical only; superseded by Phase 2I below):
 - The 3-D abstraction task is now complete. `ProposerOfSlot(_)` has been replaced by
   `ProposerOfEntry(_, _)`, and all agreement/ordering logic uses the 3D projection operators
   (`Log3D`, `Log3DLen`, `ProposerCmdSeq`) with per-sequence local indices.
@@ -1193,6 +1204,11 @@ Status note (resolved 2026-03-07):
 This subsection supersedes any earlier claim that the shared abstraction is already complete.
 Claude should treat the items below as **open** until the code and TLC evidence satisfy the
 actual model described in `tla/TLA_PLUS_BIG_PICTURE.md`.
+
+Historical note after Phase 2I:
+- The completed items below document the now-superseded projection-based path.
+- They remain useful implementation history, but they do **not** satisfy the current
+  Phase 2I acceptance bar.
 
 - [x] Rewrite the shared Jetpack log model so the spec actually matches the intended
       3-dimensional abstraction in `tla/TLA_PLUS_BIG_PICTURE.md`
@@ -1397,6 +1413,10 @@ actual model described in `tla/TLA_PLUS_BIG_PICTURE.md`.
 ### Phase 2H: TLA+ Verification (via Docker)
 
 Required verification workflow:
+- Historical note after Phase 2I:
+  - the runs below are still useful evidence/history
+  - they do **not** by themselves satisfy the current accepted large-run contract
+    (exact 5-server / 1-client / 3-command / 2-key config, 12-hour run, timestamp-prefixed logs)
 - Small config: run an exhaustive/small bounded model first.
 - Large config: run at least 5 servers, 2 keys, 3 commands. If exhaustive search is not practical,
   run the larger bounded search for a long window (target: ~2 days) and treat it only as
@@ -1455,6 +1475,137 @@ Required verification workflow:
   - Large config post-3D-rewrite (2026-03-07): partial 1.5M+ states, 73K+ distinct, no violations
     (5 servers, 3 cmds, 2 keys, StateConstraint) — `tla/log/jetpack_mencius_3d_large.log`
   - See commit 1f3d0119 for fix details (ExtendLog, NoOp, ExecutionDedupMatches override)
+
+### Phase 2I: Re-opened After 2026-03-08 3-D Base-Log Architecture Review (Highest Priority For Claude)
+
+This subsection supersedes any earlier claim that a 2-D base log plus a Jetpack-side
+3-D projection is an acceptable final abstraction.
+
+The required direction is:
+- the base protocol adapts to Jetpack
+- the base protocol exposes / maintains a real 3-D log `Log[i][j][k]`
+- `jetpack.tla` consumes that shared 3-D log interface directly
+
+The required direction is **not**:
+- keep `log[i][k]` as the real base-protocol log
+- have `jetpack.tla` reconstruct proposer/sequence structure with `Log3D`, `ProposerSlots`,
+  `ProposerOfSlot`, `ProposerOfEntry`, or any equivalent projection/refinement layer
+- claim that the projection is “logically equivalent” and close the abstraction step anyway
+
+Non-negotiable rules for Claude on this reopened section:
+
+- Treat `tla/TLA_PLUS_BIG_PICTURE.md` as the authoritative design target.
+- Do **not** weaken that target to fit the current implementation.
+- Do **not** close this phase with a projection-based proof story. The base protocol must own
+  the 3-D log structure at the Jetpack-facing interface.
+- Thin wrapper composition is still acceptable, but the wrapper may only wire modules together.
+  It must not synthesize a missing logical log dimension.
+- Do **not** reduce the accepted large config below:
+  ```tla
+  CONSTANTS
+    Server = {s1, s2, s3, s4, s5}
+    Client = {c1}
+    CmdId = {id1, id2, id3}
+    Key = {k1, k2}
+  ```
+- Do **not** shorten the accepted large run below 12 hours.
+- Do **not** count SANY-only, small-only, or “no error for a few minutes” as sufficient evidence.
+- Every accepted model-checking run must save a timestamp-prefixed log under `tla/log/`.
+
+- [ ] Rewrite the TLA+ design target and TODO guidance around the true 3-D base-log contract
+  - `tla/TLA_PLUS_BIG_PICTURE.md` must explicitly say the 3-D log is base-protocol state,
+    not a Jetpack-side projection.
+  - `TODO.md` must explicitly reject the projection/refinement shortcut so the next agent
+    cannot close the task by restating the current design in nicer words.
+
+- [ ] Refactor `base_raft.tla`, `base_copilot.tla`, and `base_mencius.tla` so each base protocol
+      maintains a genuine Jetpack-facing `Log[i][j][k]`
+  - Raft requirement:
+    - one active logical sequence
+    - all other sequences remain blank / `Nil`
+    - replicas still store the 3-D structure, even if only one logical sequence is live
+  - CoPilot requirement:
+    - two active logical sequences
+    - replicas still store the 3-D structure, even if only two logical sequences are live
+  - Mencius requirement:
+    - one logical sequence per server
+    - replicas store the 3-D structure directly
+  - Internal helper state may still exist, but the composition boundary with Jetpack must expose
+    a genuine 3-D log, not a projected or reconstructed one.
+
+- [ ] Rewrite `jetpack.tla` so it consumes the shared 3-D base-log interface directly
+  - Remove any proof story that depends on reconstructing `j` or local sequence position `k`
+    from a flatter base log.
+  - Rewrite the Jetpack-facing invariants to quantify directly over the shared 3-D log.
+  - Revisit any helper or invariant whose meaning changes when the log is truly 3-D:
+    - `LogAgreement` / `CommittedLogAgreement`
+    - `LogOrderMatchesExecution`
+    - `ExecutionDedupMatches`
+    - any execution-log helper that currently assumes a flat or projected log
+  - If the right final invariant set changes, write down exactly why the new set is stronger,
+    weaker, or more accurate than the prior version.
+
+- [ ] Keep the composition thin after the 3-D log redesign
+  - `jetpack_raft.tla`, `jetpack_copilot.tla`, and `jetpack_mencius.tla` may remain as thin
+    composition drivers for `jetpack.tla + base_<protocol>.tla`.
+  - They must not contain protocol-specific Jetpack logic or secret projection helpers.
+  - Any protocol-specific work needed to realize the 3-D log belongs in the base module, not in Jetpack.
+
+- [ ] Re-run model checking for all 3 Jetpack/base combinations after the 3-D redesign
+  - Required combinations:
+    - `jetpack.tla` + `base_raft.tla`
+    - `jetpack.tla` + `base_copilot.tla`
+    - `jetpack.tla` + `base_mencius.tla`
+  - Accepted runnable form may be a checked-in thin wrapper module per combination, but the
+    wrapper must only do wiring.
+  - Required accepted runs for **each** combination:
+    - one small-config run
+    - one big-config run using the exact constants above
+  - Accepted big-run policy:
+    - run for 12 hours with no error
+    - no constant reduction
+    - no shortened substitute window
+    - no “this protocol is too expensive, so skip it” shortcut
+
+- [ ] Make the TLA+ experiment trail reproducible from scratch
+  - Update the checked-in runner path (`tla/run-tlc.sh` or its checked-in replacement) so a fresh
+    agent can run the experiments without reconstructing local shell history.
+  - The runner must save timestamp-prefixed logs automatically, not by manual renaming after the fact.
+  - The runner / docs must make it obvious how to run:
+    - the small config for each combination
+    - the accepted 12-hour big config for each combination
+  - The checked-in config files for the accepted big runs must encode the exact 5-server,
+    1-client, 3-command, 2-key case. Do not reuse a smaller config and call it “close enough”.
+
+- [ ] Update the reproducibility docs so Codex can rerun the TLA+ workflow
+  - Do **not** edit `docs/benchmark_runbook.md` preemptively just to document an intended TLA+
+    workflow. If Claude modifies that file, Claude must do so only in the same workstream that
+    actually makes the TLA+ workflow reproducible from scratch.
+  - Acceptable documentation end states:
+    - `docs/benchmark_runbook.md` is updated after the TLA+ workflow is verified, or
+    - `docs/benchmark_runbook.md` stays benchmark/recovery-only and points to a separate checked-in
+      TLA+ runner/doc once that runner/doc is verified
+  - In either case, the documentation change must follow successful reproducibility work; it must
+    not be used as a speculative placeholder.
+  - The doc must state:
+    - which modules are the accepted Jetpack/base compositions
+    - which small configs to run
+    - which big configs to run
+    - that the big configs use the exact constants above
+    - that the accepted big run duration is 12 hours
+    - where the timestamp-prefixed logs land
+  - The reproducibility story must work from a fresh repo state without manual shell archaeology.
+
+- [ ] Do not close Phase 2I until the following are all true
+  - `tla/TLA_PLUS_BIG_PICTURE.md` clearly states that the base protocol owns the 3-D log.
+  - `jetpack.tla` no longer depends on a projection from a 2-D base log.
+  - `base_raft.tla`, `base_copilot.tla`, and `base_mencius.tla` expose / maintain a real
+    Jetpack-facing `Log[i][j][k]`.
+  - All 3 Jetpack/base combinations have:
+    - one accepted small run with saved log
+    - one accepted 12-hour big run with saved log
+  - Every accepted log filename starts with the run timestamp.
+  - The TLA+ workflow is reproducible from scratch via checked-in runner/docs.
 
 ## Phase 3: Jetpack + Industry Applications
 
