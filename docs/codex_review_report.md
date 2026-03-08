@@ -2,7 +2,7 @@
 
 ## 1. Scope
 
-This report currently covers the first twenty-one high-priority leaf tasks from `TODO_codex.md`:
+This report currently covers the first twenty-two high-priority leaf tasks from `TODO_codex.md`:
 
 - `Phase 1A`: Low-concurrency latency sanity check.
 - `Phase 1B`: Throughput sweep consistency check.
@@ -25,6 +25,7 @@ This report currently covers the first twenty-one high-priority leaf tasks from 
 - `Phase 2` next leaf: throughput sweep rerun (`zookeeper adaptive` / `rule_zookeeper.yml`).
 - `Phase 3` first leaf: failure-recovery rerun (`etcd`, WAN latency mode).
 - `Phase 3` next leaf: failure-recovery rerun (`mongodb`, WAN latency mode).
+- `Phase 3` next leaf: failure-recovery rerun (`zookeeper`, WAN latency mode).
 
 Included in this pass:
 
@@ -37,14 +38,15 @@ Included in this pass:
 - Throughput-sweep rerun execution (`etcd original`, `etcd fastpath100`, `etcd adaptive`, `mongodb original`, `mongodb fastpath100`, `mongodb adaptive`, `zookeeper original`, `zookeeper fastpath100`, `zookeeper adaptive`) with per-concurrency comparison to canonical sweep artifacts.
 - Failure-recovery rerun execution (`etcd`, WAN latency mode) with extracted election/recovery timing and signal-chain evidence.
 - Failure-recovery rerun attempts (`mongodb`, WAN latency mode) with startup-failure diagnostics and retry/cleanup evidence.
+- Failure-recovery rerun attempts/execution (`zookeeper`, WAN latency mode request) with dependency bypass fallback and recovery-phase timing extraction.
 
 Not yet executed in this report:
 
-- Remaining `Phase 3` recovery reruns (`zookeeper`; 1 of 3 matrix cases still pending).
+- No remaining `Phase 3` recovery reruns; matrix is complete (3 of 3 backends attempted/rerun).
 
 ## 2. Environment
 
-- UTC timestamp (this iteration): 2026-03-08T02:13:19Z
+- UTC timestamp (this iteration): 2026-03-08T02:21:08Z
 - Git branch: `jetpack`
 - Repository root: `/home/shuai/workspace/jetpack`
 - Build/test environment blockers observed:
@@ -798,6 +800,41 @@ Interpretation (`mongodb` failure-recovery rerun):
   - `error":"open: Permission denied"`
 - Because no recovery phases (`leader kill`, `new primary`, Jetpack recovery start/finish, signal-file chain) become observable, this backend rerun is non-supporting in the current environment.
 
+Third failure-recovery rerun set (`zookeeper`, WAN latency mode requested):
+
+Runbook command attempt (failed under current Docker Compose v5 CLI):
+
+```bash
+timeout 1800s docker compose -f docker/zookeeper/docker-compose.yml run --rm --privileged -e RECOVERY_LATENCY_MS=20 jetpack-zookeeper recovery > /tmp/codex_phase3_zookeeper_recovery_wan20_20260308T021643Z.log 2>&1
+```
+
+Compose-v5-compatible recovery attempts:
+
+```bash
+timeout 1800s docker compose -f docker/zookeeper/docker-compose.yml run --rm -e RECOVERY_LATENCY_MS=20 jetpack-zookeeper recovery > /tmp/codex_phase3_zookeeper_recovery_wan20_composev5_20260308T021650Z.log 2>&1
+timeout 1800s docker compose -f docker/zookeeper/docker-compose.yml run --rm --no-deps -e RECOVERY_LATENCY_MS=20 jetpack-zookeeper recovery > /tmp/codex_phase3_zookeeper_recovery_wan20_composev5_nodeps_20260308T021813Z.log 2>&1
+```
+
+| Attempt UTC | Status | Stdout/stderr capture | ZooKeeper leader re-election (ms) | Jetpack detection after signal (ms) | Jetpack internal duration (ms) | Assessment vs docs |
+|---|---|---|---:|---:|---:|---|
+| 2026-03-08T02:16:43Z | Failed pre-run | `/tmp/codex_phase3_zookeeper_recovery_wan20_20260308T021643Z.log` | N/A | N/A | N/A | Non-supporting runbook invocation in this environment (`unknown flag: --privileged`) |
+| 2026-03-08T02:16:50Z | Failed before recovery | `/tmp/codex_phase3_zookeeper_recovery_wan20_composev5_20260308T021650Z.log` | N/A | N/A | N/A | Non-supporting: dependency `zookeeper` container exits (1) before recovery phases |
+| 2026-03-08T02:18:13Z | Completed (with `--no-deps`) | `/tmp/codex_phase3_zookeeper_recovery_wan20_composev5_nodeps_20260308T021813Z.log` | 551 | 210 | 125 | Partially supporting: recovery phases reproduced and backend timing matches broad range, but Jetpack timing is above strict bound and WAN-mode path is not clearly active in this image |
+
+Interpretation (`zookeeper` failure-recovery rerun):
+
+- The documented runbook form with CLI `--privileged` fails under this Compose v5 CLI (`unknown flag: --privileged`).
+- Standard Compose-v5 rerun (with dependencies) fails before recovery because dependency service `zookeeper` exits immediately (`dependency failed to start: ... exited (1)`).
+- The fallback rerun using `--no-deps` completes and reproduces core recovery phases:
+  - leader kill, new leader election, primary-elected signal write, Jetpack recovery detection, Jetpack recovery completion.
+  - signal files observed: `JM_Jetpack_failure_triggered`, `JM_Jetpack_0.0.0.0`, `JM_Jetpack_recovery_finish_after_failure`.
+- Observed timings from the successful fallback run:
+  - ZooKeeper re-election: `551ms` (reported downtime `557ms`), within expected broad ZooKeeper range.
+  - Jetpack detection after signal: `210ms`.
+  - Internal Jetpack recovery duration line: `125ms`.
+- Additional diagnostic check indicates the prebuilt `jetpack-zookeeper` image’s `/jetpack/run-zookeeper-test.sh` is an older variant that does not include a WAN-mode branch (`RECOVERY_LATENCY_MS` handling absent, only `single-process` recovery path visible), so RTT=40ms comparability is limited in this environment.
+- This backend is therefore partially supporting overall: the recovery mechanism/event ordering is reproduced with realistic backend failover timing, but strict Jetpack-duration and WAN-path comparability claims are not fully reproduced here.
+
 ## 8. Discrepancies and Risks
 
 - `result.md` throughput tables conflict with canonical sweep artifacts in `docs/sweep_2026-02-28/`.
@@ -844,6 +881,10 @@ Interpretation (`mongodb` failure-recovery rerun):
   - Risk: single-run Jetpack recovery-duration claims may be optimistic without variance bounds and updated toolchain/runtime notes.
 - The mongodb WAN recovery rerun is currently blocked before recovery begins because the dependency container exits at startup (`std::exception ... open: Permission denied`, exit `100`) even after `docker compose down -v`.
   - Risk: MongoDB recovery reproducibility cannot currently be evaluated in this environment, and recovery claims for this backend remain unverified here.
+- The zookeeper WAN recovery rerun requires a dependency bypass (`--no-deps`) because compose dependency startup currently fails (`zookeeper-zookeeper-1 exited (1)`), and debugging of the pulled `zookeeper:3.9` image shows missing `/conf/zoo.cfg` handling in the startup path.
+  - Risk: default runbook/compose flow for ZooKeeper recovery is not directly reproducible in this environment without operator workarounds.
+- The successful ZooKeeper fallback recovery run used an image-local recovery script variant without explicit WAN-mode branch handling (`RECOVERY_LATENCY_MS` path absent), while reported Jetpack timings were `210ms` detect and `125ms` internal.
+  - Risk: strict RTT=40ms comparability and the `~81-83ms` Jetpack claim cannot be cleanly validated from this run alone.
 - Runtime regression testing still blocked in this environment by build prerequisites/toolchain compatibility.
   - Risk: this report can currently confirm artifact consistency, not runtime reproducibility.
 
@@ -875,7 +916,8 @@ Interpretation (`mongodb` failure-recovery rerun):
   - `etcd` WAN-style recovery rerun completed after Compose-v5 command adaptation; leader failover ordering and signal chain reproduced, with etcd re-election `6496ms`.
   - Jetpack recovery timing in this run (`108ms` detect, `123ms` internal) is above the strict RTT=40ms `~81-83ms` claim, so this backend is currently only partially supporting.
   - `mongodb` WAN-style recovery rerun is currently non-supporting: command-level adaptation is possible, but dependency startup fails before recovery phases (`mongodb` exits `100`, `open: Permission denied`) even after cleanup/retry.
-- `Phase 3` recovery matrix status: 2 of 3 backends rerun; remaining 1 backend (`zookeeper`) is pending.
+  - `zookeeper` recovery rerun is partially supporting using a `--no-deps` fallback: core recovery phases and backend failover timing reproduced (`551ms` election, `557ms` downtime), but Jetpack timing (`210ms` detect, `125ms` internal) is above strict bound and WAN-mode comparability is limited by image script variant.
+- `Phase 3` recovery matrix status: 3 of 3 backends rerun/attempted; no backend is pending.
 - Open discrepancies:
   - Throughput numbers in `result.md` are not consistent with canonical sweep artifacts.
   - Recovery sections mix metrics and contain internal status conflicts; pre-fix RTT=40ms gap claims are not fully traceable to committed logs.
@@ -944,6 +986,14 @@ docker compose -f docker/mongodb/docker-compose.yml down -v
 timeout 1800s docker compose -f docker/mongodb/docker-compose.yml run --rm -e RECOVERY_LATENCY_MS=20 jetpack-mongodb recovery > /tmp/codex_phase3_mongodb_recovery_wan20_composev5_retry1_20260308T021903Z.log 2>&1
 rg -n "unknown flag|dependency failed to start|exited \\(100\\)|Failure Recovery Test PASSED|JM_Jetpack_" /tmp/codex_phase3_mongodb_recovery_wan20_20260308T021804Z.log /tmp/codex_phase3_mongodb_recovery_wan20_composev5_20260308T021815Z.log /tmp/codex_phase3_mongodb_recovery_wan20_composev5_retry1_20260308T021903Z.log
 docker logs mongodb-mongodb-1 | rg -n "std::exception in initAndListen|Permission denied|exitCode"
+timeout 1800s docker compose -f docker/zookeeper/docker-compose.yml run --rm --privileged -e RECOVERY_LATENCY_MS=20 jetpack-zookeeper recovery > /tmp/codex_phase3_zookeeper_recovery_wan20_20260308T021643Z.log 2>&1
+timeout 1800s docker compose -f docker/zookeeper/docker-compose.yml run --rm -e RECOVERY_LATENCY_MS=20 jetpack-zookeeper recovery > /tmp/codex_phase3_zookeeper_recovery_wan20_composev5_20260308T021650Z.log 2>&1
+timeout 1800s docker compose -f docker/zookeeper/docker-compose.yml run --rm --no-deps -e RECOVERY_LATENCY_MS=20 jetpack-zookeeper recovery > /tmp/codex_phase3_zookeeper_recovery_wan20_composev5_nodeps_20260308T021813Z.log 2>&1
+rg -n "unknown flag|dependency failed to start|exited \\(1\\)|Wrote failure_triggered signal|New ZooKeeper leader elected|ZooKeeper downtime|Jetpack recovery detected|Jetpack recovery completed|JM_Jetpack_|Failure Recovery Test PASSED|single-process|WAN mode" /tmp/codex_phase3_zookeeper_recovery_wan20_20260308T021643Z.log /tmp/codex_phase3_zookeeper_recovery_wan20_composev5_20260308T021650Z.log /tmp/codex_phase3_zookeeper_recovery_wan20_composev5_nodeps_20260308T021813Z.log
+docker logs zookeeper-zookeeper-1
+docker run --rm --entrypoint /bin/bash zookeeper:3.9 -lc 'set -xe; zkServer.sh start-foreground' > /tmp/codex_zk_entrypoint_debug_20260308T021740Z.log 2>&1
+rg -n "Using config|grep: /conf/zoo.cfg|No such file or directory|mkdir: cannot create directory" /tmp/codex_zk_entrypoint_debug_20260308T021740Z.log
+docker compose -f docker/zookeeper/docker-compose.yml run --rm --no-deps --entrypoint /bin/bash jetpack-zookeeper -lc 'grep -n \"RECOVERY_LATENCY_MS\\|single-process, no failover config\\|for attempt in \\$(seq 1 200)\\|WAN mode\" /jetpack/run-zookeeper-test.sh'
 docker kill <jetpack-mongodb-container-id>
 ```
 
