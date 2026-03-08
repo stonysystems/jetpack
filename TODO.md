@@ -754,11 +754,11 @@ Why this is re-opened based on `docs/codex_review_report.md`:
 
 - [ ] Make the **documented runbook commands** the actual accepted commands
   - `docs/benchmark_runbook.md` must be runnable as written on the supported Docker Compose V2 / V5 CLI.
-  - If `docker compose run --rm --privileged ...` is not accepted by the current CLI, then fix the
-    compose files / wrapper scripts / runbook text so the documented command path works cleanly.
-  - No final acceptance while the nominal runbook recovery command fails with `unknown flag: --privileged`.
-  - If service-level `privileged: true` is the right solution, document that explicitly and update the
-    runbook examples to the command form that actually works.
+  - [x] `--privileged` flag issue fixed (2026-03-08): All 3 compose files already have
+    `privileged: true` at service level. Removed redundant `--privileged` from
+    `docker compose run` commands in runbook (unsupported on some Compose versions).
+    `docker run` commands (which bypass compose) still pass `--privileged` explicitly.
+    Needs Docker verification when available.
   - The same rule applies to benchmark commands, sweep commands, cleanup commands, and log locations:
     the documented operator path must match the real passing path.
   - Do **not** update the runbook first and leave the code/scripts behind. Any runbook diff in this

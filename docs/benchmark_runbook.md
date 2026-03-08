@@ -11,7 +11,9 @@ and `docs/failure_recovery_evaluation.md`.
 - Docker Engine >= 17.05 (multi-stage builds)
 - Docker Compose V2 (`docker compose`, not legacy `docker-compose`)
 - Git submodules initialized: `git submodule update --init --recursive`
-- `--privileged` flag required for tc/netem network simulation inside containers
+- Privileged mode required for tc/netem network simulation inside containers
+  (set automatically via `privileged: true` in compose files; for `docker run`
+  commands, pass `--privileged` explicitly)
 
 ## 2. Build Docker Images
 
@@ -157,15 +159,15 @@ To regenerate Markdown tables from TSV files:
 ### Run Recovery Test
 
 ```bash
-docker compose -f docker/etcd/docker-compose.yml run --rm --privileged jetpack-etcd recovery
-docker compose -f docker/mongodb/docker-compose.yml run --rm --privileged jetpack-mongodb recovery
-docker compose -f docker/zookeeper/docker-compose.yml run --rm --privileged jetpack-zookeeper recovery
+docker compose -f docker/etcd/docker-compose.yml run --rm jetpack-etcd recovery
+docker compose -f docker/mongodb/docker-compose.yml run --rm jetpack-mongodb recovery
+docker compose -f docker/zookeeper/docker-compose.yml run --rm jetpack-zookeeper recovery
 ```
 
 ### WAN Recovery (with network latency)
 
 ```bash
-docker compose -f docker/etcd/docker-compose.yml run --rm --privileged \
+docker compose -f docker/etcd/docker-compose.yml run --rm \
   -e RECOVERY_LATENCY_MS=20 jetpack-etcd recovery
 ```
 
@@ -210,7 +212,8 @@ T_kill              T_new_leader            T_jetpack_done
 ### Zero throughput for all processes
 
 1. Check Docker output for crash/OOM: `docker run ... 2>&1 | head -100`
-2. Verify `--privileged` flag is set (required for tc/netem)
+2. Verify privileged mode is active (required for tc/netem). For `docker run`,
+   pass `--privileged`. For `docker compose run`, this is set in the compose file.
 3. Increase file descriptors: `ulimit -n 65536` before running
 4. Check Docker memory allocation (Docker Desktop > Resources > Memory)
 
