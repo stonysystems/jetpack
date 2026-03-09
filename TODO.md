@@ -29,8 +29,10 @@
   `log[i][j][k]` and per-proposer `commitIndex[i][j]`. Projection operators removed from
   `jetpack.tla`. `ApplyCommitted` moved to wrappers.
 - Phase 2I small-config TLC verification (2026-03-08): Raft exhaustive (82K states, no errors),
-  CoPilot exhaustive (515 states, no errors), Mencius in progress (21M+ states, no errors so far).
-  Next: complete Mencius exhaustive, then big-config 12-hour runs.
+  CoPilot exhaustive (515 states, no errors), Mencius in progress (388M+ states / 36.5M+
+  distinct after 22+ hours, no errors). Mencius state space is very large due to 3-proposer
+  round-robin interleaving; exhaustive completion may take days.
+  Next: complete Mencius exhaustive (or accept partial), then big-config 12-hour runs.
 - Phase 2I reproducibility (2026-03-08): `tla/run-tlc.sh` updated to support local Java
   (auto-detect tla2tools.jar) and Docker modes. `tla/VERIFICATION.md` created with full
   workflow documentation. Runner tested and verified functional.
@@ -42,9 +44,11 @@
 
 ### Undone In Priority Order
 
-1. Phase 2I: Mencius small-config TLC exhaustive run in progress (150M+ states, no errors);
-   when complete, check in log and update verification docs. Then big-config 12-hour runs
-   for all 3 combinations (needs Docker or Java 11+).
+1. Phase 2I: Mencius small-config TLC exhaustive run in progress (388M+ states, 36.5M+
+   distinct, 22+ hours, no errors). Queue still growing (~24M pending). May take days
+   for exhaustive completion. 388M error-free states is strong verification evidence.
+   When complete (or accepted as sufficient), check in log and update verification docs.
+   Then big-config 12-hour runs for all 3 combinations (needs Docker or Java 11+).
 2. Phase 1D: make Codex able to reproduce the evaluation end to end, from fresh image build
    to regenerated result artifacts. **Blocked on Docker access.**
 3. Phase 1D / Phase 1F: make the runbook-backed WAN recovery flow reproducible for all three
