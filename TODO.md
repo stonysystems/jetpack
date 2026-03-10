@@ -902,7 +902,7 @@ Why this is re-opened based on `docs/codex_review_report.md`:
   - Do **not** update the runbook first and leave the code/scripts behind. Any runbook diff in this
     area must be paired with the actual reproducible command path and the rerun evidence that proves it.
 
-- [ ] Reproduce the **6 low-concurrency sanity runs** from the runbook-backed default path
+- [x] Reproduce the **6 low-concurrency sanity runs** from the runbook-backed default path
   - [x] Leaf 1: `etcd OFF` (`MODE_CONFIG=none_etcd.yml`) with runbook-path Docker command;
         execute 3 attempts, save per-attempt logs, and record `h1`, `h2-h5`, and delta metrics.
     - Completed (2026-03-10) with documented env vars only:
@@ -997,8 +997,39 @@ Why this is re-opened based on `docs/codex_review_report.md`:
   - Record all 3 attempts, not only the best-looking run.
   - Do not close this item on “delta model looks right” alone if the absolute published values remain
     materially different and the docs still claim the older numbers as current.
+  - Parent closure (2026-03-10):
+    - All 6 required cases were rerun 3 times each (18 runs total) on the runbook path.
+    - Consolidation and claim reconciliation are recorded in
+      `docs/phase1d_low_concurrency_runs.md` (Leaf 7 table) and reflected in
+      `result.md` + `docs/latency_analysis.md`.
 
 - [ ] Reproduce the **full 9-case throughput sweep** from freshly built images
+  - [x] Leaf 1: execute a clean-room fresh-image build from current checkout and capture
+        build metadata/logs for the accepted sweep pass.
+    - Completed (2026-03-10) via runbook-aligned command:
+      - `./scripts/reproduce_evaluation.sh --build-only`
+    - Accepted sweep-pass build root:
+      - `results/reproduce_20260310_164201/` (commit `ff81e913`)
+    - Build evidence:
+      - `results/reproduce_20260310_164201/build/image_metadata.tsv`
+      - `results/reproduce_20260310_164201/build/etcd.log`
+      - `results/reproduce_20260310_164201/build/mongodb.log`
+      - `results/reproduce_20260310_164201/build/zookeeper.log`
+      - `results/reproduce_20260310_164201/SUMMARY.md`
+    - Built image ids:
+      - `jetpack-etcd`: `4f6c2113de891b7deeca5186423aae1f93e7ef3864dd89acc79175c5728c88a8`
+      - `jetpack-mongodb`: `d04b6382c145e4bfa5e5119e7798513e9ae09f468fdda8d814105c311a4e2753`
+      - `jetpack-zookeeper`: `35e08d2ae1b92a36523d44977b6726c4570a9c39041da6f6f592820a35cf56d7`
+  - [ ] Leaf 2: run etcd sweep trio (`original`, `fastpath100`, `adaptive`) from the
+        accepted fresh images, preserving status/retry/error/log-path columns.
+  - [ ] Leaf 3: run MongoDB sweep trio (`original`, `fastpath100`, `adaptive`) from the
+        same accepted image set and sweep script revision.
+  - [ ] Leaf 4: run ZooKeeper sweep trio (`original`, `fastpath100`, `adaptive`) from the
+        same accepted image set and sweep script revision.
+  - [ ] Leaf 5: regenerate accepted sweep artifacts from the same rerun pass:
+        canonical TSVs, sidecar Markdown tables, consolidated CSV, and linked failure/retry logs.
+  - [ ] Leaf 6: document peak/shape reproducibility across the 9 cases and reconcile
+        published throughput claims where tails are environment-sensitive.
   - Required matrix:
     - etcd original / fastpath100 / adaptive
     - MongoDB original / fastpath100 / adaptive
