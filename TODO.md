@@ -1047,8 +1047,36 @@ Why this is re-opened based on `docs/codex_review_report.md`:
       - original: `docs/sweep_2026-02-28/logs/jetpack-etcd-phase1e-leaf2_none_etcd/`
       - fastpath100: `docs/sweep_2026-02-28/logs/jetpack-etcd-phase1e-leaf2_rule_etcd/`
       - adaptive: `docs/sweep_2026-02-28/logs/jetpack-etcd-phase1e-leaf2-adaptive_rule_etcd/`
-  - [ ] Leaf 3: run MongoDB sweep trio (`original`, `fastpath100`, `adaptive`) from the
+  - [x] Leaf 3: run MongoDB sweep trio (`original`, `fastpath100`, `adaptive`) from the
         same accepted image set and sweep script revision.
+    - Completed (2026-03-10) from the accepted fresh-image pass
+      `results/reproduce_20260310_164201/` (commit `ff81e913`).
+    - Archived committed TSV copies:
+      - `docs/sweep_2026-03-10_phase1e_mongodb/mongodb_original.tsv`
+      - `docs/sweep_2026-03-10_phase1e_mongodb/mongodb_fastpath100.tsv`
+      - `docs/sweep_2026-03-10_phase1e_mongodb/mongodb_adaptive.tsv`
+    - Commands executed with the checked-in sweep script:
+      - `./scripts/sweep_benchmark.sh jetpack-mongodb-phase1e-leaf3 none_mongodb.yml > results/reproduce_20260310_164201/sweep/mongodb_original.tsv`
+      - `./scripts/sweep_benchmark.sh jetpack-mongodb-phase1e-leaf3 rule_mongodb.yml "-m 100" > results/reproduce_20260310_164201/sweep/mongodb_fastpath100.tsv`
+      - `./scripts/sweep_benchmark.sh jetpack-mongodb-phase1e-leaf3-adaptive rule_mongodb.yml > results/reproduce_20260310_164201/sweep/mongodb_adaptive.tsv`
+    - Image identity check:
+      - both alias tags (`jetpack-mongodb-phase1e-leaf3`, `jetpack-mongodb-phase1e-leaf3-adaptive`)
+        resolve to `sha256:d04b6382c145e4bfa5e5119e7798513e9ae09f468fdda8d814105c311a4e2753`
+        (same accepted fresh image as Leaf 1).
+    - Result summary (all include 16 TSV columns with `status/error_summary/log_path/retry_count`):
+      - `mongodb_original.tsv`: `11/11 OK`, retry sum `0`, peak `4297.9 @ c=75`
+      - `mongodb_fastpath100.tsv`: `11/11 OK`, retry sum `0`, peak `3380.0 @ c=200`
+      - `mongodb_adaptive.tsv`: `11/11 OK`, retry sum `1`, peak `3872.6 @ c=75`
+      - Note: `mongodb_adaptive.tsv` needed one retry (`conc1_attempt1`) after
+        an initial stuck run (`conc1_attempt0`, docker exit `137`) and then
+        completed successfully with `OK` status for all points.
+      - Note: current `detect_failure_signature()` appends `;timeout` in `error_summary`
+        even for `OK` rows because benchmark text contains `"timeout:"`; status/retry columns
+        still show successful runs.
+    - Per-point logs referenced by TSV `log_path`:
+      - original: `docs/sweep_2026-02-28/logs/jetpack-mongodb-phase1e-leaf3_none_mongodb/`
+      - fastpath100: `docs/sweep_2026-02-28/logs/jetpack-mongodb-phase1e-leaf3_rule_mongodb/`
+      - adaptive: `docs/sweep_2026-02-28/logs/jetpack-mongodb-phase1e-leaf3-adaptive_rule_mongodb/`
   - [ ] Leaf 4: run ZooKeeper sweep trio (`original`, `fastpath100`, `adaptive`) from the
         same accepted image set and sweep script revision.
   - [ ] Leaf 5: regenerate accepted sweep artifacts from the same rerun pass:
