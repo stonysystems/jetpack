@@ -1020,8 +1020,33 @@ Why this is re-opened based on `docs/codex_review_report.md`:
       - `jetpack-etcd`: `4f6c2113de891b7deeca5186423aae1f93e7ef3864dd89acc79175c5728c88a8`
       - `jetpack-mongodb`: `d04b6382c145e4bfa5e5119e7798513e9ae09f468fdda8d814105c311a4e2753`
       - `jetpack-zookeeper`: `35e08d2ae1b92a36523d44977b6726c4570a9c39041da6f6f592820a35cf56d7`
-  - [ ] Leaf 2: run etcd sweep trio (`original`, `fastpath100`, `adaptive`) from the
+  - [x] Leaf 2: run etcd sweep trio (`original`, `fastpath100`, `adaptive`) from the
         accepted fresh images, preserving status/retry/error/log-path columns.
+    - Completed (2026-03-10) from the accepted fresh-image pass
+      `results/reproduce_20260310_164201/` (commit `ff81e913`).
+    - Archived committed TSV copies:
+      - `docs/sweep_2026-03-10_phase1e_etcd/etcd_original.tsv`
+      - `docs/sweep_2026-03-10_phase1e_etcd/etcd_fastpath100.tsv`
+      - `docs/sweep_2026-03-10_phase1e_etcd/etcd_adaptive.tsv`
+    - Commands executed with the checked-in sweep script:
+      - `./scripts/sweep_benchmark.sh jetpack-etcd-phase1e-leaf2 none_etcd.yml > results/reproduce_20260310_164201/sweep/etcd_original.tsv`
+      - `./scripts/sweep_benchmark.sh jetpack-etcd-phase1e-leaf2 rule_etcd.yml "-m 100" > results/reproduce_20260310_164201/sweep/etcd_fastpath100.tsv`
+      - `./scripts/sweep_benchmark.sh jetpack-etcd-phase1e-leaf2-adaptive rule_etcd.yml > results/reproduce_20260310_164201/sweep/etcd_adaptive.tsv`
+    - Image identity check:
+      - both alias tags (`jetpack-etcd-phase1e-leaf2`, `jetpack-etcd-phase1e-leaf2-adaptive`)
+        resolve to `sha256:4f6c2113de891b7deeca5186423aae1f93e7ef3864dd89acc79175c5728c88a8`
+        (same accepted fresh image as Leaf 1).
+    - Result summary (all include 16 TSV columns with `status/error_summary/log_path/retry_count`):
+      - `etcd_original.tsv`: `11/11 OK`, retry sum `0`, peak `7743.2 @ c=150`
+      - `etcd_fastpath100.tsv`: `11/11 OK`, retry sum `0`, peak `6995.2 @ c=150`
+      - `etcd_adaptive.tsv`: `11/11 OK`, retry sum `0`, peak `7368.7 @ c=200`
+      - Note: current `detect_failure_signature()` appends `;timeout` in `error_summary`
+        even for `OK` rows because benchmark text contains `"timeout:"`; status/retry columns
+        still show successful runs (`OK`, retry `0`).
+    - Per-point logs referenced by TSV `log_path`:
+      - original: `docs/sweep_2026-02-28/logs/jetpack-etcd-phase1e-leaf2_none_etcd/`
+      - fastpath100: `docs/sweep_2026-02-28/logs/jetpack-etcd-phase1e-leaf2_rule_etcd/`
+      - adaptive: `docs/sweep_2026-02-28/logs/jetpack-etcd-phase1e-leaf2-adaptive_rule_etcd/`
   - [ ] Leaf 3: run MongoDB sweep trio (`original`, `fastpath100`, `adaptive`) from the
         same accepted image set and sweep script revision.
   - [ ] Leaf 4: run ZooKeeper sweep trio (`original`, `fastpath100`, `adaptive`) from the
