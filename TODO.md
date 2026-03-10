@@ -49,7 +49,7 @@
   `jetpack-*` image tags, setup validators assert those tags, and
   `scripts/reproduce_evaluation.sh --build-only` now records `image_metadata.tsv`
   plus a `Build Metadata` table in `SUMMARY.md`. Verified with a successful clean-room
-  build run at commit `561b143e` (artifacts in `results/reproduce_20260310_141845/`).
+  build run at commit `561b143e`.
 - Phase 1D / Phase 1F remain the highest-priority Claude execution track: they are meant to be
   reproduced locally on one machine with multiple Docker containers, using checked-in scripts and
   20ms `tc/netem` where the runbook requires WAN simulation. They are not AWS-dependent tasks.
