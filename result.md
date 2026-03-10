@@ -37,23 +37,24 @@ own replication RTT (~40ms via tc/netem).
 | MongoDB | 47.7 / 88.0 | 45.2 / 45.9 | PASS (40ms RTT + ~48ms Mongo repl) |
 | ZooKeeper | 45.5 / 86.0 | 40.3 / 40.5 | PASS (40ms RTT + ~45ms ZAB repl + fsync) |
 
-### High-concurrency comparison (60 clients, near-peak concurrency)
+### High-concurrency comparison (c=200, from 2026-03-02 sweep rerun)
 
-| Backend | Jetpack OFF | | Jetpack ON | |
-|---------|---:|---:|---:|---:|
-| | Concurrency | Throughput | Concurrency | Throughput |
-| etcd | c=200 | 7,927 txn/s | c=200 | 7,104 txn/s |
-| MongoDB | c=200 | 2,135 txn/s | c=200 | 2,160 txn/s |
-| ZooKeeper | c=200 | 5,743 txn/s | c=200 | 5,498 txn/s |
+| Backend | Jetpack OFF (original) | Jetpack ON (adaptive) |
+|---------|---:|---:|
+| etcd | 7,687 txn/s | 7,323 txn/s |
+| MongoDB | 3,642 txn/s | 3,542 txn/s |
+| ZooKeeper | 5,590 txn/s | 4,621 txn/s |
 
-### Maximum throughput (60 clients, best concurrency from sweep)
+### Maximum throughput (best concurrency from 2026-03-02 sweep rerun)
 
-| Backend | Jetpack OFF | | Jetpack ON | |
+| Backend | Jetpack OFF (original) | | Jetpack ON (adaptive) | |
 |---------|---:|---:|---:|---:|
 | | Concurrency | Max (txn/s) | Concurrency | Max (txn/s) |
-| MongoDB | c=50 | 2,304 | c=75 | 1,966 |
-| etcd | c=200 | 7,753 | c=200 | 7,414 |
-| ZooKeeper | c=400 | 5,879 | c=200 | 5,954 |
+| etcd | c=200 | 7,687 | c=200 | 7,323 |
+| MongoDB | c=100 | 3,799 | c=100 | 3,858 |
+| ZooKeeper | c=150 | 5,648 | c=150 | 5,486 |
+
+*Data source: `docs/sweep_2026-02-28/*.tsv` (rerun 2026-03-02, commit `194c32c1`).*
 
 ### Observations (open-loop, Jetpack ON vs OFF, 3-node backend clusters)
 

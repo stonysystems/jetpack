@@ -40,6 +40,11 @@
   All 4 entry scripts source it. Backward compatibility verified (CLI, result naming, parsers).
   Docker backend matrix extended with failover configs, compose/test paths. 47 unit tests pass.
   AWS/Zoo validation blocked with documented re-validation matrix.
+- Phase 1D docs reconciliation (2026-03-10): Fixed stale throughput tables in `result.md`
+  (MongoDB was 48-70% off from canonical sweep). Fixed contradictory RESOLVED/OPEN statuses
+  in `failure_recovery_evaluation.md`. Added date clarification to `latency_analysis.md`.
+  Created `scripts/reproduce_evaluation.sh` for automated end-to-end reproduction.
+  Fixed ZooKeeper Dockerfile download URL (archive.apache.org). Trimmed Docker context.
 - Phase 1D / Phase 1F remain the highest-priority Claude execution track: they are meant to be
   reproduced locally on one machine with multiple Docker containers, using checked-in scripts and
   20ms `tc/netem` where the runbook requires WAN simulation. They are not AWS-dependent tasks.

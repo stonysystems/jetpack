@@ -232,6 +232,7 @@ Full concurrency sweep (total txn/s, 2026-03-02 rerun, 99/99 OK):
 | 400 | 6,915 | 6,749 | 6,051 | 3,149 | 2,920 | 1,660 | 5,223 | 4,931 | 5,423 |
 
 Raw data: [`docs/sweep_2026-02-28/`](sweep_2026-02-28/README.md) (TSV + Markdown tables for each backend/mode).
+*Note: The directory is named `sweep_2026-02-28` (initial sweep date) but contains data from the 2026-03-02 full rerun (commit `194c32c1`).*
 
 **Notes:** MongoDB remains systematically slower (~3.8K) than etcd (~7.7K) and ZK (~5.6K)
 due to the `#define AWS` 2500-connection pool and w:majority replication.

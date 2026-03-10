@@ -288,17 +288,17 @@ Runs Jetpack as 3 separate OS processes instead of single-process mode.
 **mongodb/server.h connection fix**: Non-leader processes use 0 MongoDB connections,
 preventing connection storms in WAN mode with multiple OS processes.
 
-**MongoDB reactor fix (OPEN)**:
-The 60–95ms overhead from MongoDB SDAM reconnection during recovery is the dominant gap.
-Potential approaches:
-1. Separate MongoDB client I/O onto a dedicated thread, isolating it from the reactor.
-2. Pre-warm the MongoDB connection pool before triggering `JetpackRecoveryEntry`.
-3. Add an explicit wait for SDAM stabilization before starting recovery RPCs.
+**MongoDB reactor congestion (RESOLVED in WAN mode)**:
+The 60–95ms overhead from MongoDB SDAM reconnection only manifested in single-process
+Docker tests where all 3 Jetpack replicas shared one process. In WAN mode with 3
+separate processes and non-leader processes using 0 MongoDB connections (via
+`loc_id_ == 0` guard), the leader process recovers without SDAM interference.
+Post-fix WAN results: 81–83ms for all three backends (see below).
 
-**Recovery test RTT support (OPEN)**:
-Recovery test scripts need tc/netem latency applied between Jetpack replicas (using
-different loopback IPs: 127.0.0.1–3 with tc qdisc netem delay 20ms). This requires
-running replicas on separate loopback IPs rather than all on 127.0.0.1.
+**Recovery test RTT support (DONE)**:
+Recovery test scripts support tc/netem latency via `RECOVERY_LATENCY_MS` env var,
+applied between Jetpack replicas on separate loopback IPs (127.0.0.1–3).
+All 3 scripts (`run-{etcd,mongodb,zookeeper}-test.sh`) implement this.
 
 ### Detailed Timing Breakdown (at RTT=40ms, pre-fix)
 
