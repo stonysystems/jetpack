@@ -35,10 +35,5 @@ services:
       context: ../..
       dockerfile: docker/mongodb/Dockerfile
     privileged: true
-    depends_on:
-      mongodb:
-        condition: service_healthy
-    environment:
-      - MONGODB_ENDPOINTS=mongodb://mongodb:27017
     volumes:
       - ../../config:/jetpack/config:ro

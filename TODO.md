@@ -50,6 +50,12 @@
   `scripts/reproduce_evaluation.sh --build-only` now records `image_metadata.tsv`
   plus a `Build Metadata` table in `SUMMARY.md`. Verified with a successful clean-room
   build run at commit `561b143e`.
+- Phase 1D runbook command-path fix (2026-03-10): removed unconditional
+  `depends_on` + external endpoint env wiring from `jetpack-{etcd,mongodb,zookeeper}`
+  compose services so `docker compose run ... jetpack-* ...` uses the embedded backend
+  path by default. Verified with compose smoke runs:
+  `jetpack-etcd single`, `jetpack-mongodb single`, `jetpack-zookeeper single`
+  (all PASS on Docker Compose v5.0.1).
 - Phase 1D / Phase 1F remain the highest-priority Claude execution track: they are meant to be
   reproduced locally on one machine with multiple Docker containers, using checked-in scripts and
   20ms `tc/netem` where the runbook requires WAN simulation. They are not AWS-dependent tasks.
@@ -819,6 +825,20 @@ Why this is re-opened based on `docs/codex_review_report.md`:
     - the rerun metadata records the commit hash, build date, and resulting image tag / image ID
 
 - [ ] Make the **documented runbook commands** the actual accepted commands
+  - [x] Leaf 1: make compose-based Jetpack commands runnable without external dependency
+        startup preconditions when the runbook uses embedded backend mode.
+    - Completed (2026-03-10): removed unconditional `depends_on` and external endpoint
+      env from `jetpack-etcd`, `jetpack-mongodb`, `jetpack-zookeeper` services in
+      the three compose files. Compose run now launches Jetpack test entrypoints
+      directly for runbook-style commands.
+    - Docker verification (Compose v5.0.1):
+      - `docker compose -f docker/etcd/docker-compose.yml run --rm -e TEST_DURATION=5 jetpack-etcd single` PASS
+      - `docker compose -f docker/mongodb/docker-compose.yml run --rm -e TEST_DURATION=5 jetpack-mongodb single` PASS
+      - `docker compose -f docker/zookeeper/docker-compose.yml run --rm -e TEST_DURATION=5 jetpack-zookeeper single` PASS
+  - [ ] Leaf 2: verify runbook recovery command shape (`docker compose run --rm jetpack-* recovery`)
+        passes on supported Compose versions without local syntax workarounds.
+  - [ ] Leaf 3: verify benchmark/sweep/cleanup command blocks in `docs/benchmark_runbook.md`
+        map 1:1 to passing scripts and documented output paths.
   - `docs/benchmark_runbook.md` must be runnable as written on the supported Docker Compose V2 / V5 CLI.
   - [x] `--privileged` flag issue fixed (2026-03-08): All 3 compose files already have
     `privileged: true` at service level. Removed redundant `--privileged` from

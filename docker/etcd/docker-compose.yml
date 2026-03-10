@@ -43,10 +43,5 @@ services:
       context: ../..
       dockerfile: docker/etcd/Dockerfile
     privileged: true
-    depends_on:
-      etcd:
-        condition: service_healthy
-    environment:
-      - ETCD_ENDPOINTS=http://etcd:2379
     volumes:
       - ../../config:/jetpack/config:ro

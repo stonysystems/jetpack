@@ -34,10 +34,5 @@ services:
       context: ../..
       dockerfile: docker/zookeeper/Dockerfile
     privileged: true
-    depends_on:
-      zookeeper:
-        condition: service_healthy
-    environment:
-      - ZOOKEEPER_ENDPOINTS=127.0.0.1:2181
     volumes:
       - ../../config:/jetpack/config:ro
