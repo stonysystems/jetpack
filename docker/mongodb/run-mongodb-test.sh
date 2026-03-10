@@ -289,7 +289,7 @@ run_multi_process_test() {
 
     # Use 3-node MongoDB replica set so writes include replication latency
     start_mongodb_replset
-    mongosh --host "127.0.0.1:27017" --eval "
+    mongosh "$MONGODB_ENDPOINTS" --eval "
         db.adminCommand({ setDefaultRWConcern: 1, defaultWriteConcern: { w: 'majority' } })
     " --quiet >/dev/null 2>&1 || log_warn "Could not set default write concern"
     verify_mongodb_rw
@@ -422,6 +422,10 @@ REPLSET_IPS=("127.0.0.1" "127.0.0.2" "127.0.0.3")
 REPLSET_PIDS=()
 REPLSET_NAME="jetpack-rs"
 
+get_mongodb_replset_uri() {
+    echo "mongodb://127.0.0.1:27017,127.0.0.2:27017,127.0.0.3:27017/?replicaSet=${REPLSET_NAME}"
+}
+
 start_mongodb_replset() {
     log_info "Starting 3-member MongoDB replica set..."
 
@@ -479,6 +483,8 @@ start_mongodb_replset() {
         local primary
         primary=$(get_mongodb_primary 2>/dev/null) || true
         if [ -n "$primary" ]; then
+            # Use replica-set URI so callers do not depend on a fixed primary host.
+            MONGODB_ENDPOINTS="$(get_mongodb_replset_uri)"
             log_info "Replica set is ready (primary=$primary)"
             return 0
         fi
@@ -838,7 +844,7 @@ run_benchmark() {
     # tc/netem delays on 127.0.0.2-3 make replication take ~40ms RTT.
     start_mongodb_replset
     # Set default write concern to majority so update_one waits for replication
-    mongosh --host "127.0.0.1:27017" --eval "
+    mongosh "$MONGODB_ENDPOINTS" --eval "
         db.adminCommand({ setDefaultRWConcern: 1, defaultWriteConcern: { w: 'majority' } })
     " --quiet >/dev/null 2>&1 || log_warn "Could not set default write concern"
     verify_mongodb_rw

@@ -144,6 +144,9 @@ check_file_contains "Script has multi mode" "$SCRIPT_DIR/run-mongodb-test.sh" "r
 check_file_contains "Script references 5c1s5r1p_mongodb config" "$SCRIPT_DIR/run-mongodb-test.sh" "5c1s5r1p_mongodb"
 check_file_contains "Script has latency simulation (setup_latency)" "$SCRIPT_DIR/run-mongodb-test.sh" "setup_latency"
 check_file_contains "Script has latency cleanup (remove_latency)" "$SCRIPT_DIR/run-mongodb-test.sh" "remove_latency"
+check_file_contains "Script defines replica-set URI helper" "$SCRIPT_DIR/run-mongodb-test.sh" "get_mongodb_replset_uri"
+check_file_contains "Replica-set startup sets MONGODB_ENDPOINTS" "$SCRIPT_DIR/run-mongodb-test.sh" 'MONGODB_ENDPOINTS="\$(get_mongodb_replset_uri)"'
+check_file_contains "Multi/benchmark write concern uses replica-set URI" "$SCRIPT_DIR/run-mongodb-test.sh" 'mongosh "\$MONGODB_ENDPOINTS" --eval'
 check_file_contains "Script uses tc netem for latency" "$SCRIPT_DIR/run-mongodb-test.sh" "netem delay"
 check_file_contains "Script defines 5 host processes" "$SCRIPT_DIR/run-mongodb-test.sh" 'host_procs=("h1" "h2" "h3" "h4" "h5")'
 check_file_contains "Script validates 5 servers + 5 clients" "$SCRIPT_DIR/run-mongodb-test.sh" "5 servers + 5 clients"

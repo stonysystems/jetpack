@@ -104,3 +104,42 @@ Notes:
 - `h2-h5 - h1` stayed at about `~39ms` in all attempts.
 - Absolute latencies are much lower than the previously published MongoDB OFF baseline
   (`h1 ~47.7ms`, `h2-h5 ~88.0ms`), so docs reconciliation remains required in later leaves.
+
+## 2026-03-10: Leaf 4 (`mongodb ON`, 3 attempts)
+
+Command shape (runbook-compatible; documented env vars only):
+
+```bash
+docker run --rm --privileged \
+  -e SITE_CONFIG=60c1s5r5p.yml \
+  -e MODE_CONFIG=rule_mongodb.yml \
+  -e CLIENT_CONFIG=client_open.yml \
+  -e CONCURRENT_CONFIG=concurrent_1.yml \
+  -e LATENCY_MS=20 \
+  -e LATENCY_JITTER=0 \
+  -e TEST_DURATION=30 \
+  jetpack-mongodb benchmark
+```
+
+Artifact directory:
+`docs/phase1d_low_concurrency_20260310_mongodb_on/`
+
+Metrics extracted from `All-efficient-attempts statistics` (`50pct`) and
+`Fastpath statistics`:
+
+| Attempt | Status | Exit | Log | h1 p50 (ms) | h2-h5 p50 avg (ms) | Delta (ms) | FP attempted | FP succeeded | FP rate (%) |
+|---|---|---:|---|---:|---:|---:|---:|---:|---:|
+| 1 | Completed | 0 | `docs/phase1d_low_concurrency_20260310_mongodb_on/mongodb_on_r1.txt` | 7.45 | 41.39 | 33.94 | 389 | 389 | 100.00 |
+| 2 | Completed | 0 | `docs/phase1d_low_concurrency_20260310_mongodb_on/mongodb_on_r2.txt` | 7.76 | 41.49 | 33.73 | 370 | 370 | 100.00 |
+| 3 | Completed | 0 | `docs/phase1d_low_concurrency_20260310_mongodb_on/mongodb_on_r3.txt` | 7.33 | 41.44 | 34.11 | 380 | 380 | 100.00 |
+
+Notes:
+- Initial pre-fix rerun encountered a primary-dependent startup failure when
+  `start_mongodb_replset` elected a non-`127.0.0.1` primary and verification
+  still targeted `mongodb://127.0.0.1:27017`.
+- Fixed in `docker/mongodb/run-mongodb-test.sh` by setting `MONGODB_ENDPOINTS`
+  to a replica-set URI after replica-set startup and using that URI for
+  verification and write-concern setup in multi/benchmark modes.
+- Post-fix verification logs show the replica-set URI path:
+  `mongodb://127.0.0.1:27017,127.0.0.2:27017,127.0.0.3:27017/?replicaSet=jetpack-rs`.
+- All 3 post-fix attempts completed with `100%` fast-path success.

@@ -1,0 +1,69 @@
+[INFO] === Benchmark Mode ===
+[INFO] Site config:       60c1s5r5p.yml
+[INFO] Mode config:       rule_mongodb.yml
+[INFO] Client config:     client_open.yml
+[INFO] Concurrent config: concurrent_1.yml
+[INFO] Latency:           20ms +/- 0ms
+[INFO] Duration:          30s
+[INFO] Starting 3-member MongoDB replica set...
+about to fork child process, waiting until server is ready for connections.
+forked process: 11
+child process started successfully, parent exiting
+[INFO]   mongod0 (127.0.0.1:27017) PID=11
+about to fork child process, waiting until server is ready for connections.
+forked process: 74
+child process started successfully, parent exiting
+[INFO]   mongod1 (127.0.0.2:27017) PID=74
+about to fork child process, waiting until server is ready for connections.
+forked process: 137
+child process started successfully, parent exiting
+[INFO]   mongod2 (127.0.0.3:27017) PID=137
+[INFO] Initiating replica set 'jetpack-rs'...
+[INFO] Replica set is ready (primary=127.0.0.1)
+[INFO] Verifying MongoDB read/write at mongodb://127.0.0.1:27017,127.0.0.2:27017,127.0.0.3:27017/?replicaSet=jetpack-rs ...
+[INFO] MongoDB read/write verification passed
+[INFO] Setting up network latency: 20ms +/- 0ms on lo
+[INFO]   127.0.0.2: 20ms +/- 0ms delay
+[INFO]   127.0.0.3: 20ms +/- 0ms delay
+[INFO]   127.0.0.4: 20ms +/- 0ms delay
+[INFO]   127.0.0.5: 20ms +/- 0ms delay
+[INFO] Latency simulation active
+[INFO] Starting process h1
+[INFO] Starting process h2
+[INFO] Starting process h3
+[INFO] Starting process h4
+[INFO] Starting process h5
+[INFO] Waiting for 5 processes to complete (timeout: 90s)...
+[INFO] --- Benchmark Results ---
+[INFO]   h1: I [../src/deptran/s_main.cc:893] 2026-03-10 20:09:57.982 | All-efficient-attempts           statistics   count       75   0pct     5.65  50pct     7.76  90pct    11.52  99pct    23.95    ave     8.64
+[INFO]   h1: I [../src/deptran/s_main.cc:901] 2026-03-10 20:09:57.982 | All-efficient-attempts           distribution      5.65     6.65     7.05     7.34     7.58     7.76     8.47     9.02    10.04    11.52    23.95
+[INFO]   h1: I [../src/deptran/s_main.cc:904] 2026-03-10 20:09:57.982 | Mid throughput is 7.50
+[INFO]   h1: I [../src/deptran/s_main.cc:905] 2026-03-10 20:09:57.982 | Fastpath statistics attempted 56 successed 56 rate(pct) 100.00 efficient_successed 0 efficient_rate(pct) 0.00
+[INFO]   h1: I [../src/deptran/s_main.cc:919] 2026-03-10 20:09:57.982 | Cpu-usage-leaders ave 0.0000 count 169
+[INFO]   h1: I [../src/deptran/s_main.cc:931] 2026-03-10 20:09:57.982 | Queue-depth ave 1.0000 count 169
+[INFO]   h2: I [../src/deptran/s_main.cc:893] 2026-03-10 20:09:58.465 | All-efficient-attempts           statistics   count       83   0pct    41.01  50pct    41.45  90pct    41.91  99pct    42.52    ave    41.51
+[INFO]   h2: I [../src/deptran/s_main.cc:901] 2026-03-10 20:09:58.465 | All-efficient-attempts           distribution     41.01    41.18    41.26    41.30    41.37    41.45    41.51    41.61    41.71    41.91    42.52
+[INFO]   h2: I [../src/deptran/s_main.cc:904] 2026-03-10 20:09:58.465 | Mid throughput is 8.30
+[INFO]   h2: I [../src/deptran/s_main.cc:905] 2026-03-10 20:09:58.465 | Fastpath statistics attempted 83 successed 83 rate(pct) 100.00 efficient_successed 83 efficient_rate(pct) 100.00
+[INFO]   h2: I [../src/deptran/s_main.cc:919] 2026-03-10 20:09:58.465 | Cpu-usage-leaders ave 0.0000 count 242
+[INFO]   h2: I [../src/deptran/s_main.cc:931] 2026-03-10 20:09:58.465 | Queue-depth ave 1.0000 count 242
+[INFO]   h3: I [../src/deptran/s_main.cc:893] 2026-03-10 20:09:58.465 | All-efficient-attempts           statistics   count       73   0pct    41.02  50pct    41.47  90pct    41.99  99pct    42.79    ave    41.53
+[INFO]   h3: I [../src/deptran/s_main.cc:901] 2026-03-10 20:09:58.465 | All-efficient-attempts           distribution     41.02    41.11    41.25    41.32    41.42    41.47    41.56    41.70    41.78    41.99    42.79
+[INFO]   h3: I [../src/deptran/s_main.cc:904] 2026-03-10 20:09:58.465 | Mid throughput is 7.30
+[INFO]   h3: I [../src/deptran/s_main.cc:905] 2026-03-10 20:09:58.465 | Fastpath statistics attempted 73 successed 73 rate(pct) 100.00 efficient_successed 73 efficient_rate(pct) 100.00
+[INFO]   h3: I [../src/deptran/s_main.cc:919] 2026-03-10 20:09:58.465 | Cpu-usage-leaders ave 0.0000 count 233
+[INFO]   h3: I [../src/deptran/s_main.cc:931] 2026-03-10 20:09:58.465 | Queue-depth ave 1.0000 count 233
+[INFO]   h4: I [../src/deptran/s_main.cc:893] 2026-03-10 20:09:58.459 | All-efficient-attempts           statistics   count       82   0pct    40.99  50pct    41.50  90pct    41.87  99pct    42.44    ave    41.51
+[INFO]   h4: I [../src/deptran/s_main.cc:901] 2026-03-10 20:09:58.459 | All-efficient-attempts           distribution     40.99    41.17    41.26    41.33    41.42    41.50    41.57    41.60    41.70    41.87    42.44
+[INFO]   h4: I [../src/deptran/s_main.cc:904] 2026-03-10 20:09:58.459 | Mid throughput is 8.20
+[INFO]   h4: I [../src/deptran/s_main.cc:905] 2026-03-10 20:09:58.459 | Fastpath statistics attempted 82 successed 82 rate(pct) 100.00 efficient_successed 82 efficient_rate(pct) 100.00
+[INFO]   h4: I [../src/deptran/s_main.cc:919] 2026-03-10 20:09:58.459 | Cpu-usage-leaders ave 0.0000 count 241
+[INFO]   h4: I [../src/deptran/s_main.cc:931] 2026-03-10 20:09:58.459 | Queue-depth ave 1.0000 count 241
+[INFO]   h5: I [../src/deptran/s_main.cc:893] 2026-03-10 20:09:58.466 | All-efficient-attempts           statistics   count       76   0pct    41.02  50pct    41.54  90pct    41.98  99pct    42.68    ave    41.56
+[INFO]   h5: I [../src/deptran/s_main.cc:901] 2026-03-10 20:09:58.466 | All-efficient-attempts           distribution     41.02    41.13    41.32    41.40    41.49    41.54    41.58    41.67    41.78    41.98    42.68
+[INFO]   h5: I [../src/deptran/s_main.cc:904] 2026-03-10 20:09:58.467 | Mid throughput is 7.60
+[INFO]   h5: I [../src/deptran/s_main.cc:905] 2026-03-10 20:09:58.467 | Fastpath statistics attempted 76 successed 76 rate(pct) 100.00 efficient_successed 76 efficient_rate(pct) 100.00
+[INFO]   h5: I [../src/deptran/s_main.cc:919] 2026-03-10 20:09:58.467 | Cpu-usage-leaders ave 0.0000 count 241
+[INFO]   h5: I [../src/deptran/s_main.cc:931] 2026-03-10 20:09:58.467 | Queue-depth ave 1.0000 count 241
+[INFO] === Benchmark PASSED ===
+[INFO] Cleaning up...
