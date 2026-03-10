@@ -953,8 +953,17 @@ Why this is re-opened based on `docs/codex_review_report.md`:
     - Attempt metrics (`h1`, `h2-h5 avg`, delta in ms): `43.23/83.41/40.18`,
       `42.68/82.83/40.15`, `42.78/82.89/40.11`.
     - All 3 attempts exited `0` on the default path.
-  - [ ] Leaf 6: `zookeeper ON` (`MODE_CONFIG=rule_zookeeper.yml`) with runbook-path command;
+  - [x] Leaf 6: `zookeeper ON` (`MODE_CONFIG=rule_zookeeper.yml`) with runbook-path command;
         execute 3 attempts and record per-attempt metrics.
+    - Completed (2026-03-10) with documented env vars only:
+      - `docker run --rm --privileged -e SITE_CONFIG=60c1s5r5p.yml -e MODE_CONFIG=rule_zookeeper.yml -e CLIENT_CONFIG=client_open.yml -e CONCURRENT_CONFIG=concurrent_1.yml -e LATENCY_MS=20 -e LATENCY_JITTER=0 -e TEST_DURATION=30 jetpack-zookeeper benchmark`
+    - Evidence: `docs/phase1d_low_concurrency_runs.md` plus per-attempt logs in
+      `docs/phase1d_low_concurrency_20260310_zookeeper_on/`.
+    - Attempt metrics (`h1`, `h2-h5 avg`, delta in ms; fast-path totals):
+      - `40.26/40.35/0.09`, fp `394/394` (`100.00%`)
+      - `40.25/40.35/0.10`, fp `405/405` (`100.00%`)
+      - `40.27/40.35/0.08`, fp `402/402` (`100.00%`)
+    - All 3 attempts exited `0` on the default path.
   - [ ] Leaf 7: consolidate all 6 cases (18 runs), compare against published low-concurrency
         claims, and update docs if absolute values materially differ.
   - Required cases:

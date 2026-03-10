@@ -176,3 +176,37 @@ Notes:
 - All 3 attempts completed successfully on the documented default path.
 - `h2-h5 - h1` stayed near `~40ms` in all attempts.
 - Absolute levels are stable and align with the expected ZooKeeper OFF low-concurrency shape.
+
+## 2026-03-10: Leaf 6 (`zookeeper ON`, 3 attempts)
+
+Command shape (runbook-compatible; documented env vars only):
+
+```bash
+docker run --rm --privileged \
+  -e SITE_CONFIG=60c1s5r5p.yml \
+  -e MODE_CONFIG=rule_zookeeper.yml \
+  -e CLIENT_CONFIG=client_open.yml \
+  -e CONCURRENT_CONFIG=concurrent_1.yml \
+  -e LATENCY_MS=20 \
+  -e LATENCY_JITTER=0 \
+  -e TEST_DURATION=30 \
+  jetpack-zookeeper benchmark
+```
+
+Artifact directory:
+`docs/phase1d_low_concurrency_20260310_zookeeper_on/`
+
+Metrics extracted from `All-efficient-attempts statistics` (`50pct`) and
+`Fastpath statistics`:
+
+| Attempt | Status | Exit | Log | h1 p50 (ms) | h2-h5 p50 avg (ms) | Delta (ms) | FP attempted | FP succeeded | FP rate (%) |
+|---|---|---:|---|---:|---:|---:|---:|---:|---:|
+| 1 | Completed | 0 | `docs/phase1d_low_concurrency_20260310_zookeeper_on/zookeeper_on_r1.txt` | 40.26 | 40.35 | 0.09 | 394 | 394 | 100.00 |
+| 2 | Completed | 0 | `docs/phase1d_low_concurrency_20260310_zookeeper_on/zookeeper_on_r2.txt` | 40.25 | 40.35 | 0.10 | 405 | 405 | 100.00 |
+| 3 | Completed | 0 | `docs/phase1d_low_concurrency_20260310_zookeeper_on/zookeeper_on_r3.txt` | 40.27 | 40.35 | 0.08 | 402 | 402 | 100.00 |
+
+Notes:
+- All 3 attempts completed successfully on the documented default path.
+- Fast-path attempts remained `100%` successful in all attempts.
+- `h1` and `h2-h5` both stayed near `~40.3ms` in all 3 attempts, with near-zero
+  `h2-h5 - h1` deltas (`~0.1ms`), matching the expected rule-mode shape.
