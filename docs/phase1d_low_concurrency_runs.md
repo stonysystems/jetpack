@@ -70,3 +70,37 @@ Notes:
 - `h2-h5` remained stable around `~40.4ms`, while `h1` was bimodal (`~22.7ms` in attempts
   1 and 3 vs `~40.3ms` in attempt 2), so this leaf is operationally complete but not yet
   absolutely stable across repeated runs.
+
+## 2026-03-10: Leaf 3 (`mongodb OFF`, 3 attempts)
+
+Command shape (runbook-compatible; documented env vars only):
+
+```bash
+docker run --rm --privileged \
+  -e SITE_CONFIG=60c1s5r5p.yml \
+  -e MODE_CONFIG=none_mongodb.yml \
+  -e CLIENT_CONFIG=client_open.yml \
+  -e CONCURRENT_CONFIG=concurrent_1.yml \
+  -e LATENCY_MS=20 \
+  -e LATENCY_JITTER=0 \
+  -e TEST_DURATION=30 \
+  jetpack-mongodb benchmark
+```
+
+Artifact directory:
+`docs/phase1d_low_concurrency_20260310_mongodb_off/`
+
+Metrics extracted from `All-efficient-attempts statistics` (`50pct`) and
+`Fastpath statistics`:
+
+| Attempt | Status | Exit | Log | h1 p50 (ms) | h2-h5 p50 avg (ms) | Delta (ms) | FP attempted | FP succeeded |
+|---|---|---:|---|---:|---:|---:|---:|---:|
+| 1 | Completed | 0 | `docs/phase1d_low_concurrency_20260310_mongodb_off/mongodb_off_r1.txt` | 7.27 | 46.53 | 39.26 | 0 | 0 |
+| 2 | Completed | 0 | `docs/phase1d_low_concurrency_20260310_mongodb_off/mongodb_off_r2.txt` | 7.12 | 46.15 | 39.03 | 0 | 0 |
+| 3 | Completed | 0 | `docs/phase1d_low_concurrency_20260310_mongodb_off/mongodb_off_r3.txt` | 7.28 | 46.27 | 38.99 | 0 | 0 |
+
+Notes:
+- All 3 attempts completed on the default command path (no `MONGODB_ENDPOINTS` override).
+- `h2-h5 - h1` stayed at about `~39ms` in all attempts.
+- Absolute latencies are much lower than the previously published MongoDB OFF baseline
+  (`h1 ~47.7ms`, `h2-h5 ~88.0ms`), so docs reconciliation remains required in later leaves.

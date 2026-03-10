@@ -66,16 +66,21 @@
   `docker run --rm --privileged jetpack-{etcd,mongodb,zookeeper} benchmark` PASS,
   `./scripts/sweep_benchmark.sh jetpack-etcd none_etcd.yml > docs/sweep_2026-02-28/etcd_original.tsv` PASS,
   and `docker compose -f docker/{etcd,mongodb,zookeeper}/docker-compose.yml down -v` PASS.
-- Phase 1D low-concurrency rerun progress (2026-03-10): first two leaves (`etcd OFF`,
-  `etcd ON`) completed with 3 runbook-path attempts each. Evidence under
+- Phase 1D low-concurrency rerun progress (2026-03-10): first three leaves (`etcd OFF`,
+  `etcd ON`, `mongodb OFF`) completed with 3 runbook-path attempts each. Evidence under
   `docs/phase1d_low_concurrency_20260310_etcd_off/`,
-  `docs/phase1d_low_concurrency_20260310_etcd_on/`, and
+  `docs/phase1d_low_concurrency_20260310_etcd_on/`,
+  `docs/phase1d_low_concurrency_20260310_mongodb_off/`, and
   `docs/phase1d_low_concurrency_runs.md`.
   - `etcd OFF`: two attempts matched expected absolute range (`h1 ~42.6-42.8ms`,
     `h2-h5 ~82.7-82.9ms`); one attempt was a low absolute-latency outlier while
     preserving `~40ms` delta.
   - `etcd ON`: all attempts completed with `100%` fast-path success and stable
     `h2-h5 ~40.4ms`; `h1` was bimodal (`~22.7ms` or `~40.3ms`) across attempts.
+  - `mongodb OFF`: all 3 attempts completed on the default runbook path
+    (no endpoint override), with stable `h1 ~7.1-7.3ms` and `h2-h5 ~46.2-46.5ms`
+    (`~39ms` delta). These absolute values materially differ from previously
+    published MongoDB OFF numbers, so doc reconciliation remains open.
 - Phase 1D / Phase 1F remain the highest-priority Claude execution track: they are meant to be
   reproduced locally on one machine with multiple Docker containers, using checked-in scripts and
   20ms `tc/netem` where the runbook requires WAN simulation. They are not AWS-dependent tasks.
@@ -905,8 +910,15 @@ Why this is re-opened based on `docs/codex_review_report.md`:
       - `22.78/40.41/17.63`, fp `391/391` (`100.00%`)
       - `40.26/40.42/0.16`, fp `404/404` (`100.00%`)
       - `22.65/40.42/17.77`, fp `373/373` (`100.00%`)
-  - [ ] Leaf 3: `mongodb OFF` (`MODE_CONFIG=none_mongodb.yml`) with runbook-path command;
+  - [x] Leaf 3: `mongodb OFF` (`MODE_CONFIG=none_mongodb.yml`) with runbook-path command;
         execute 3 attempts and record per-attempt metrics.
+    - Completed (2026-03-10) with documented env vars only:
+      - `docker run --rm --privileged -e SITE_CONFIG=60c1s5r5p.yml -e MODE_CONFIG=none_mongodb.yml -e CLIENT_CONFIG=client_open.yml -e CONCURRENT_CONFIG=concurrent_1.yml -e LATENCY_MS=20 -e LATENCY_JITTER=0 -e TEST_DURATION=30 jetpack-mongodb benchmark`
+    - Evidence: `docs/phase1d_low_concurrency_runs.md` plus per-attempt logs in
+      `docs/phase1d_low_concurrency_20260310_mongodb_off/`.
+    - Attempt metrics (`h1`, `h2-h5 avg`, delta in ms): `7.27/46.53/39.26`,
+      `7.12/46.15/39.03`, `7.28/46.27/38.99`.
+    - All 3 attempts exited `0` on the default path (no `MONGODB_ENDPOINTS` override).
   - [ ] Leaf 4: `mongodb ON` (`MODE_CONFIG=rule_mongodb.yml`) with runbook-path command;
         execute 3 attempts and record per-attempt metrics.
   - [ ] Leaf 5: `zookeeper OFF` (`MODE_CONFIG=none_zookeeper.yml`) with runbook-path command;
