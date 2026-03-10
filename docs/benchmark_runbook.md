@@ -143,14 +143,19 @@ h1: Queue-depth ave 12.3000 count 100                  # queue depth
 The `scripts/sweep_benchmark.sh` script automates running all concurrency levels:
 
 ```bash
+mkdir -p docs/sweep_2026-02-28
+
 # etcd without Jetpack
-./scripts/sweep_benchmark.sh jetpack-etcd none_etcd.yml > results/etcd_original.tsv
+./scripts/sweep_benchmark.sh jetpack-etcd none_etcd.yml \
+  > docs/sweep_2026-02-28/etcd_original.tsv
 
 # MongoDB with Jetpack
-./scripts/sweep_benchmark.sh jetpack-mongodb rule_mongodb.yml > results/mongodb_adaptive.tsv
+./scripts/sweep_benchmark.sh jetpack-mongodb rule_mongodb.yml \
+  > docs/sweep_2026-02-28/mongodb_adaptive.tsv
 
 # ZooKeeper with Jetpack, custom server args
-./scripts/sweep_benchmark.sh jetpack-zookeeper rule_zookeeper.yml "-m 100" > results/zk_fp100.tsv
+./scripts/sweep_benchmark.sh jetpack-zookeeper rule_zookeeper.yml "-m 100" \
+  > docs/sweep_2026-02-28/zk_fp100.tsv
 ```
 
 Output is TSV with columns: `concurrency`, `total_throughput`, `h1`..`h5`,

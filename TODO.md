@@ -59,6 +59,13 @@
 - Phase 1D recovery command-path verification (2026-03-10): runbook recovery command
   shape now verified on Docker Compose v5.0.1 without syntax workarounds:
   `docker compose run --rm jetpack-{etcd,mongodb,zookeeper} recovery` all PASS.
+- Phase 1D benchmark/sweep/cleanup command-path verification (2026-03-10):
+  runbook sweep examples now use the same canonical output root
+  `docs/sweep_2026-02-28/` referenced by log/markdown conversion sections.
+  Verified command blocks on Docker Compose v5.0.1:
+  `docker run --rm --privileged jetpack-{etcd,mongodb,zookeeper} benchmark` PASS,
+  `./scripts/sweep_benchmark.sh jetpack-etcd none_etcd.yml > docs/sweep_2026-02-28/etcd_original.tsv` PASS,
+  and `docker compose -f docker/{etcd,mongodb,zookeeper}/docker-compose.yml down -v` PASS.
 - Phase 1D / Phase 1F remain the highest-priority Claude execution track: they are meant to be
   reproduced locally on one machine with multiple Docker containers, using checked-in scripts and
   20ms `tc/netem` where the runbook requires WAN simulation. They are not AWS-dependent tasks.
@@ -827,7 +834,7 @@ Why this is re-opened based on `docs/codex_review_report.md`:
     - the build commands are the same ones documented in `docs/benchmark_runbook.md`
     - the rerun metadata records the commit hash, build date, and resulting image tag / image ID
 
-- [ ] Make the **documented runbook commands** the actual accepted commands
+- [x] Make the **documented runbook commands** the actual accepted commands
   - [x] Leaf 1: make compose-based Jetpack commands runnable without external dependency
         startup preconditions when the runbook uses embedded backend mode.
     - Completed (2026-03-10): removed unconditional `depends_on` and external endpoint
@@ -844,8 +851,20 @@ Why this is re-opened based on `docs/codex_review_report.md`:
       - `docker compose -f docker/etcd/docker-compose.yml run --rm jetpack-etcd recovery` PASS
       - `docker compose -f docker/mongodb/docker-compose.yml run --rm jetpack-mongodb recovery` PASS
       - `docker compose -f docker/zookeeper/docker-compose.yml run --rm jetpack-zookeeper recovery` PASS
-  - [ ] Leaf 3: verify benchmark/sweep/cleanup command blocks in `docs/benchmark_runbook.md`
+  - [x] Leaf 3: verify benchmark/sweep/cleanup command blocks in `docs/benchmark_runbook.md`
         map 1:1 to passing scripts and documented output paths.
+    - Completed (2026-03-10):
+      - Updated runbook sweep examples to write TSV outputs to `docs/sweep_2026-02-28/`
+        (canonical artifact root used by subsequent sections).
+      - Docker verification (Compose v5.0.1):
+        - `docker run --rm --privileged jetpack-etcd benchmark` PASS
+        - `docker run --rm --privileged jetpack-mongodb benchmark` PASS
+        - `docker run --rm --privileged jetpack-zookeeper benchmark` PASS
+        - `./scripts/sweep_benchmark.sh jetpack-etcd none_etcd.yml > docs/sweep_2026-02-28/etcd_original.tsv` PASS
+        - `./scripts/tsv_to_md.sh docs/sweep_2026-02-28/*.tsv` PASS
+        - `docker compose -f docker/etcd/docker-compose.yml down -v` PASS
+        - `docker compose -f docker/mongodb/docker-compose.yml down -v` PASS
+        - `docker compose -f docker/zookeeper/docker-compose.yml down -v` PASS
   - `docs/benchmark_runbook.md` must be runnable as written on the supported Docker Compose V2 / V5 CLI.
   - [x] `--privileged` flag issue fixed (2026-03-08): All 3 compose files already have
     `privileged: true` at service level. Removed redundant `--privileged` from
