@@ -139,6 +139,7 @@ build_images() {
     log_step "Phase 1: Build Fresh Docker Images"
 
     mkdir -p "$RESULTS_DIR/build"
+    local metadata_file="$RESULTS_DIR/build/image_metadata.tsv"
 
     # Remove old images to ensure clean-room build
     for backend in "${BACKENDS[@]}"; do
@@ -149,11 +150,18 @@ build_images() {
         fi
     done
 
+    if $DRY_RUN; then
+        echo "  [DRY-RUN] write build metadata to $metadata_file"
+    else
+        printf "backend\timage_tag\timage_id\tcreated_at\tcommit\tbuilt_at\n" > "$metadata_file"
+    fi
+
     # Build each backend
     for backend in "${BACKENDS[@]}"; do
         local compose_file="docker/${backend}/docker-compose.yml"
+        local image="jetpack-${backend}"
         local log_file="$RESULTS_DIR/build/${backend}.log"
-        log_info "Building jetpack-${backend} ..."
+        log_info "Building $image ..."
         if $DRY_RUN; then
             echo "  [DRY-RUN] docker compose -f $compose_file build 2>&1 | tee $log_file"
         else
@@ -162,9 +170,20 @@ build_images() {
             if docker compose -f "$REPO_ROOT/$compose_file" build 2>&1 | tee "$log_file"; then
                 local end_time
                 end_time=$(date +%s)
-                log_info "Built jetpack-${backend} in $((end_time - start_time))s"
+                log_info "Built $image in $((end_time - start_time))s"
+
+                local image_id
+                local created_at
+                local built_at
+                image_id="$(docker image inspect --format '{{.Id}}' "$image")"
+                created_at="$(docker image inspect --format '{{.Created}}' "$image")"
+                built_at="$(date -Iseconds)"
+                printf "%s\t%s\t%s\t%s\t%s\t%s\n" \
+                    "$backend" "$image" "$image_id" "$created_at" "$COMMIT_HASH" "$built_at" \
+                    >> "$metadata_file"
+                log_info "Image metadata: $image id=${image_id#sha256:}"
             else
-                log_error "Failed to build jetpack-${backend}. See $log_file"
+                log_error "Failed to build $image. See $log_file"
                 return 1
             fi
         fi
@@ -182,6 +201,9 @@ build_images() {
         fi
     done
 
+    if ! $DRY_RUN; then
+        log_info "Build metadata: $metadata_file"
+    fi
     log_info "All 3 backend images built successfully."
 }
 
@@ -437,6 +459,22 @@ EOF
 - [ ] Canonical artifacts regenerated and consistent
 - [ ] No unresolved contradictions in published docs
 EOF
+
+    local metadata_file="$RESULTS_DIR/build/image_metadata.tsv"
+    if [ -f "$metadata_file" ]; then
+        cat >> "$summary" <<EOF
+
+## Build Metadata
+
+| Backend | Image Tag | Image ID | Created At | Commit | Built At |
+|---|---|---|---|---|---|
+EOF
+        awk -F'\t' 'NR > 1 {
+            image_id = $3
+            sub(/^sha256:/, "", image_id)
+            printf("| %s | `%s` | `%s` | %s | `%s` | %s |\n", $1, $2, image_id, $4, $5, $6)
+        }' "$metadata_file" >> "$summary"
+    fi
 
     if ! $DRY_RUN; then
         log_info "Summary written to: $summary"

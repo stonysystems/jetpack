@@ -30,6 +30,7 @@ services:
 
   # Jetpack with MongoDB integration
   jetpack-mongodb:
+    image: jetpack-mongodb
     build:
       context: ../..
       dockerfile: docker/mongodb/Dockerfile

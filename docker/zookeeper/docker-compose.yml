@@ -29,6 +29,7 @@ services:
 
   # Jetpack with ZooKeeper integration
   jetpack-zookeeper:
+    image: jetpack-zookeeper
     build:
       context: ../..
       dockerfile: docker/zookeeper/Dockerfile

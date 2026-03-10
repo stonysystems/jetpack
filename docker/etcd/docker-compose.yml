@@ -38,6 +38,7 @@ services:
 
   # Jetpack with etcd integration
   jetpack-etcd:
+    image: jetpack-etcd
     build:
       context: ../..
       dockerfile: docker/etcd/Dockerfile

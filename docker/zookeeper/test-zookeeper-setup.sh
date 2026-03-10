@@ -109,6 +109,7 @@ echo ""
 echo "6. Docker Compose Content"
 check_file_contains "docker-compose has zookeeper service" "$SCRIPT_DIR/docker-compose.yml" "zookeeper:"
 check_file_contains "docker-compose has jetpack service" "$SCRIPT_DIR/docker-compose.yml" "jetpack-zookeeper:"
+check_file_contains "docker-compose pins jetpack-zookeeper image tag" "$SCRIPT_DIR/docker-compose.yml" "image: jetpack-zookeeper"
 check_file_contains "docker-compose exposes port 2181" "$SCRIPT_DIR/docker-compose.yml" "2181"
 check_file_contains "docker-compose sets build context" "$SCRIPT_DIR/docker-compose.yml" "context:"
 check_file_contains "docker-compose has healthcheck" "$SCRIPT_DIR/docker-compose.yml" "healthcheck"
@@ -123,8 +124,8 @@ check_file_contains "Script uses zoo.cfg config" "$SCRIPT_DIR/run-zookeeper-test
 check_file_contains "Script has run_single_process_test function" "$SCRIPT_DIR/run-zookeeper-test.sh" "run_single_process_test"
 check_file_contains "Script has cleanup trap" "$SCRIPT_DIR/run-zookeeper-test.sh" "trap cleanup"
 check_file_contains "Script uses ZooKeeper ruok health check" "$SCRIPT_DIR/run-zookeeper-test.sh" "ruok"
-check_file_contains "Script passes -P zookeeper flag" "$SCRIPT_DIR/run-zookeeper-test.sh" '\-P.*zookeeper'
-check_file_contains "Script passes -r zookeeper flag" "$SCRIPT_DIR/run-zookeeper-test.sh" '\-r.*zookeeper'
+check_file_contains "Script passes -P localhost in single mode" "$SCRIPT_DIR/run-zookeeper-test.sh" '\-P localhost'
+check_file_contains "Script passes log directory via -r" "$SCRIPT_DIR/run-zookeeper-test.sh" '\-r "\$LOG_DIR"'
 echo ""
 
 # --- 7b. Multi-process test mode ---
@@ -145,7 +146,7 @@ check_file_contains "Script has ZooKeeper ensemble setup" "$SCRIPT_DIR/run-zooke
 check_file_contains "Script has ZooKeeper leader detection" "$SCRIPT_DIR/run-zookeeper-test.sh" "get_zookeeper_leader"
 check_file_contains "Script has ZooKeeper node kill function" "$SCRIPT_DIR/run-zookeeper-test.sh" "kill_zookeeper_node"
 check_file_contains "Script has new leader wait function" "$SCRIPT_DIR/run-zookeeper-test.sh" "wait_zookeeper_new_leader"
-check_file_contains "Script references failover config" "$SCRIPT_DIR/run-zookeeper-test.sh" "failover_zookeeper"
+check_file_contains "Script uses external recovery flow (no failover config)" "$SCRIPT_DIR/run-zookeeper-test.sh" "WITHOUT failover config"
 check_file_contains "Script checks for recovery in logs" "$SCRIPT_DIR/run-zookeeper-test.sh" "JetpackRecoveryEntry"
 check_file_contains "Script uses ZooKeeper srvr command for leader" "$SCRIPT_DIR/run-zookeeper-test.sh" "srvr"
 check_file_contains "Script creates 3-node ensemble" "$SCRIPT_DIR/run-zookeeper-test.sh" "3-node ZooKeeper ensemble"

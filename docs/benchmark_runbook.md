@@ -31,6 +31,18 @@ docker compose -f docker/zookeeper/docker-compose.yml build
 Each image bundles the Jetpack binary, backend client libraries, config files,
 and network simulation tools.
 
+Compose files pin explicit tags, so successful builds produce:
+`jetpack-etcd`, `jetpack-mongodb`, `jetpack-zookeeper`.
+
+Record build metadata for reproducibility:
+
+```bash
+git rev-parse --short HEAD
+date -Iseconds
+docker image inspect jetpack-etcd jetpack-mongodb jetpack-zookeeper \
+  --format '{{.RepoTags}} {{.Id}} {{.Created}}'
+```
+
 ## 3. Run a Single Benchmark
 
 ### Minimal (1 client, default config)

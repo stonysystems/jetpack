@@ -45,6 +45,11 @@
   in `failure_recovery_evaluation.md`. Added date clarification to `latency_analysis.md`.
   Created `scripts/reproduce_evaluation.sh` for automated end-to-end reproduction.
   Fixed ZooKeeper Dockerfile download URL (archive.apache.org). Trimmed Docker context.
+- Phase 1D clean-room build gate fix (2026-03-10): Compose now pins deterministic
+  `jetpack-*` image tags, setup validators assert those tags, and
+  `scripts/reproduce_evaluation.sh --build-only` now records `image_metadata.tsv`
+  plus a `Build Metadata` table in `SUMMARY.md`. Verified with a successful clean-room
+  build run at commit `561b143e` (artifacts in `results/reproduce_20260310_141845/`).
 - Phase 1D / Phase 1F remain the highest-priority Claude execution track: they are meant to be
   reproduced locally on one machine with multiple Docker containers, using checked-in scripts and
   20ms `tc/netem` where the runbook requires WAN simulation. They are not AWS-dependent tasks.
@@ -776,7 +781,26 @@ Why this is re-opened based on `docs/codex_review_report.md`:
   - ZooKeeper recovery currently needed a fallback path that does not count as final acceptance
   - `result.md` and recovery docs still contain stale / ambiguous / internally conflicting claims
 
-- [ ] Re-establish a **clean-room build gate** for all 3 backends (`etcd`, `mongodb`, `zookeeper`)
+- [x] Re-establish a **clean-room build gate** for all 3 backends (`etcd`, `mongodb`, `zookeeper`)
+  - [x] Leaf 1: pin deterministic compose image tags (`jetpack-etcd`, `jetpack-mongodb`, `jetpack-zookeeper`)
+        and validate them in setup checks so reruns never depend on anonymous local build names.
+    - Completed (2026-03-10): added `image: jetpack-{etcd,mongodb,zookeeper}` in the 3 compose files;
+      added compose-tag assertions in `docker/*/test-*-setup.sh`.
+  - [x] Leaf 2: make `scripts/reproduce_evaluation.sh --build-only` persist per-backend build metadata
+        (commit hash, image tag, image ID, build timestamp) and surface it in `SUMMARY.md`.
+    - Completed (2026-03-10): `image_metadata.tsv` is emitted under `results/reproduce_<timestamp>/build/`
+      and rendered into a `Build Metadata` table in `SUMMARY.md`.
+  - [x] Leaf 3: execute a clean-room `--build-only` run from image-free state and archive build logs +
+        metadata under `results/reproduce_<timestamp>/build/`.
+    - Completed (2026-03-10): ran `./scripts/reproduce_evaluation.sh --build-only` at commit `561b143e`;
+      all 3 images built and verified. Metadata:
+      - `jetpack-etcd` `sha256:2c88c5f0acafcb641018fa88195ffbbb08704342a35ce7d300afbb693aac820d`
+      - `jetpack-mongodb` `sha256:304cbf0b3bc1a44580c4f41348a92d7574aa521249b1469d09d2abcf45762163`
+      - `jetpack-zookeeper` `sha256:5b0b28c1a4a5796d5150ed5add64c4bf4a9c355715983e0d978ec8b7806427c1`
+  - [x] Leaf 4: keep `docs/benchmark_runbook.md` aligned with the accepted build-gate command path
+        and metadata capture steps used by the script.
+    - Completed (2026-03-10): runbook now states deterministic image tags and includes the
+      `docker image inspect ... --format ...` metadata capture command.
   - Start from a state that does not depend on previously built `jetpack-*` images.
     Acceptable proof options:
     - remove the relevant local images before the acceptance run, or
