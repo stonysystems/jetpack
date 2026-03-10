@@ -8,7 +8,7 @@
 
 ## Review Snapshot
 
-- Latest active phase: `Phase 2I: 3-D Base-Log Architecture Review`
+- Latest active phase: `Phase 1D / Phase 1F: Local Docker Evaluation Reproducibility`
 
 ### Recently Done / Updated
 
@@ -40,19 +40,26 @@
   All 4 entry scripts source it. Backward compatibility verified (CLI, result naming, parsers).
   Docker backend matrix extended with failover configs, compose/test paths. 47 unit tests pass.
   AWS/Zoo validation blocked with documented re-validation matrix.
+- Phase 1D / Phase 1F remain the highest-priority Claude execution track: they are meant to be
+  reproduced locally on one machine with multiple Docker containers, using checked-in scripts and
+  20ms `tc/netem` where the runbook requires WAN simulation. They are not AWS-dependent tasks.
 
 ### Undone In Priority Order
 
-1. Phase 2I: Mencius small-config TLC run completed (terminated after ~34 hours,
+1. Phase 1D: make Codex able to reproduce the evaluation end to end, from fresh image build
+   to regenerated result artifacts. This is a local Docker task on one machine, not an AWS task.
+   Claude should actively attempt or unblock it rather than classifying it as AWS-blocked.
+2. Phase 1D / Phase 1F: make the runbook-backed WAN recovery flow reproducible for all three
+   backends and align recovery docs with the correct metrics. This is also a local Docker task:
+   several containers on one machine, with 20ms `tc/netem` added where the runbook requires it.
+3. Phase 2I: Mencius small-config TLC run completed (terminated after ~34 hours,
    598M states, 56.2M distinct, zero errors — accepted as sufficient verification).
    Log checked in. Big-config 12-hour runs for all 3 combinations still needed
    (requires Docker or Java 11+).
-2. Phase 1D: make Codex able to reproduce the evaluation end to end, from fresh image build
-   to regenerated result artifacts. **Blocked on Docker access.**
-3. Phase 1D / Phase 1F: make the runbook-backed WAN recovery flow reproducible for all three
-   backends and align recovery docs with the correct metrics. **Blocked on Docker access.**
 
-All remaining tasks require Docker or AWS access. Code-only tasks are complete:
+Remaining open work is split across local Docker reruns, TLA execution, and deferred remote
+validation. Only the legacy remote-validation tail in Phase 1H is AWS/Zoo-blocked. Code-only tasks
+are complete:
 - Phase 0: done
 - Phase 1A/1B/1C (sweep/benchmark code): done
 - Phase 1H (script automation): done (2026-03-08)
@@ -713,8 +720,22 @@ with each other.” The target is:
 - and obtain results that either match the published claims closely enough to support them,
   or force the docs/results to be narrowed so they only claim what is actually reproducible.
 
+This reopened section is a local single-machine reproducibility target. The accepted path is:
+
+- checked-in Dockerfiles / compose files / test scripts from this repo
+- several local Docker containers on one machine
+- 20ms `tc/netem` added where the runbook or test mode says to simulate WAN conditions
+
+Do **not** reinterpret this section as an AWS task. AWS/Zoo access matters only for the deferred
+legacy remote-validation work in Phase 1H.
+
 Non-negotiable rules for Claude on this reopened section:
 
+- Do **not** mark Phase 1D / Phase 1F blocked just because AWS is unavailable. These tasks are
+  supposed to run locally via Docker.
+- If the current agent session lacks working Docker access, treat that as an execution environment
+  issue to solve or escalate so Codex can continue the local rerun. Do not rewrite the TODO status
+  as “blocked on AWS”.
 - `docs/benchmark_runbook.md` is the primary operational source of truth for evaluation
   reproducibility. If the runbook is wrong, fix the runbook **and** the underlying scripts /
   Docker / docs. Do not keep a hidden local workaround.
