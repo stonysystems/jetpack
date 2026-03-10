@@ -15,7 +15,7 @@ This repo is an orchestration layer around the main `JetPack` codebase. It handl
 
 | Category | Scripts | Description |
 |---|---|---|
-| **Canonical (current)** | `sweep_benchmark.sh`, `run_full_sweep.sh`, `rerun_failed_points.sh`, `patch_canonical_with_reruns.sh`, `test_sweep_benchmark.sh` | Docker-based local benchmark and sweep pipeline |
+| **Canonical (current)** | `reproduce_evaluation.sh`, `sweep_benchmark.sh`, `run_full_sweep.sh`, `rerun_failed_points.sh`, `patch_canonical_with_reruns.sh`, `test_sweep_benchmark.sh` | Docker-based local benchmark and sweep pipeline |
 | **Canonical (result processing)** | `build_consolidated_csv.sh`, `tsv_to_md.sh`, `calc_latency.py`, `results_reader.py` | Result parsing, conversion, and analysis |
 | **Shared definitions** | `experiment_defs.sh`, `test_experiment_defs.sh` | Centralized protocol/backend/mode definitions, concurrency arrays, and command-generation helpers sourced by entry scripts |
 | **Legacy (AWS/Zoo)** | `00-ips.sh` through `11-aws-copilot-property.sh`, `93-99` ops helpers | AWS/Zoo cluster setup, remote experiment runs, ops |
@@ -57,6 +57,24 @@ Cluster assumptions:
 `setup.json` is the control-plane state for the legacy scripts. Re-run `./00-ips.sh` whenever you switch between AWS and Zoo.
 
 ## Docker-based sweep pipeline (current)
+
+### `reproduce_evaluation.sh`
+
+End-to-end evaluation reproduction: builds fresh images, runs sanity tests,
+throughput sweep, and recovery tests. Designed for automated Codex reruns.
+
+Usage:
+```bash
+./scripts/reproduce_evaluation.sh                # Full end-to-end
+./scripts/reproduce_evaluation.sh --dry-run      # Preview commands
+./scripts/reproduce_evaluation.sh --build-only   # Only build images
+./scripts/reproduce_evaluation.sh --sanity-only  # Build + 6 sanity runs
+./scripts/reproduce_evaluation.sh --sweep-only   # Build + 9-case sweep
+./scripts/reproduce_evaluation.sh --recovery-only # Build + 3 recovery tests
+```
+
+Results saved to `results/reproduce_<timestamp>/` with build logs, sanity
+outputs, sweep TSV files, recovery logs, and SUMMARY.md acceptance checklist.
 
 ### `sweep_benchmark.sh`
 

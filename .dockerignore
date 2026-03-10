@@ -30,6 +30,17 @@ tmp/
 out/
 logs/
 
+# Large data directories not needed for builds
+old_scripts/
+curp_scripts/
+data_processing/
+dependencies/
+scripts/*-failure-recovery-data*/
+scripts/*-failure-recovery-data*/
+docs/sweep_*/logs/
+**/*.csv
+**/*.res
+
 # Large archives/images
 **/*.tar
 **/*.tar.gz

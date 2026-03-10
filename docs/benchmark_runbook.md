@@ -271,7 +271,28 @@ If significantly longer, check for scheduling delays in single-process mode.
 | `docs/latency_analysis.md` | Consolidated performance analysis |
 | `docs/failure_recovery_evaluation.md` | Recovery timing results |
 
-## 10. Cleanup
+## 10. Automated End-to-End Reproduction
+
+For a fully automated evaluation run (build + sanity + sweep + recovery):
+
+```bash
+# Full end-to-end reproduction (builds fresh images, runs all tests)
+./scripts/reproduce_evaluation.sh
+
+# Preview all commands without executing
+./scripts/reproduce_evaluation.sh --dry-run
+
+# Individual phases
+./scripts/reproduce_evaluation.sh --build-only     # Only build images
+./scripts/reproduce_evaluation.sh --sanity-only    # Build + 6 sanity runs
+./scripts/reproduce_evaluation.sh --sweep-only     # Build + 9-case sweep
+./scripts/reproduce_evaluation.sh --recovery-only  # Build + 3 recovery tests
+```
+
+Results are saved to `results/reproduce_<timestamp>/` with build logs, sanity
+run outputs, sweep TSV files, recovery logs, and a summary checklist.
+
+## 11. Cleanup
 
 ```bash
 docker compose -f docker/etcd/docker-compose.yml down -v

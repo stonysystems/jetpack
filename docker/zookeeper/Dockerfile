@@ -204,9 +204,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Apache ZooKeeper server
+# Use archive.apache.org (permanent) with downloads.apache.org as fallback.
+# downloads.apache.org only hosts current releases and 404s older versions.
 ARG ZOOKEEPER_VERSION=3.9.4
-ADD https://downloads.apache.org/zookeeper/zookeeper-${ZOOKEEPER_VERSION}/apache-zookeeper-${ZOOKEEPER_VERSION}-bin.tar.gz /tmp/zookeeper.tar.gz
-RUN tar -xzf /tmp/zookeeper.tar.gz -C /opt && \
+RUN wget -q -O /tmp/zookeeper.tar.gz \
+        "https://archive.apache.org/dist/zookeeper/zookeeper-${ZOOKEEPER_VERSION}/apache-zookeeper-${ZOOKEEPER_VERSION}-bin.tar.gz" || \
+    wget -q -O /tmp/zookeeper.tar.gz \
+        "https://downloads.apache.org/zookeeper/zookeeper-${ZOOKEEPER_VERSION}/apache-zookeeper-${ZOOKEEPER_VERSION}-bin.tar.gz" && \
+    tar -xzf /tmp/zookeeper.tar.gz -C /opt && \
     mv "/opt/apache-zookeeper-${ZOOKEEPER_VERSION}-bin" /opt/zookeeper && \
     rm /tmp/zookeeper.tar.gz
 
