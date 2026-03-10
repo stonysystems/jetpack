@@ -793,8 +793,8 @@ Why this is re-opened based on `docs/codex_review_report.md`:
   - [x] Leaf 3: execute a clean-room `--build-only` run from image-free state and archive build logs +
         metadata under `results/reproduce_<timestamp>/build/`.
     - Completed (2026-03-10): ran `./scripts/reproduce_evaluation.sh --build-only` at commit `561b143e`;
-      all 3 images built and verified. Metadata:
-      - `jetpack-etcd` `sha256:2c88c5f0acafcb641018fa88195ffbbb08704342a35ce7d300afbb693aac820d`
+      all 3 images built and verified in one clean-room run. Metadata:
+      - `jetpack-etcd` `sha256:09a4a010ccc14455832788187fed598f8c03f1ae1191c1ccbdcd3005275511c3`
       - `jetpack-mongodb` `sha256:304cbf0b3bc1a44580c4f41348a92d7574aa521249b1469d09d2abcf45762163`
       - `jetpack-zookeeper` `sha256:5b0b28c1a4a5796d5150ed5add64c4bf4a9c355715983e0d978ec8b7806427c1`
   - [x] Leaf 4: keep `docs/benchmark_runbook.md` aligned with the accepted build-gate command path
