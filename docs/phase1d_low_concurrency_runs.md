@@ -143,3 +143,36 @@ Notes:
 - Post-fix verification logs show the replica-set URI path:
   `mongodb://127.0.0.1:27017,127.0.0.2:27017,127.0.0.3:27017/?replicaSet=jetpack-rs`.
 - All 3 post-fix attempts completed with `100%` fast-path success.
+
+## 2026-03-10: Leaf 5 (`zookeeper OFF`, 3 attempts)
+
+Command shape (runbook-compatible; documented env vars only):
+
+```bash
+docker run --rm --privileged \
+  -e SITE_CONFIG=60c1s5r5p.yml \
+  -e MODE_CONFIG=none_zookeeper.yml \
+  -e CLIENT_CONFIG=client_open.yml \
+  -e CONCURRENT_CONFIG=concurrent_1.yml \
+  -e LATENCY_MS=20 \
+  -e LATENCY_JITTER=0 \
+  -e TEST_DURATION=30 \
+  jetpack-zookeeper benchmark
+```
+
+Artifact directory:
+`docs/phase1d_low_concurrency_20260310_zookeeper_off/`
+
+Metrics extracted from `All-efficient-attempts statistics` (`50pct`) and
+`Fastpath statistics`:
+
+| Attempt | Status | Exit | Log | h1 p50 (ms) | h2-h5 p50 avg (ms) | Delta (ms) | FP attempted | FP succeeded |
+|---|---|---:|---|---:|---:|---:|---:|---:|
+| 1 | Completed | 0 | `docs/phase1d_low_concurrency_20260310_zookeeper_off/zookeeper_off_r1.txt` | 43.23 | 83.41 | 40.18 | 0 | 0 |
+| 2 | Completed | 0 | `docs/phase1d_low_concurrency_20260310_zookeeper_off/zookeeper_off_r2.txt` | 42.68 | 82.83 | 40.15 | 0 | 0 |
+| 3 | Completed | 0 | `docs/phase1d_low_concurrency_20260310_zookeeper_off/zookeeper_off_r3.txt` | 42.78 | 82.89 | 40.11 | 0 | 0 |
+
+Notes:
+- All 3 attempts completed successfully on the documented default path.
+- `h2-h5 - h1` stayed near `~40ms` in all attempts.
+- Absolute levels are stable and align with the expected ZooKeeper OFF low-concurrency shape.
