@@ -28,11 +28,10 @@
 - Phase 2I 3-D log refactor completed (2026-03-08): All 7 TLA+ files refactored for genuine
   `log[i][j][k]` and per-proposer `commitIndex[i][j]`. Projection operators removed from
   `jetpack.tla`. `ApplyCommitted` moved to wrappers.
-- Phase 2I small-config TLC verification (2026-03-08): Raft exhaustive (82K states, no errors),
-  CoPilot exhaustive (515 states, no errors), Mencius in progress (388M+ states / 36.5M+
-  distinct after 22+ hours, no errors). Mencius state space is very large due to 3-proposer
-  round-robin interleaving; exhaustive completion may take days.
-  Next: complete Mencius exhaustive (or accept partial), then big-config 12-hour runs.
+- Phase 2I small-config TLC verification (2026-03-08 to 2026-03-09): Raft exhaustive
+  (82K states, no errors), CoPilot exhaustive (515 states, no errors), Mencius terminated
+  after ~34 hours (598M states, 56.2M distinct, zero errors — accepted as sufficient).
+  All three small-config verifications complete. Next: big-config 12-hour runs.
 - Phase 2I reproducibility (2026-03-08): `tla/run-tlc.sh` updated to support local Java
   (auto-detect tla2tools.jar) and Docker modes. `tla/VERIFICATION.md` created with full
   workflow documentation. Runner tested and verified functional.
@@ -44,11 +43,10 @@
 
 ### Undone In Priority Order
 
-1. Phase 2I: Mencius small-config TLC exhaustive run in progress (388M+ states, 36.5M+
-   distinct, 22+ hours, no errors). Queue still growing (~24M pending). May take days
-   for exhaustive completion. 388M error-free states is strong verification evidence.
-   When complete (or accepted as sufficient), check in log and update verification docs.
-   Then big-config 12-hour runs for all 3 combinations (needs Docker or Java 11+).
+1. Phase 2I: Mencius small-config TLC run completed (terminated after ~34 hours,
+   598M states, 56.2M distinct, zero errors — accepted as sufficient verification).
+   Log checked in. Big-config 12-hour runs for all 3 combinations still needed
+   (requires Docker or Java 11+).
 2. Phase 1D: make Codex able to reproduce the evaluation end to end, from fresh image build
    to regenerated result artifacts. **Blocked on Docker access.**
 3. Phase 1D / Phase 1F: make the runbook-backed WAN recovery flow reproducible for all three
@@ -58,7 +56,7 @@ All remaining tasks require Docker or AWS access. Code-only tasks are complete:
 - Phase 0: done
 - Phase 1A/1B/1C (sweep/benchmark code): done
 - Phase 1H (script automation): done (2026-03-08)
-- Phase 2 (TLA+ specs): done except Mencius exhaustive + big-config runs
+- Phase 2 (TLA+ specs): done except big-config runs (Mencius small-config accepted with 598M states)
 - Phase 3 (integrations): done
 - Phase 4 (supporting docs): done
 

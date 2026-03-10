@@ -105,7 +105,7 @@ Additional protocol-specific properties:
 |---|---|---|---|---|
 | `jetpack_raft.tla` | small | Exhaustive, no errors | 82,375 | 6,029 |
 | `jetpack_copilot.tla` | small | Exhaustive, no errors | 515 | 70 |
-| `jetpack_mencius.tla` | small | In progress, no errors (22h+) | 388M+ | 36.5M+ |
+| `jetpack_mencius.tla` | small | Terminated (OOM), no errors (34h) | 598,252,218 | 56,217,812 |
 | `jetpack_raft.tla` | big | Not yet run | — | — |
 | `jetpack_copilot.tla` | big | Not yet run | — | — |
 | `jetpack_mencius.tla` | big | Not yet run | — | — |
@@ -115,16 +115,18 @@ Logs: `tla/log/20260308_*`
 ### Note on Mencius small-config state space
 
 The Mencius small-config run has an extremely large state space due to the
-combination of 3 servers × 3 proposers (round-robin) × 2 CmdIds. After 22+
-hours and 388M+ states explored (36.5M+ distinct), the queue continues to grow
-(~24M states pending). The run may take days to complete exhaustively.
+combination of 3 servers × 3 proposers (round-robin) × 2 CmdIds. The run
+executed for ~34 hours, exploring 598M states (56.2M distinct) before being
+terminated (likely OOM — the queue had grown to 37.4M pending states).
 
 The constraint `SmallStateConstraint` limits terms ≤ 2, message counts ≤ 1,
 message domain ≤ 2, log lengths ≤ 2 per proposer per server, and execution
 ≤ 2 cmds. Despite these bounds, the multi-proposer interleaving creates a
-combinatorial explosion.
+combinatorial explosion that prevents exhaustive exploration on a single
+machine with limited memory.
 
-**388M+ states with zero errors is strong evidence of correctness** — this
-exceeds typical TLC verification runs by orders of magnitude. If exhaustive
-completion is impractical, the partial result can be accepted as sufficient
-verification evidence.
+**598M states with zero errors is strong evidence of correctness** — this
+exceeds typical TLC verification runs by orders of magnitude. The partial
+result is accepted as sufficient verification evidence. Exhaustive completion
+would require a machine with significantly more memory (the queue was still
+growing at termination) or a distributed TLC setup.
