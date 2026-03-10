@@ -83,9 +83,12 @@ Previously, all backends ran as single-node instances, which hid the replication
 latency and produced unrealistically low write times (etcd: ~2ms, ZK: ~50ms fsync only).
 
 **Measured write latencies** (3-node clusters, Setting A, h1 — no client→leader RTT):
-- etcd: ~43.6ms (Raft replication RTT + WAL)
-- MongoDB: ~47.7ms (replication RTT + local write)
-- ZooKeeper: ~45.5ms (ZAB replication RTT + txn log fsync)
+- Historical baseline (2026-03-02 docs): etcd `~43.6ms`, MongoDB `~47.7ms`, ZooKeeper `~45.5ms`.
+- Runbook-path rerun (2026-03-10, 3 attempts each): etcd median `42.59ms` (range `22.64-42.79`),
+  MongoDB median `7.27ms` (range `7.12-7.28`), ZooKeeper median `42.78ms`
+  (range `42.68-43.23`).
+- Interpretation: etcd/ZooKeeper remain near the expected OFF-mode shape; MongoDB absolute
+  levels are materially lower than the old baseline and are treated as updated rerun evidence.
 
 ### Rule Mode (Jetpack ON)
 
@@ -149,14 +152,16 @@ Before the RPC bind fix, ALL processes showed ~2.65ms because all client sockets
 
 Low-concurrency (5 clients, concurrency=1):
 
-| Setting | h1 Avg (ms) | h2-h5 Avg (ms) | Explanation |
+| Setting | 2026-03-02 published h1/h2-h5 (ms) | 2026-03-10 rerun h1/h2-h5 (range, median) | Notes |
 |---|---:|---:|---|
-| etcd A (off) | 43.6 | 83.7 | 0/40ms RTT + ~43ms etcd Raft repl |
-| etcd C (on) | 40.4 | 40.7 | Jetpack fast path, 1 RTT |
-| MongoDB A (off) | 47.7 | 88.0 | 0/40ms RTT + ~48ms Mongo repl |
-| MongoDB C (on) | 45.2 | 45.9 | Jetpack fast path, 1 RTT |
-| ZK A (off) | 45.5 | 86.0 | 0/40ms RTT + ~45ms ZAB repl + fsync |
-| ZK C (on) | 40.3 | 40.5 | Jetpack fast path, 1 RTT |
+| etcd A (off) | 43.6 / 83.7 | 22.64-42.79 (42.59) / 62.65-82.86 (82.66) | Supporting overall with one low-latency outlier |
+| etcd C (on) | 40.4 / 40.7 | 22.65-40.26 (22.78) / 40.41-40.42 (40.42) | `h2-h5` stable; `h1` bimodal; fast-path 100% |
+| MongoDB A (off) | 47.7 / 88.0 | 7.12-7.28 (7.27) / 46.15-46.53 (46.27) | Material absolute mismatch vs old baseline |
+| MongoDB C (on) | 45.2 / 45.9 | 7.33-7.76 (7.45) / 41.39-41.49 (41.44) | Material absolute mismatch vs old baseline; fast-path 100% |
+| ZK A (off) | 45.5 / 86.0 | 42.68-43.23 (42.78) / 82.83-83.41 (82.89) | Supporting with mild downward drift |
+| ZK C (on) | 40.3 / 40.5 | 40.25-40.27 (40.26) / 40.35-40.35 (40.35) | Supporting and stable |
+
+Rerun evidence source: `docs/phase1d_low_concurrency_runs.md`.
 
 ### Maximum Throughput Sweep (2026-03-02 full rerun)
 

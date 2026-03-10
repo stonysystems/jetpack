@@ -964,8 +964,19 @@ Why this is re-opened based on `docs/codex_review_report.md`:
       - `40.25/40.35/0.10`, fp `405/405` (`100.00%`)
       - `40.27/40.35/0.08`, fp `402/402` (`100.00%`)
     - All 3 attempts exited `0` on the default path.
-  - [ ] Leaf 7: consolidate all 6 cases (18 runs), compare against published low-concurrency
+  - [x] Leaf 7: consolidate all 6 cases (18 runs), compare against published low-concurrency
         claims, and update docs if absolute values materially differ.
+    - Completed (2026-03-10): consolidated all 18 reruns using `50pct` per-attempt
+      latencies and compared medians/ranges against the published 2026-03-02
+      low-concurrency claims (`result.md`, `docs/latency_analysis.md`).
+    - Evidence: `docs/phase1d_low_concurrency_runs.md` now includes a Leaf 7
+      consolidation table with per-case ranges, medians, median drift vs published
+      values, and supporting/non-supporting classification.
+    - Docs updated for material mismatches:
+      - `result.md` low-concurrency section now includes 2026-03-10 rerun ranges/medians
+        alongside the 2026-03-02 historical baseline.
+      - `docs/latency_analysis.md` current-results table and measured-latency notes now
+        include rerun ranges/medians and explicitly call out MongoDB absolute mismatch.
   - Required cases:
     - etcd (Jetpack OFF)
     - etcd (Jetpack ON / rule mode)

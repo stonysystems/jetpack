@@ -210,3 +210,28 @@ Notes:
 - Fast-path attempts remained `100%` successful in all attempts.
 - `h1` and `h2-h5` both stayed near `~40.3ms` in all 3 attempts, with near-zero
   `h2-h5 - h1` deltas (`~0.1ms`), matching the expected rule-mode shape.
+
+## 2026-03-10: Leaf 7 Consolidation vs Published Low-Concurrency Claims
+
+Published claims compared below come from:
+- `result.md` (Open-Loop Performance table)
+- `docs/latency_analysis.md` (Current Results table)
+
+Material-difference rule used for this consolidation:
+- absolute median drift `>= 5ms` on either `h1` or `h2-h5`, or
+- clear multimodal behavior that cannot be represented by one stable absolute value.
+
+| Case | Published h1/h2-h5 (ms) | Rerun h1 range (median) | Rerun h2-h5 range (median) | Median delta (ms) | Median drift vs published (h1 / h2-h5, ms) | Fast-path totals | Assessment |
+|---|---:|---:|---:|---:|---:|---:|---|
+| etcd OFF | 43.6 / 83.7 | 22.64-42.79 (42.59) | 62.65-82.86 (82.66) | 40.07 | -1.01 / -1.04 | 0/0 | Supporting overall with one low-latency outlier; absolute medians remain close. |
+| etcd ON | 40.4 / 40.7 | 22.65-40.26 (22.78) | 40.41-40.42 (40.42) | 17.64 | -17.62 / -0.28 | 1168/1168 | Partially supporting: `h2-h5` aligns and fast-path is 100%, but `h1` is bimodal. |
+| MongoDB OFF | 47.7 / 88.0 | 7.12-7.28 (7.27) | 46.15-46.53 (46.27) | 39.00 | -40.43 / -41.73 | 0/0 | Non-supporting for published absolute levels (material mismatch). |
+| MongoDB ON | 45.2 / 45.9 | 7.33-7.76 (7.45) | 41.39-41.49 (41.44) | 33.99 | -37.75 / -4.46 | 1139/1139 | Non-supporting for published absolute levels; fast-path success is stable at 100%. |
+| ZooKeeper OFF | 45.5 / 86.0 | 42.68-43.23 (42.78) | 82.83-83.41 (82.89) | 40.11 | -2.72 / -3.11 | 0/0 | Supporting with mild downward absolute drift, still preserving OFF-mode shape. |
+| ZooKeeper ON | 40.3 / 40.5 | 40.25-40.27 (40.26) | 40.35-40.35 (40.35) | 0.09 | -0.04 / -0.15 | 1201/1201 | Supporting and stable. |
+
+Documentation reconciliation applied in this leaf:
+- Updated low-concurrency comparison sections in `result.md` and `docs/latency_analysis.md`
+  to include the 2026-03-10 rerun ranges/medians and to mark the old absolute table values
+  as historical 2026-03-02 baselines.
+- Kept high-concurrency sweep sections unchanged in this leaf (handled by later TODO items).

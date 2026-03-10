@@ -31,11 +31,19 @@ All backends run as **3-node clusters** (etcd Raft cluster, ZooKeeper ZAB ensemb
 MongoDB replica set with `w:majority`), so backend write latency includes the backend's
 own replication RTT (~40ms via tc/netem).
 
-| Backend | Jetpack OFF (h1/h2-h5 ms) | Jetpack ON (h1/h2-h5 ms) | Sanity |
+Published values below are the 2026-03-02 baseline from earlier reruns. The right column
+shows the 2026-03-10 runbook-path rerun (3 attempts per case, 18 runs total).
+
+| Case | Published h1/h2-h5 (ms) | 2026-03-10 rerun h1/h2-h5 (range, median) | Assessment |
 |---------|---:|---:|---|
-| etcd | 43.6 / 83.7 | 40.4 / 40.7 | PASS (40ms RTT + ~43ms etcd Raft repl) |
-| MongoDB | 47.7 / 88.0 | 45.2 / 45.9 | PASS (40ms RTT + ~48ms Mongo repl) |
-| ZooKeeper | 45.5 / 86.0 | 40.3 / 40.5 | PASS (40ms RTT + ~45ms ZAB repl + fsync) |
+| etcd OFF | 43.6 / 83.7 | 22.64-42.79 (42.59) / 62.65-82.86 (82.66) | Supporting overall with one low-latency outlier |
+| etcd ON | 40.4 / 40.7 | 22.65-40.26 (22.78) / 40.41-40.42 (40.42) | `h2-h5` aligns; `h1` is bimodal |
+| MongoDB OFF | 47.7 / 88.0 | 7.12-7.28 (7.27) / 46.15-46.53 (46.27) | Material mismatch vs published absolute values |
+| MongoDB ON | 45.2 / 45.9 | 7.33-7.76 (7.45) / 41.39-41.49 (41.44) | Material mismatch vs published absolute values |
+| ZooKeeper OFF | 45.5 / 86.0 | 42.68-43.23 (42.78) / 82.83-83.41 (82.89) | Supporting with mild downward drift |
+| ZooKeeper ON | 40.3 / 40.5 | 40.25-40.27 (40.26) / 40.35-40.35 (40.35) | Supporting and stable |
+
+Source for rerun evidence: `docs/phase1d_low_concurrency_runs.md`.
 
 ### High-concurrency comparison (c=200, from 2026-03-02 sweep rerun)
 
@@ -58,18 +66,16 @@ own replication RTT (~40ms via tc/netem).
 
 ### Observations (open-loop, Jetpack ON vs OFF, 3-node backend clusters)
 
-- **All three backends pass the latency sanity check** with 3-node backend clusters.
-  Backend write latency now includes the backend's own replication RTT (~40ms), making
-  the results realistic. etcd h1=43.6ms (0 RTT + ~43ms etcd Raft repl), h2-h5=83.7ms
-  (40ms RTT + ~43ms). MongoDB h1=47.7ms, h2-h5=88.0ms. ZK h1=45.5ms (0 RTT + ~45ms
-  ZAB repl + fsync), h2-h5=86.0ms (40ms RTT + ~45ms).
-- **Jetpack ON latency is ~40ms** across all backends (fast path bypasses backend write).
-  This demonstrates Jetpack's core value: speculative execution eliminates backend I/O
-  from the critical path.
-- **Backend write latency with replication**: etcd ~43ms (Raft repl RTT + WAL),
-  MongoDB ~48ms (repl RTT + local write), ZooKeeper ~45ms (ZAB repl RTT + txn log fsync).
-  The 40ms client→leader RTT is visible as the delta between h1 and h2-h5 latencies for
-  etcd (43.6 vs 83.7), MongoDB (47.7 vs 88.0), and ZooKeeper (45.5 vs 86.0).
+- **etcd and ZooKeeper OFF-mode reruns remain consistent** with the expected `h2-h5 ~= h1 + 40ms`
+  model, with one etcd absolute-latency outlier.
+- **Jetpack ON behavior diverges by backend in the rerun set**:
+  - ZooKeeper ON is stable near `~40ms` for both leader and non-leader clients.
+  - etcd ON keeps stable `h2-h5 ~40.4ms` and `100%` fast-path success, but `h1` is bimodal.
+  - MongoDB ON keeps `100%` fast-path success but its absolute latencies are materially lower
+    than the previously published table values.
+- **MongoDB low-concurrency absolute values are currently non-supporting** relative to the
+  old published baseline and are tracked as updated rerun evidence in
+  `docs/phase1d_low_concurrency_runs.md`.
 - **Maximum throughput**: etcd is fastest (~7.8K txn/s off, ~7.4K on), ZooKeeper is
   moderate (~5.7K off, ~5.5K on), MongoDB is lowest (~2.3K off, ~2.0K on).
 - **Jetpack ON throughput is comparable or slightly lower** than Jetpack OFF. The
