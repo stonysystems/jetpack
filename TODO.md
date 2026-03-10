@@ -56,6 +56,9 @@
   path by default. Verified with compose smoke runs:
   `jetpack-etcd single`, `jetpack-mongodb single`, `jetpack-zookeeper single`
   (all PASS on Docker Compose v5.0.1).
+- Phase 1D recovery command-path verification (2026-03-10): runbook recovery command
+  shape now verified on Docker Compose v5.0.1 without syntax workarounds:
+  `docker compose run --rm jetpack-{etcd,mongodb,zookeeper} recovery` all PASS.
 - Phase 1D / Phase 1F remain the highest-priority Claude execution track: they are meant to be
   reproduced locally on one machine with multiple Docker containers, using checked-in scripts and
   20ms `tc/netem` where the runbook requires WAN simulation. They are not AWS-dependent tasks.
@@ -835,8 +838,12 @@ Why this is re-opened based on `docs/codex_review_report.md`:
       - `docker compose -f docker/etcd/docker-compose.yml run --rm -e TEST_DURATION=5 jetpack-etcd single` PASS
       - `docker compose -f docker/mongodb/docker-compose.yml run --rm -e TEST_DURATION=5 jetpack-mongodb single` PASS
       - `docker compose -f docker/zookeeper/docker-compose.yml run --rm -e TEST_DURATION=5 jetpack-zookeeper single` PASS
-  - [ ] Leaf 2: verify runbook recovery command shape (`docker compose run --rm jetpack-* recovery`)
+  - [x] Leaf 2: verify runbook recovery command shape (`docker compose run --rm jetpack-* recovery`)
         passes on supported Compose versions without local syntax workarounds.
+    - Completed (2026-03-10) on Docker Compose v5.0.1:
+      - `docker compose -f docker/etcd/docker-compose.yml run --rm jetpack-etcd recovery` PASS
+      - `docker compose -f docker/mongodb/docker-compose.yml run --rm jetpack-mongodb recovery` PASS
+      - `docker compose -f docker/zookeeper/docker-compose.yml run --rm jetpack-zookeeper recovery` PASS
   - [ ] Leaf 3: verify benchmark/sweep/cleanup command blocks in `docs/benchmark_runbook.md`
         map 1:1 to passing scripts and documented output paths.
   - `docs/benchmark_runbook.md` must be runnable as written on the supported Docker Compose V2 / V5 CLI.
