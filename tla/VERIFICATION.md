@@ -99,19 +99,29 @@ Additional protocol-specific properties:
 
 ## Verification Status
 
-### Post-3D-refactor runs (2026-03-08)
+### Post-3D-refactor runs (2026-03-08 to 2026-03-11)
 
 | Spec | Config | Result | States generated | Distinct states |
 |---|---|---|---|---|
 | `jetpack_raft.tla` | small | Exhaustive, no errors | 82,375 | 6,029 |
 | `jetpack_copilot.tla` | small | Exhaustive, no errors | 515 | 70 |
 | `jetpack_mencius.tla` | small | Terminated (OOM), no errors (34h) | 598,252,218 | 56,217,812 |
-| `jetpack_raft.tla` | big | Not yet run | — | — |
+| `jetpack_raft.tla` | big | 12h bounded run completed, no TLC error/invariant/deadlock marker (accepted) | 87,135,107 | 9,101,950 |
 | `jetpack_copilot.tla` | big | Not yet run | — | — |
 | `jetpack_mencius.tla` | big | Not yet run | — | — |
 
-Logs: `tla/log/20260308_*`
+Logs: `tla/log/20260308_*` (small runs),
+`tla/log/20260310_214540_jetpack_raft.log`,
+`tla/log/20260310_214540_jetpack_raft_big_launcher.log` (raft big run)
 Primary Mencius small evidence: `tla/log/20260308_101553_jetpack_mencius_small.log`
+
+Raft big-run note (2026-03-10/11): launched via
+`timeout 12h ./tla/run-tlc.sh jetpack_raft.tla`. Final TLC line was
+`Progress(13) at 2026-03-11 13:45:21 ... 87,135,107 generated, 9,101,950 distinct`.
+No `Error:`, invariant-violation, or deadlock marker was emitted before timeout-window
+closure. The expected launcher status file
+`tla/log/20260310_214540_jetpack_raft_big_launcher.status` was not present for this run,
+so the timeout exit code is recorded as inferred (`124`) rather than directly captured.
 
 ### Note on Mencius small-config state space
 

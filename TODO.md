@@ -35,6 +35,9 @@
 - Phase 2I reproducibility (2026-03-08): `tla/run-tlc.sh` updated to support local Java
   (auto-detect tla2tools.jar) and Docker modes. `tla/VERIFICATION.md` created with full
   workflow documentation. Runner tested and verified functional.
+- Phase 2I raft big-config evidence documentation (2026-03-11): `tla/VERIFICATION.md`
+  now records the accepted 12-hour bounded `jetpack_raft.tla` run
+  (`87,135,107` generated / `9,101,950` distinct, no TLC error marker in tail).
 - Phase 1H script automation (2026-03-08): Created `scripts/experiment_defs.sh` centralizing
   protocol/backend families, mode mappings, concurrency arrays, and command-generation helpers.
   All 4 entry scripts source it. Backward compatibility verified (CLI, result naming, parsers).
@@ -106,7 +109,8 @@
    several containers on one machine, with 20ms `tc/netem` added where the runbook requires it.
 3. Phase 2I: Mencius small-config TLC run completed (terminated after ~34 hours,
    598M states, 56.2M distinct, zero errors — accepted as sufficient verification).
-   Log checked in. Big-config 12-hour runs for all 3 combinations still needed
+   `jetpack_raft.tla` big-config 12-hour bounded run evidence is now documented.
+   Remaining big-config 12-hour runs: `jetpack_copilot.tla` and `jetpack_mencius.tla`
    (requires Docker or Java 11+).
 
 Remaining open work is split across local Docker reruns, TLA execution, and deferred remote
@@ -4994,8 +4998,19 @@ Non-negotiable rules for Claude on this reopened section:
             (inferred `timeout` exit code `124` from command form
             `timeout 12h ./tla/run-tlc.sh jetpack_raft.tla` plus log stop at deadline;
             direct status-file capture unavailable for this run).
-    - [ ] Leaf 2.3: update `tla/VERIFICATION.md` and `TODO.md` with the accepted
+    - [x] Leaf 2.3: update `tla/VERIFICATION.md` and `TODO.md` with the accepted
           big-run evidence for `jetpack_raft.tla`.
+      - Completed (2026-03-11):
+        - updated `tla/VERIFICATION.md` status table:
+          `jetpack_raft.tla` big-config row now records the accepted 12-hour bounded run
+          with concrete final counts (`87,135,107` generated / `9,101,950` distinct).
+        - added explicit big-run evidence links:
+          `tla/log/20260310_214540_jetpack_raft.log` and
+          `tla/log/20260310_214540_jetpack_raft_big_launcher.log`.
+        - documented the run caveat transparently:
+          status file `tla/log/20260310_214540_jetpack_raft_big_launcher.status`
+          was absent, so timeout exit code is retained as inferred (`124`) while
+          no TLC error/invariant/deadlock marker appears in the log tail.
   - [ ] Leaf 3: execute accepted 12-hour big-config run for `jetpack_copilot.tla`
         using the checked-in runner and keep timestamp-prefixed log.
   - [ ] Leaf 4: execute accepted 12-hour big-config run for `jetpack_mencius.tla`
