@@ -111,6 +111,7 @@ Additional protocol-specific properties:
 | `jetpack_mencius.tla` | big | Not yet run | — | — |
 
 Logs: `tla/log/20260308_*`
+Primary Mencius small evidence: `tla/log/20260308_101553_jetpack_mencius_small.log`
 
 ### Note on Mencius small-config state space
 

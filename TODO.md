@@ -2339,6 +2339,23 @@ Non-negotiable rules for Claude on this reopened section:
     No projection helpers or Jetpack logic in wrappers.
 
 - [ ] Re-run model checking for all 3 Jetpack/base combinations after the 3-D redesign
+  - [x] Leaf 1: finalize the pending `jetpack_mencius.tla` small-config run status
+        and record concrete evidence from the saved timestamped log.
+    - Completed (2026-03-11):
+      - reconciled the stale "still running" note with the saved run log
+        `tla/log/20260308_101553_jetpack_mencius_small.log`
+      - last recorded progress point: `598,252,218` states generated,
+        `56,217,812` distinct states, `37,403,770` states on queue
+      - no invariant violation / safety error line was reported before termination;
+        run is retained as non-exhaustive bounded evidence (not full closure)
+  - [ ] Leaf 2: execute accepted 12-hour big-config run for `jetpack_raft.tla`
+        using the checked-in runner and keep timestamp-prefixed log.
+  - [ ] Leaf 3: execute accepted 12-hour big-config run for `jetpack_copilot.tla`
+        using the checked-in runner and keep timestamp-prefixed log.
+  - [ ] Leaf 4: execute accepted 12-hour big-config run for `jetpack_mencius.tla`
+        using the checked-in runner and keep timestamp-prefixed log.
+  - [ ] Leaf 5: consolidate all three big-run outcomes in `tla/VERIFICATION.md`
+        and update Phase 2I closure evidence in `TODO.md`.
   - Required combinations:
     - `jetpack.tla` + `base_raft.tla`
     - `jetpack.tla` + `base_copilot.tla`
@@ -2356,8 +2373,10 @@ Non-negotiable rules for Claude on this reopened section:
   - **Small-config progress (2026-03-08)**:
     - [x] `jetpack_raft.tla` small: exhaustive, 82,375 states generated, 6,029 distinct, no errors
     - [x] `jetpack_copilot.tla` small: exhaustive, 515 states generated, 70 distinct, no errors
-    - [ ] `jetpack_mencius.tla` small: 21M+ states generated, 2.2M+ distinct, no errors so far;
-      still running (large state space due to multi-proposer + 2 CmdIds)
+    - [x] `jetpack_mencius.tla` small: non-exhaustive long run recorded in
+      `tla/log/20260308_101553_jetpack_mencius_small.log`; reached 598,252,218 generated /
+      56,217,812 distinct with no safety-error line before termination
+      (large multi-proposer state space).
 
 - [x] Make the TLA+ experiment trail reproducible from scratch
   - [x] `tla/run-tlc.sh` updated: supports local Java (auto-detects `tla2tools.jar`) and Docker
