@@ -25,7 +25,22 @@ open-loop client. Each process on a separate loopback IP (127.0.0.1-5).
 Each process reports its own latency independently. The leader process (h1) has lower
 latency because client→leader is on the same IP (no tc/netem delay).
 
+### Claim Status and Sources (Benchmark Throughput/Latency)
+
+- `artifact-backed`:
+  - accepted high-concurrency and peak-throughput tables in this section
+  - source: `docs/sweep_2026-02-28/*.tsv`
+- `rerun-confirmed`:
+  - low-concurrency rerun ranges and mismatch assessments
+  - source: `docs/phase1d_low_concurrency_runs.md`
+- `historical context`:
+  - old published baseline values shown for contrast in low-concurrency tables
+  - legacy baseline sections later in this file (`5 replicas`, `3 replicas`)
+- `still open`:
+  - MongoDB low-concurrency absolute mismatch vs the old published baseline
+
 ### Low-concurrency latency comparison (1 client per process, concurrency=1)
+Claim status: `rerun-confirmed` (with `still open` MongoDB absolute mismatch).
 
 All backends run as **3-node clusters** (etcd Raft cluster, ZooKeeper ZAB ensemble,
 MongoDB replica set with `w:majority`), so backend write latency includes the backend's
@@ -46,6 +61,7 @@ shows the 2026-03-10 runbook-path rerun (3 attempts per case, 18 runs total).
 Source for rerun evidence: `docs/phase1d_low_concurrency_runs.md`.
 
 ### High-concurrency comparison (c=200, accepted canonical pass)
+Claim status: `artifact-backed`.
 
 | Backend | Jetpack OFF (original) | Jetpack ON (adaptive) |
 |---------|---:|---:|
@@ -54,6 +70,7 @@ Source for rerun evidence: `docs/phase1d_low_concurrency_runs.md`.
 | ZooKeeper | 5,140 txn/s | 5,018 txn/s |
 
 ### Maximum throughput (best concurrency from accepted canonical pass)
+Claim status: `artifact-backed`.
 
 | Backend | Jetpack OFF (original) | | Jetpack ON (adaptive) | |
 |---------|---:|---:|---:|---:|
@@ -66,25 +83,25 @@ Source for rerun evidence: `docs/phase1d_low_concurrency_runs.md`.
 
 ### Observations (open-loop, Jetpack ON vs OFF, 3-node backend clusters)
 
-- **etcd and ZooKeeper OFF-mode reruns remain consistent** with the expected `h2-h5 ~= h1 + 40ms`
+- `rerun-confirmed`: **etcd and ZooKeeper OFF-mode reruns remain consistent** with the expected `h2-h5 ~= h1 + 40ms`
   model, with one etcd absolute-latency outlier.
-- **Jetpack ON behavior diverges by backend in the rerun set**:
+- `rerun-confirmed`: **Jetpack ON behavior diverges by backend in the rerun set**:
   - ZooKeeper ON is stable near `~40ms` for both leader and non-leader clients.
   - etcd ON keeps stable `h2-h5 ~40.4ms` and `100%` fast-path success, but `h1` is bimodal.
   - MongoDB ON keeps `100%` fast-path success but its absolute latencies are materially lower
     than the previously published table values.
-- **MongoDB low-concurrency absolute values are currently non-supporting** relative to the
+- `still open`: **MongoDB low-concurrency absolute values are currently non-supporting** relative to the
   old published baseline and are tracked as updated rerun evidence in
   `docs/phase1d_low_concurrency_runs.md`.
-- **Maximum throughput (accepted pass)**: etcd remains fastest (~7.7K off, ~7.4K adaptive),
+- `artifact-backed`: **Maximum throughput (accepted pass)**: etcd remains fastest (~7.7K off, ~7.4K adaptive),
   ZooKeeper is moderate (~5.6K off, ~5.4K adaptive), MongoDB is lower (~4.3K off, ~3.9K adaptive).
-- **Jetpack ON throughput** is lower than OFF at peak in this accepted pass for all three
+- `artifact-backed`: **Jetpack ON throughput** is lower than OFF at peak in this accepted pass for all three
   backends (etcd −4.8%, MongoDB −9.9%, ZooKeeper −2.5%).
-- **Tail sensitivity**: peak magnitudes are relatively stable, but c300/c400 tail shape is
+- `rerun-confirmed`: **Tail sensitivity**: peak magnitudes are relatively stable, but c300/c400 tail shape is
   environment-sensitive (especially MongoDB and etcd FP100), so peak/near-peak ranges are
   more reliable than a single tail point.
 
-## Performance Results (5 replicas)
+## Performance Results (5 replicas, historical context)
 
 ### Single-client tests (1 client, 5 replicas, concurrency=1)
 
@@ -112,7 +129,7 @@ Source for rerun evidence: `docs/phase1d_low_concurrency_runs.md`.
 - **Throughput drops** for MongoDB (1234→717 multi-client) due to higher per-request latency,
   while etcd (1593→1368) and ZooKeeper (1736→1393) see moderate decreases.
 
-## Multi-Process Results (5 replicas, 5ms network latency)
+## Multi-Process Results (5 replicas, 5ms network latency, historical context)
 
 Multi-process mode runs each server+client pair as a separate OS process, with tc/netem
 simulating 5ms +/- 2ms network latency between loopback addresses (127.0.0.1-5).
@@ -139,7 +156,7 @@ not site names (the KEY).
 - **Throughput is lower** than single-process mode because each process only has 1 client
   (concurrency=1) and network latency adds ~5ms per inter-replica message.
 
-## Performance Results (3 replicas, baseline)
+## Performance Results (3 replicas, baseline historical context)
 
 ### Single-client tests (1 client, 3 replicas)
 

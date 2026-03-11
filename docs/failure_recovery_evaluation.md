@@ -4,6 +4,25 @@ This document describes how to evaluate failure recovery downtime for Jetpack an
 backend protocols (etcd, MongoDB, ZooKeeper). It covers what to measure, which
 timestamps/log lines to use, and how to distinguish each recovery phase.
 
+## Claim Status and Sources (Recovery Claims)
+
+- `artifact-backed`:
+  - accepted WAN recovery matrix values (backend re-election ranges, script-detected ranges,
+    and internal `duration=` ranges)
+  - sources:
+    - `docs/phase1f_wan_recovery_20260311/wan_matrix_summary.md`
+    - `docs/phase1f_wan_recovery_20260311/*_wan_r*.txt`
+- `rerun-confirmed`:
+  - RTT-model interpretation (`1ms poll + 2*RTT`) applied to accepted WAN internal
+    duration values at `RECOVERY_LATENCY_MS=20` (20ms one-way, RTT=40ms)
+  - source: accepted WAN matrix above + formula in this document
+- `historical context`:
+  - pre-fix Run A / Run B measurements and original gap hypotheses retained for design trail
+  - sources: `docs/logs/*_recovery_gap_fix_wan_r*.txt`, `docs/*_recovery_v2.txt`
+- `still open`:
+  - no open claim in the accepted WAN internal-duration metric set; script-detected downtime
+    remains detection-path dependent and is reported separately from RTT comparison
+
 ## Recovery Phases
 
 A failure recovery test has three distinct phases:
@@ -112,6 +131,9 @@ signal file after `setZabState(BROADCAST)` in `Leader.java:lead()`.
 
 ## Interpreting Results
 
+Claim status: `artifact-backed` for the ranges in this section; `rerun-confirmed` for
+the interpretation notes.
+
 | Metric | Accepted WAN rerun range (2026-03-11) | Notes |
 |---|---|---|
 | etcd backend re-election (script) | 6.568-6.817s | Raft election variability |
@@ -126,6 +148,9 @@ Accepted rerun sources:
 - `docs/phase1f_wan_recovery_20260311/zookeeper_wan_r{1,2,3}.txt`
 
 ## RTT-Based Sanity Check for Jetpack Internal Recovery Duration
+
+Claim status: `artifact-backed` for measured table values;
+`rerun-confirmed` for the RTT-model comparison.
 
 > **Sanity Check Status: PASSED**
 >
@@ -194,7 +219,11 @@ With the original 10ms poll interval, polling delay averages 5ms -> expected ~85
 
 **For WAN deployments with RTT = 40ms, Jetpack internal recovery should take approximately 80-90ms.**
 
-### Measured vs Expected: Gap Analysis
+### Historical Context: Pre-Fix Measured vs Expected Gap Analysis
+
+Claim status: `historical context` (diagnostic trail before the accepted WAN rerun pass).
+Primary historical sources: `docs/logs/*_recovery_gap_fix_wan_r*.txt`,
+`docs/*_recovery_v2.txt`.
 
 Two sets of measurements exist:
 
@@ -250,7 +279,7 @@ Internal recovery was 1ms. Script detected at 3ms. Near-optimal for 0ms RTT.
 This confirms the Jetpack recovery protocol itself is correct and fast when
 the reactor is not congested.
 
-#### MongoDB: SDAM reactor congestion — ~60ms overhead at 0ms RTT (OPEN)
+#### MongoDB: SDAM reactor congestion — ~60ms overhead at 0ms RTT (historical context)
 
 Internal recovery (`JetpackRecoveryEntry` total) took **60–95ms** even with 0ms RTT.
 This is a real performance issue independent of network latency.
@@ -272,13 +301,13 @@ overhead on top: 80ms + 60–95ms reactor = ~140–175ms total (matches Run A: ~
 
 | Component | Before | After | Status |
 |-----------|--------|-------|--------|
-| Hooker poll interval | 10ms | 1ms | **DONE** — Docker images rebuilt |
-| Test script poll interval | 100ms | 10ms | **DONE** — scripts updated |
-| etcd/ZK RTT-level gap (42–47ms) | not diagnosed | resolved at 81ms | **RESOLVED** — gap disappears with correct WAN test setup; measured 81-83ms |
-| MongoDB reactor congestion (60–95ms) | 60-95ms | not seen | **RESOLVED** — only manifested in single-process mode; WAN mode with non-leader conn fix yields 81-83ms |
-| Recovery test tc/netem latency | not supported | supported | **DONE** — `RECOVERY_LATENCY_MS` env var added to all 3 test scripts |
-| Server-only process lifetime | exits at ~16s | stays for `duration_` | **DONE** — `s_main.cc` else-if branch added |
-| MongoDB non-leader connections | 80 per process | 0 for non-leaders | **DONE** — `loc_id_ == 0` guard in `mongodb/server.h` |
+| Hooker poll interval | 10ms | 1ms | `artifact-backed` code change; `rerun-confirmed` by accepted WAN pass |
+| Test script poll interval | 100ms | 10ms | `artifact-backed` script change; reduced detection-path noise |
+| etcd/ZK RTT-level gap (42–47ms) | not diagnosed | not observed in accepted WAN pass | `historical context` gap; accepted pass is `artifact-backed` at 81-83ms |
+| MongoDB reactor congestion (60–95ms) | 60-95ms | not observed in accepted WAN pass | `historical context` for single-process path; accepted WAN pass is `artifact-backed` |
+| Recovery test tc/netem latency | not supported | supported | `artifact-backed` script support for `RECOVERY_LATENCY_MS` |
+| Server-only process lifetime | exits at ~16s | stays for `duration_` | `artifact-backed` runtime fix in `s_main.cc` |
+| MongoDB non-leader connections | 80 per process | 0 for non-leaders | `artifact-backed` fix in `mongodb/server.h` |
 
 **Hooker poll fix** (`src/deptran/etcd/server.h`, `mongodb/server.h`, `zookeeper/server.h`):
 Reduces average signal detection delay from 5ms to 0.5ms. With RTT=40ms, total
@@ -297,14 +326,14 @@ Runs Jetpack as 3 separate OS processes instead of single-process mode.
 **mongodb/server.h connection fix**: Non-leader processes use 0 MongoDB connections,
 preventing connection storms in WAN mode with multiple OS processes.
 
-**MongoDB reactor congestion (RESOLVED in WAN mode)**:
+**MongoDB reactor congestion (historical context, accepted WAN pass no longer shows this gap)**:
 The 60–95ms overhead from MongoDB SDAM reconnection only manifested in single-process
 Docker tests where all 3 Jetpack replicas shared one process. In WAN mode with 3
 separate processes and non-leader processes using 0 MongoDB connections (via
 `loc_id_ == 0` guard), the leader process recovers without SDAM interference.
 Post-fix WAN results: 81–83ms for all three backends (see below).
 
-**Recovery test RTT support (DONE)**:
+**Recovery test RTT support (`artifact-backed`)**:
 Recovery test scripts support tc/netem latency via `RECOVERY_LATENCY_MS` env var,
 applied between Jetpack replicas on separate loopback IPs (127.0.0.1–3).
 All 3 scripts (`run-{etcd,mongodb,zookeeper}-test.sh`) implement this.
@@ -376,6 +405,12 @@ reconnection in separate threads or with minimal reactor interaction. Their reco
 events don't flood the Jetpack event reactor during recovery.
 
 ### Post-Fix Measured Results (RTT=40ms WAN mode, accepted rerun pass)
+
+Claim status: `artifact-backed` for all table values in this section;
+`rerun-confirmed` for the 2-RTT interpretation.
+Sources:
+- `docs/phase1f_wan_recovery_20260311/wan_matrix_summary.md`
+- `docs/phase1f_wan_recovery_20260311/*_wan_r*.txt`
 
 All three backends were rerun from the accepted runbook path with
 `RECOVERY_LATENCY_MS=20` (3 reps each). We keep script-detected and internal metrics

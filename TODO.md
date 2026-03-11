@@ -1304,11 +1304,31 @@ Why this is re-opened based on `docs/codex_review_report.md`:
       - identified remaining high-priority doc gap:
         `docs/benchmark_runbook.md` recovery RTT wording should use
         RTT=40ms for `RECOVERY_LATENCY_MS=20` (20ms one-way)
-  - [ ] Leaf 2: apply the claim-status labels and source links in `result.md` and
+  - [x] Leaf 2: apply the claim-status labels and source links in `result.md` and
         `docs/latency_analysis.md` for benchmark-throughput/latency sections.
-  - [ ] Leaf 3: apply the same claim-status labels and source links in
+    - Completed (2026-03-11):
+      - updated `result.md` benchmark throughput/latency sections with explicit
+        claim-status labels (`artifact-backed`, `rerun-confirmed`,
+        `historical context`, `still open`) and canonical source references
+      - marked legacy baseline sections in `result.md` as `historical context`
+      - updated `docs/latency_analysis.md` with the same claim-status mapping and
+        explicit source linkage to `docs/sweep_2026-02-28/*.tsv`
+      - preserved the open MongoDB low-concurrency absolute-mismatch note as
+        `still open` with evidence link to `docs/phase1d_low_concurrency_runs.md`
+  - [x] Leaf 3: apply the same claim-status labels and source links in
         `docs/failure_recovery_evaluation.md` and `docs/benchmark_runbook.md`, and remove
         any contradictory RESOLVED/OPEN wording that is not explicitly marked historical.
+    - Completed (2026-03-11):
+      - added explicit recovery claim-status mapping (`artifact-backed`,
+        `rerun-confirmed`, `historical context`, `still open`) and canonical
+        source links in:
+        - `docs/failure_recovery_evaluation.md`
+        - `docs/benchmark_runbook.md`
+      - corrected runbook RTT wording for `RECOVERY_LATENCY_MS=20`
+        to use RTT=40ms (20ms one-way) and aligned expected internal
+        recovery duration to `~81ms` (`1ms + 2*RTT`)
+      - converted ambiguous pre-fix `OPEN/RESOLVED/DONE` wording in recovery
+        analysis to explicit claim-status language and historical-context framing
   - [ ] Leaf 4: run a final docs consistency pass (cross-file number/label/source checks)
         and record closure notes in `TODO.md`.
   - Reconcile `docs/latency_analysis.md`, `docs/failure_recovery_evaluation.md`, `result.md`,

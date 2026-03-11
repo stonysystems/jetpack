@@ -173,6 +173,17 @@ To regenerate Markdown tables from TSV files:
 
 ## 7. Failure Recovery Tests
 
+Claim-status mapping for recovery claims in this runbook:
+- `artifact-backed`: accepted WAN rerun ranges and per-rep values from
+  `docs/phase1f_wan_recovery_20260311/wan_matrix_summary.md` and
+  `docs/phase1f_wan_recovery_20260311/*_wan_r*.txt`.
+- `rerun-confirmed`: RTT-model interpretation (`1ms + 2*RTT`) applied to internal
+  `duration=` values from the accepted WAN pass.
+- `historical context`: pre-fix diagnostic narratives retained in
+  `docs/failure_recovery_evaluation.md`.
+- `still open`: no open claim in the accepted WAN internal-duration metric set; keep
+  script-detected downtime separate from RTT-model comparisons.
+
 ### Run Recovery Test
 
 ```bash
@@ -188,6 +199,8 @@ docker compose -f docker/etcd/docker-compose.yml run --rm \
   -e RECOVERY_LATENCY_MS=20 jetpack-etcd recovery
 ```
 
+`RECOVERY_LATENCY_MS` is one-way latency. `RECOVERY_LATENCY_MS=20` means RTT=40ms.
+
 ### Recovery Timeline
 
 ```
@@ -198,7 +211,8 @@ T_kill              T_new_leader            T_jetpack_done
 1. Test kills the leader process
 2. Backend re-elects a leader (etcd ~6s, MongoDB ~11s, ZooKeeper ~1s)
 3. Signal file written to `/tmp/JM_Jetpack_0.0.0.0`
-4. Jetpack recovery hooker detects signal, runs 3-phase Paxos (~80-110ms at 20ms RTT)
+4. Jetpack recovery hooker detects signal and runs Jetpack recovery
+   (accepted WAN pass: internal `duration=` 81-83ms at RTT=40ms)
 5. Writes `/tmp/JM_Jetpack_recovery_finish_after_failure` on completion
 
 ### Signal Files (in `/tmp/`)
@@ -211,11 +225,21 @@ T_kill              T_new_leader            T_jetpack_done
 
 ### Expected Recovery Times
 
-| Backend | Backend re-election | Jetpack recovery | Total |
-|---------|-------------------|------------------|-------|
-| etcd | ~6.0-6.7s | ~80-110ms | ~6.1-6.8s |
-| MongoDB | ~10.6-11.0s | ~80-110ms | ~10.7-11.1s |
-| ZooKeeper | ~0.5-1.1s | ~80-110ms | ~0.6-1.2s |
+Claim status: `artifact-backed` for the table ranges;
+`rerun-confirmed` for the RTT interpretation note below.
+
+| Backend | Backend re-election (script) | Jetpack script-detected downtime | Jetpack internal `duration=` (RTT metric) |
+|---------|------------------------------|----------------------------------|--------------------------------------------|
+| etcd | 6.568-6.817s | 3-4ms | 81-82ms |
+| MongoDB | 10.741-23.209s | 88-92ms | 82-83ms |
+| ZooKeeper | 0.773-0.800s | 82-83ms | 81-82ms |
+
+RTT-model comparison metric uses only Jetpack internal `duration=`:
+expected at `RECOVERY_LATENCY_MS=20` is `1ms + 2*40ms = 81ms`.
+
+Source (accepted pass):
+- `docs/phase1f_wan_recovery_20260311/wan_matrix_summary.md`
+- `docs/phase1f_wan_recovery_20260311/*_wan_r*.txt`
 
 ### Recovery Log Lines
 
@@ -274,8 +298,10 @@ docker run --rm --privileged -e TEST_DURATION=60 jetpack-etcd benchmark
 
 Check tc/netem rules inside container: `tc qdisc show`
 
-Expected Jetpack recovery time: `1ms (poll) + 2 * RTT`. At RTT=20ms, expect ~41ms.
-If significantly longer, check for scheduling delays in single-process mode.
+Expected Jetpack internal recovery time: `1ms (poll) + 2 * RTT`.
+At `RECOVERY_LATENCY_MS=20` (20ms one-way, RTT=40ms), expect ~81ms.
+If significantly longer, check whether you are in single-process mode or not on the
+accepted WAN runbook path.
 
 ## 9. Where Results Live
 
@@ -287,6 +313,7 @@ If significantly longer, check for scheduling delays in single-process mode.
 | `docs/sweep_2026-02-28/logs/` | Per-run stdout/stderr logs |
 | `docs/latency_analysis.md` | Consolidated performance analysis |
 | `docs/failure_recovery_evaluation.md` | Recovery timing results |
+| `docs/phase1f_wan_recovery_20260311/` | Accepted WAN rerun raw logs and consolidated matrix |
 
 ## 10. Automated End-to-End Reproduction
 

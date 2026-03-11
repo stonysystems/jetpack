@@ -150,7 +150,15 @@ Before the RPC bind fix, ALL processes showed ~2.65ms because all client sockets
 
 ### Current Results (3-node backend clusters)
 
+Claim-status mapping for benchmark throughput/latency claims in this section:
+- `artifact-backed`: values copied from canonical accepted artifacts
+  `docs/sweep_2026-02-28/*.tsv`.
+- `rerun-confirmed`: interpretations derived from repeated reruns and cross-run comparisons.
+- `historical context`: older 2026-03-02 baseline values shown only for comparison.
+- `still open`: claims where old published absolute values do not match rerun evidence.
+
 Low-concurrency (5 clients, concurrency=1):
+Claim status: `rerun-confirmed` (with `still open` MongoDB absolute mismatch).
 
 | Setting | 2026-03-02 published h1/h2-h5 (ms) | 2026-03-10 rerun h1/h2-h5 (range, median) | Notes |
 |---|---:|---:|---|
@@ -164,6 +172,7 @@ Low-concurrency (5 clients, concurrency=1):
 Rerun evidence source: `docs/phase1d_low_concurrency_runs.md`.
 
 ### Maximum Throughput Sweep (accepted pass, refreshed 2026-03-11)
+Claim status: `artifact-backed` for raw tables; `rerun-confirmed` for interpretation.
 
 Configuration: 60 clients (`60c1s5r5p.yml`), 5 replicas, 5 partitions, 20ms tc/netem,
 3-node backend clusters, open-loop, 30s test duration per point.
@@ -205,6 +214,7 @@ Canonical files in `docs/sweep_2026-02-28/` were refreshed from accepted pass
 † = external host CPU from `/proc/stat` (system-wide average); other values are in-process leader CPU.
 
 #### Peak/Shape Reproducibility vs Prior 2026-03-02 Baseline
+Claim status: `rerun-confirmed` (comparison/interpretation across accepted vs prior pass).
 
 To avoid over-precise single-run claims, we compare accepted canonical shapes against the
 previous 2026-03-02 canonical snapshot (kept in Git history).
@@ -270,6 +280,8 @@ due to the `#define AWS` 2500-connection pool and w:majority replication.
   MongoDB tails remain the most environment-sensitive (`c=300/400`).
 - Tail shape at high concurrency (`c=300/400`) is more variable across reruns than peak
   magnitude; prefer range-aware claims over single-run tail numbers.
+- Low-concurrency MongoDB absolute latency mismatch vs old published baselines remains
+  `still open` and is tracked in `docs/phase1d_low_concurrency_runs.md`.
 - The adaptive queue-depth throttle (coordinator.cc) enables fast-path at low concurrency
   for latency benefit and throttles at high concurrency to preserve throughput.
 - CPU values for original mode are host-level `/proc/stat` measurements (system-wide
