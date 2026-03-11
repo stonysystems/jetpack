@@ -1199,9 +1199,26 @@ Why this is re-opened based on `docs/codex_review_report.md`:
       - primary_elected signal write
       - Jetpack recovery start
       - Jetpack recovery completion
-  - [ ] Leaf 2: run MongoDB WAN recovery from the runbook path with
+  - [x] Leaf 2: run MongoDB WAN recovery from the runbook path with
         `RECOVERY_LATENCY_MS=20` for 3 repetitions, archive full logs, and extract:
         script-level downtime + internal `duration=` values.
+    - Completed (2026-03-11) with runbook command:
+      - `docker compose -f docker/mongodb/docker-compose.yml run --rm -e RECOVERY_LATENCY_MS=20 jetpack-mongodb recovery`
+    - Archived logs:
+      - `docs/phase1f_wan_recovery_20260311/mongodb_wan_r1.txt`
+      - `docs/phase1f_wan_recovery_20260311/mongodb_wan_r2.txt`
+      - `docs/phase1f_wan_recovery_20260311/mongodb_wan_r3.txt`
+      - summary: `docs/phase1f_wan_recovery_20260311/mongodb_wan_summary.md`
+    - Extracted metrics:
+      - backend (script-level) downtime: `23209ms`, `10741ms`, `21684ms`
+      - Jetpack (script-level detection) downtime: `92ms`, `88ms`, `92ms`
+      - Jetpack internal `duration=`: `83ms`, `83ms`, `82ms`
+    - Each run confirms full chain:
+      - leader kill
+      - backend re-election
+      - primary_elected signal write
+      - Jetpack recovery start
+      - Jetpack recovery completion
   - [ ] Leaf 3: run ZooKeeper WAN recovery from the runbook path with
         `RECOVERY_LATENCY_MS=20` for 3 repetitions, archive full logs, and extract:
         script-level downtime + internal `duration=` values.
