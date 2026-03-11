@@ -2499,6 +2499,13 @@ Non-negotiable rules for Claude on this reopened section:
           - latest progress line:
             `Progress(11) ... 2,704,407 states generated, 336,848 distinct,
             244,746 states left on queue.`
+        - Follow-up checkpoint (2026-03-10T22:18:52-04:00 local):
+          - elapsed runtime observed from `timeout` process: `33:04` (`1984s`)
+          - status file still absent (run not complete):
+            `tla/log/20260310_214540_jetpack_raft_big_launcher.status`
+          - latest progress line:
+            `Progress(11) ... 2,953,302 states generated, 370,142 distinct,
+            269,293 states left on queue.`
       - [ ] Leaf 2.2.2: after timeout window closes, capture final TLC summary lines
             and launcher exit code from status file.
     - [ ] Leaf 2.3: update `tla/VERIFICATION.md` and `TODO.md` with the accepted
