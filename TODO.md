@@ -2350,6 +2350,25 @@ Non-negotiable rules for Claude on this reopened section:
         run is retained as non-exhaustive bounded evidence (not full closure)
   - [ ] Leaf 2: execute accepted 12-hour big-config run for `jetpack_raft.tla`
         using the checked-in runner and keep timestamp-prefixed log.
+    - [x] Leaf 2.1: launch the strict 12-hour `jetpack_raft.tla` big run from
+          `tla/run-tlc.sh` (no constant reduction) and record PID + log paths.
+      - Completed (2026-03-10 21:45 local):
+        - launch command:
+          `timeout 12h ./tla/run-tlc.sh jetpack_raft.tla`
+        - launcher shell PID: `1001612` (handoff to active runner chain:
+          `timeout` PID `1001615` -> `run-tlc.sh` PID `1001616` ->
+          Docker/TLC child process)
+        - launcher log:
+          `tla/log/20260310_214540_jetpack_raft_big_launcher.log`
+        - TLC timestamped run log:
+          `tla/log/20260310_214540_jetpack_raft.log`
+        - launcher exit-status file (written on completion):
+          `tla/log/20260310_214540_jetpack_raft_big_launcher.status`
+        - config in use: `jetpack_raft.cfg` (big constants, no reduction)
+    - [ ] Leaf 2.2: after 12 hours, confirm run outcome (no TLC error / invariant
+          violation) and capture final summary lines from the timestamped log.
+    - [ ] Leaf 2.3: update `tla/VERIFICATION.md` and `TODO.md` with the accepted
+          big-run evidence for `jetpack_raft.tla`.
   - [ ] Leaf 3: execute accepted 12-hour big-config run for `jetpack_copilot.tla`
         using the checked-in runner and keep timestamp-prefixed log.
   - [ ] Leaf 4: execute accepted 12-hour big-config run for `jetpack_mencius.tla`
