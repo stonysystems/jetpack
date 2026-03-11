@@ -2367,6 +2367,21 @@ Non-negotiable rules for Claude on this reopened section:
         - config in use: `jetpack_raft.cfg` (big constants, no reduction)
     - [ ] Leaf 2.2: after 12 hours, confirm run outcome (no TLC error / invariant
           violation) and capture final summary lines from the timestamped log.
+      - [x] Leaf 2.2.1: checkpoint active-run health before 12-hour deadline
+            (process chain alive, status file not yet present, progress advancing).
+        - Completed (2026-03-11):
+          - active chain observed:
+            - `timeout` PID `1001615`
+            - `run-tlc.sh` PID `1001616`
+            - Docker/TLC child process for
+              `tlc2.TLC -config jetpack_raft.cfg jetpack_raft.tla`
+          - completion status file still absent (expected while running):
+            `tla/log/20260310_214540_jetpack_raft_big_launcher.status`
+          - latest progress checkpoint in TLC log:
+            `Progress(8) ... 119,787 states generated, 16,477 distinct`
+            (`tla/log/20260310_214540_jetpack_raft.log`)
+      - [ ] Leaf 2.2.2: after timeout window closes, capture final TLC summary lines
+            and launcher exit code from status file.
     - [ ] Leaf 2.3: update `tla/VERIFICATION.md` and `TODO.md` with the accepted
           big-run evidence for `jetpack_raft.tla`.
   - [ ] Leaf 3: execute accepted 12-hour big-config run for `jetpack_copilot.tla`
