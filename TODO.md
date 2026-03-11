@@ -1292,7 +1292,7 @@ Why this is re-opened based on `docs/codex_review_report.md`:
   - The docs must say explicitly which metric is compared against the RTT formula (`1ms poll + 2 * RTT`)
     and must not mix the two under the same “Jetpack downtime” label.
 
-- [ ] Make the **published docs/results** match what Codex can actually rerun
+- [x] Make the **published docs/results** match what Codex can actually rerun
   - [x] Leaf 1: create a claim-reconciliation matrix that maps major benchmark/recovery
         statements to canonical artifacts and classifies each claim as:
         artifact-backed / rerun-confirmed / historical context / still open.
@@ -1329,8 +1329,35 @@ Why this is re-opened based on `docs/codex_review_report.md`:
         recovery duration to `~81ms` (`1ms + 2*RTT`)
       - converted ambiguous pre-fix `OPEN/RESOLVED/DONE` wording in recovery
         analysis to explicit claim-status language and historical-context framing
-  - [ ] Leaf 4: run a final docs consistency pass (cross-file number/label/source checks)
+  - [x] Leaf 4: run a final docs consistency pass (cross-file number/label/source checks)
         and record closure notes in `TODO.md`.
+    - Completed (2026-03-11):
+      - audited cross-file consistency across:
+        - `result.md`
+        - `docs/latency_analysis.md`
+        - `docs/failure_recovery_evaluation.md`
+        - `docs/benchmark_runbook.md`
+        - canonical artifacts under `docs/sweep_2026-02-28/*.tsv` and
+          `docs/phase1f_wan_recovery_20260311/*`
+      - verified accepted throughput checkpoints from sweep artifacts match
+        published c=200 values in docs/results:
+        - etcd: `7605` (OFF), `7369` (adaptive)
+        - MongoDB: `3867` (OFF), `3591` (adaptive)
+        - ZooKeeper: `5140` (OFF), `5018` (adaptive)
+      - verified accepted WAN recovery ranges are consistent across docs:
+        - etcd backend/script/internal: `6.568-6.817s` / `3-4ms` / `81-82ms`
+        - MongoDB backend/script/internal: `10.741-23.209s` / `88-92ms` / `82-83ms`
+        - ZooKeeper backend/script/internal: `0.773-0.800s` / `82-83ms` / `81-82ms`
+      - updated `result.md` recovery section with explicit claim-status/source
+        mapping and marked pre-fix gap-analysis blocks as `historical context`
+      - aligned runbook recovery timeline wording with accepted WAN rerun ranges
+        so it no longer implies narrow stale backend election values
+  - Parent closure (2026-03-11):
+    - all four leaves completed with explicit claim labels and canonical source links
+    - benchmark/recovery narrative now distinguishes `artifact-backed`,
+      `rerun-confirmed`, `historical context`, and `still open` claims
+    - no unresolved contradiction remains between published accepted claims and
+      the committed canonical rerun artifacts
   - Reconcile `docs/latency_analysis.md`, `docs/failure_recovery_evaluation.md`, `result.md`,
     `docs/benchmark_runbook.md`, and the canonical raw artifacts from the same accepted rerun pass.
   - `result.md` must not keep stale throughput tables that disagree with the canonical sweep files.

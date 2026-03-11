@@ -189,6 +189,23 @@ not site names (the KEY).
 
 ## Failure Recovery Results
 
+### Claim Status and Sources (Failure Recovery)
+
+- `artifact-backed`:
+  - accepted WAN recovery matrix values in this section
+  - source:
+    - `docs/phase1f_wan_recovery_20260311/wan_matrix_summary.md`
+    - `docs/phase1f_wan_recovery_20260311/*_wan_r*.txt`
+- `rerun-confirmed`:
+  - RTT-model interpretation (`1ms poll + 2*RTT`) applied to accepted WAN internal
+    `duration=` values at `RECOVERY_LATENCY_MS=20` (20ms one-way, RTT=40ms)
+- `historical context`:
+  - pre-fix Run A / Run B gap-analysis trail and projections retained for diagnostic context
+  - sources: `docs/logs/*_recovery_gap_fix_wan_r*.txt`, `docs/*_recovery_v2.txt`
+- `still open`:
+  - no open claim in accepted WAN internal-duration metrics; script-detected downtime
+    remains a separate, detection-path-dependent metric
+
 ### Recovery Architecture
 
 Recovery testing uses an **external kill approach**: the test script (not Jetpack's
@@ -211,6 +228,8 @@ Non-leader Jetpack servers poll this file every 1ms and trigger `JetpackRecovery
 when the signal is detected (reduced from original 10ms poll interval).
 
 ### WAN Recovery Test Results (post-fix, RTT=40ms)
+
+Claim status: `artifact-backed` for table values; `rerun-confirmed` for RTT-model interpretation.
 
 WAN mode runs 3 separate OS processes (h1=127.0.0.1, h2=127.0.0.2, h3=127.0.0.3)
 with tc/netem adding 20ms one-way delay (RTT=40ms). Config: `config/1c1s3r1p_wan.yml`.
@@ -294,7 +313,7 @@ Plus a signal polling delay of 0–P ms (P = hooker poll interval).
 With RTT = 40ms (benchmark environment): 0.5ms + 40ms + 40ms = **~81ms** (1ms poll) or
 ~85ms (10ms poll). This is the theoretical floor for internal recovery duration.
 
-#### Results with RTT ≈ 40ms (original run, tc/netem active from benchmark environment)
+#### Historical context: Results with RTT ≈ 40ms (original run, tc/netem active)
 
 The following numbers were measured in an environment where tc/netem latency (20ms one-way)
 was active between Jetpack replicas, consistent with the WAN benchmark setup:
@@ -307,7 +326,7 @@ was active between Jetpack replicas, consistent with the WAN benchmark setup:
 
 These numbers are from the initial test run and serve as the pre-fix baseline.
 
-#### Results at 0ms RTT (single-process Docker, post measurement-artifact fix)
+#### Historical context: Results at 0ms RTT (single-process Docker)
 
 After fixing the test script detection poll from 100ms → 10ms:
 
@@ -319,7 +338,7 @@ After fixing the test script detection poll from 100ms → 10ms:
 
 Note: ZooKeeper 16ms = 10ms script poll granularity + 6ms overhead. Internal = 1ms (correct).
 
-#### Gap analysis: etcd/ZooKeeper at RTT=40ms (~43ms gap)
+#### Historical context: Gap analysis (etcd/ZooKeeper at RTT=40ms, initial run)
 
 At RTT=40ms, etcd and ZK showed ~123–128ms internal duration vs expected 81ms — a ~42–47ms gap.
 
@@ -329,9 +348,10 @@ At RTT=40ms, etcd and ZK showed ~123–128ms internal duration vs expected 81ms 
   coroutine dispatch delay when the RPC completes. At 0ms RTT this overhead is hidden
   (recovery completes in 1ms total), but at 40ms RTT the coroutine scheduling adds up.
 
-**Status**: Root cause not yet confirmed. Needs profiling at RTT=40ms.
+**Historical status at initial-run time**: root cause not yet confirmed; later accepted WAN reruns
+show internal durations at 81-83ms.
 
-#### Gap analysis: MongoDB at RTT=40ms (~81–103ms gap)
+#### Historical context: Gap analysis (MongoDB at RTT=40ms, initial run)
 
 MongoDB shows ~162–184ms internal vs expected ~81ms — a ~81–103ms gap on top of the RTT.
 
@@ -346,15 +366,15 @@ This is not a network latency issue but a reactor contention issue specific to M
 **Comparison**: etcd and ZooKeeper recover in 1ms at 0ms RTT because their reconnection
 overhead is minimal or handled separately, leaving the Jetpack reactor free.
 
-#### Projection to WAN (RTT = 40ms, post-fix target)
+#### Historical context: Projection to WAN (RTT=40ms, pre-fix target)
 
 | Backend | 0ms RTT internal | Expected at 40ms RTT | Sanity check target |
 |---------|----------------:|---------------------:|--------------------:|
 | etcd | ~1ms | ~81ms | ≤100ms |
 | ZooKeeper | ~1ms | ~81ms | ≤100ms |
-| MongoDB | ~60–95ms | ~141–175ms | needs fix first |
+| MongoDB | ~60–95ms | ~141–175ms | pre-fix target (superseded by accepted WAN rerun at 81-83ms) |
 
-### Recovery Test Raw Output (v2: 10ms script poll)
+### Historical context: Recovery Test Raw Output (v2: 10ms script poll)
 
 #### etcd Recovery (10ms poll)
 ```

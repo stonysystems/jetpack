@@ -209,7 +209,8 @@ T_kill              T_new_leader            T_jetpack_done
 ```
 
 1. Test kills the leader process
-2. Backend re-elects a leader (etcd ~6s, MongoDB ~11s, ZooKeeper ~1s)
+2. Backend re-elects a leader (accepted WAN rerun ranges: etcd 6.568-6.817s,
+   MongoDB 10.741-23.209s, ZooKeeper 0.773-0.800s)
 3. Signal file written to `/tmp/JM_Jetpack_0.0.0.0`
 4. Jetpack recovery hooker detects signal and runs Jetpack recovery
    (accepted WAN pass: internal `duration=` 81-83ms at RTT=40ms)
