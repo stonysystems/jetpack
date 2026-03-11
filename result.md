@@ -45,24 +45,24 @@ shows the 2026-03-10 runbook-path rerun (3 attempts per case, 18 runs total).
 
 Source for rerun evidence: `docs/phase1d_low_concurrency_runs.md`.
 
-### High-concurrency comparison (c=200, from 2026-03-02 sweep rerun)
+### High-concurrency comparison (c=200, accepted canonical pass)
 
 | Backend | Jetpack OFF (original) | Jetpack ON (adaptive) |
 |---------|---:|---:|
-| etcd | 7,687 txn/s | 7,323 txn/s |
-| MongoDB | 3,642 txn/s | 3,542 txn/s |
-| ZooKeeper | 5,590 txn/s | 4,621 txn/s |
+| etcd | 7,605 txn/s | 7,369 txn/s |
+| MongoDB | 3,867 txn/s | 3,591 txn/s |
+| ZooKeeper | 5,140 txn/s | 5,018 txn/s |
 
-### Maximum throughput (best concurrency from 2026-03-02 sweep rerun)
+### Maximum throughput (best concurrency from accepted canonical pass)
 
 | Backend | Jetpack OFF (original) | | Jetpack ON (adaptive) | |
 |---------|---:|---:|---:|---:|
 | | Concurrency | Max (txn/s) | Concurrency | Max (txn/s) |
-| etcd | c=200 | 7,687 | c=200 | 7,323 |
-| MongoDB | c=100 | 3,799 | c=100 | 3,858 |
-| ZooKeeper | c=150 | 5,648 | c=150 | 5,486 |
+| etcd | c=150 | 7,743 | c=200 | 7,369 |
+| MongoDB | c=75 | 4,298 | c=75 | 3,873 |
+| ZooKeeper | c=150 | 5,564 | c=150 | 5,427 |
 
-*Data source: `docs/sweep_2026-02-28/*.tsv` (rerun 2026-03-02, commit `194c32c1`).*
+*Data source: `docs/sweep_2026-02-28/*.tsv` (refreshed from accepted pass `results/reproduce_20260310_164201/sweep/`, build commit `ff81e913`).*
 
 ### Observations (open-loop, Jetpack ON vs OFF, 3-node backend clusters)
 
@@ -76,11 +76,13 @@ Source for rerun evidence: `docs/phase1d_low_concurrency_runs.md`.
 - **MongoDB low-concurrency absolute values are currently non-supporting** relative to the
   old published baseline and are tracked as updated rerun evidence in
   `docs/phase1d_low_concurrency_runs.md`.
-- **Maximum throughput**: etcd is fastest (~7.8K txn/s off, ~7.4K on), ZooKeeper is
-  moderate (~5.7K off, ~5.5K on), MongoDB is lowest (~2.3K off, ~2.0K on).
-- **Jetpack ON throughput is comparable or slightly lower** than Jetpack OFF. The
-  BroadcastDispatch fast path adds some coordination overhead but does not significantly
-  reduce peak throughput.
+- **Maximum throughput (accepted pass)**: etcd remains fastest (~7.7K off, ~7.4K adaptive),
+  ZooKeeper is moderate (~5.6K off, ~5.4K adaptive), MongoDB is lower (~4.3K off, ~3.9K adaptive).
+- **Jetpack ON throughput** is lower than OFF at peak in this accepted pass for all three
+  backends (etcd −4.8%, MongoDB −9.9%, ZooKeeper −2.5%).
+- **Tail sensitivity**: peak magnitudes are relatively stable, but c300/c400 tail shape is
+  environment-sensitive (especially MongoDB and etcd FP100), so peak/near-peak ranges are
+  more reliable than a single tail point.
 
 ## Performance Results (5 replicas)
 

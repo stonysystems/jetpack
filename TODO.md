@@ -1128,8 +1128,26 @@ Why this is re-opened based on `docs/codex_review_report.md`:
       - linked retry logs captured in `FAILURE_LEDGER.md`:
         - `logs/jetpack-mongodb-phase1e-leaf3-adaptive_rule_mongodb/conc1_attempt1.log`
         - `logs/jetpack-mongodb-phase1e-leaf3-adaptive_rule_mongodb/conc1_attempt0.log`
-  - [ ] Leaf 6: document peak/shape reproducibility across the 9 cases and reconcile
+  - [x] Leaf 6: document peak/shape reproducibility across the 9 cases and reconcile
         published throughput claims where tails are environment-sensitive.
+    - Completed (2026-03-11) by reconciling throughput sections in:
+      - `docs/latency_analysis.md`
+      - `result.md`
+    - Updated to accepted canonical dataset:
+      - source: `docs/sweep_2026-02-28/*.tsv` refreshed from
+        `results/reproduce_20260310_164201/sweep/` (accepted build commit `ff81e913`)
+      - removed stale 2026-03-02-only peak claims from primary throughput summary sections
+    - Added explicit reproducibility/tail-sensitivity documentation:
+      - `docs/latency_analysis.md` now includes
+        `Peak/Shape Reproducibility vs Prior 2026-03-02 Baseline`
+      - table compares prior vs accepted peaks and `c=400` tail-drop deltas for all 9 cases
+      - narrative now treats tails (`c=300/400`) as environment-sensitive and uses
+        range-aware interpretation near the peak
+    - Reconciled headline throughput numbers in `result.md`:
+      - c=200 comparison table updated to accepted canonical values
+      - max-throughput table updated to accepted canonical values/concurrency points
+      - observations updated to avoid stale MongoDB low-throughput claims and to
+        explicitly call out tail sensitivity
   - Required matrix:
     - etcd original / fastpath100 / adaptive
     - MongoDB original / fastpath100 / adaptive

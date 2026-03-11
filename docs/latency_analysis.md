@@ -163,11 +163,12 @@ Low-concurrency (5 clients, concurrency=1):
 
 Rerun evidence source: `docs/phase1d_low_concurrency_runs.md`.
 
-### Maximum Throughput Sweep (2026-03-02 full rerun)
+### Maximum Throughput Sweep (accepted pass, refreshed 2026-03-11)
 
 Configuration: 60 clients (`60c1s5r5p.yml`), 5 replicas, 5 partitions, 20ms tc/netem,
 3-node backend clusters, open-loop, 30s test duration per point.
-Full 9-case rerun on 2026-03-02 (commit 194c32c1) with CPU instrumentation for all modes.
+Canonical files in `docs/sweep_2026-02-28/` were refreshed from accepted pass
+`results/reproduce_20260310_164201/sweep/` (accepted build commit `ff81e913`).
 
 **Modes:**
 - **Original** (`none_*.yml`): Jetpack OFF, single-leader replication through backend.
@@ -179,67 +180,79 @@ Full 9-case rerun on 2026-03-02 (commit 194c32c1) with CPU instrumentation for a
 - Original mode: external host CPU from `/proc/stat` snapshots before/after each Docker run
   (system-wide average across all cores, so lower than single-process measurements).
 
-#### Peak Throughput Summary
+#### Peak Throughput Summary (accepted canonical pass)
 
 | Backend | Original | FP 100% | Adaptive | Adaptive vs Original |
 |---|---:|---:|---:|---|
-| etcd | 7,687 @ c=200 | 6,749 @ c=400 | 7,323 @ c=200 | −5% (rule mode overhead) |
-| MongoDB | 3,799 @ c=100 | 3,200 @ c=200 | 3,858 @ c=100 | **+2%** |
-| ZooKeeper | 5,648 @ c=150 | 5,456 @ c=300 | 5,486 @ c=150 | −3% |
+| etcd | 7,743 @ c=150 | 6,995 @ c=150 | 7,369 @ c=200 | −4.8% |
+| MongoDB | 4,298 @ c=75 | 3,380 @ c=200 | 3,873 @ c=75 | −9.9% |
+| ZooKeeper | 5,564 @ c=150 | 5,438 @ c=150 | 5,427 @ c=150 | −2.5% |
 
 #### CPU and Bottleneck Analysis
 
 | Case | Peak (txn/s) | CPU Avg (%) | Queue Depth | FP Rate at Peak | Bottleneck |
 |---|---:|---:|---:|---:|---|
-| etcd original | 7,687 | 8.1† | 7 | — | Backend Raft replication latency |
-| etcd FP 100% | 6,749 | 10.2 | 284 | 26% | Rule mode overhead (witness, conflict tracking) |
-| etcd adaptive | 7,323 | 11.7 | 315 | 89% | Rule mode overhead; adaptive keeps fp high |
-| MongoDB original | 3,799 | 11.5† | 0.2 | — | w:majority replication + connection pool |
-| MongoDB FP 100% | 3,200 | 9.7 | 1 | 0% (conflicts) | Fast-path conflicts force slow-path fallback |
-| MongoDB adaptive | 3,858 | 9.2 | 1 | 77% | Best MongoDB; adaptive keeps fp high |
-| ZK original | 5,648 | 9.2† | 926 | — | ZAB replication + queue buildup |
-| ZK FP 100% | 5,456 | 11.9 | 4,745 | 0% (throttled) | Queue depth buildup at high concurrency |
-| ZK adaptive | 5,486 | 5.9 | 3,085 | 0% (throttled) | Queue depth buildup at high concurrency |
+| etcd original | 7,743 | 8.0† | 7 | — | Backend Raft replication latency |
+| etcd FP 100% | 6,995 | 8.9 | 319 | 0% | Rule mode overhead + queue buildup |
+| etcd adaptive | 7,369 | 9.3 | 362 | 90.9% | Adaptive keeps fast path high near peak |
+| MongoDB original | 4,298 | 8.7† | 0.2 | — | w:majority replication + connection pool |
+| MongoDB FP 100% | 3,380 | 12.1 | 1 | 0% | Fast-path throttled/conflicting at high load |
+| MongoDB adaptive | 3,873 | 11.6 | 1 | 74.5% | Better than FP100, still below original |
+| ZK original | 5,564 | 9.8† | 391 | — | ZAB replication + queue buildup |
+| ZK FP 100% | 5,438 | 9.8 | 2,602 | 0% | Queue depth buildup at high concurrency |
+| ZK adaptive | 5,427 | 9.6 | 3,436 | 0% | Queue depth buildup at high concurrency |
 
 † = external host CPU from `/proc/stat` (system-wide average); other values are in-process leader CPU.
 
-**Key findings:**
-- etcd original (7,687) is the highest throughput across all backends. Rule modes show a
-  modest 5-12% throughput gap due to CoordinatorRule overhead (witness tracking, conflict
-  detection, extra marshaling). The adaptive mode (7,323) recovers most of the gap by
-  maintaining 89% fast-path success at peak.
-- MongoDB adaptive (3,858) slightly outperforms original (3,799, +2%) because fast-path
-  avoids the expensive w:majority backend write for successful transactions. FP 100%
-  (3,200) is worst because fast-path conflicts at high concurrency force fallback.
-- ZooKeeper original (5,648) slightly outperforms both rule modes. High queue depth
-  (926-5,000+) at peak concurrency indicates the bottleneck is ZAB replication throughput,
-  not CPU. Rule modes add overhead without a fast-path latency benefit at high load.
-- **99/99 data points OK** — zero failed rows across all 9 datasets. The previous sweep
-  (2026-02-28) had 12 sporadic Docker failures that are no longer present after the
-  rerun with improved retry logic and Docker image rebuilds.
+#### Peak/Shape Reproducibility vs Prior 2026-03-02 Baseline
+
+To avoid over-precise single-run claims, we compare accepted canonical shapes against the
+previous 2026-03-02 canonical snapshot (kept in Git history).
+
+| Case | Peak 2026-03-02 | Peak accepted | Delta | Tail drop at c=400 (old -> accepted) |
+|---|---:|---:|---:|---:|
+| etcd original | 7,686.6 @ c=200 | 7,743.2 @ c=150 | +0.7% | 10.0% -> 5.0% |
+| etcd FP100 | 6,749.3 @ c=400 | 6,995.2 @ c=150 | +3.6% | 0.0% -> 14.5% |
+| etcd adaptive | 7,323.3 @ c=200 | 7,368.7 @ c=200 | +0.6% | 17.4% -> 13.3% |
+| MongoDB original | 3,799.3 @ c=100 | 4,297.9 @ c=75 | +13.1% | 17.1% -> 22.3% |
+| MongoDB FP100 | 3,199.6 @ c=200 | 3,380.0 @ c=200 | +5.6% | 8.7% -> 19.5% |
+| MongoDB adaptive | 3,858.3 @ c=100 | 3,872.6 @ c=75 | +0.4% | 57.0% -> 28.4% |
+| ZK original | 5,647.6 @ c=150 | 5,563.9 @ c=150 | -1.5% | 7.5% -> 2.2% |
+| ZK FP100 | 5,456.4 @ c=300 | 5,438.1 @ c=150 | -0.3% | 9.6% -> 2.3% |
+| ZK adaptive | 5,486.0 @ c=150 | 5,426.9 @ c=150 | -1.1% | 1.2% -> 8.9% |
+
+**Reconciled interpretation:**
+- Peak magnitudes are generally stable for etcd and ZooKeeper (within about +/-4%).
+- MongoDB peak location is more environment-sensitive (`c=75` vs `c=100`) and shows
+  larger absolute variance in original/FP100 modes.
+- High-concurrency tail shape (`c=300/400`) is materially more variable than the peak.
+  Claims should therefore emphasize **peak ranges and shoulder behavior near peak** rather
+  than one over-precise tail number.
+- **99/99 data points OK** in the accepted canonical dataset; the only retry event is
+  MongoDB adaptive `c=1` (attempt0 failed, attempt1 selected).
 
 #### Raw Sweep Data
 
-Full concurrency sweep (total txn/s, 2026-03-02 rerun, 99/99 OK):
+Full concurrency sweep (total txn/s, accepted canonical pass):
 
 | Conc | etcd Orig | etcd FP100 | etcd Adapt | MongoDB Orig | MongoDB FP100 | MongoDB Adapt | ZK Orig | ZK FP100 | ZK Adapt |
 |---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| 1 | 40 | 40 | 40 | 41 | 40 | 40 | 40 | 41 | 39 |
-| 5 | 272 | 275 | 272 | 275 | 274 | 274 | 270 | 271 | 273 |
-| 10 | 568 | 567 | 574 | 569 | 573 | 563 | 570 | 574 | 567 |
-| 25 | 1,472 | 1,466 | 1,466 | 1,457 | 1,474 | 1,466 | 1,476 | 1,468 | 1,463 |
-| 50 | 2,975 | 2,969 | 2,964 | 2,970 | 2,104 | 2,965 | 2,959 | 2,959 | 2,958 |
-| 75 | 4,458 | 4,465 | 4,463 | 3,728 | 2,715 | 3,850 | 4,460 | 4,459 | 4,459 |
-| 100 | 5,949 | 5,938 | 5,925 | 3,799 | 2,948 | 3,858 | 5,360 | 4,743 | 5,054 |
-| 150 | 7,616 | 4,818 | 6,956 | 3,767 | 2,507 | 3,670 | 5,648 | 4,730 | 5,486 |
-| 200 | 7,687 | 6,065 | 7,323 | 3,642 | 3,200 | 3,542 | 5,590 | 5,436 | 4,621 |
-| 300 | 6,977 | 6,449 | 6,790 | 3,460 | 2,880 | 3,200 | 5,489 | 5,456 | 5,380 |
-| 400 | 6,915 | 6,749 | 6,051 | 3,149 | 2,920 | 1,660 | 5,223 | 4,931 | 5,423 |
+| 1 | 40 | 40 | 40 | 40 | 40 | 40 | 40 | 40 | 40 |
+| 5 | 273 | 273 | 275 | 274 | 272 | 272 | 272 | 274 | 274 |
+| 10 | 566 | 570 | 572 | 570 | 572 | 568 | 572 | 570 | 572 |
+| 25 | 1,467 | 1,472 | 1,477 | 1,466 | 1,471 | 1,465 | 1,470 | 1,465 | 1,469 |
+| 50 | 2,964 | 2,967 | 2,967 | 2,963 | 2,602 | 2,971 | 2,970 | 2,970 | 2,969 |
+| 75 | 4,449 | 4,465 | 4,462 | 4,298 | 2,678 | 3,873 | 4,457 | 4,462 | 4,469 |
+| 100 | 5,937 | 5,960 | 5,965 | 3,986 | 2,752 | 3,695 | 5,345 | 5,345 | 4,845 |
+| 150 | 7,743 | 6,995 | 7,084 | 3,800 | 3,164 | 3,786 | 5,564 | 5,438 | 5,427 |
+| 200 | 7,605 | 6,686 | 7,369 | 3,867 | 3,380 | 3,591 | 5,140 | 5,404 | 5,018 |
+| 300 | 7,261 | 6,932 | 6,620 | 3,601 | 2,960 | 3,279 | 5,494 | 5,027 | 5,405 |
+| 400 | 7,353 | 5,984 | 6,390 | 3,339 | 2,720 | 2,773 | 5,440 | 5,315 | 4,944 |
 
 Raw data: [`docs/sweep_2026-02-28/`](sweep_2026-02-28/README.md) (TSV + Markdown tables for each backend/mode).
-*Note: The directory is named `sweep_2026-02-28` (initial sweep date) but contains data from the 2026-03-02 full rerun (commit `194c32c1`).*
+*Note: The directory is named `sweep_2026-02-28` (initial sweep date) but currently contains the accepted refreshed canonical artifacts from the 2026-03-10/11 rerun pass.*
 
-**Notes:** MongoDB remains systematically slower (~3.8K) than etcd (~7.7K) and ZK (~5.6K)
+**Notes:** MongoDB remains systematically slower (~3.9K-4.3K) than etcd (~7.4K-7.7K) and ZK (~5.4K-5.6K)
 due to the `#define AWS` 2500-connection pool and w:majority replication.
 
 ### Notes
@@ -249,13 +262,14 @@ due to the `#define AWS` 2500-connection pool and w:majority replication.
   client→leader communication is on the same loopback IP (no tc/netem).
 - High-concurrency results are dominated by queuing effects, not network RTT.
 - `SIMULATE_WAN` must remain disabled when using tc/netem.
-- etcd shows highest throughput (7,687 txn/s original) due to efficient Raft implementation.
-  Rule modes (FP 100% and adaptive) peak at 6,749-7,323, a modest 5-12% gap from
-  CoordinatorRule overhead.
-- ZooKeeper original (5,648) slightly outperforms rule modes (5,456-5,486). High queue
+- etcd shows highest throughput (7,743 txn/s original in accepted pass) due to efficient
+  Raft implementation. Rule modes (FP100/adaptive) peak at 6,995-7,369.
+- ZooKeeper original (5,564) slightly outperforms rule modes (5,438 and 5,427). High queue
   depth at peak concurrency indicates ZAB replication is the bottleneck, not CPU.
-- MongoDB adaptive (3,858) slightly outperforms original (3,799). FP 100% (3,200) is
-  worst because fast-path conflicts force expensive slow-path fallback at high concurrency.
+- MongoDB original (4,298) is above adaptive (3,873) and FP100 (3,380) in the accepted pass.
+  MongoDB tails remain the most environment-sensitive (`c=300/400`).
+- Tail shape at high concurrency (`c=300/400`) is more variable across reruns than peak
+  magnitude; prefer range-aware claims over single-run tail numbers.
 - The adaptive queue-depth throttle (coordinator.cc) enables fast-path at low concurrency
   for latency benefit and throttles at high concurrency to preserve throughput.
 - CPU values for original mode are host-level `/proc/stat` measurements (system-wide
