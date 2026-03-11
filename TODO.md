@@ -2352,7 +2352,7 @@ Non-negotiable rules for Claude on this reopened section:
         `56,217,812` distinct states, `37,403,770` states on queue
       - no invariant violation / safety error line was reported before termination;
         run is retained as non-exhaustive bounded evidence (not full closure)
-  - [ ] Leaf 2: execute accepted 12-hour big-config run for `jetpack_raft.tla`
+  - [x] Leaf 2: execute accepted 12-hour big-config run for `jetpack_raft.tla`
         using the checked-in runner and keep timestamp-prefixed log.
     - [x] Leaf 2.1: launch the strict 12-hour `jetpack_raft.tla` big run from
           `tla/run-tlc.sh` (no constant reduction) and record PID + log paths.
@@ -2369,8 +2369,11 @@ Non-negotiable rules for Claude on this reopened section:
         - launcher exit-status file (written on completion):
           `tla/log/20260310_214540_jetpack_raft_big_launcher.status`
         - config in use: `jetpack_raft.cfg` (big constants, no reduction)
-    - [ ] Leaf 2.2: after 12 hours, confirm run outcome (no TLC error / invariant
+    - [x] Leaf 2.2: after 12 hours, confirm run outcome (no TLC error / invariant
           violation) and capture final summary lines from the timestamped log.
+      - Completed (2026-03-11):
+        - timeout-window final summary captured in Leaf 2.2.2 with no TLC
+          error/invariant/deadlock marker in the log tail.
       - [x] Leaf 2.2.1: checkpoint active-run health before 12-hour deadline
             (process chain alive, status file not yet present, progress advancing).
         - Completed (2026-03-11):
@@ -5112,6 +5115,20 @@ Non-negotiable rules for Claude on this reopened section:
           - latest progress line:
             `Progress(9) ... 906,769 states generated, 113,722 distinct,
             72,875 states left on queue.`
+        - Follow-up checkpoint (2026-03-11T10:44:21-04:00 local):
+          - elapsed runtime observed from `timeout` process: `19:22`
+          - completion status file still absent (run not complete):
+            `tla/log/20260311_102513_jetpack_copilot_big_launcher.status`
+          - latest progress line:
+            `Progress(9) ... 1,027,901 states generated, 128,540 distinct,
+            82,088 states left on queue.`
+        - Follow-up checkpoint (2026-03-11T10:48:24-04:00 local):
+          - elapsed runtime observed from `timeout` process: `23:10`
+          - completion status file still absent (run not complete):
+            `tla/log/20260311_102513_jetpack_copilot_big_launcher.status`
+          - latest progress line:
+            `Progress(9) ... 1,231,105 states generated, 155,250 distinct,
+            99,716 states left on queue.`
     - [ ] Leaf 3.3: update `tla/VERIFICATION.md` and `TODO.md` with the accepted
           big-run evidence for `jetpack_copilot.tla`.
   - [ ] Leaf 4: execute accepted 12-hour big-config run for `jetpack_mencius.tla`
