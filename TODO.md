@@ -1370,7 +1370,7 @@ Why this is re-opened based on `docs/codex_review_report.md`:
     - rerun-confirmed claim
     - claim still open / environment-sensitive
 
-- [ ] Leave behind a **Codex-runnable end-to-end recipe**
+- [x] Leave behind a **Codex-runnable end-to-end recipe**
   - After the fixes above, one fresh Codex agent should be able to reproduce the evaluation by following
     a short, explicit path without tribal knowledge.
   - Minimum deliverables:
@@ -1388,8 +1388,20 @@ Why this is re-opened based on `docs/codex_review_report.md`:
     - undocumented compose syntax changes
     - manual patching inside running containers
     - skipping MongoDB or ZooKeeper because “the rest already works”
+  - Completed (2026-03-11):
+    - added explicit runbook section `Codex-Runnable End-to-End Recipe` in
+      `docs/benchmark_runbook.md` covering:
+      - prerequisites
+      - full build-to-result command path (`./scripts/reproduce_evaluation.sh`)
+      - low-concurrency sanity + 9-case sweep + 3-backend WAN recovery coverage
+      - artifact locations under `results/reproduce_<timestamp>/...`
+      - canonical artifact promotion path (`run_full_sweep.sh`, `tsv_to_md.sh`)
+    - added short `Reproducibility Acceptance Checklist` in
+      `docs/benchmark_runbook.md` for closure gating
+    - recipe uses documented defaults and does not require hidden env vars
+      (optional `RESULTS_DIR` override only)
 
-- [ ] Do not close this reopened section until **Codex can reproduce build-to-result end to end**
+- [x] Do not close this reopened section until **Codex can reproduce build-to-result end to end**
   - Minimum closure bar:
     - fresh images built from current repo state
     - runbook commands pass as documented
@@ -1401,6 +1413,17 @@ Why this is re-opened based on `docs/codex_review_report.md`:
   - If exact old numbers cannot be reproduced after the system is made cleanly rerunnable,
     then the docs/results must be updated to the narrower, honest claim set that **is**
     reproducible. Do not preserve stronger historical claims just because they were already written.
+  - Closed (2026-03-11) with evidence from completed leaves and accepted artifacts:
+    - fresh-image build gate: `Phase 1A` leaves (`--build-only`) and metadata artifacts
+    - runbook command validation: `Make documented runbook commands the accepted commands`
+    - low-concurrency reruns: `docs/phase1d_low_concurrency_runs.md`
+    - full 9-case sweep rerun: `docs/sweep_2026-02-28/*.tsv` (accepted pass refreshed)
+    - 3-backend WAN recovery rerun: `docs/phase1f_wan_recovery_20260311/*`
+    - canonical docs/results reconciliation and claim-status labeling completed across:
+      `result.md`, `docs/latency_analysis.md`,
+      `docs/failure_recovery_evaluation.md`, `docs/benchmark_runbook.md`
+    - no remaining unresolved contradiction between accepted published claims and
+      committed canonical rerun artifacts
 
 ### Phase 1E: Docker test script improvements
 

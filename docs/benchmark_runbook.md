@@ -344,3 +344,77 @@ docker compose -f docker/etcd/docker-compose.yml down -v
 docker compose -f docker/mongodb/docker-compose.yml down -v
 docker compose -f docker/zookeeper/docker-compose.yml down -v
 ```
+
+## 12. Codex-Runnable End-to-End Recipe
+
+Use this exact path for a fresh rerun from current checkout. No hidden environment
+variables are required; `RESULTS_DIR` is optional.
+
+### Step 1: Preflight (repo + Docker)
+
+```bash
+git submodule update --init --recursive
+docker --version
+docker compose version
+```
+
+### Step 2: Preview commands (optional)
+
+```bash
+./scripts/reproduce_evaluation.sh --dry-run
+```
+
+### Step 3: Run full build-to-result reproduction
+
+```bash
+./scripts/reproduce_evaluation.sh
+```
+
+This single command covers:
+- fresh image build
+- 6 low-concurrency sanity cases (3 repeats each)
+- full 9-case throughput sweep
+- 3-backend WAN recovery reruns (3 repeats each, `RECOVERY_LATENCY_MS=20`)
+
+### Step 4: Inspect output and summary checklist
+
+```bash
+LATEST_RESULTS="$(ls -dt results/reproduce_* | head -n 1)"
+echo "$LATEST_RESULTS"
+cat "$LATEST_RESULTS/SUMMARY.md"
+```
+
+Expected output tree:
+- `results/reproduce_<timestamp>/build/` (`image_metadata.tsv` + per-backend build logs)
+- `results/reproduce_<timestamp>/sanity/` (18 sanity logs)
+- `results/reproduce_<timestamp>/sweep/` (9 TSVs + per-case stderr logs)
+- `results/reproduce_<timestamp>/recovery/` (9 WAN recovery logs)
+- `results/reproduce_<timestamp>/SUMMARY.md` (acceptance checklist template)
+
+### Step 5: Canonical artifact promotion (only when intentionally updating published baseline)
+
+Use this only when a rerun is accepted as the new published baseline.
+
+```bash
+# Refresh canonical sweep artifacts under docs/sweep_2026-02-28/
+./scripts/run_full_sweep.sh
+
+# Regenerate Markdown tables from canonical TSVs
+./scripts/tsv_to_md.sh docs/sweep_2026-02-28/*.tsv
+```
+
+Recovery artifacts remain under dated folders such as
+`docs/phase1f_wan_recovery_20260311/`; update narrative docs with explicit claim-status
+labels and canonical source links.
+
+## 13. Reproducibility Acceptance Checklist
+
+Call the evaluation reproducible only if all are true:
+
+- [ ] Fresh images were built from current repo state (verify `build/image_metadata.tsv`)
+- [ ] Runbook command path executed as documented (no manual in-container patching)
+- [ ] 6 low-concurrency sanity cases completed from the documented path
+- [ ] Full 9-case throughput sweep completed from the same fresh image set
+- [ ] 3-backend WAN recovery reruns completed from the same fresh image set
+- [ ] Canonical raw files and published docs are aligned with accepted rerun artifacts
+- [ ] No unresolved contradiction remains between published docs and rerunnable evidence
