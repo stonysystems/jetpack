@@ -1077,8 +1077,33 @@ Why this is re-opened based on `docs/codex_review_report.md`:
       - original: `docs/sweep_2026-02-28/logs/jetpack-mongodb-phase1e-leaf3_none_mongodb/`
       - fastpath100: `docs/sweep_2026-02-28/logs/jetpack-mongodb-phase1e-leaf3_rule_mongodb/`
       - adaptive: `docs/sweep_2026-02-28/logs/jetpack-mongodb-phase1e-leaf3-adaptive_rule_mongodb/`
-  - [ ] Leaf 4: run ZooKeeper sweep trio (`original`, `fastpath100`, `adaptive`) from the
+  - [x] Leaf 4: run ZooKeeper sweep trio (`original`, `fastpath100`, `adaptive`) from the
         same accepted image set and sweep script revision.
+    - Completed (2026-03-11) from the accepted fresh-image pass
+      `results/reproduce_20260310_164201/` (commit `ff81e913`).
+    - Archived committed TSV copies:
+      - `docs/sweep_2026-03-10_phase1e_zookeeper/zookeeper_original.tsv`
+      - `docs/sweep_2026-03-10_phase1e_zookeeper/zookeeper_fastpath100.tsv`
+      - `docs/sweep_2026-03-10_phase1e_zookeeper/zookeeper_adaptive.tsv`
+    - Commands executed with the checked-in sweep script:
+      - `./scripts/sweep_benchmark.sh jetpack-zookeeper-phase1e-leaf4 none_zookeeper.yml > results/reproduce_20260310_164201/sweep/zookeeper_original.tsv`
+      - `./scripts/sweep_benchmark.sh jetpack-zookeeper-phase1e-leaf4 rule_zookeeper.yml "-m 100" > results/reproduce_20260310_164201/sweep/zookeeper_fastpath100.tsv`
+      - `./scripts/sweep_benchmark.sh jetpack-zookeeper-phase1e-leaf4-adaptive rule_zookeeper.yml > results/reproduce_20260310_164201/sweep/zookeeper_adaptive.tsv`
+    - Image identity check:
+      - both alias tags (`jetpack-zookeeper-phase1e-leaf4`, `jetpack-zookeeper-phase1e-leaf4-adaptive`)
+        resolve to `sha256:35e08d2ae1b92a36523d44977b6726c4570a9c39041da6f6f592820a35cf56d7`
+        (same accepted fresh image as Leaf 1).
+    - Result summary (all include 16 TSV columns with `status/error_summary/log_path/retry_count`):
+      - `zookeeper_original.tsv`: `11/11 OK`, retry sum `0`, peak `5563.9 @ c=150`
+      - `zookeeper_fastpath100.tsv`: `11/11 OK`, retry sum `0`, peak `5438.1 @ c=150`
+      - `zookeeper_adaptive.tsv`: `11/11 OK`, retry sum `0`, peak `5426.9 @ c=150`
+      - Note: current `detect_failure_signature()` appends `;timeout` in `error_summary`
+        even for `OK` rows because benchmark text contains `"timeout:"`; status/retry columns
+        still show successful runs.
+    - Per-point logs referenced by TSV `log_path`:
+      - original: `docs/sweep_2026-02-28/logs/jetpack-zookeeper-phase1e-leaf4_none_zookeeper/`
+      - fastpath100: `docs/sweep_2026-02-28/logs/jetpack-zookeeper-phase1e-leaf4_rule_zookeeper/`
+      - adaptive: `docs/sweep_2026-02-28/logs/jetpack-zookeeper-phase1e-leaf4-adaptive_rule_zookeeper/`
   - [ ] Leaf 5: regenerate accepted sweep artifacts from the same rerun pass:
         canonical TSVs, sidecar Markdown tables, consolidated CSV, and linked failure/retry logs.
   - [ ] Leaf 6: document peak/shape reproducibility across the 9 cases and reconcile

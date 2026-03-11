@@ -1,0 +1,17 @@
+# Sweep: image=jetpack-zookeeper-phase1e-leaf4-adaptive mode=rule_zookeeper.yml extra_args=''
+# Site config: 60c1s5r5p.yml (60 clients)
+# Latency: 20ms, Duration: 30s
+# Date: 2026-03-11T00:13:09Z
+# Max retries per point: 2
+concurrency	total_throughput	h1	h2	h3	h4	h5	fp_attempted	fp_succeeded	fp_rate	cpu_leader_avg	queue_depth_avg	status	error_summary	log_path	retry_count
+1	40.30	8.30	8.10	8.20	7.70	8.00	403	403	100.00	6.0900	2.7238	OK	;timeout	docs/sweep_2026-02-28/logs/jetpack-zookeeper-phase1e-leaf4-adaptive_rule_zookeeper/conc1_attempt0.log	0
+5	273.50	55.10	54.20	53.90	55.20	55.10	2735	2735	100.00	8.2000	12.8466	OK	;timeout	docs/sweep_2026-02-28/logs/jetpack-zookeeper-phase1e-leaf4-adaptive_rule_zookeeper/conc5_attempt0.log	0
+10	571.60	114.60	114.40	113.20	115.10	114.30	5716	5716	100.00	6.4600	26.8544	OK	;timeout	docs/sweep_2026-02-28/logs/jetpack-zookeeper-phase1e-leaf4-adaptive_rule_zookeeper/conc10_attempt0.log	0
+25	1469.40	294.20	295.20	293.00	294.80	292.20	13508	13508	100.00	6.8900	65.5802	OK	;timeout	docs/sweep_2026-02-28/logs/jetpack-zookeeper-phase1e-leaf4-adaptive_rule_zookeeper/conc25_attempt0.log	0
+50	2968.80	597.30	589.80	593.40	592.20	596.10	15803	15803	100.00	7.4400	136.9890	OK	;timeout	docs/sweep_2026-02-28/logs/jetpack-zookeeper-phase1e-leaf4-adaptive_rule_zookeeper/conc50_attempt0.log	0
+75	4468.60	892.00	896.20	892.30	895.90	892.20	0	0	0	7.5400	535.8401	OK	;timeout	docs/sweep_2026-02-28/logs/jetpack-zookeeper-phase1e-leaf4-adaptive_rule_zookeeper/conc75_attempt0.log	0
+100	4845.40	987.90	967.70	966.20	955.70	967.90	0	0	0	8.1000	1492.1092	OK	;timeout	docs/sweep_2026-02-28/logs/jetpack-zookeeper-phase1e-leaf4-adaptive_rule_zookeeper/conc100_attempt0.log	0
+150	5426.90	1104.60	1068.80	1086.40	1084.00	1083.10	0	0	0	9.5800	3435.6777	OK	;timeout	docs/sweep_2026-02-28/logs/jetpack-zookeeper-phase1e-leaf4-adaptive_rule_zookeeper/conc150_attempt0.log	0
+200	5018.00	1040.20	990.20	993.70	992.30	1001.60	0	0	0	8.7100	5725.1241	OK	;timeout	docs/sweep_2026-02-28/logs/jetpack-zookeeper-phase1e-leaf4-adaptive_rule_zookeeper/conc200_attempt0.log	0
+300	5404.70	1064.60	1058.90	1110.00	1064.80	1106.40	0	0	0	9.8100	4783.2465	OK	;timeout	docs/sweep_2026-02-28/logs/jetpack-zookeeper-phase1e-leaf4-adaptive_rule_zookeeper/conc300_attempt0.log	0
+400	4943.50	1012.90	978.00	978.70	991.70	982.20	0	0	0	17.8200	4891.5391	OK	;timeout	docs/sweep_2026-02-28/logs/jetpack-zookeeper-phase1e-leaf4-adaptive_rule_zookeeper/conc400_attempt0.log	0
