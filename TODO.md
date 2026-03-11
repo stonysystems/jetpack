@@ -1179,6 +1179,35 @@ Why this is re-opened based on `docs/codex_review_report.md`:
     - linked logs for failures / retries
 
 - [ ] Reproduce the **3-backend WAN recovery matrix** from the accepted runbook path
+  - [x] Leaf 1: run etcd WAN recovery from the runbook path with
+        `RECOVERY_LATENCY_MS=20` for 3 repetitions, archive full logs, and extract:
+        script-level downtime + internal `duration=` values.
+    - Completed (2026-03-11) with runbook command:
+      - `docker compose -f docker/etcd/docker-compose.yml run --rm -e RECOVERY_LATENCY_MS=20 jetpack-etcd recovery`
+    - Archived logs:
+      - `docs/phase1f_wan_recovery_20260311/etcd_wan_r1.txt`
+      - `docs/phase1f_wan_recovery_20260311/etcd_wan_r2.txt`
+      - `docs/phase1f_wan_recovery_20260311/etcd_wan_r3.txt`
+      - summary: `docs/phase1f_wan_recovery_20260311/etcd_wan_summary.md`
+    - Extracted metrics:
+      - backend (script-level) downtime: `6568ms`, `6729ms`, `6817ms`
+      - Jetpack (script-level detection) downtime: `4ms`, `4ms`, `3ms`
+      - Jetpack internal `duration=`: `82ms`, `81ms`, `82ms`
+    - Each run confirms full chain:
+      - leader kill
+      - backend re-election
+      - primary_elected signal write
+      - Jetpack recovery start
+      - Jetpack recovery completion
+  - [ ] Leaf 2: run MongoDB WAN recovery from the runbook path with
+        `RECOVERY_LATENCY_MS=20` for 3 repetitions, archive full logs, and extract:
+        script-level downtime + internal `duration=` values.
+  - [ ] Leaf 3: run ZooKeeper WAN recovery from the runbook path with
+        `RECOVERY_LATENCY_MS=20` for 3 repetitions, archive full logs, and extract:
+        script-level downtime + internal `duration=` values.
+  - [ ] Leaf 4: consolidate the 3-backend WAN matrix from the accepted rerun pass and
+        reconcile `docs/failure_recovery_evaluation.md` + `result.md` so metric labels are
+        unambiguous (script detection downtime vs internal Jetpack `duration=`).
   - Required backends:
     - etcd
     - MongoDB
