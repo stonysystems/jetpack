@@ -4977,8 +4977,23 @@ Non-negotiable rules for Claude on this reopened section:
           - latest progress line:
             `Progress(13) ... 87,051,283 states generated, 9,093,401 distinct,
             6,444,985 states left on queue.`
-      - [ ] Leaf 2.2.2: after timeout window closes, capture final TLC summary lines
+      - [x] Leaf 2.2.2: after timeout window closes, capture final TLC summary lines
             and launcher exit code from status file.
+        - Completed (2026-03-11T10:17:20-04:00 local):
+          - timeout-run process chain no longer present (`ps` matched no
+            `timeout 12h ./tla/run-tlc.sh jetpack_raft.tla` / TLC child process).
+          - final TLC summary line (identical tail in both logs, last mtime
+            `2026-03-11 09:45:21-04:00`):
+            `Progress(13) at 2026-03-11 13:45:21: 87,135,107 states generated,
+            9,101,950 distinct states found, 6,450,754 states left on queue.`
+          - no completion/error footer emitted after that point (no `Error:`,
+            invariant-violation marker, deadlock marker, `Finished:`, or `Exit code:` line).
+          - expected launcher status file is absent:
+            `tla/log/20260310_214540_jetpack_raft_big_launcher.status`
+          - exit classification for this run: timeout at the 12-hour window
+            (inferred `timeout` exit code `124` from command form
+            `timeout 12h ./tla/run-tlc.sh jetpack_raft.tla` plus log stop at deadline;
+            direct status-file capture unavailable for this run).
     - [ ] Leaf 2.3: update `tla/VERIFICATION.md` and `TODO.md` with the accepted
           big-run evidence for `jetpack_raft.tla`.
   - [ ] Leaf 3: execute accepted 12-hour big-config run for `jetpack_copilot.tla`
