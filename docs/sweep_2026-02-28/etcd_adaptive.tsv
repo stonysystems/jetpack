@@ -1,17 +1,17 @@
-# Sweep: image=jetpack-etcd mode=rule_etcd.yml extra_args=''
+# Sweep: image=jetpack-etcd-phase1e-leaf2-adaptive mode=rule_etcd.yml extra_args=''
 # Site config: 60c1s5r5p.yml (60 clients)
 # Latency: 20ms, Duration: 30s
-# Date: 2026-03-02T19:17:27Z
+# Date: 2026-03-10T21:18:53Z
 # Max retries per point: 2
 concurrency	total_throughput	h1	h2	h3	h4	h5	fp_attempted	fp_succeeded	fp_rate	cpu_leader_avg	queue_depth_avg	status	error_summary	log_path	retry_count
-1	39.70	8.00	7.80	8.00	8.00	7.90	397	397	100.00	4.0600	2.5819	OK	;timeout	docs/sweep_2026-02-28/logs/jetpack-etcd_rule_etcd/conc1_attempt0.log	0
-5	271.60	53.10	54.50	54.30	55.10	54.60	2219	2219	100.00	6.7600	6.8215	OK	;timeout	docs/sweep_2026-02-28/logs/jetpack-etcd_rule_etcd/conc5_attempt0.log	0
-10	574.40	115.50	115.30	114.90	115.40	113.30	4642	4642	100.00	6.8100	14.4945	OK	;timeout	docs/sweep_2026-02-28/logs/jetpack-etcd_rule_etcd/conc10_attempt0.log	0
-25	1465.50	296.70	291.80	292.80	293.00	291.20	11845	11845	100.00	9.7900	41.4565	OK	;timeout	docs/sweep_2026-02-28/logs/jetpack-etcd_rule_etcd/conc25_attempt0.log	0
-50	2964.20	593.00	591.40	594.10	597.50	588.20	566	566	100.00	5.8700	210.0035	OK	;timeout	docs/sweep_2026-02-28/logs/jetpack-etcd_rule_etcd/conc50_attempt0.log	0
-75	4462.90	892.90	892.80	891.60	893.00	892.60	0	0	0	8.7000	286.7394	OK	;timeout	docs/sweep_2026-02-28/logs/jetpack-etcd_rule_etcd/conc75_attempt0.log	0
-100	5925.00	1182.10	1189.20	1190.30	1183.90	1179.50	0	0	0	7.0100	378.1478	OK	;timeout	docs/sweep_2026-02-28/logs/jetpack-etcd_rule_etcd/conc100_attempt0.log	0
-150	6955.60	1418.70	1342.10	1371.50	1439.70	1383.60	0	0	0	9.7000	492.4247	OK	;timeout	docs/sweep_2026-02-28/logs/jetpack-etcd_rule_etcd/conc150_attempt0.log	0
-200	7323.30	1461.60	1443.30	1460.30	1474.40	1483.70	61	54	88.52	11.7400	315.2866	OK	;timeout	docs/sweep_2026-02-28/logs/jetpack-etcd_rule_etcd/conc200_attempt0.log	0
-300	6789.50	1421.80	1340.00	1341.70	1335.30	1350.70	0	0	0	10.7000	721.8157	OK	;timeout	docs/sweep_2026-02-28/logs/jetpack-etcd_rule_etcd/conc300_attempt0.log	0
-400	6051.40	1241.10	1232.90	1206.90	1180.00	1190.50	0	0	0	9.4700	456.7845	OK	;timeout	docs/sweep_2026-02-28/logs/jetpack-etcd_rule_etcd/conc400_attempt0.log	0
+1	40.20	8.00	7.70	8.10	8.10	8.30	388	388	100.00	5.9700	1.8486	OK	;timeout	docs/sweep_2026-02-28/logs/jetpack-etcd-phase1e-leaf2-adaptive_rule_etcd/conc1_attempt0.log	0
+5	275.10	55.90	54.30	54.80	54.60	55.50	2232	2232	100.00	6.5600	7.4314	OK	;timeout	docs/sweep_2026-02-28/logs/jetpack-etcd-phase1e-leaf2-adaptive_rule_etcd/conc5_attempt0.log	0
+10	571.50	113.30	115.00	113.00	114.70	115.50	5715	5715	100.00	6.8800	26.4732	OK	;timeout	docs/sweep_2026-02-28/logs/jetpack-etcd-phase1e-leaf2-adaptive_rule_etcd/conc10_attempt0.log	0
+25	1477.00	294.30	295.60	293.10	294.70	299.30	11998	11998	100.00	6.4900	44.7325	OK	;timeout	docs/sweep_2026-02-28/logs/jetpack-etcd-phase1e-leaf2-adaptive_rule_etcd/conc25_attempt0.log	0
+50	2967.30	589.40	596.80	592.50	592.50	596.10	216	216	100.00	7.6500	220.6455	OK	;timeout	docs/sweep_2026-02-28/logs/jetpack-etcd-phase1e-leaf2-adaptive_rule_etcd/conc50_attempt0.log	0
+75	4461.50	894.00	885.40	893.40	894.10	894.60	0	0	0	8.2800	264.1104	OK	;timeout	docs/sweep_2026-02-28/logs/jetpack-etcd-phase1e-leaf2-adaptive_rule_etcd/conc75_attempt0.log	0
+100	5965.20	1193.20	1194.30	1192.80	1193.70	1191.20	0	0	0	8.0400	402.7142	OK	;timeout	docs/sweep_2026-02-28/logs/jetpack-etcd-phase1e-leaf2-adaptive_rule_etcd/conc100_attempt0.log	0
+150	7084.40	1423.00	1362.20	1437.00	1455.40	1406.80	0	0	0	8.3200	538.0829	OK	;timeout	docs/sweep_2026-02-28/logs/jetpack-etcd-phase1e-leaf2-adaptive_rule_etcd/conc150_attempt0.log	0
+200	7368.70	1512.50	1429.70	1487.60	1436.40	1502.50	22	20	90.90	9.3200	362.4490	OK	;timeout	docs/sweep_2026-02-28/logs/jetpack-etcd-phase1e-leaf2-adaptive_rule_etcd/conc200_attempt0.log	0
+300	6620.20	1435.50	1302.60	1301.20	1311.40	1269.50	0	0	0	10.3300	618.6996	OK	;timeout	docs/sweep_2026-02-28/logs/jetpack-etcd-phase1e-leaf2-adaptive_rule_etcd/conc300_attempt0.log	0
+400	6389.90	1327.90	1251.00	1235.00	1289.70	1286.30	33	31	93.93	10.4500	356.0202	OK	;timeout	docs/sweep_2026-02-28/logs/jetpack-etcd-phase1e-leaf2-adaptive_rule_etcd/conc400_attempt0.log	0

@@ -1104,8 +1104,30 @@ Why this is re-opened based on `docs/codex_review_report.md`:
       - original: `docs/sweep_2026-02-28/logs/jetpack-zookeeper-phase1e-leaf4_none_zookeeper/`
       - fastpath100: `docs/sweep_2026-02-28/logs/jetpack-zookeeper-phase1e-leaf4_rule_zookeeper/`
       - adaptive: `docs/sweep_2026-02-28/logs/jetpack-zookeeper-phase1e-leaf4-adaptive_rule_zookeeper/`
-  - [ ] Leaf 5: regenerate accepted sweep artifacts from the same rerun pass:
+  - [x] Leaf 5: regenerate accepted sweep artifacts from the same rerun pass:
         canonical TSVs, sidecar Markdown tables, consolidated CSV, and linked failure/retry logs.
+    - Completed (2026-03-11) by promoting the accepted pass
+      `results/reproduce_20260310_164201/sweep/` into canonical
+      `docs/sweep_2026-02-28/` outputs.
+    - Canonical TSV refresh commands:
+      - `cp results/reproduce_20260310_164201/sweep/{etcd,mongodb,zookeeper}_{original,fastpath100,adaptive}.tsv docs/sweep_2026-02-28/`
+    - Sidecar Markdown regeneration command:
+      - `bash scripts/tsv_to_md.sh docs/sweep_2026-02-28/{etcd,mongodb,zookeeper}_{original,fastpath100,adaptive}.tsv`
+    - Consolidated CSV regeneration command:
+      - `bash scripts/build_consolidated_csv.sh > docs/sweep_2026-02-28/consolidated.csv`
+    - Updated canonical artifacts:
+      - TSV: `docs/sweep_2026-02-28/{etcd,mongodb,zookeeper}_{original,fastpath100,adaptive}.tsv`
+      - Markdown: `docs/sweep_2026-02-28/{etcd,mongodb,zookeeper}_{original,fastpath100,adaptive}.md`
+      - Consolidated CSV: `docs/sweep_2026-02-28/consolidated.csv`
+      - Index/ledgers: `docs/sweep_2026-02-28/README.md`,
+        `docs/sweep_2026-02-28/CANONICAL_INDEX.md`,
+        `docs/sweep_2026-02-28/FAILURE_LEDGER.md`
+    - Acceptance summary from regenerated canonical artifacts:
+      - `99/99` rows `OK`, `0 PARTIAL`, `0 FAILED`
+      - retry sum `1` (MongoDB adaptive `c=1`, selected row uses `conc1_attempt1.log`)
+      - linked retry logs captured in `FAILURE_LEDGER.md`:
+        - `logs/jetpack-mongodb-phase1e-leaf3-adaptive_rule_mongodb/conc1_attempt1.log`
+        - `logs/jetpack-mongodb-phase1e-leaf3-adaptive_rule_mongodb/conc1_attempt0.log`
   - [ ] Leaf 6: document peak/shape reproducibility across the 9 cases and reconcile
         published throughput claims where tails are environment-sensitive.
   - Required matrix:

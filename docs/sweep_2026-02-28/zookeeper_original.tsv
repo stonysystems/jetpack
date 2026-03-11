@@ -1,17 +1,17 @@
-# Sweep: image=jetpack-zookeeper mode=none_zookeeper.yml extra_args=''
+# Sweep: image=jetpack-zookeeper-phase1e-leaf4 mode=none_zookeeper.yml extra_args=''
 # Site config: 60c1s5r5p.yml (60 clients)
 # Latency: 20ms, Duration: 30s
-# Date: 2026-03-02T21:27:25Z
+# Date: 2026-03-10T23:43:34Z
 # Max retries per point: 2
 concurrency	total_throughput	h1	h2	h3	h4	h5	fp_attempted	fp_succeeded	fp_rate	cpu_leader_avg	queue_depth_avg	status	error_summary	log_path	retry_count
-1	39.60	8.10	7.80	7.80	8.10	7.80	0	0	0	4.6100	.4720	OK	;timeout	docs/sweep_2026-02-28/logs/jetpack-zookeeper_none_zookeeper/conc1_attempt0.log	0
-5	270.10	53.90	54.70	53.80	53.70	54.00	0	0	0	7.0500	1.0480	OK	;timeout	docs/sweep_2026-02-28/logs/jetpack-zookeeper_none_zookeeper/conc5_attempt0.log	0
-10	570.00	114.70	113.10	113.80	113.40	115.00	0	0	0	5.0200	1.4380	OK	;timeout	docs/sweep_2026-02-28/logs/jetpack-zookeeper_none_zookeeper/conc10_attempt0.log	0
-25	1475.50	294.30	296.00	293.60	294.80	296.80	0	0	0	5.9900	1.8560	OK	;timeout	docs/sweep_2026-02-28/logs/jetpack-zookeeper_none_zookeeper/conc25_attempt0.log	0
-50	2959.20	589.50	592.90	590.80	593.10	592.90	0	0	0	6.1900	3.1560	OK	;timeout	docs/sweep_2026-02-28/logs/jetpack-zookeeper_none_zookeeper/conc50_attempt0.log	0
-75	4460.10	890.60	890.70	889.80	892.20	896.80	0	0	0	6.5400	3.6920	OK	;timeout	docs/sweep_2026-02-28/logs/jetpack-zookeeper_none_zookeeper/conc75_attempt0.log	0
-100	5360.40	1087.60	1067.00	1067.70	1068.50	1069.60	0	0	0	9.2800	848.3520	OK	;timeout	docs/sweep_2026-02-28/logs/jetpack-zookeeper_none_zookeeper/conc100_attempt0.log	0
-150	5647.60	1148.20	1123.60	1122.00	1126.80	1127.00	0	0	0	9.2000	926.1940	OK	;timeout	docs/sweep_2026-02-28/logs/jetpack-zookeeper_none_zookeeper/conc150_attempt0.log	0
-200	5589.90	1135.60	1124.10	1114.00	1121.00	1095.20	0	0	0	8.4800	819.0140	OK	;timeout	docs/sweep_2026-02-28/logs/jetpack-zookeeper_none_zookeeper/conc200_attempt0.log	0
-300	5488.60	1151.50	1048.80	1084.30	1095.40	1108.60	0	0	0	8.6900	735.6180	OK	;timeout	docs/sweep_2026-02-28/logs/jetpack-zookeeper_none_zookeeper/conc300_attempt0.log	0
-400	5223.20	1056.00	1052.20	1034.10	1038.10	1042.80	0	0	0	9.5800	1301.8460	OK	;timeout	docs/sweep_2026-02-28/logs/jetpack-zookeeper_none_zookeeper/conc400_attempt0.log	0
+1	39.90	7.70	7.80	8.00	8.10	8.30	0	0	0	5.1000	.4820	OK	;timeout	docs/sweep_2026-02-28/logs/jetpack-zookeeper-phase1e-leaf4_none_zookeeper/conc1_attempt0.log	0
+5	272.50	54.40	53.90	54.50	55.30	54.40	0	0	0	5.6500	1.1000	OK	;timeout	docs/sweep_2026-02-28/logs/jetpack-zookeeper-phase1e-leaf4_none_zookeeper/conc5_attempt0.log	0
+10	571.80	114.90	114.00	115.10	114.00	113.80	0	0	0	5.9800	1.0060	OK	;timeout	docs/sweep_2026-02-28/logs/jetpack-zookeeper-phase1e-leaf4_none_zookeeper/conc10_attempt0.log	0
+25	1470.30	295.40	292.80	292.50	293.70	295.90	0	0	0	6.4500	1.2780	OK	;timeout	docs/sweep_2026-02-28/logs/jetpack-zookeeper-phase1e-leaf4_none_zookeeper/conc25_attempt0.log	0
+50	2970.20	595.50	593.20	590.80	594.90	595.80	0	0	0	7.1000	3.1380	OK	;timeout	docs/sweep_2026-02-28/logs/jetpack-zookeeper-phase1e-leaf4_none_zookeeper/conc50_attempt0.log	0
+75	4457.40	893.60	894.70	889.30	886.30	893.50	0	0	0	8.3400	3.2360	OK	;timeout	docs/sweep_2026-02-28/logs/jetpack-zookeeper-phase1e-leaf4_none_zookeeper/conc75_attempt0.log	0
+100	5345.00	1079.50	1061.80	1064.30	1070.10	1069.30	0	0	0	9.5600	83.8460	OK	;timeout	docs/sweep_2026-02-28/logs/jetpack-zookeeper-phase1e-leaf4_none_zookeeper/conc100_attempt0.log	0
+150	5563.90	1137.20	1112.60	1099.30	1108.70	1106.10	0	0	0	9.8300	391.4540	OK	;timeout	docs/sweep_2026-02-28/logs/jetpack-zookeeper-phase1e-leaf4_none_zookeeper/conc150_attempt0.log	0
+200	5140.30	1028.60	1015.30	1003.10	1076.40	1016.90	0	0	0	10.1600	851.1860	OK	;timeout	docs/sweep_2026-02-28/logs/jetpack-zookeeper-phase1e-leaf4_none_zookeeper/conc200_attempt0.log	0
+300	5494.40	1074.90	1093.30	1110.40	1105.00	1110.80	0	0	0	11.4900	502.3780	OK	;timeout	docs/sweep_2026-02-28/logs/jetpack-zookeeper-phase1e-leaf4_none_zookeeper/conc300_attempt0.log	0
+400	5439.90	1098.10	1079.90	1076.70	1076.70	1108.50	0	0	0	12.5100	662.0700	OK	;timeout	docs/sweep_2026-02-28/logs/jetpack-zookeeper-phase1e-leaf4_none_zookeeper/conc400_attempt0.log	0
