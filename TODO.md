@@ -5013,6 +5013,37 @@ Non-negotiable rules for Claude on this reopened section:
           no TLC error/invariant/deadlock marker appears in the log tail.
   - [ ] Leaf 3: execute accepted 12-hour big-config run for `jetpack_copilot.tla`
         using the checked-in runner and keep timestamp-prefixed log.
+    - [x] Leaf 3.1: launch the strict 12-hour `jetpack_copilot.tla` big run from
+          `tla/run-tlc.sh` (no constant reduction) and record PID + log paths.
+      - Completed (2026-03-11 10:25 local):
+        - launch command:
+          `timeout 12h ./tla/run-tlc.sh jetpack_copilot.tla`
+        - launcher shell PID: `2850218` (handoff chain:
+          `timeout` PID `2850221` -> `run-tlc.sh` PID `2850222` -> Docker/TLC child)
+        - launcher log:
+          `tla/log/20260311_102513_jetpack_copilot_big_launcher.log`
+        - TLC timestamped run log:
+          `tla/log/20260311_102514_jetpack_copilot.log`
+        - launcher status file (written on completion):
+          `tla/log/20260311_102513_jetpack_copilot_big_launcher.status`
+        - config in use: `jetpack_copilot.cfg` (big constants, no reduction)
+    - [ ] Leaf 3.2: after 12 hours, confirm run outcome (no TLC error / invariant
+          violation) and capture final summary lines from the timestamped log.
+      - [x] Leaf 3.2.1: checkpoint active-run health before 12-hour deadline
+            (process chain alive, status file not yet present, progress advancing).
+        - Completed (2026-03-11T10:25:39-04:00 local):
+          - active chain observed:
+            - `timeout` PID `2850221`
+            - `run-tlc.sh` PID `2850222`
+            - Docker/TLC child for
+              `tlc2.TLC -config jetpack_copilot.cfg jetpack_copilot.tla`
+          - completion status file absent (expected while run is active):
+            `tla/log/20260311_102513_jetpack_copilot_big_launcher.status`
+          - latest progress checkpoint:
+            `Progress(4) ... 1,525 states generated, 470 distinct, 401 queue`
+            (`tla/log/20260311_102514_jetpack_copilot.log`)
+    - [ ] Leaf 3.3: update `tla/VERIFICATION.md` and `TODO.md` with the accepted
+          big-run evidence for `jetpack_copilot.tla`.
   - [ ] Leaf 4: execute accepted 12-hour big-config run for `jetpack_mencius.tla`
         using the checked-in runner and keep timestamp-prefixed log.
   - [ ] Leaf 5: consolidate all three big-run outcomes in `tla/VERIFICATION.md`
