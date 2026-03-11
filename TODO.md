@@ -1219,9 +1219,26 @@ Why this is re-opened based on `docs/codex_review_report.md`:
       - primary_elected signal write
       - Jetpack recovery start
       - Jetpack recovery completion
-  - [ ] Leaf 3: run ZooKeeper WAN recovery from the runbook path with
+  - [x] Leaf 3: run ZooKeeper WAN recovery from the runbook path with
         `RECOVERY_LATENCY_MS=20` for 3 repetitions, archive full logs, and extract:
         script-level downtime + internal `duration=` values.
+    - Completed (2026-03-11) with runbook command:
+      - `docker compose -f docker/zookeeper/docker-compose.yml run --rm -e RECOVERY_LATENCY_MS=20 jetpack-zookeeper recovery`
+    - Archived logs:
+      - `docs/phase1f_wan_recovery_20260311/zookeeper_wan_r1.txt`
+      - `docs/phase1f_wan_recovery_20260311/zookeeper_wan_r2.txt`
+      - `docs/phase1f_wan_recovery_20260311/zookeeper_wan_r3.txt`
+      - summary: `docs/phase1f_wan_recovery_20260311/zookeeper_wan_summary.md`
+    - Extracted metrics:
+      - backend (script-level) downtime: `774ms`, `800ms`, `773ms`
+      - Jetpack (script-level detection) downtime: `83ms`, `82ms`, `83ms`
+      - Jetpack internal `duration=`: `81ms`, `82ms`, `81ms`
+    - Each run confirms full chain:
+      - leader kill
+      - backend re-election
+      - primary_elected signal write
+      - Jetpack recovery start
+      - Jetpack recovery completion
   - [ ] Leaf 4: consolidate the 3-backend WAN matrix from the accepted rerun pass and
         reconcile `docs/failure_recovery_evaluation.md` + `result.md` so metric labels are
         unambiguous (script detection downtime vs internal Jetpack `duration=`).
