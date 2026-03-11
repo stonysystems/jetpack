@@ -5234,6 +5234,20 @@ Non-negotiable rules for Claude on this reopened section:
           - latest progress line:
             `Progress(10) ... 2,986,595 states generated, 341,591 distinct,
             202,939 states left on queue.`
+        - Follow-up checkpoint (2026-03-11T11:20:26-04:00 local):
+          - elapsed runtime observed from `timeout` process: `55:12`
+          - completion status file still absent (run not complete):
+            `tla/log/20260311_102513_jetpack_copilot_big_launcher.status`
+          - latest progress line:
+            `Progress(10) ... 3,154,902 states generated, 359,929 distinct,
+            213,406 states left on queue.`
+        - Follow-up checkpoint (2026-03-11T11:36:53-04:00 local):
+          - elapsed runtime observed from `timeout` process: `01:11:39`
+          - completion status file still absent (run not complete):
+            `tla/log/20260311_102513_jetpack_copilot_big_launcher.status`
+          - latest progress line:
+            `Progress(10) ... 3,911,595 states generated, 439,660 distinct,
+            256,943 states left on queue.`
     - [ ] Leaf 3.3: update `tla/VERIFICATION.md` and `TODO.md` with the accepted
           big-run evidence for `jetpack_copilot.tla`.
   - [ ] Leaf 4: execute accepted 12-hour big-config run for `jetpack_mencius.tla`
