@@ -1003,7 +1003,7 @@ Why this is re-opened based on `docs/codex_review_report.md`:
       `docs/phase1d_low_concurrency_runs.md` (Leaf 7 table) and reflected in
       `result.md` + `docs/latency_analysis.md`.
 
-- [ ] Reproduce the **full 9-case throughput sweep** from freshly built images
+- [x] Reproduce the **full 9-case throughput sweep** from freshly built images
   - [x] Leaf 1: execute a clean-room fresh-image build from current checkout and capture
         build metadata/logs for the accepted sweep pass.
     - Completed (2026-03-10) via runbook-aligned command:
@@ -1148,6 +1148,13 @@ Why this is re-opened based on `docs/codex_review_report.md`:
       - max-throughput table updated to accepted canonical values/concurrency points
       - observations updated to avoid stale MongoDB low-throughput claims and to
         explicitly call out tail sensitivity
+  - Parent closure (2026-03-11):
+    - All 9 sweep cases rerun from accepted fresh-image pass
+      (`results/reproduce_20260310_164201/`, commit `ff81e913`).
+    - Canonical sweep artifacts regenerated under `docs/sweep_2026-02-28/` with
+      `99/99 OK` rows and retry/failure ledger links.
+    - Throughput claims in `docs/latency_analysis.md` and `result.md` reconciled to
+      the accepted canonical dataset with tail-sensitivity caveats.
   - Required matrix:
     - etcd original / fastpath100 / adaptive
     - MongoDB original / fastpath100 / adaptive
