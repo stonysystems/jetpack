@@ -1178,7 +1178,7 @@ Why this is re-opened based on `docs/codex_review_report.md`:
     - latency-analysis summary tables
     - linked logs for failures / retries
 
-- [ ] Reproduce the **3-backend WAN recovery matrix** from the accepted runbook path
+- [x] Reproduce the **3-backend WAN recovery matrix** from the accepted runbook path
   - [x] Leaf 1: run etcd WAN recovery from the runbook path with
         `RECOVERY_LATENCY_MS=20` for 3 repetitions, archive full logs, and extract:
         script-level downtime + internal `duration=` values.
@@ -1239,9 +1239,27 @@ Why this is re-opened based on `docs/codex_review_report.md`:
       - primary_elected signal write
       - Jetpack recovery start
       - Jetpack recovery completion
-  - [ ] Leaf 4: consolidate the 3-backend WAN matrix from the accepted rerun pass and
+  - [x] Leaf 4: consolidate the 3-backend WAN matrix from the accepted rerun pass and
         reconcile `docs/failure_recovery_evaluation.md` + `result.md` so metric labels are
         unambiguous (script detection downtime vs internal Jetpack `duration=`).
+    - Completed (2026-03-11) by consolidating the accepted 9-run WAN pass into:
+      - `docs/phase1f_wan_recovery_20260311/wan_matrix_summary.md`
+    - Reconciled metric labeling in:
+      - `docs/failure_recovery_evaluation.md`
+      - `result.md`
+    - Both docs now distinguish:
+      - backend downtime (script-level)
+      - Jetpack script-detected downtime
+      - Jetpack internal `duration=` (the only metric compared to RTT formula)
+    - Updated accepted rerun values in both docs to match logs under
+      `docs/phase1f_wan_recovery_20260311/*_wan_r*.txt`.
+  - Parent closure (2026-03-11):
+    - All 3 backends rerun at WAN mode (`RECOVERY_LATENCY_MS=20`) with 3 reps each.
+    - Full-chain recovery evidence archived for all 9 runs under
+      `docs/phase1f_wan_recovery_20260311/`.
+    - Recovery metric labels reconciled in published docs:
+      - `docs/failure_recovery_evaluation.md`
+      - `result.md`
   - Required backends:
     - etcd
     - MongoDB

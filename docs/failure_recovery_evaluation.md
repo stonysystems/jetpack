@@ -12,12 +12,14 @@ A failure recovery test has three distinct phases:
 2. **Backend Re-election** — The backend's remaining nodes detect the failure and elect
    a new leader. This is the **original protocol downtime**.
 3. **Jetpack Recovery** — Once the backend has a new leader, Jetpack detects the change
-   (via signal file) and performs its own recovery. This is the **Jetpack downtime**.
+   (via signal file) and performs its own recovery. We record two metrics:
+   - **Jetpack script-detected downtime** (signal write -> script detection of completion)
+   - **Jetpack internal recovery duration** (`duration=` from `JETPACK-RECOVERY.*COMPLETED`)
 
 ```
 Timeline:
-  T_kill                T_new_leader              T_jetpack_done
-    |--- backend downtime ---|--- Jetpack downtime ---|
+  T_kill                T_new_leader              T_script_detect
+    |--- backend downtime ---|--- Jetpack script-detected downtime ---|
 ```
 
 ## How Each Phase Is Measured
@@ -45,7 +47,7 @@ a member reports `stateStr === "PRIMARY"` and it's not the killed IP. Elapsed ti
 four-letter command until one reports `Mode: leader`, excluding the killed IP. Elapsed
 time from `kill_ns` = ZooKeeper downtime.
 
-### T_jetpack_done: Jetpack Recovery Complete
+### T_script_detect: Script-detected Jetpack Recovery Complete
 
 After the backend elects a new leader, the script writes a signal file:
 
@@ -57,12 +59,15 @@ Jetpack's recovery hooker (in `src/deptran/jm_file_signal.h`) polls for this fil
 found, it triggers `JetpackRecoveryEntry()`, which performs Jetpack's internal recovery
 (re-establish leadership, replay log, etc.).
 
-Recovery completion is detected by polling for either:
+Script-level recovery completion is detected by polling for either:
 - The signal file `/tmp/JM_Jetpack_recovery_finish_after_failure`, or
 - The log line matching `JETPACK-RECOVERY.*COMPLETED` in server output.
 
-Jetpack downtime = T_jetpack_done - T_new_leader (i.e., from signal file write to
-recovery completion detection).
+Script-detected Jetpack downtime = `T_script_detect - T_new_leader`.
+
+Separately, Jetpack internal recovery duration is read from the in-process completion
+log (`duration=...ms`). This is the metric compared to the RTT model
+(`1ms poll + 2 * RTT`).
 
 ## How Leader Identity Is Verified Before Kill
 
@@ -107,33 +112,37 @@ signal file after `setZabState(BROADCAST)` in `Leader.java:lead()`.
 
 ## Interpreting Results
 
-| Metric                      | Typical Range     | Notes                              |
-|----------------------------|------------------|------------------------------------|
-| etcd Raft election         | ~6.0-6.3s        | Default election timeout           |
-| MongoDB replica set election| ~10.6s           | Default `electionTimeoutMillis`    |
-| ZooKeeper ZAB election     | ~0.5-1.1s        | Fast Leader Election (FLE)         |
-| Jetpack internal recovery  | ~106-281ms       | Independent of backend choice      |
+| Metric | Accepted WAN rerun range (2026-03-11) | Notes |
+|---|---|---|
+| etcd backend re-election (script) | 6.568-6.817s | Raft election variability |
+| MongoDB backend re-election (script) | 10.741-23.209s | Replica-set election variability |
+| ZooKeeper backend re-election (script) | 0.773-0.800s | Fast Leader Election (FLE) |
+| Jetpack script-detected downtime | 3-92ms | Detection-path dependent; not used for RTT formula |
+| Jetpack internal recovery duration | 81-83ms | Compared to `1ms + 2*RTT` model at RTT=40ms |
 
-Jetpack's recovery time is dominated by its own protocol work (log replay, leadership
-re-establishment) and is largely independent of which backend is used.
+Accepted rerun sources:
+- `docs/phase1f_wan_recovery_20260311/etcd_wan_r{1,2,3}.txt`
+- `docs/phase1f_wan_recovery_20260311/mongodb_wan_r{1,2,3}.txt`
+- `docs/phase1f_wan_recovery_20260311/zookeeper_wan_r{1,2,3}.txt`
 
-## RTT-Based Sanity Check for Jetpack Recovery Downtime
+## RTT-Based Sanity Check for Jetpack Internal Recovery Duration
 
 > **Sanity Check Status: PASSED**
 >
-> Expected Jetpack downtime at RTT=40ms: ~81ms (1ms poll + 2×40ms).
+> Expected Jetpack internal recovery duration at RTT=40ms: ~81ms (1ms poll + 2×40ms).
 > All three backends measured at RTT=40ms (WAN mode: 3 OS processes, tc/netem 20ms one-way)
 > with 3 repetitions each. All results within ±2ms of expected 81ms.
 >
-> **Post-fix WAN results (RTT=40ms, 3 reps each):**
+> **Accepted WAN rerun pass (RTT=40ms, 3 reps each):**
 >
 > | Backend | Rep 1 | Rep 2 | Rep 3 | Expected | Status |
 > |---------|------:|------:|------:|---------:|--------|
-> | etcd | 82ms | 81ms | 81ms | 81ms | PASS |
-> | MongoDB | 83ms | 81ms | 81ms | 81ms | PASS |
-> | ZooKeeper | 83ms | 82ms | 81ms | 81ms | PASS |
+> | etcd | 82ms | 81ms | 82ms | 81ms | PASS |
+> | MongoDB | 83ms | 83ms | 82ms | 81ms | PASS |
+> | ZooKeeper | 81ms | 82ms | 81ms | 81ms | PASS |
 >
-> Logs saved to `docs/logs/*_recovery_gap_fix_wan_r*.txt`.
+> Consolidated source: `docs/phase1f_wan_recovery_20260311/wan_matrix_summary.md`.
+> Raw logs saved in `docs/phase1f_wan_recovery_20260311/*_wan_r*.txt`.
 >
 > Two bugs were fixed to make WAN mode work:
 > 1. **Server-only process lifetime** (`s_main.cc`): added `else if (!server_infos.empty())`
@@ -161,7 +170,7 @@ T_signal_detected
 T_recovery_complete
 ```
 
-**Total Jetpack downtime (RTT-based lower bound)**:
+**Total Jetpack internal recovery duration (RTT-based lower bound)**:
 
 ```
 T_jetpack = poll_delay + RTT_round1 + RTT_round2
@@ -183,7 +192,7 @@ The benchmark environment uses 20ms one-way latency (RTT = 40ms) via tc/netem
 
 With the original 10ms poll interval, polling delay averages 5ms -> expected ~85ms.
 
-**For WAN deployments with RTT = 40ms, Jetpack recovery should take approximately 80-90ms.**
+**For WAN deployments with RTT = 40ms, Jetpack internal recovery should take approximately 80-90ms.**
 
 ### Measured vs Expected: Gap Analysis
 
@@ -366,23 +375,35 @@ event reactor. These events compete with Jetpack's recovery RPC coroutines.
 reconnection in separate threads or with minimal reactor interaction. Their reconnection
 events don't flood the Jetpack event reactor during recovery.
 
-### Post-Fix Measured Results (RTT=40ms WAN mode)
+### Post-Fix Measured Results (RTT=40ms WAN mode, accepted rerun pass)
 
-All three backends measured at RTT=40ms (tc/netem 20ms one-way, WAN mode):
+All three backends were rerun from the accepted runbook path with
+`RECOVERY_LATENCY_MS=20` (3 reps each). We keep script-detected and internal metrics
+separate:
 
-| Backend | Rep 1 | Rep 2 | Rep 3 | Expected | Sanity check |
-|---------|------:|------:|------:|---------:|-------------|
-| etcd | 82ms | 81ms | 81ms | ~81ms | ≤100ms: **PASS** |
-| ZooKeeper | 83ms | 82ms | 81ms | ~81ms | ≤100ms: **PASS** |
-| MongoDB | 83ms | 81ms | 81ms | ~81ms | ≤100ms: **PASS** |
+| Backend (rep) | Backend downtime (script) | Jetpack script-detected downtime | Jetpack internal `duration=` |
+|---|---:|---:|---:|
+| etcd (r1) | 6568ms | 4ms | 82ms |
+| etcd (r2) | 6729ms | 4ms | 81ms |
+| etcd (r3) | 6817ms | 3ms | 82ms |
+| MongoDB (r1) | 23209ms | 92ms | 83ms |
+| MongoDB (r2) | 10741ms | 88ms | 83ms |
+| MongoDB (r3) | 21684ms | 92ms | 82ms |
+| ZooKeeper (r1) | 774ms | 83ms | 81ms |
+| ZooKeeper (r2) | 800ms | 82ms | 82ms |
+| ZooKeeper (r3) | 773ms | 83ms | 81ms |
+
+RTT-model comparison metric:
+- compare only **Jetpack internal `duration=`** to expected ~81ms (`1ms + 2*RTT`)
+- all 9 internal values are 81-83ms, so the sanity check passes.
 
 Note: MongoDB SDAM reactor congestion (~60–95ms) only manifested in the initial
 single-process Docker test where all 3 Jetpack replicas shared one process. In WAN mode
 with 3 separate processes and non-leader processes using 0 MongoDB connections, the
 leader process recovers without SDAM interference from other processes.
 
-**Conclusion**: The 2-RTT recovery model is confirmed. Jetpack recovery at RTT=40ms
-takes 81–83ms (1ms poll + 2×40ms), matching the theoretical lower bound.
+**Conclusion**: The 2-RTT recovery model is confirmed. Jetpack internal recovery at
+RTT=40ms takes 81-83ms (1ms poll + 2x40ms), matching the theoretical lower bound.
 
 ## Running Recovery Tests
 
@@ -397,4 +418,5 @@ docker/mongodb/run-mongodb-test.sh recovery
 docker/zookeeper/run-zookeeper-test.sh recovery
 ```
 
-Each test prints a summary with backend downtime and Jetpack downtime in milliseconds.
+Each test prints backend downtime, script-detected Jetpack downtime, and Jetpack internal
+`duration=` in milliseconds.

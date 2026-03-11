@@ -181,8 +181,13 @@ files. This simulates a real backend failure with actual leader election.
 Recovery measures two phases:
 1. **Original protocol downtime**: from SIGKILL of the leader to the new leader being
    elected (detected by the test script polling the backend cluster)
-2. **Jetpack downtime**: from `primary_elected` signal file write to Jetpack finishing
-   its own recovery (`recovery_finish_after_failure` signal detected)
+2. **Jetpack script-detected downtime**: from `primary_elected` signal file write to
+   script detection of recovery completion (`recovery_finish_after_failure` signal or
+   completion log match)
+
+For RTT-model comparison, use a separate metric:
+- **Jetpack internal recovery duration**: in-process `duration=...ms` from
+  `JETPACK-RECOVERY.*COMPLETED`.
 
 Signal file path: `/tmp/JM_Jetpack_0.0.0.0` (due to `#define AWS` in constants.h).
 Non-leader Jetpack servers poll this file every 1ms and trigger `JetpackRecoveryEntry()`
@@ -193,38 +198,39 @@ when the signal is detected (reduced from original 10ms poll interval).
 WAN mode runs 3 separate OS processes (h1=127.0.0.1, h2=127.0.0.2, h3=127.0.0.3)
 with tc/netem adding 20ms one-way delay (RTT=40ms). Config: `config/1c1s3r1p_wan.yml`.
 
-| Backend | Protocol Downtime | Recovery Duration | Expected | Status |
-|---------|------------------:|-----------------:|---------:|--------|
-| etcd (r1) | 1106ms | 82ms | 81ms | PASSED |
-| etcd (r2) | 6973ms | 81ms | 81ms | PASSED |
-| etcd (r3) | 1556ms | 81ms | 81ms | PASSED |
-| MongoDB (r1) | 10496ms | 83ms | 81ms | PASSED |
-| MongoDB (r2) | 12710ms | 81ms | 81ms | PASSED |
-| MongoDB (r3) | 11091ms | 81ms | 81ms | PASSED |
-| ZooKeeper (r1) | 862ms | 83ms | 81ms | PASSED |
-| ZooKeeper (r2) | 789ms | 82ms | 81ms | PASSED |
-| ZooKeeper (r3) | 776ms | 81ms | 81ms | PASSED |
+| Backend (rep) | Backend downtime (script) | Jetpack script-detected downtime | Jetpack internal `duration=` | Expected internal | Status |
+|---|---:|---:|---:|---:|---|
+| etcd (r1) | 6568ms | 4ms | 82ms | 81ms | PASSED |
+| etcd (r2) | 6729ms | 4ms | 81ms | 81ms | PASSED |
+| etcd (r3) | 6817ms | 3ms | 82ms | 81ms | PASSED |
+| MongoDB (r1) | 23209ms | 92ms | 83ms | 81ms | PASSED |
+| MongoDB (r2) | 10741ms | 88ms | 83ms | 81ms | PASSED |
+| MongoDB (r3) | 21684ms | 92ms | 82ms | 81ms | PASSED |
+| ZooKeeper (r1) | 774ms | 83ms | 81ms | 81ms | PASSED |
+| ZooKeeper (r2) | 800ms | 82ms | 82ms | 81ms | PASSED |
+| ZooKeeper (r3) | 773ms | 83ms | 81ms | 81ms | PASSED |
 
-Recovery Duration = Jetpack internal recovery time logged by `JetpackRecovery()` (time from
-`JetpackRecoveryEntry()` start to recovery complete). This is the meaningful metric for
-comparing to the 2-RTT model: expected = 1ms poll delay + 2×40ms RTT = 81ms.
-All 9 runs within ±2ms of expected 81ms. Logs: `docs/logs/*_recovery_gap_fix_wan_r*.txt`.
+RTT-model comparison uses only Jetpack internal `duration=`:
+expected = 1ms poll delay + 2x40ms RTT = 81ms.
+All 9 internal values are within +/-2ms of 81ms.
+Consolidated source: `docs/phase1f_wan_recovery_20260311/wan_matrix_summary.md`.
 
-Note: etcd election time varies (1.1s–7s) due to Raft's randomized election timeout;
-ZooKeeper is consistently fast (~0.8s) due to ZAB's Fast Leader Election.
+Note: etcd election time in this accepted pass is stable at ~6.6-6.8s;
+ZooKeeper remains consistently fast (~0.77-0.80s) due to ZAB's Fast Leader Election.
 
 ### Observations
 
 - **ZooKeeper has the fastest backend re-election** (~0.8s), consistent with ZAB's
   fast leader election algorithm designed for low-latency failover.
-- **etcd leader election is variable** (1.1–7s in our WAN tests) due to Raft's randomized
-  election timeout (1000–2000ms, with retry backoff). When no follower wins immediately,
-  etcd waits another full timeout before the next attempt, which can chain to ~7s.
-- **MongoDB replica set election is slowest** (~10.5-12.7s), as MongoDB's election protocol
-  includes a longer heartbeat timeout (`electionTimeoutMillis` default 10s).
-- **Jetpack recovery is consistently 81-83ms** across all backends at RTT=40ms, matching
-  the 2-RTT lower bound (1ms poll + 2×40ms). This confirms the recovery protocol complexity
-  is exactly 2 sequential broadcast rounds regardless of backend choice.
+- **etcd leader election** in this accepted pass is ~6.6-6.8s, reflecting Raft election
+  variability and retry timing.
+- **MongoDB replica-set election is slowest and most variable** in this accepted pass
+  (~10.7-23.2s), consistent with longer election timeout behavior.
+- **Jetpack internal recovery duration is consistently 81-83ms** across all backends at
+  RTT=40ms, matching the 2-RTT lower bound (1ms poll + 2x40ms). This confirms the recovery
+  protocol complexity is exactly 2 sequential broadcast rounds regardless of backend choice.
+- **Jetpack script-detected downtime is not the RTT-comparison metric**; it reflects the
+  script detection path and is reported separately.
 - **MongoDB required a URI fix**: the original code built a comma-separated URI without
   `replicaSet=jetpack-rs`, so the mongocxx driver couldn't failover to surviving nodes.
 - **ZooKeeper required enabling recovery**: `JETPACK_ZOOKEEPER_RECOVERY` was not defined
@@ -237,18 +243,18 @@ ZooKeeper is consistently fast (~0.8s) due to ZAB's Fast Leader Election.
 
 > **Sanity Check Status: PASSED**
 >
-> Expected Jetpack downtime at RTT=40ms: **~81ms** (1ms poll + 2×40ms).
+> Expected Jetpack internal recovery duration at RTT=40ms: **~81ms** (1ms poll + 2x40ms).
 > All three backends measured at RTT=40ms (20ms one-way via tc/netem) in WAN mode
 > (3 separate OS processes on loopback IPs 127.0.0.1–3). Each backend run 3 times.
 > All results within ±2ms of the expected 81ms.
 >
-> **Post-fix WAN results (RTT=40ms, 3 reps each):**
+> **Accepted WAN rerun pass (RTT=40ms, 3 reps each):**
 >
 > | Backend | Rep 1 | Rep 2 | Rep 3 | Expected | Status |
 > |---------|------:|------:|------:|---------:|--------|
-> | etcd | 82ms | 81ms | 81ms | 81ms | PASS |
-> | MongoDB | 83ms | 81ms | 81ms | 81ms | PASS |
-> | ZooKeeper | 83ms | 82ms | 81ms | 81ms | PASS |
+> | etcd | 82ms | 81ms | 82ms | 81ms | PASS |
+> | MongoDB | 83ms | 83ms | 82ms | 81ms | PASS |
+> | ZooKeeper | 81ms | 82ms | 81ms | 81ms | PASS |
 >
 > Root causes previously blocking this check:
 > 1. **Server-only process lifetime bug**: Non-client h2/h3 processes exited after ~16s
@@ -266,17 +272,17 @@ Jetpack recovery requires **2 sequential RTT rounds** (each round sends parallel
 
 Plus a signal polling delay of 0–P ms (P = hooker poll interval).
 
-**Expected Jetpack downtime = polling_delay + 2 × RTT**
+**Expected Jetpack internal recovery duration = polling_delay + 2 x RTT**
 
 With RTT = 40ms (benchmark environment): 0.5ms + 40ms + 40ms = **~81ms** (1ms poll) or
-~85ms (10ms poll). This is the theoretical floor.
+~85ms (10ms poll). This is the theoretical floor for internal recovery duration.
 
 #### Results with RTT ≈ 40ms (original run, tc/netem active from benchmark environment)
 
 The following numbers were measured in an environment where tc/netem latency (20ms one-way)
 was active between Jetpack replicas, consistent with the WAN benchmark setup:
 
-| Backend | Protocol Downtime | Jetpack Downtime | Internal Duration | vs Expected ~81ms |
+| Backend | Protocol Downtime | Jetpack script-detected downtime | Jetpack internal duration | vs Expected ~81ms |
 |---------|------------------:|----------------:|------------------:|------------------:|
 | etcd | ~6.0–6.3s | ~106–107ms | ~124–128ms | **+43ms gap** |
 | ZooKeeper | ~0.5–1.1s | ~106ms | ~123–124ms | **+42ms gap** |
@@ -288,7 +294,7 @@ These numbers are from the initial test run and serve as the pre-fix baseline.
 
 After fixing the test script detection poll from 100ms → 10ms:
 
-| Backend | Protocol Downtime | Jetpack Downtime | Internal Duration | Expected (0ms RTT) | Gap |
+| Backend | Protocol Downtime | Jetpack script-detected downtime | Jetpack internal duration | Expected (0ms RTT) | Gap |
 |---------|------------------:|----------------:|------------------:|-------------------:|----:|
 | etcd | ~1.1s | **3ms** | **1ms** | ~0.5ms | none |
 | ZooKeeper | ~0.5s | **16ms** | **1ms** | ~0.5ms | ~15ms (script poll artifact) |
