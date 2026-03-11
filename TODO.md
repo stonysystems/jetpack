@@ -1293,6 +1293,24 @@ Why this is re-opened based on `docs/codex_review_report.md`:
     and must not mix the two under the same “Jetpack downtime” label.
 
 - [ ] Make the **published docs/results** match what Codex can actually rerun
+  - [x] Leaf 1: create a claim-reconciliation matrix that maps major benchmark/recovery
+        statements to canonical artifacts and classifies each claim as:
+        artifact-backed / rerun-confirmed / historical context / still open.
+    - Completed (2026-03-11):
+      - added `docs/phase1f_docs_claim_reconciliation_20260311.md`
+      - mapped benchmark + recovery claim families to canonical sources
+      - established status legend (`artifact-backed`, `rerun-confirmed`,
+        `historical context`, `still open`) for follow-on doc edits
+      - identified remaining high-priority doc gap:
+        `docs/benchmark_runbook.md` recovery RTT wording should use
+        RTT=40ms for `RECOVERY_LATENCY_MS=20` (20ms one-way)
+  - [ ] Leaf 2: apply the claim-status labels and source links in `result.md` and
+        `docs/latency_analysis.md` for benchmark-throughput/latency sections.
+  - [ ] Leaf 3: apply the same claim-status labels and source links in
+        `docs/failure_recovery_evaluation.md` and `docs/benchmark_runbook.md`, and remove
+        any contradictory RESOLVED/OPEN wording that is not explicitly marked historical.
+  - [ ] Leaf 4: run a final docs consistency pass (cross-file number/label/source checks)
+        and record closure notes in `TODO.md`.
   - Reconcile `docs/latency_analysis.md`, `docs/failure_recovery_evaluation.md`, `result.md`,
     `docs/benchmark_runbook.md`, and the canonical raw artifacts from the same accepted rerun pass.
   - `result.md` must not keep stale throughput tables that disagree with the canonical sweep files.
