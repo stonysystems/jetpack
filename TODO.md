@@ -9708,6 +9708,24 @@ Non-negotiable rules for Claude on this reopened section:
                 `Progress(6) at 2026-03-12 12:19:27: 2,720,805 states generated,
                 102,009 distinct states found, 76,530 states left on queue.`
                 (`tla/log/20260312_070021_jetpack_mencius.log`)
+            - Recheck checkpoint (2026-03-12T12:22:24Z):
+              - relaunched timeout window is still open:
+                - `timeout` PID `4155218` (`etimes=4922`)
+                - `run-tlc.sh` PID `4155219` (`etimes=4922`)
+                - Docker runner PID `4155329` (`etimes=4921`)
+                - TLC Java PID `4155372` (`etimes=4921`)
+              - watcher reliability fix (twenty-ninth reattach, PTY-persistent):
+                - watcher had dropped from `ps`, so watcher was restarted in
+                  PTY session `52988`
+                - active watcher shell PID `75103` (`etimes=9`) with sleep child
+                  PID `75106`
+              - completion artifacts still absent (expected pre-timeout):
+                `tla/log/20260312_110021_jetpack_mencius_big_launcher.status`
+                `tla/log/20260312_110021_jetpack_mencius_big_final_summary.txt`
+              - latest progress line:
+                `Progress(6) at 2026-03-12 12:21:27: 2,790,427 states generated,
+                103,661 distinct states found, 77,525 states left on queue.`
+                (`tla/log/20260312_070021_jetpack_mencius.log`)
             - NOTE: pre-timeout checkpoints below remain historical evidence; no further
               manual checkpoint commits are needed before watcher completion unless the
               watcher fails and requires replacement.
