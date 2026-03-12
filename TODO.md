@@ -6430,6 +6430,31 @@ Non-negotiable rules for Claude on this reopened section:
                 `Progress(7) at 2026-03-12 05:25:44: 5,093,844 states generated,
                 207,921 distinct states found, 160,140 states left on queue.`
                 (`tla/log/20260311_225635_jetpack_mencius_big_launcher.log`)
+            - Recheck checkpoint (2026-03-12T05:30:44Z):
+              - timeout window still open (raw `etimes=9248s` for PID `3375099`);
+                `Leaf 4.2.2.2.b` remains blocked until completion evidence exists.
+              - active chain:
+                - `timeout` PID `3375099` (`etimes=9248`)
+                - `run-tlc.sh` PID `3375100` (`etimes=9248`)
+                - Docker runner PID `3375251` (`etimes=9245`)
+                - TLC Java PID `3375293` (`etimes=9245`)
+              - watcher health recovery:
+                - no active watcher process was found for
+                  `20260311_225635_jetpack_mencius_big_final_summary.txt`;
+                  relaunched detached watcher with `setsid`:
+                  - watcher PID `3637015`
+                  - command: `/tmp/mencius_finalizer_watch.sh 3375099 ...`
+                - finalizer log confirms watcher start:
+                  `[2026-03-12T05:30:27Z] detached watcher started for pid 3375099`
+                  (`tla/log/20260311_225635_jetpack_mencius_big_finalizer.log`)
+              - status file still absent (expected pre-timeout):
+                `tla/log/20260311_225635_jetpack_mencius_big_launcher.status`
+              - watcher summary artifact still absent:
+                `tla/log/20260311_225635_jetpack_mencius_big_final_summary.txt`
+              - latest progress line:
+                `Progress(7) at 2026-03-12 05:30:44: 5,267,605 states generated,
+                212,272 distinct states found, 162,769 states left on queue.`
+                (`tla/log/20260311_225635_jetpack_mencius_big_launcher.log`)
             - NOTE: pre-timeout checkpoints below remain historical evidence; no further
               manual checkpoint commits are needed before watcher completion unless the
               watcher fails and requires replacement.
