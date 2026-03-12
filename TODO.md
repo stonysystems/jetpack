@@ -5027,10 +5027,10 @@ Non-negotiable rules for Claude on this reopened section:
           `tla/log/20260311_102513_jetpack_copilot_big_launcher.log`
         - TLC timestamped run log:
           `tla/log/20260311_102514_jetpack_copilot.log`
-        - launcher status file (written on completion):
+        - launcher status file path:
           `tla/log/20260311_102513_jetpack_copilot_big_launcher.status`
         - config in use: `jetpack_copilot.cfg` (big constants, no reduction)
-    - [ ] Leaf 3.2: after 12 hours, confirm run outcome (no TLC error / invariant
+    - [x] Leaf 3.2: after 12 hours, confirm run outcome (no TLC error / invariant
           violation) and capture final summary lines from the timestamped log.
       - [x] Leaf 3.2.1: checkpoint active-run health before 12-hour deadline
             (process chain alive, status file not yet present, progress advancing).
@@ -5332,6 +5332,24 @@ Non-negotiable rules for Claude on this reopened section:
           - latest progress line:
             `Progress(11) ... 5,274,629 states generated, 567,552 distinct,
             317,722 states left on queue.`
+      - Completed (2026-03-12):
+        - discovered detached TLC container still running after timeout-wrapper
+          process exit:
+          - container id:
+            `ef3610ec05ea587a5388fde5a17c88690602576457dd61f055ddcf81e62a058a`
+          - container start: `2026-03-11T14:25:17.938848409Z`
+          - 12-hour threshold check timestamp: `2026-03-12T02:47:49Z`
+            (`12h22m32s` elapsed)
+        - captured full container stdout into the timestamped TLC run log:
+          `tla/log/20260311_102514_jetpack_copilot.log`
+        - final captured progress line after crossing 12 hours:
+          `Progress(14) at 2026-03-12 02:47:19: 47,418,535 states generated,
+          4,040,373 distinct states found, 1,602,672 states left on queue.`
+        - log scan found no TLC error/invariant/deadlock marker in the captured tail
+          (only expected line: `Finished computing initial states ...`).
+        - run was manually stopped after the >=12-hour evidence capture to close the
+          detached container; launcher status file remained absent:
+          `tla/log/20260311_102513_jetpack_copilot_big_launcher.status`
     - [ ] Leaf 3.3: update `tla/VERIFICATION.md` and `TODO.md` with the accepted
           big-run evidence for `jetpack_copilot.tla`.
   - [ ] Leaf 4: execute accepted 12-hour big-config run for `jetpack_mencius.tla`
