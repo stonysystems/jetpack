@@ -5424,6 +5424,39 @@ Non-negotiable rules for Claude on this reopened section:
         - [ ] Leaf 4.2.2.2: once timeout window closes, capture final TLC summary
               lines and launcher exit code from status file (or explicitly document
               status-file absence with supporting process/log evidence).
+          - [x] Leaf 4.2.2.2.a: launch a background completion watcher that waits for
+                timeout-process exit and auto-captures final launcher/TLC tails plus
+                status-file presence into a dedicated summary artifact.
+            - Completed (2026-03-12T03:25:20Z, superseding earlier detached attempts):
+              - active persistent watcher session: `session_id 90598`
+                (started `2026-03-12T03:25:20Z`, waiting on timeout PID `3375099`)
+              - watcher stdout/stderr log:
+                `tla/log/20260311_225635_jetpack_mencius_big_finalizer.log`
+              - watcher final summary output target:
+                `tla/log/20260311_225635_jetpack_mencius_big_final_summary.txt`
+              - capture policy:
+                wait until `timeout` PID `3375099` exits, then save:
+                - status-file presence/value
+                - launcher log tail
+                - TLC log tail
+                - last progress line
+                - TLC error/invariant/deadlock markers scan
+              - note: initial watcher attempt exited immediately; replaced with the
+                verified persistent PTY watcher session above. Detached watcher
+                attempts (`3414416`, `3415716`) were reaped by the command runner and
+                could not be used for this long-lived wait.
+          - [ ] Leaf 4.2.2.2.b: once watcher output exists, transcribe the final
+                timeout-window outcome in this TODO leaf and close `4.2.2.2`.
+            - Analysis/plan (2026-03-12): documentation-only closure expected
+              (`<80` LOC across `TODO.md` + `tla/VERIFICATION.md`). Execute in order:
+              1) read watcher summary artifact, 2) transcribe final status/tails/marker
+              scan into this leaf, 3) close `4.2.2.2` and advance to `Leaf 4.3`.
+            - Current status (2026-03-12T03:25:20Z): timeout PID `3375099` is still
+              active, so this leaf remains pending until
+              `tla/log/20260311_225635_jetpack_mencius_big_final_summary.txt` exists.
+          - NOTE: pre-timeout checkpoints below remain historical evidence; no further
+            manual checkpoint commits are needed before watcher completion unless the
+            watcher fails and requires replacement.
           - Closure-attempt checkpoint (2026-03-11T23:02:04-04:00 local):
             - timeout window still open (`elapsed 05:29`), so this leaf remains
               pending by design.
