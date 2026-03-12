@@ -5550,6 +5550,20 @@ Non-negotiable rules for Claude on this reopened section:
               `Progress(5) at 2026-03-12 03:16:43: 690,139 generated,
               34,990 distinct, 28,679 left on queue.`
               (`tla/log/20260311_225635_jetpack_mencius.log`)
+          - Closure-attempt checkpoint (2026-03-11T23:18:40-04:00 local):
+            - timeout window still open (raw `etimes=1324s`, i.e. ~22m04s), so this
+              leaf remains pending by design.
+            - active chain still alive:
+              - `timeout` PID `3375099` (`etimes=1324`)
+              - `run-tlc.sh` PID `3375100` (`etimes=1324`)
+              - Docker runner PID `3375251` (`etimes=1321`)
+              - TLC Java PID `3375293` (`etimes=1321`)
+            - launcher status file still absent (expected pre-timeout):
+              `tla/log/20260311_225635_jetpack_mencius_big_launcher.status`
+            - latest progress line at check time:
+              `Progress(5) at 2026-03-12 03:17:43: 725,384 generated,
+              35,986 distinct, 29,361 left on queue.`
+              (`tla/log/20260311_225635_jetpack_mencius.log`)
     - [ ] Leaf 4.3: update `tla/VERIFICATION.md` and `TODO.md` with the accepted
           big-run evidence for `jetpack_mencius.tla`.
   - [ ] Leaf 5: consolidate all three big-run outcomes in `tla/VERIFICATION.md`
