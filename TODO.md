@@ -5372,6 +5372,42 @@ Non-negotiable rules for Claude on this reopened section:
           plus >=12h log progression with no TLC error/invariant/deadlock marker.
   - [ ] Leaf 4: execute accepted 12-hour big-config run for `jetpack_mencius.tla`
         using the checked-in runner and keep timestamp-prefixed log.
+    - [x] Leaf 4.1: launch the strict 12-hour `jetpack_mencius.tla` big run from
+          `tla/run-tlc.sh` (no constant reduction) and record PID + log paths.
+      - Completed (2026-03-11 22:56 local):
+        - launch command:
+          `timeout 12h ./tla/run-tlc.sh jetpack_mencius.tla`
+        - launcher wrapper shell PID: `3375099` (active chain observed:
+          `timeout` PID `3375099` -> `run-tlc.sh` PID `3375100` ->
+          Docker/TLC child process)
+        - launcher log:
+          `tla/log/20260311_225635_jetpack_mencius_big_launcher.log`
+        - TLC timestamped run log:
+          `tla/log/20260311_225635_jetpack_mencius.log`
+        - launcher status file path (written on completion):
+          `tla/log/20260311_225635_jetpack_mencius_big_launcher.status`
+        - config in use: `jetpack_mencius.cfg` (big constants, no reduction)
+    - [ ] Leaf 4.2: after 12 hours, confirm run outcome (no TLC error / invariant
+          violation) and capture final summary lines from the timestamped log.
+      - [x] Leaf 4.2.1: checkpoint active-run health before 12-hour deadline
+            (process chain alive, status file not yet present, progress advancing).
+        - Completed (2026-03-11T22:57:13-04:00 local):
+          - active chain observed:
+            - `timeout` PID `3375099`
+            - `run-tlc.sh` PID `3375100`
+            - Docker/TLC child for
+              `tlc2.TLC -config jetpack_mencius.cfg jetpack_mencius.tla`
+          - completion status file absent (expected while run is active):
+            `tla/log/20260311_225635_jetpack_mencius_big_launcher.status`
+          - latest progress checkpoint:
+            `Progress(3) ... 731 states generated, 602 distinct,
+            594 states left on queue.`
+            (`tla/log/20260311_225635_jetpack_mencius.log`)
+      - [ ] Leaf 4.2.2: after timeout window closes, capture final TLC summary lines
+            and launcher exit code from status file (or explicitly document
+            status-file absence with supporting process/log evidence).
+    - [ ] Leaf 4.3: update `tla/VERIFICATION.md` and `TODO.md` with the accepted
+          big-run evidence for `jetpack_mencius.tla`.
   - [ ] Leaf 5: consolidate all three big-run outcomes in `tla/VERIFICATION.md`
         and update Phase 2I closure evidence in `TODO.md`.
   - Required combinations:
