@@ -38,6 +38,10 @@
 - Phase 2I raft big-config evidence documentation (2026-03-11): `tla/VERIFICATION.md`
   now records the accepted 12-hour bounded `jetpack_raft.tla` run
   (`87,135,107` generated / `9,101,950` distinct, no TLC error marker in tail).
+- Phase 2I CoPilot big-config evidence documentation (2026-03-12): `tla/VERIFICATION.md`
+  now records the accepted >=12-hour bounded `jetpack_copilot.tla` run
+  (`47,418,535` generated / `4,040,373` distinct, no TLC error marker in captured tail;
+  detached-run caveat documented with launcher-status-file absence).
 - Phase 1H script automation (2026-03-08): Created `scripts/experiment_defs.sh` centralizing
   protocol/backend families, mode mappings, concurrency arrays, and command-generation helpers.
   All 4 entry scripts source it. Backward compatibility verified (CLI, result naming, parsers).
@@ -109,8 +113,9 @@
    several containers on one machine, with 20ms `tc/netem` added where the runbook requires it.
 3. Phase 2I: Mencius small-config TLC run completed (terminated after ~34 hours,
    598M states, 56.2M distinct, zero errors — accepted as sufficient verification).
-   `jetpack_raft.tla` big-config 12-hour bounded run evidence is now documented.
-   Remaining big-config 12-hour runs: `jetpack_copilot.tla` and `jetpack_mencius.tla`
+   `jetpack_raft.tla` and `jetpack_copilot.tla` big-config 12-hour bounded run evidence
+   is now documented.
+   Remaining big-config 12-hour run: `jetpack_mencius.tla`
    (requires Docker or Java 11+).
 
 Remaining open work is split across local Docker reruns, TLA execution, and deferred remote
@@ -5014,7 +5019,7 @@ Non-negotiable rules for Claude on this reopened section:
           status file `tla/log/20260310_214540_jetpack_raft_big_launcher.status`
           was absent, so timeout exit code is retained as inferred (`124`) while
           no TLC error/invariant/deadlock marker appears in the log tail.
-  - [ ] Leaf 3: execute accepted 12-hour big-config run for `jetpack_copilot.tla`
+  - [x] Leaf 3: execute accepted 12-hour big-config run for `jetpack_copilot.tla`
         using the checked-in runner and keep timestamp-prefixed log.
     - [x] Leaf 3.1: launch the strict 12-hour `jetpack_copilot.tla` big run from
           `tla/run-tlc.sh` (no constant reduction) and record PID + log paths.
@@ -5350,8 +5355,21 @@ Non-negotiable rules for Claude on this reopened section:
         - run was manually stopped after the >=12-hour evidence capture to close the
           detached container; launcher status file remained absent:
           `tla/log/20260311_102513_jetpack_copilot_big_launcher.status`
-    - [ ] Leaf 3.3: update `tla/VERIFICATION.md` and `TODO.md` with the accepted
+    - [x] Leaf 3.3: update `tla/VERIFICATION.md` and `TODO.md` with the accepted
           big-run evidence for `jetpack_copilot.tla`.
+      - Completed (2026-03-12):
+        - updated `tla/VERIFICATION.md` post-3D status table:
+          `jetpack_copilot.tla` big-config row now records the accepted
+          12h+ bounded run with concrete final counts
+          (`47,418,535` generated / `4,040,373` distinct).
+        - added explicit big-run evidence links:
+          `tla/log/20260311_102514_jetpack_copilot.log` and
+          `tla/log/20260311_102513_jetpack_copilot_big_launcher.log`.
+        - documented detached-run caveat transparently:
+          launcher status file
+          `tla/log/20260311_102513_jetpack_copilot_big_launcher.status`
+          was not produced; acceptance is based on container-start timestamp
+          plus >=12h log progression with no TLC error/invariant/deadlock marker.
   - [ ] Leaf 4: execute accepted 12-hour big-config run for `jetpack_mencius.tla`
         using the checked-in runner and keep timestamp-prefixed log.
   - [ ] Leaf 5: consolidate all three big-run outcomes in `tla/VERIFICATION.md`

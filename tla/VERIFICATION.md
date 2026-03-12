@@ -99,7 +99,7 @@ Additional protocol-specific properties:
 
 ## Verification Status
 
-### Post-3D-refactor runs (2026-03-08 to 2026-03-11)
+### Post-3D-refactor runs (2026-03-08 to 2026-03-12)
 
 | Spec | Config | Result | States generated | Distinct states |
 |---|---|---|---|---|
@@ -107,12 +107,14 @@ Additional protocol-specific properties:
 | `jetpack_copilot.tla` | small | Exhaustive, no errors | 515 | 70 |
 | `jetpack_mencius.tla` | small | Terminated (OOM), no errors (34h) | 598,252,218 | 56,217,812 |
 | `jetpack_raft.tla` | big | 12h bounded run completed, no TLC error/invariant/deadlock marker (accepted) | 87,135,107 | 9,101,950 |
-| `jetpack_copilot.tla` | big | Not yet run | — | — |
+| `jetpack_copilot.tla` | big | 12h+ bounded run completed, no TLC error/invariant/deadlock marker (accepted, detached-run caveat) | 47,418,535 | 4,040,373 |
 | `jetpack_mencius.tla` | big | Not yet run | — | — |
 
 Logs: `tla/log/20260308_*` (small runs),
 `tla/log/20260310_214540_jetpack_raft.log`,
-`tla/log/20260310_214540_jetpack_raft_big_launcher.log` (raft big run)
+`tla/log/20260310_214540_jetpack_raft_big_launcher.log`,
+`tla/log/20260311_102514_jetpack_copilot.log`,
+`tla/log/20260311_102513_jetpack_copilot_big_launcher.log` (big runs)
 Primary Mencius small evidence: `tla/log/20260308_101553_jetpack_mencius_small.log`
 
 Raft big-run note (2026-03-10/11): launched via
@@ -122,6 +124,15 @@ No `Error:`, invariant-violation, or deadlock marker was emitted before timeout-
 closure. The expected launcher status file
 `tla/log/20260310_214540_jetpack_raft_big_launcher.status` was not present for this run,
 so the timeout exit code is recorded as inferred (`124`) rather than directly captured.
+
+CoPilot big-run note (2026-03-11/12): launched via
+`timeout 12h ./tla/run-tlc.sh jetpack_copilot.tla`. The launcher wrapper exited without
+writing `tla/log/20260311_102513_jetpack_copilot_big_launcher.status`, but the TLC Docker
+container continued running detached (`started=2026-03-11T14:25:17Z`). At
+`2026-03-12T02:47:49Z` (12h22m elapsed), the captured TLC log reached:
+`Progress(14) at 2026-03-12 02:47:19: 47,418,535 generated, 4,040,373 distinct`.
+No `Error:`, invariant-violation, or deadlock marker appeared before manual stop after the
+>=12h evidence capture.
 
 ### Note on Mencius small-config state space
 
