@@ -147,6 +147,31 @@ are complete:
   turn-scoped instruction given only to Codex (for example, “do not edit file X in this turn”)
   into this TODO unless the user explicitly wants that rule preserved for future Claude work.
 
+## Execution Rules For Long-Running Leaves
+
+- Treat any leaf that is expected to spend more than about 30 minutes mostly waiting
+  (for example big-config TLC runs, long benchmark sweeps, long Docker builds, or long reruns)
+  as a **background-execution leaf**, not as a leaf that should monopolize the agent until it finishes.
+- Break every such task into separate leaves:
+  1. launch and record exact command, start time, timeout/deadline, PID/container/session id,
+     log path, and status-file or completion-artifact path;
+  2. one early health-check leaf that confirms the job is genuinely advancing;
+  3. one completion-harvest leaf that runs only after the completion artifact exists, the timeout
+     window closes, or a failure signal appears;
+  4. any follow-up analysis/doc/update leaf after the result is available.
+- After the launch leaf and one health check are done, move on to the next runnable highest-priority
+  leaf. Do **not** keep re-selecting the waiting leaf while the only next action is passive waiting.
+- Poll background jobs only briefly at loop boundaries or when their explicit deadline / artifact
+  condition is met. Do **not** live-tail for hours and do **not** append repetitive "still running"
+  checkpoints to this TODO.
+- Keep background concurrency conservative unless a phase explicitly says otherwise: at most one
+  heavy TLC/model-check run and at most one heavy Docker/benchmark/build run at a time.
+- For a waiting background run, keep only one concise status note under the leaf. When the run finishes,
+  replace that waiting note with the final outcome/evidence rather than growing an unbounded poll log.
+- If every remaining open leaf is only waiting on background completion, sleep/exit instead of busy-watching.
+- Do **not** make a commit or push that only records "still running" status churn. Commit/push only after
+  a completed leaf, a finished run with captured evidence, or some other material artifact lands.
+
 ## Goal
 
 Jetpack is a plugin consensus protocol that sits on top of a base protocol (e.g. Raft,
@@ -5454,6 +5479,10 @@ Non-negotiable rules for Claude on this reopened section:
             - Current status (2026-03-12T03:25:20Z): timeout PID `3375099` is still
               active, so this leaf remains pending until
               `tla/log/20260311_225635_jetpack_mencius_big_final_summary.txt` exists.
+            - Forward rule: this leaf is now in passive-wait state. Do **not** append more
+              periodic recheck checkpoints while the only fact is "the watcher artifact does
+              not exist yet". Revisit this leaf only when the summary artifact exists, the
+              timeout window has clearly expired, or the watcher/process chain has failed.
             - Recheck checkpoint (2026-03-12T03:31:34Z):
               - timeout window still open (raw `etimes=2098s` for PID `3375099`);
                 `Leaf 4.2.2.2.b` remains blocked until completion evidence exists.
