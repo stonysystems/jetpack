@@ -5406,6 +5406,24 @@ Non-negotiable rules for Claude on this reopened section:
       - [ ] Leaf 4.2.2: after timeout window closes, capture final TLC summary lines
             and launcher exit code from status file (or explicitly document
             status-file absence with supporting process/log evidence).
+        - [x] Leaf 4.2.2.1: while timeout window is still open, record an additional
+              active-run checkpoint proving the process chain is alive, status file is
+              still absent, and TLC progress is advancing.
+          - Completed (2026-03-11T22:59:46-04:00 local):
+            - active chain observed:
+              - `timeout` PID `3375099`
+              - `run-tlc.sh` PID `3375100`
+              - Docker runner PID `3375251`
+              - TLC Java PID `3375293`
+            - completion status file still absent (expected while run is active):
+              `tla/log/20260311_225635_jetpack_mencius_big_launcher.status`
+            - latest progress lines confirm advancement:
+              - `Progress(4) at 2026-03-12 02:58:43: 66,266 generated, 6,352 distinct`
+              - `Progress(4) at 2026-03-12 02:59:43: 101,006 generated, 7,682 distinct`
+              (`tla/log/20260311_225635_jetpack_mencius.log`)
+        - [ ] Leaf 4.2.2.2: once timeout window closes, capture final TLC summary
+              lines and launcher exit code from status file (or explicitly document
+              status-file absence with supporting process/log evidence).
     - [ ] Leaf 4.3: update `tla/VERIFICATION.md` and `TODO.md` with the accepted
           big-run evidence for `jetpack_mencius.tla`.
   - [ ] Leaf 5: consolidate all three big-run outcomes in `tla/VERIFICATION.md`
