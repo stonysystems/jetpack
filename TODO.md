@@ -9177,6 +9177,27 @@ Non-negotiable rules for Claude on this reopened section:
                 `Progress(7) at 2026-03-12 10:41:46: 15,840,754 states generated,
                 845,931 distinct states found, 695,906 states left on queue.`
                 (`tla/log/20260311_225635_jetpack_mencius.log`)
+            - Reopen note (2026-03-12T10:58:11Z):
+              - watcher summary artifact was produced after manual stop:
+                `tla/log/20260311_225635_jetpack_mencius_big_final_summary.txt`
+              - that stopped run reached only `etimes=28857s` before termination,
+                so it does **not** satisfy the 12-hour acceptance window for this
+                leaf. Treat this as invalid evidence for closure.
+            - Relaunch (2026-03-12T11:00:21Z):
+              - started fresh strict bounded run:
+                `timeout 12h ./tla/run-tlc.sh jetpack_mencius.tla`
+              - wrapper PID: `4155215`; timeout PID: `4155218`
+              - launcher log:
+                `tla/log/20260312_110021_jetpack_mencius_big_launcher.log`
+              - TLC log:
+                `tla/log/20260312_070021_jetpack_mencius.log`
+              - launcher status target:
+                `tla/log/20260312_110021_jetpack_mencius_big_launcher.status`
+              - watcher session attached for completion capture:
+                `session_id 96937`
+              - watcher outputs:
+                `tla/log/20260312_110021_jetpack_mencius_big_finalizer.log`
+                `tla/log/20260312_110021_jetpack_mencius_big_final_summary.txt`
             - NOTE: pre-timeout checkpoints below remain historical evidence; no further
               manual checkpoint commits are needed before watcher completion unless the
               watcher fails and requires replacement.
