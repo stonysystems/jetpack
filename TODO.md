@@ -7101,6 +7101,25 @@ Non-negotiable rules for Claude on this reopened section:
                 `Progress(7) at 2026-03-12 06:35:45: 7,501,417 states generated,
                 311,324 distinct states found, 239,793 states left on queue.`
                 (`tla/log/20260311_225635_jetpack_mencius_big_launcher.log`)
+            - Recheck checkpoint (2026-03-12T06:37:49Z):
+              - timeout window still open (raw `etimes=13273s` for PID `3375099`);
+                `Leaf 4.2.2.2.b` remains blocked until completion evidence exists.
+              - active chain:
+                - `timeout` PID `3375099` (`etimes=13273`)
+                - `run-tlc.sh` PID `3375100` (`etimes=13273`)
+                - Docker runner PID `3375251` (`etimes=13270`)
+                - TLC Java PID `3375293` (`etimes=13270`)
+              - watcher still active after recovery:
+                - watcher PID `3637015` (`etimes=4042`)
+                - command: `/tmp/mencius_finalizer_watch.sh 3375099 ...`
+              - status file still absent (expected pre-timeout):
+                `tla/log/20260311_225635_jetpack_mencius_big_launcher.status`
+              - watcher summary artifact still absent:
+                `tla/log/20260311_225635_jetpack_mencius_big_final_summary.txt`
+              - latest progress line:
+                `Progress(7) at 2026-03-12 06:37:45: 7,568,436 states generated,
+                314,214 distinct states found, 241,991 states left on queue.`
+                (`tla/log/20260311_225635_jetpack_mencius_big_launcher.log`)
             - NOTE: pre-timeout checkpoints below remain historical evidence; no further
               manual checkpoint commits are needed before watcher completion unless the
               watcher fails and requires replacement.
