@@ -1,4 +1,4 @@
-------------------------------- MODULE jetpack_raft -------------------------------
+-------------------------- MODULE jetpack_raft_composition --------------------------
 \* Composition of Jetpack plugin with Raft base protocol.
 \*
 \* This wrapper module:

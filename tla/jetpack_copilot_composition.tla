@@ -1,4 +1,4 @@
---------------------------- MODULE jetpack_copilot ---------------------------
+---------------------- MODULE jetpack_copilot_composition ----------------------
 \* Composition of Jetpack plugin with CoPilot base protocol.
 \*
 \* This wrapper module:

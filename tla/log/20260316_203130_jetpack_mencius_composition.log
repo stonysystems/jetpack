@@ -1,0 +1,37 @@
+=== TLC Run ===
+Spec:      jetpack_mencius_composition.tla
+Config:    jetpack_mencius.cfg
+Mode:      local
+Detected total memory: 96506MB
+Enforced TLC memory cap: 32168MB
+JVM heap cap: 28951MB
+Log:       /home/users/ztang/janus/tla/log/20260316_203130_jetpack_mencius_composition.log
+Started:   2026-03-16T20:31:30+00:00
+===============
+Using config: jetpack_mencius.cfg
+--- Config contents ---
+SPECIFICATION Spec
+SYMMETRY Symmetry
+
+CONSTANTS
+  Server = {s1, s2, s3, s4, s5}
+  Client = {c1}
+  CmdId = {id1, id2, id3}
+  Key = {k1, k2}
+
+CONSTRAINT StateConstraint
+
+PROPERTY Safety
+\* PROPERTY Liveness
+--- End config ---
+
+Running: tlc2.TLC -nowarning -deadlock -config jetpack_mencius.cfg jetpack_mencius_composition.tla
+
+ERROR: ld.so: object '/usr/lib/x86_64-linux-gnu/libprofiler.so' from LD_PRELOAD cannot be preloaded (wrong ELF class: ELFCLASS64): ignored.
+Invalid maximum heap size: -Xmx28951m
+The specified size exceeds the maximum representable size.
+Error: Could not create the Java Virtual Machine.
+Error: A fatal exception has occurred. Program will exit.
+
+Finished:  2026-03-16T20:31:32+00:00
+Exit code: 1

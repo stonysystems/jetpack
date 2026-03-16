@@ -2,13 +2,22 @@
 
 Reproducible model-checking workflow for the Jetpack consensus plugin.
 
+Thin-wrapper rename note: on 2026-03-16 the decoupled wrapper specs were renamed
+from `jetpack_raft.tla`, `jetpack_copilot.tla`, and `jetpack_mencius.tla` to
+`jetpack_raft_composition.tla`, `jetpack_copilot_composition.tla`, and
+`jetpack_mencius_composition.tla`. Older logs still reference the legacy names.
+
+Scope note: this file keeps the reproducible workflow and historical evidence. If
+it disagrees with `tla/TLA_PLUS_BIG_PICTURE.md` or `TODO.md` about the active
+finish bar, treat those two files as authoritative for the current task.
+
 ## Accepted Jetpack/Base Compositions
 
 | Spec file | Base protocol | Proposer model |
 |---|---|---|
-| `jetpack_raft.tla` | Raft (`base_raft.tla`) | 1 proposer (`"sole"`) |
-| `jetpack_copilot.tla` | CoPilot (`base_copilot.tla`) | 2 proposers (pilot + copilot) |
-| `jetpack_mencius.tla` | Mencius (`base_mencius.tla`) | N proposers (round-robin) |
+| `jetpack_raft_composition.tla` | Raft (`base_raft.tla`) | 1 proposer (`"sole"`) |
+| `jetpack_copilot_composition.tla` | CoPilot (`base_copilot.tla`) | 2 proposers (pilot + copilot) |
+| `jetpack_mencius_composition.tla` | Mencius (`base_mencius.tla`) | N proposers (round-robin) |
 
 All three compose `jetpack.tla` via TLA+ `INSTANCE` with protocol-specific
 `Proposer`, `ProposerOf`, and `NoOpCmd` bindings.
@@ -25,7 +34,7 @@ All three compose `jetpack.tla` via TLA+ `INSTANCE` with protocol-specific
 
 Mencius small uses 2 CmdIds to exercise multi-proposer interleaving.
 
-### Big configs (12-hour verification runs)
+### Big configs (historical large-run configs)
 
 | Config file | Constants |
 |---|---|
@@ -33,8 +42,9 @@ Mencius small uses 2 CmdIds to exercise multi-proposer interleaving.
 | `jetpack_copilot.cfg` | 5 servers, 1 client, 3 cmds, 2 keys |
 | `jetpack_mencius.cfg` | 5 servers, 1 client, 3 cmds, 2 keys |
 
-The big configs encode the accepted verification parameters: 5 servers, 1 client,
-3 commands, 2 keys. These are the final-evidence runs.
+The big configs encode the accepted large-run constants: 5 servers, 1 client,
+3 commands, 2 keys. The current acceptance window is defined by the active task
+docs, not by this historical section.
 
 ## Running TLC
 
@@ -52,26 +62,59 @@ wget -O tla/tla2tools.jar \
 # Requires Docker. The runner builds the image automatically from tla/Dockerfile.
 ```
 
+### Memory cap
+
+`tla/run-tlc.sh` now enforces the repository memory policy automatically:
+
+- it detects total system memory, or the active cgroup/container limit if smaller
+- it caps TLC to at most one third of that total
+- in local mode it applies a JVM heap cap with `-Xmx`
+- in Docker mode it applies both:
+  - container limits via `--memory` and `--memory-swap`
+  - the same JVM heap cap via `JAVA_TOOL_OPTIONS`
+- if local `java` is 32-bit, it further clamps the heap to a JVM-safe ceiling
+  and logs that adjustment explicitly
+
+The run log records:
+- detected total memory
+- the automatic one-third cap
+- the configured TLC memory cap
+- the enforced TLC memory cap after any local-JVM clamp
+- JVM heap cap
+
+Optional lower overrides:
+
+```bash
+# Lower the total TLC memory budget, while still respecting the 1/3 auto cap:
+TLC_MEMORY_MB=8192 ./tla/run-tlc.sh jetpack_raft_composition.tla
+
+# Lower only the JVM heap within that budget:
+TLC_MEMORY_MB=8192 TLC_HEAP_MB=7168 ./tla/run-tlc.sh jetpack_raft_composition.tla
+```
+
+The runner rejects values above the automatic one-third cap.
+For large heaps, prefer Docker mode or a 64-bit local JVM.
+
 ### Run commands
 
 All runs use `tla/run-tlc.sh`. Run from the repo root or the `tla/` directory.
 
 ```bash
 # Small-config runs (minutes to hours depending on spec):
-./tla/run-tlc.sh jetpack_raft.tla small
-./tla/run-tlc.sh jetpack_copilot.tla small
-./tla/run-tlc.sh jetpack_mencius.tla small
+./tla/run-tlc.sh jetpack_raft_composition.tla small
+./tla/run-tlc.sh jetpack_copilot_composition.tla small
+./tla/run-tlc.sh jetpack_mencius_composition.tla small
 
-# Big-config runs (12-hour verification):
-./tla/run-tlc.sh jetpack_raft.tla
-./tla/run-tlc.sh jetpack_copilot.tla
-./tla/run-tlc.sh jetpack_mencius.tla
+# Large-config runs (runtime window defined by the current task docs):
+./tla/run-tlc.sh jetpack_raft_composition.tla
+./tla/run-tlc.sh jetpack_copilot_composition.tla
+./tla/run-tlc.sh jetpack_mencius_composition.tla
 ```
 
 The runner auto-detects local vs Docker mode. Override with `TLC_MODE`:
 ```bash
-TLC_MODE=docker ./tla/run-tlc.sh jetpack_raft.tla small
-TLC_MODE=local  ./tla/run-tlc.sh jetpack_raft.tla small
+TLC_MODE=docker ./tla/run-tlc.sh jetpack_raft_composition.tla small
+TLC_MODE=local  ./tla/run-tlc.sh jetpack_raft_composition.tla small
 ```
 
 ### Output
@@ -103,12 +146,12 @@ Additional protocol-specific properties:
 
 | Spec | Config | Result | States generated | Distinct states |
 |---|---|---|---|---|
-| `jetpack_raft.tla` | small | Exhaustive, no errors | 82,375 | 6,029 |
-| `jetpack_copilot.tla` | small | Exhaustive, no errors | 515 | 70 |
-| `jetpack_mencius.tla` | small | Terminated (OOM), no errors (34h) | 598,252,218 | 56,217,812 |
-| `jetpack_raft.tla` | big | 12h bounded run completed, no TLC error/invariant/deadlock marker (accepted) | 87,135,107 | 9,101,950 |
-| `jetpack_copilot.tla` | big | 12h+ bounded run completed, no TLC error/invariant/deadlock marker (accepted, detached-run caveat) | 47,418,535 | 4,040,373 |
-| `jetpack_mencius.tla` | big | Not yet run | — | — |
+| `jetpack_raft_composition.tla` | small | Exhaustive, no errors | 82,375 | 6,029 |
+| `jetpack_copilot_composition.tla` | small | Exhaustive, no errors | 515 | 70 |
+| `jetpack_mencius_composition.tla` | small | Terminated (OOM), no errors (34h) | 598,252,218 | 56,217,812 |
+| `jetpack_raft_composition.tla` | big | 12h bounded run completed, no TLC error/invariant/deadlock marker (accepted) | 87,135,107 | 9,101,950 |
+| `jetpack_copilot_composition.tla` | big | 12h+ bounded run completed, no TLC error/invariant/deadlock marker (accepted, detached-run caveat) | 47,418,535 | 4,040,373 |
+| `jetpack_mencius_composition.tla` | big | Not yet run | — | — |
 
 Logs: `tla/log/20260308_*` (small runs),
 `tla/log/20260310_214540_jetpack_raft.log`,
@@ -117,7 +160,7 @@ Logs: `tla/log/20260308_*` (small runs),
 `tla/log/20260311_102513_jetpack_copilot_big_launcher.log` (big runs)
 Primary Mencius small evidence: `tla/log/20260308_101553_jetpack_mencius_small.log`
 
-Raft big-run note (2026-03-10/11): launched via
+Raft big-run note (2026-03-10/11): launched before the rename via
 `timeout 12h ./tla/run-tlc.sh jetpack_raft.tla`. Final TLC line was
 `Progress(13) at 2026-03-11 13:45:21 ... 87,135,107 generated, 9,101,950 distinct`.
 No `Error:`, invariant-violation, or deadlock marker was emitted before timeout-window
@@ -125,7 +168,7 @@ closure. The expected launcher status file
 `tla/log/20260310_214540_jetpack_raft_big_launcher.status` was not present for this run,
 so the timeout exit code is recorded as inferred (`124`) rather than directly captured.
 
-CoPilot big-run note (2026-03-11/12): launched via
+CoPilot big-run note (2026-03-11/12): launched before the rename via
 `timeout 12h ./tla/run-tlc.sh jetpack_copilot.tla`. The launcher wrapper exited without
 writing `tla/log/20260311_102513_jetpack_copilot_big_launcher.status`, but the TLC Docker
 container continued running detached (`started=2026-03-11T14:25:17Z`). At

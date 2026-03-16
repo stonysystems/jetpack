@@ -1,0 +1,57 @@
+=== TLC Run ===
+Spec:      jetpack_mencius_composition.tla
+Config:    jetpack_mencius.cfg
+Mode:      local
+Detected total memory: 96506MB
+Auto 1/3 memory cap: 32168MB
+Configured TLC memory cap: 32168MB
+Local Java bitness: 32
+Local 32-bit JVM heap ceiling: 1408MB
+Adjusted JVM heap cap for local Java: 1408MB
+Enforced TLC memory cap: 1408MB
+JVM heap cap: 1408MB
+Log:       /home/users/ztang/janus/tla/log/20260316_203440_jetpack_mencius_composition.log
+Started:   2026-03-16T20:34:40+00:00
+===============
+Using config: jetpack_mencius.cfg
+--- Config contents ---
+SPECIFICATION Spec
+SYMMETRY Symmetry
+
+CONSTANTS
+  Server = {s1, s2, s3, s4, s5}
+  Client = {c1}
+  CmdId = {id1, id2, id3}
+  Key = {k1, k2}
+
+CONSTRAINT StateConstraint
+
+PROPERTY Safety
+\* PROPERTY Liveness
+--- End config ---
+
+Running: tlc2.TLC -nowarning -deadlock -config jetpack_mencius.cfg jetpack_mencius_composition.tla
+
+ERROR: ld.so: object '/usr/lib/x86_64-linux-gnu/libprofiler.so' from LD_PRELOAD cannot be preloaded (wrong ELF class: ELFCLASS64): ignored.
+TLC2 Version 2.16 of 31 December 2020 (rev: cdddf55)
+Running breadth-first search Model-Checking with fp 24 and seed 2218078206802929234 with 1 worker on 64 cores with 1251MB heap and 64MB offheap memory (Linux 5.15.0-133-generic i386, Oracle Corporation 1.8.0_101 x86, MSBDiskFPSet, DiskStateQueue).
+Parsing file /home/users/ztang/janus/tla/jetpack_mencius_composition.tla
+Parsing file /tmp/Naturals.tla
+Parsing file /tmp/FiniteSets.tla
+Parsing file /tmp/Sequences.tla
+Parsing file /tmp/TLC.tla
+Parsing file /home/users/ztang/janus/tla/base_mencius.tla
+Parsing file /home/users/ztang/janus/tla/jetpack.tla
+Semantic processing of module Naturals
+Semantic processing of module Sequences
+Semantic processing of module FiniteSets
+Semantic processing of module TLC
+Semantic processing of module base_mencius
+Semantic processing of module jetpack
+Semantic processing of module jetpack_mencius_composition
+Starting... (2026-03-16 20:34:46)
+Computing initial states...
+Finished computing initial states: 1 distinct state generated at 2026-03-16 20:34:47.
+Progress(3) at 2026-03-16 20:34:50: 974 states generated (974 s/min), 620 distinct states found (620 ds/min), 610 states left on queue.
+Progress(4) at 2026-03-16 20:35:50: 40,825 states generated (39,851 s/min), 4,345 distinct states found (3,725 ds/min), 3,981 states left on queue.
+Progress(4) at 2026-03-16 20:36:50: 82,143 states generated (41,318 s/min), 6,968 distinct states found (2,623 ds/min), 6,238 states left on queue.

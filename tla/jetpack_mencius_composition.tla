@@ -1,4 +1,4 @@
---------------------------- MODULE jetpack_mencius ---------------------------
+---------------------- MODULE jetpack_mencius_composition ----------------------
 \* Composition of Jetpack plugin with Mencius base protocol.
 \*
 \* This wrapper module:

@@ -2,29 +2,33 @@
 
 <!-- NOTE: The old doc/ folder has been merged into docs/. All documentation is now in docs/. -->
 
-Purpose: keep current work, acceptance criteria, and evidence pointers visible. Do not use
-this file as a live execution transcript.
+Purpose: keep current work, acceptance criteria, and evidence pointers visible. This file
+should carry both the broader project big picture and the detailed active TLA+ closure
+checklist. Do not use it as a live execution transcript.
 
 ## Review Snapshot
 
-- Latest active phase: `Phase 2I: TLA+ 3-D base-log verification`
+- Latest active phase: `Phase 2I: TLA+ decoupled composition and monolithic closure`
 
 ### Highest-Priority Open Work
 
-1. Re-establish accepted big-run evidence for `jetpack_raft.tla` and `jetpack_mencius.tla`.
-   Current repo state has the accepted `jetpack_copilot.tla` big-run logs on disk, but
-   `tla/VERIFICATION.md` still references timestamped Raft big-run artifacts that are not
-   present under `tla/log/`, and Mencius big-run evidence is still open.
-2. Update `tla/VERIFICATION.md` and this TODO from the actual on-disk evidence only.
-3. Close Phase 2I only after all three Jetpack/base combinations have accepted small and
-   12-hour big timestamped logs plus aligned docs.
+1. Close the decoupled composition deliverables:
+   `jetpack_raft_composition.tla`, `jetpack_copilot_composition.tla`,
+   and `jetpack_mencius_composition.tla`.
+2. Reconfirm that `base_raft.tla`, `base_copilot.tla`, and `base_mencius.tla`
+   pass their own protocol-needed checks rather than relying only on wrapper results.
+3. Recover or recreate the real monolithic deliverables:
+   `jetpack_raft_monolithic.tla`, `jetpack_copilot_monolithic.tla`,
+   and `jetpack_mencius_monolithic.tla`.
+4. Keep docs aligned so future agents cannot cut corners on naming, cfg usage,
+   runtime windows, or the 3-D log ownership rule.
 
 ### Current Phase Status
 
 - Phase 0: done
 - Phase 1: done for local Docker reproducibility
 - Phase 1H remote validation: deferred until AWS / Zoo access returns
-- Phase 2: open only on final big-run evidence / closure
+- Phase 2: active
 - Phase 3: done
 - Phase 4: done
 
@@ -45,33 +49,19 @@ this file as a live execution transcript.
   2. one health check,
   3. final outcome.
 - Do not append minute-by-minute polling history here.
-- A task is done only when the repo contains the code/doc change, the exact command or runner
-  used, a saved log or artifact, and a clear result classification.
+- A task is done only when the repo contains the code or doc change, the exact command or
+  runner used, a saved log or artifact, and a clear result classification.
 - If docs and on-disk artifacts disagree, treat that as open work and fix the docs or rerun.
 
-## Goal
+## Project Big Picture
 
-Jetpack is a plugin consensus protocol layered on top of a base protocol. The TLA+ end goal is
-one shared `jetpack.tla` composed with protocol-specific base modules that expose a real
-Jetpack-facing 3-D log `log[i][j][k]`:
-
-- `i`: replica storing the copy
-- `j`: logical proposer / sequence
-- `k`: position inside that proposer's sequence
-
-The accepted proof story is:
-
-- the base protocol owns the 3-D log
-- `jetpack.tla` consumes that 3-D interface directly
-- wrappers stay thin and do wiring only
-
-## Phase 0: Documentation Foundations
+### Phase 0: Documentation Foundations
 
 - [x] Documentation was consolidated under `docs/`
 - [x] Leader-election signaling was documented
 - [x] Jetpack pseudocode docs were refreshed and validated
 
-## Phase 1: Evaluation Reproducibility
+### Phase 1: Evaluation Reproducibility
 
 Local Docker reproducibility is complete. The canonical local evidence is:
 
@@ -101,62 +91,11 @@ deferred until AWS / Zoo access returns.
 - [x] Dry-run / self-check support was added
 - Deferred: remote cluster validation is still pending environment availability
 
-## Phase 2: TLA+ Specifications and Verification
+### Phase 2: TLA+ Specifications and Verification
 
-### Accepted Phase 2I Constraints
+This is the active phase. The detailed closure checklist remains below.
 
-- The base protocol owns the real 3-D log.
-- `jetpack.tla` must not reconstruct the proposer dimension from a flatter log.
-- Accepted big config is fixed at:
-  - 5 servers
-  - 1 client
-  - 3 commands
-  - 2 keys
-- Accepted big evidence is a 12-hour bounded run with a timestamp-prefixed log in `tla/log/`.
-
-### Completed Core Refactor
-
-- [x] `tla/TLA_PLUS_BIG_PICTURE.md` explicitly rejects the projection shortcut
-- [x] `base_raft.tla`, `base_copilot.tla`, and `base_mencius.tla` now expose real 3-D log state
-- [x] `jetpack.tla` consumes the shared 3-D interface directly
-- [x] Wrappers remain thin composition drivers
-- [x] `tla/run-tlc.sh` saves timestamp-prefixed logs and supports local Java or Docker
-- [x] `tla/VERIFICATION.md` documents the reproducible workflow
-
-### Current Verification Evidence
-
-Small-config evidence on disk:
-
-- [x] `tla/log/20260308_101528_jetpack_raft_small.log`
-- [x] `tla/log/20260308_101541_jetpack_copilot_small.log`
-- [x] `tla/log/20260308_101553_jetpack_mencius_small.log`
-
-Big-config evidence currently on disk:
-
-- [x] `tla/log/20260311_102514_jetpack_copilot.log`
-- [x] `tla/log/20260311_102513_jetpack_copilot_big_launcher.log`
-- Missing on disk: timestamped accepted `jetpack_raft.tla` big-run artifacts under `tla/log/`
-- Missing on disk: timestamped accepted `jetpack_mencius.tla` big-run artifacts under `tla/log/`
-
-### Open Work
-
-- [ ] Re-run or restore the accepted 12-hour big-config evidence for `jetpack_raft.tla`,
-      then update `tla/VERIFICATION.md` and this TODO to match what is actually on disk.
-- [ ] Run the accepted 12-hour big-config verification for `jetpack_mencius.tla`,
-      save timestamp-prefixed logs under `tla/log/`, and update `tla/VERIFICATION.md`.
-- [ ] Consolidate the three big-run outcomes in `tla/VERIFICATION.md` and this TODO with
-      one concise result line per spec instead of polling history.
-- [ ] Do not close Phase 2I until all of the following are true:
-  - `tla/TLA_PLUS_BIG_PICTURE.md` clearly states that the base protocol owns the 3-D log
-  - `jetpack.tla` no longer depends on a projection from a 2-D base log
-  - `base_raft.tla`, `base_copilot.tla`, and `base_mencius.tla` expose a real
-    Jetpack-facing `log[i][j][k]`
-  - all three Jetpack/base combinations have one accepted small run with saved log
-  - all three Jetpack/base combinations have one accepted 12-hour big run with saved log
-  - every accepted log filename starts with the run timestamp
-  - `tla/VERIFICATION.md` and this TODO agree with the on-disk artifacts
-
-## Phase 3: Jetpack + Industry Applications
+### Phase 3: Jetpack + Industry Applications
 
 Integration work is complete for the current scope.
 
@@ -165,7 +104,7 @@ Integration work is complete for the current scope.
 - [x] ZooKeeper integration
 - [x] Docker-based benchmark and recovery paths for all three backends
 
-## Phase 4: Supporting Docs and Project Alignment
+### Phase 4: Supporting Docs and Project Alignment
 
 Supporting documentation and alignment work is complete.
 
@@ -173,3 +112,119 @@ Supporting documentation and alignment work is complete.
 - [x] TLA config alignment
 - [x] README and operator docs refresh
 - [x] TLA debugging / supporting notes
+
+## Active TLA+ Closure Work
+
+The active TLA+ goal is now split into two deliverable families:
+
+- Part 1: standalone base protocols plus real monolithic Jetpack integrations
+- Part 2: decoupled `base_*` + shared `jetpack.tla` + thin `*_composition.tla` wrappers
+
+## Current Naming Status
+
+- [x] Thin wrapper specs were renamed to:
+  - `tla/jetpack_raft_composition.tla`
+  - `tla/jetpack_copilot_composition.tla`
+  - `tla/jetpack_mencius_composition.tla`
+- [ ] Confirm that the separate monolithic integrated specs exist under:
+  - `tla/jetpack_raft_monolithic.tla`
+  - `tla/jetpack_copilot_monolithic.tla`
+  - `tla/jetpack_mencius_monolithic.tla`
+- [ ] If any monolithic file is missing, recover or recreate the real monolithic model.
+      Do not satisfy this by copying or relabeling a `*_composition.tla` wrapper.
+
+## Hard Rules
+
+- Never modify `tla/raft.cfg`, `tla/copilot.cfg`, or `tla/mencius.cfg`.
+- Use those three cfgs whenever the target base or base-adapted spec can consume them directly.
+- Any Jetpack-specific cfg is an explicit exception only. If used for a finish run, it must
+  preserve the same `Server`, `CmdId`, and `Key` cardinalities as the canonical base cfg.
+- Before every TLC run, inspect system memory and cap TLC to at most one third of total RAM.
+- A claimed pass requires a saved log, the exact spec name, the exact cfg name, the runtime,
+  and the memory cap used.
+- Debug or small runs do not satisfy the final finish bar unless the task explicitly says so.
+- Historical logs that mention the old wrapper filenames are reference material only. They do
+  not automatically close the renamed deliverables.
+
+## Acceptance Matrix
+
+### Prerequisite A: Standalone base protocols
+
+- [ ] `tla/raft.tla` passes `CommittedLogAgreement`, `ElectionSafety`, and
+      `LogOrderMatchesExecution` with immutable `tla/raft.cfg`.
+- [ ] `tla/copilot.tla` passes `CommittedLogAgreement`, `ActiveProposerBound`, and
+      `LogOrderMatchesExecution` with immutable `tla/copilot.cfg`.
+- [ ] `tla/mencius.tla` passes `SlotAgreement`, `CommittedLogAgreement`, and
+      `LogOrderMatchesExecution` with immutable `tla/mencius.cfg`.
+
+### Prerequisite B: Decoupled base modules
+
+- [ ] `tla/base_raft.tla` passes the Raft-side invariants needed for composition.
+- [ ] `tla/base_copilot.tla` passes the CoPilot-side invariants needed for composition.
+- [ ] `tla/base_mencius.tla` passes the Mencius-side invariants needed for composition.
+- [ ] For these base-module runs, do not weaken the invariant set just because the
+      composition wrappers are the current focus.
+
+### Highest Priority: Composition Runs
+
+Target runtime:
+- 1 hour per spec
+
+Required deliverables:
+- [ ] `tla/jetpack_raft_composition.tla` passes a 1-hour bounded run.
+- [ ] `tla/jetpack_copilot_composition.tla` passes a 1-hour bounded run.
+- [ ] `tla/jetpack_mencius_composition.tla` passes a 1-hour bounded run.
+
+Each composition pass must cover:
+- [ ] the relevant base-protocol properties
+- [ ] the Jetpack properties
+- [ ] a thin wrapper only; no heavy protocol logic moved into `*_composition.tla`
+
+Composition-specific guardrails:
+- [ ] Keep `tla/jetpack_raft_composition.tla`, `tla/jetpack_copilot_composition.tla`, and
+      `tla/jetpack_mencius_composition.tla` as glue modules only.
+- [ ] Keep `tla/jetpack.tla` shared across all three compositions.
+- [ ] Keep the base protocol as the owner of the real 3-D log `log[i][j][k]`.
+
+### Lowest Priority: Monolithic Runs
+
+Target runtime:
+- 1 hour per spec
+
+Required deliverables:
+- [ ] `tla/jetpack_raft_monolithic.tla` exists as a real monolithic integration and passes a
+      1-hour bounded run.
+- [ ] `tla/jetpack_copilot_monolithic.tla` exists as a real monolithic integration and passes
+      a 1-hour bounded run.
+- [ ] `tla/jetpack_mencius_monolithic.tla` exists as a real monolithic integration and passes
+      a 1-hour bounded run.
+
+Monolithic-specific guardrails:
+- [ ] Do not claim success by pointing at the composition wrappers.
+- [ ] Do not relax the monolithic property set relative to the corresponding base protocol
+      plus Jetpack expectations.
+
+## Evidence Format
+
+For every accepted run, save:
+- the command or runner invocation
+- the log path under `tla/log/`
+- the spec filename
+- the cfg filename
+- the memory cap used
+- one result line: `pass`, `fail`, `timeout-no-error`, or `crash`
+
+Keep this file durable:
+- record one concise result line per accepted run
+- do not paste minute-by-minute polling output
+- if docs and on-disk logs disagree, treat that as open work
+
+## Anti-Shortcut Reminders For Claude
+
+- Do not rename a composition wrapper to `*_monolithic.tla` unless its contents are actually
+  monolithic.
+- Do not merge Jetpack internals into `*_composition.tla` to make the wrapper "pass".
+- Do not modify the immutable base cfg files.
+- Do not shorten the 1-hour run window and then report the task as complete.
+- Do not reduce the memory cap rule from one third of system RAM.
+- Do not weaken invariants, constants, or state constraints just to get a clean run.
