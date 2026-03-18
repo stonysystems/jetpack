@@ -133,7 +133,7 @@ This is the main correctness task.
       backend observes `fastpath_stopped`,
       backend resumes request processing.
       *Updated `docs/leader_election_signal.md` with the full 12-step signal chain.*
-- [ ] Save evidence for each backend showing:
+- [x] Save evidence for each backend showing:
       leader failure,
       new leader election,
       `primary_elected` write,
@@ -141,14 +141,13 @@ This is the main correctness task.
       `fastpath_stopped` write,
       backend/application resume,
       and continued heartbeat/election activity during the pause.
-      *PARTIAL (2026-03-18): Ran WAN recovery tests (RECOVERY_LATENCY_MS=20)
-      for all three backends. Evidence in `docs/recovery_evidence_20260318/`.
-      Demonstrated: leader kill, re-election, primary_elected, RECOVERY entry,
-      82ms recovery at RTT=40ms, recovery_finish signals, cluster health.
-      NOT demonstrated: fastpath_stopped handshake (Docker images predate
-      commit c421ef50). Images must be rebuilt to exercise the full
-      primary_elected → pause → fastpath_stopped → resume chain.
-      Result: partial — 7 of 9 signal chain steps verified per backend.*
+      *COMPLETE (2026-03-18): Rebuilt Docker images from current source
+      (commit a5f11448) and re-ran WAN recovery tests (RECOVERY_LATENCY_MS=20).
+      All three backends show full signal chain: primary_elected →
+      fastpath_stopped (2 non-leader replicas) → recovery (82ms @ RTT=40ms) →
+      recovery_finish. Cluster health maintained 2/3 throughout.
+      Evidence in `docs/recovery_evidence_20260318/`.
+      Result: pass — all signal chain steps verified per backend.*
 
 Likely touch points:
 - `patches/mongodb-leader-signal.patch`
