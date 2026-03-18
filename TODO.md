@@ -164,24 +164,37 @@ Acceptance criteria:
 
 ### Track 2: Report how current integration tests simulate 20ms latency
 
-- [ ] Create `docs/integration_latency_20ms_report.md`.
-- [ ] Explain separately how benchmark tests simulate 20ms latency today.
-- [ ] Explain separately how failure-recovery tests simulate 20ms latency today.
-- [ ] Cover MongoDB, etcd, and ZooKeeper individually rather than describing only
+- [x] Create `docs/integration_latency_20ms_report.md`.
+- [x] Explain separately how benchmark tests simulate 20ms latency today.
+      *Report has dedicated "Benchmark Tests" section with per-backend subsections.*
+- [x] Explain separately how failure-recovery tests simulate 20ms latency today.
+      *Report has dedicated "Failure-Recovery Tests" section covering two modes
+      (single-process 0ms vs WAN 40ms RTT) with per-backend subsections.*
+- [x] Cover MongoDB, etcd, and ZooKeeper individually rather than describing only
       one backend and implying the others are the same.
-- [ ] Identify the actual mechanism used on each path:
+      *Each backend has its own subsection in both benchmark and recovery sections,
+      noting ZooKeeper's additional ZAB peer port delay rules.*
+- [x] Identify the actual mechanism used on each path:
       `tc` / `netem`, `SIMULATE_WAN`, polling sleeps, or some mixture.
-- [ ] Cite the current command / script / config entrypoints that matter:
+      *Report identifies tc/netem as the active mechanism and SIMULATE_WAN as
+      disabled legacy. Explains both, with code snippets and tc command examples.*
+- [x] Cite the current command / script / config entrypoints that matter:
       `docs/benchmark_runbook.md`,
       `scripts/sweep_benchmark.sh`,
       `scripts/reproduce_evaluation.sh`,
       and any backend-specific Docker entrypoints that shape latency.
-- [ ] State explicitly that `LATENCY_MS=20` and `RECOVERY_LATENCY_MS=20` are
+      *All entry points cited with exact Docker run commands and config file names.*
+- [x] State explicitly that `LATENCY_MS=20` and `RECOVERY_LATENCY_MS=20` are
       one-way latency settings and correspond to RTT = 40ms.
-- [ ] State explicitly that `SIMULATE_WAN` and `tc` must not both be turned on
+      *Stated in executive summary and repeated in env variable table.*
+- [x] State explicitly that `SIMULATE_WAN` and `tc` must not both be turned on
       for the same path unless additive delay is intended.
-- [ ] If any current test path does not really implement the claimed 20ms model,
+      *Stated in executive summary and in the SIMULATE_WAN section.*
+- [x] If any current test path does not really implement the claimed 20ms model,
       say that plainly instead of smoothing it over.
+      *"Limitations and Known Gaps" section calls out: default recovery uses 0ms
+      RTT, no enforcement of mutual exclusion, different topologies between
+      benchmark and recovery, missing CI matrices.*
 
 Acceptance criteria:
 - The report is backend-specific, mechanism-specific, and command-specific.
