@@ -1,0 +1,100 @@
+name: Regression Smoke Gate
+
+# This is a REGRESSION SMOKE GATE — it uses short durations and low
+# concurrency to verify that each mode config builds and runs without
+# crashing.  It does NOT reproduce published benchmark numbers.
+#
+# Runner prerequisites:
+#   - SIMULATE_WAN lane: needs Jetpack binary (cmake build)
+#   - tc/netem lane: needs Docker with --privileged (not available on
+#     standard GitHub-hosted runners; use self-hosted or skip)
+
+on:
+  push:
+    branches: [master, jetpack]
+  pull_request:
+    branches: [master, jetpack]
+  workflow_dispatch:
+
+env:
+  SMOKE_DURATION: 5
+  SMOKE_CONCURRENT: 1
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake libboost-all-dev \
+            libyaml-cpp-dev pkg-config
+
+      - name: Build Jetpack
+        run: |
+          cmake -DCMAKE_BUILD_TYPE=Release .
+          make -j$(nproc)
+
+      - name: Upload binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: jetpack-binary
+          path: build/deptran_server
+          retention-days: 1
+
+  wan-lane:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download binary
+        uses: actions/download-artifact@v4
+        with:
+          name: jetpack-binary
+          path: build/
+
+      - name: Make binary executable
+        run: chmod +x build/deptran_server
+
+      - name: Run SIMULATE_WAN lane
+        run: ./scripts/ci_regression.sh --lane wan
+
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-logs-wan
+          path: ci_logs/
+          retention-days: 7
+
+  # tc lane requires --privileged Docker and is not available on standard
+  # GitHub-hosted runners.  Enable on self-hosted runners with:
+  #   runs-on: [self-hosted, privileged]
+  # Until then, this job is kept as documentation of the intended workflow.
+  #
+  # tc-lane:
+  #   needs: build
+  #   runs-on: [self-hosted, privileged]
+  #   steps:
+  #     - uses: actions/checkout@v4
+  #     - name: Download binary
+  #       uses: actions/download-artifact@v4
+  #       with:
+  #         name: jetpack-binary
+  #         path: build/
+  #     - name: Make binary executable
+  #       run: chmod +x build/deptran_server
+  #     - name: Run tc/netem lane
+  #       run: ./scripts/ci_regression.sh --lane tc
+  #     - name: Upload logs
+  #       if: always()
+  #       uses: actions/upload-artifact@v4
+  #       with:
+  #         name: ci-logs-tc
+  #         path: ci_logs/
+  #         retention-days: 7
