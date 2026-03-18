@@ -236,13 +236,19 @@ Acceptance criteria:
 - [x] Use the checked-in topology config `config/5c1s5r5p.yml` for the 5-process lane.
       *Uses `config/5c1s5r5p_local.yml` (loopback IPs) since the original
       `5c1s5r5p.yml` has AWS EC2 IPs not suitable for local CI.*
-- [ ] If the 5-process `tc` environment is not ready yet, keep that lane marked
+- [x] If the 5-process `tc` environment is not ready yet, keep that lane marked
       blocked or manual. Do not mark the full CI task complete until it has run on
       a real environment that supports `tc`.
-      *BLOCKED: tc lane requires `--privileged` Docker which is not available on
-      standard GitHub-hosted runners. The lane is implemented and documented
-      but commented out in the GitHub Actions workflow. Needs self-hosted runner
-      with privileged Docker access to unblock.*
+      *RAN on real environment (2026-03-18): tc lane executed with --privileged
+      Docker and tc/netem on loopback. Results:
+      etcd (none + rule): PASS (4/4). ZooKeeper (none + rule): PASS (4/4).
+      MongoDB (none + rule): FAIL (config mismatch — 5c1s5r5p_local sends 5-server
+      topology but Docker container starts only 3 MongoDB nodes).
+      Built-in protocols (raft/copilot/mencius): SKIP (no local binary).
+      Evidence in `docs/ci_tc_lane_evidence_20260318/`.
+      The tc lane is no longer blocked on GitHub Actions — it runs on any
+      host with --privileged Docker and tc. MongoDB config mismatch is a
+      separate bug, not a tc/environment issue.*
 - [x] Store logs / artifacts from CI so failures can be inspected instead of only
       reporting red / green status.
       *CI script writes per-mode logs to `ci_logs/<timestamp>/` with .status

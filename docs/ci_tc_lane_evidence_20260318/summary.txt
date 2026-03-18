@@ -1,0 +1,23 @@
+Jetpack CI Regression Smoke Gate
+================================
+Timestamp: 20260318_074314
+Commit:    3cd81526
+Duration:  5s per mode
+Concurrent: 1
+
+This is a REGRESSION SMOKE GATE, not a benchmark reproduction.
+
+--- tc_lane ---
+  none_copilot         status=SKIP reason=binary_not_found
+  none_etcd            status=PASS
+  none_mencius         status=SKIP reason=binary_not_found
+  none_mongodb         status=FAIL
+  none_raft            status=SKIP reason=binary_not_found
+  none_zookeeper       status=PASS
+  rule_copilot         status=SKIP reason=binary_not_found
+  rule_etcd            status=PASS
+  rule_mencius         status=SKIP reason=binary_not_found
+  rule_mongodb         status=FAIL
+  rule_raft            status=SKIP reason=binary_not_found
+  rule_zookeeper       status=PASS
+
