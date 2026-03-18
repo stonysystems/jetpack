@@ -863,7 +863,30 @@ void TxLogServer::JetpackRecoveryEntry() {
            recovery_start_ms);
   Log_info("[JETPACK-RECOVERY] Leader: site_id=%d, jepoch=%d, oepoch=%d", site_id_, jepoch_, oepoch_);
   jetpack_status_ = TxLogServer::JetpackStatus::RECOVERY;
-  
+
+  // Emit fastpath_stopped signal so the new leader's backend knows the
+  // Jetpack fast path is now stopped and it is safe to resume request
+  // processing.  This signal must be written as soon as we enter RECOVERY,
+  // *before* the multi-phase recovery protocol runs.
+  {
+    std::string host;
+    if (frame_ && frame_->site_info_) {
+      auto* si = frame_->site_info_;
+      if (!si->host.empty())
+        host = si->host;
+      else if (!si->proc_name.empty())
+        host = si->proc_name;
+      else if (!si->name.empty())
+        host = si->name;
+    }
+#ifdef AWS
+    host = "0.0.0.0";
+#endif
+    jm_signal::set_key("jetpack", "fastpath_stopped", host);
+    Log_info("[JETPACK-RECOVERY] Emitted jetpack:fastpath_stopped on JM_Jetpack_%s",
+             host.c_str());
+  }
+
   // Combined recovery RPC: updates views and pulls commands
   JetpackRecovery();
 
@@ -1226,9 +1249,9 @@ void TxLogServer::JetpackResubmit(int sid) {
   }
   
   Log_info("[JETPACK-RECOVERY] Step 5: Broadcasting FinishRecovery to complete recovery");
-  
+
   // Finally, broadcast FinishRecovery to update jepoch and make fast path available
-#ifdef JETPACK_MONGODB_RECOVERY
+#if defined(JETPACK_MONGODB_RECOVERY) || defined(JETPACK_ETCD_RECOVERY) || defined(JETPACK_ZOOKEEPER_RECOVERY)
   Log_info("Mark FinishRecovery on %s", "recovery_finish");
   jm_signal::set_key("jetpack", "recovery_finish", "recovery_finish");
   Log_info("[JETPACK-RECOVERY] Wrote finish signal to JM_Jetpack_%s", "recovery_finish");
@@ -1722,7 +1745,7 @@ void TxLogServer::OnJetpackFinishRecovery(const epoch_t& oepoch) {
     rep_sched_->jetpack_status_ = TxLogServer::JetpackStatus::READY;
   }
   // Finally, broadcast FinishRecovery to update jepoch and make fast path available
-#ifdef JETPACK_MONGODB_RECOVERY
+#if defined(JETPACK_MONGODB_RECOVERY) || defined(JETPACK_ETCD_RECOVERY) || defined(JETPACK_ZOOKEEPER_RECOVERY)
   Log_info("Mark FinishRecovery on %s", "recovery_finish");
   jm_signal::set_key("jetpack", "recovery_finish", "recovery_finish");
   Log_info("[JETPACK-RECOVERY] Wrote finish signal to JM_Jetpack_%s", "recovery_finish");

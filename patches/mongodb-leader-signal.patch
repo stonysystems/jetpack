@@ -1,13 +1,14 @@
 --- a/src/mongo/db/repl/replication_coordinator_impl.cpp
 +++ b/src/mongo/db/repl/replication_coordinator_impl.cpp
-@@ -37,6 +37,8 @@
+@@ -37,6 +37,9 @@
  #include <algorithm>
++#include <chrono>
 +#include <cstdlib>
  #include <fmt/format.h>
 +#include <fstream>
  #include <functional>
  #include <limits>
-@@ -1438,6 +1440,28 @@
+@@ -1438,6 +1441,59 @@
      LOGV2(21331,
            "Transition to primary complete; database writes are now permitted",
            "term"_attr = _termShadow.load());
@@ -32,6 +33,38 @@
 +        } else {
 +            LOGV2_WARNING(9999902,
 +                          "Failed to write Jetpack signal file",
++                          "path"_attr = signalPath);
++        }
++
++        // Wait for Jetpack to confirm fast path is stopped before allowing
++        // write traffic.  This blocks the primary step-up thread but does NOT
++        // affect heartbeat or replication threads which run independently.
++        // Timeout after 5 seconds to avoid deadlock if Jetpack is unavailable.
++        const std::string needle = "jetpack:fastpath_stopped";
++        auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
++        bool observed = false;
++        while (std::chrono::steady_clock::now() < deadline) {
++            std::ifstream in(signalPath);
++            if (in.is_open()) {
++                std::string line;
++                while (std::getline(in, line)) {
++                    if (line == needle) {
++                        observed = true;
++                        break;
++                    }
++                }
++            }
++            if (observed) break;
++            std::this_thread::sleep_for(std::chrono::milliseconds(1));
++        }
++        if (observed) {
++            LOGV2(9999903,
++                  "Jetpack fastpath_stopped observed, resuming request processing",
++                  "path"_attr = signalPath);
++        } else {
++            LOGV2_WARNING(9999904,
++                          "Timed out waiting for Jetpack fastpath_stopped, "
++                          "resuming request processing anyway",
 +                          "path"_attr = signalPath);
 +        }
 +    }

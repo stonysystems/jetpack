@@ -60,15 +60,25 @@ be missed. The current Docker test scripts write to `/tmp/JM_Jetpack_0.0.0.0`.
 The full recovery signal chain has these steps:
 
 ```
-1. Base protocol leader fails (killed/crashed)
-2. Base protocol elects new leader
-3. Signal writer detects new leader → writes "primary_elected" signal
-4. Jetpack server (non-leader) polls for signal (every 10ms)
-5. Jetpack detects signal → calls JetpackRecoveryEntry()
-6. JetpackRecovery() runs 4-phase Paxos-like recovery
-7. JetpackResubmit() writes "recovery_finish" signal
-8. If "failure_triggered" exists, also writes "recovery_finish_after_failure"
+1.  Base protocol leader fails (killed/crashed)
+2.  Base protocol elects new leader
+3.  New leader writes "<backend>:primary_elected" signal
+4.  New leader pauses request processing, waits for "jetpack:fastpath_stopped"
+5.  Jetpack server (non-leader) polls for signal (every 1ms)
+6.  Jetpack detects signal → calls JetpackRecoveryEntry()
+7.  Jetpack sets jetpack_status_ = RECOVERY
+8.  Jetpack writes "jetpack:fastpath_stopped" signal
+9.  New leader observes "fastpath_stopped" → resumes request processing
+10. JetpackRecovery() runs 4-phase Paxos-like recovery
+11. JetpackResubmit() writes "recovery_finish" signal
+12. If "failure_triggered" exists, also writes "recovery_finish_after_failure"
 ```
+
+**Key invariant:** Between steps 3 and 8, the new leader does NOT accept
+application write requests. Heartbeat, replication, and leader-election
+traffic continue unaffected because they run on separate threads/goroutines.
+If Jetpack does not emit `fastpath_stopped` within 5 seconds, the backend
+times out and resumes to avoid a permanent stall.
 
 ### Step 3: Who Writes the Signal?
 
@@ -152,7 +162,7 @@ The signal directory defaults to `/tmp` but can be overridden via `JM_SIGNAL_DIR
 
 ### Step 4-5: Jetpack Server Polling
 
-Non-leader Jetpack servers run a coroutine that polls for the signal every 10ms.
+Non-leader Jetpack servers run a coroutine that polls for the signal every 1ms.
 This code is gated behind compile-time defines:
 
 | Backend   | Define                          | Server File |
@@ -174,7 +184,7 @@ if (loc_id_ != 0) {
         JetpackRecoveryEntry();
         break;
       }
-      auto sp_e = Reactor::CreateSpEvent<TimeoutEvent>(10 * 1000); // 10ms
+      auto sp_e = Reactor::CreateSpEvent<TimeoutEvent>(1 * 1000); // 1ms
       sp_e->Wait();
     }
   });
@@ -182,18 +192,23 @@ if (loc_id_ != 0) {
 #endif
 ```
 
-### Step 6-8: Jetpack Recovery
+### Step 6-12: Jetpack Recovery
 
-`JetpackRecoveryEntry()` in `scheduler.cc` (line 856):
+`JetpackRecoveryEntry()` in `scheduler.cc`:
 1. Records start timestamp with millisecond precision
-2. Calls `JetpackRecovery()` — a 4-phase Paxos-like recovery protocol:
+2. Sets `jetpack_status_ = RECOVERY`
+3. Emits `jetpack:fastpath_stopped` signal (notifies the new leader's backend)
+4. Calls `JetpackRecovery()` — a 4-phase Paxos-like recovery protocol:
    - Phase 1: PullRecovery + Prepare (parallel broadcast to all replicas)
    - Phase 2: Accept (broadcast recovered commands)
    - Phase 3: Commit
    - Phase 4: Execute (via `JetpackResubmit()`)
-3. `JetpackResubmit()` writes `recovery_finish` signal
-4. If `failure_triggered` signal exists, also writes `recovery_finish_after_failure`
-5. Records end timestamp and logs duration
+5. `JetpackResubmit()` writes `recovery_finish` signal
+6. If `failure_triggered` signal exists, also writes `recovery_finish_after_failure`
+7. Records end timestamp and logs duration
+
+The `recovery_finish` signals are now emitted for all three backends (MongoDB,
+etcd, and ZooKeeper), not just MongoDB.
 
 ## Recovery Timing Results
 

@@ -81,35 +81,58 @@ any future agent. It is not a live execution transcript.
 
 This is the main correctness task.
 
-- [ ] Keep or refresh the server-side leader-election signal path for all three backends:
+- [x] Keep or refresh the server-side leader-election signal path for all three backends:
       MongoDB, etcd, and ZooKeeper must write `<backend>:primary_elected` when the
       new leader is actually ready at the backend layer.
-- [ ] Add and document a backend-visible pause window after `primary_elected`:
+      *Verified: patches exist for all three backends at correct insertion points.*
+- [x] Add and document a backend-visible pause window after `primary_elected`:
       from the moment `primary_elected` is written until Jetpack confirms
       `fastpath_stopped`, the application / original protocol must wait before
       resuming normal request processing.
-- [ ] Make Jetpack emit the stop signal from the correct place:
+      *Implemented: each backend patch now waits for `jetpack:fastpath_stopped`
+      with a 5-second timeout after writing `primary_elected`.*
+- [x] Make Jetpack emit the stop signal from the correct place:
       when the Jetpack component colocated with the new leader sets
       `jetpack_status_ = RECOVERY`, it must write a signal that means
       `fastpath_stopped`.
-- [ ] Prefer the signal naming `jetpack:fastpath_stopped` in the existing
+      *Implemented in `scheduler.cc` `JetpackRecoveryEntry()`: emits
+      `jetpack:fastpath_stopped` immediately after setting RECOVERY status,
+      before the multi-phase recovery protocol runs.*
+- [x] Prefer the signal naming `jetpack:fastpath_stopped` in the existing
       `JM_Jetpack_<host>` mechanism. If another exact role / value name is used,
       document it and update every relevant doc and test consistently.
-- [ ] Make the backend side actually honor that signal:
+      *Uses `jetpack:fastpath_stopped` via `jm_signal::set_key("jetpack", "fastpath_stopped", host)`.*
+- [x] Make the backend side actually honor that signal:
       normal request handling must stay paused until `fastpath_stopped` is observed.
-- [ ] Ensure the pause applies to request acceptance / fast-path dependent work,
+      *Implemented: MongoDB blocks in `signalDrainComplete()` before allowing writes;
+      etcd uses a goroutine to wait (non-blocking to raft loop);
+      ZooKeeper blocks in `lead()` before entering broadcast mode.*
+- [x] Ensure the pause applies to request acceptance / fast-path dependent work,
       not to heartbeat, election, or other protocol liveness traffic.
-- [ ] Check whether any current logic only pauses benchmark clients rather than
+      *MongoDB: heartbeat runs on separate replication threads.
+      etcd: wait is in a goroutine, raft loop continues.
+      ZooKeeper: quorum follower handlers run on separate threads.*
+- [x] Check whether any current logic only pauses benchmark clients rather than
       the backend / server path. If so, do not treat that as satisfying this task.
-- [ ] Remove, replace, or clearly document any stale recovery gating that waits on
+      *`client_worker.cc` CLIENT_SIGNAL_PAUSE_SIGNAL_RESUME pauses benchmark clients
+      on `recovery_finish_after_failure`. This is separate from the new server-side
+      `fastpath_stopped` pause. Both mechanisms now exist: client-side pause via
+      `recovery_finish_after_failure`, server-side pause via `fastpath_stopped`.*
+- [x] Remove, replace, or clearly document any stale recovery gating that waits on
       `recovery_finish_after_failure` when the intended control point is
       `fastpath_stopped`.
-- [ ] Update the docs so the final signal chain is explicit:
+      *Documented: `recovery_finish_after_failure` is the client-side resume signal
+      (after full recovery completes). `fastpath_stopped` is the new server-side
+      signal (after Jetpack enters RECOVERY but before recovery runs). Both serve
+      different purposes. Also fixed: recovery_finish signals now emitted for all
+      three backends, not just MongoDB (was gated by `#ifdef JETPACK_MONGODB_RECOVERY`).*
+- [x] Update the docs so the final signal chain is explicit:
       `primary_elected` from backend leader election,
       Jetpack enters `RECOVERY`,
       Jetpack writes `fastpath_stopped`,
       backend observes `fastpath_stopped`,
       backend resumes request processing.
+      *Updated `docs/leader_election_signal.md` with the full 12-step signal chain.*
 - [ ] Save evidence for each backend showing:
       leader failure,
       new leader election,

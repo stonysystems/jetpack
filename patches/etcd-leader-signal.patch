@@ -1,6 +1,6 @@
 --- a/server/etcdserver/server.go
 +++ b/server/etcdserver/server.go
-@@ -1080,6 +1080,25 @@
+@@ -1080,6 +1080,54 @@
  			if newLeader {
  				t := time.Now()
  				s.leadTimeMu.Lock()
@@ -10,7 +10,10 @@
 +				// Jetpack signal: notify that etcd leader election is complete.
 +				// Write "etcd:primary_elected" to /tmp/JM_Jetpack_<host> so
 +				// Jetpack servers can detect the new leader and trigger recovery.
-+				func() {
++				// Then wait (in a goroutine) for Jetpack to confirm fast path
++				// is stopped.  The wait runs in a goroutine so it does NOT
++				// block the raft state machine loop or heartbeat traffic.
++				go func() {
 +					signalDir := os.Getenv("JM_SIGNAL_DIR")
 +					if signalDir == "" {
 +						signalDir = "/tmp"
@@ -25,12 +28,31 @@
 +						s.Logger().Warn(fmt.Sprintf("failed to open Jetpack signal file %s: %v", signalPath, err))
 +						return
 +					}
-+					defer f.Close()
 +					if _, err := f.WriteString("etcd:primary_elected\n"); err != nil {
++						f.Close()
 +						s.Logger().Warn(fmt.Sprintf("failed to write Jetpack signal: %v", err))
 +						return
 +					}
++					f.Close()
 +					s.Logger().Info(fmt.Sprintf("Jetpack signal written: etcd:primary_elected -> %s", signalPath))
++
++					// Wait for Jetpack to confirm fast path is stopped.
++					// Timeout after 5 seconds to avoid deadlock.
++					needle := "jetpack:fastpath_stopped"
++					deadline := time.Now().Add(5 * time.Second)
++					for time.Now().Before(deadline) {
++						data, err := os.ReadFile(signalPath)
++						if err == nil {
++							for _, line := range strings.Split(string(data), "\n") {
++								if line == needle {
++									s.Logger().Info("Jetpack fastpath_stopped observed, resuming request processing")
++									return
++								}
++							}
++						}
++						time.Sleep(1 * time.Millisecond)
++					}
++					s.Logger().Warn("Timed out waiting for Jetpack fastpath_stopped, resuming anyway")
 +				}()
  			}
  			setSyncC(s.SyncTicker.C)

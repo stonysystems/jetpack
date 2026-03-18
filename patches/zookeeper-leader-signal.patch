@@ -1,20 +1,25 @@
 --- a/zookeeper-server/src/main/java/org/apache/zookeeper/server/quorum/Leader.java
 +++ b/zookeeper-server/src/main/java/org/apache/zookeeper/server/quorum/Leader.java
-@@ -25,6 +25,8 @@
+@@ -25,6 +25,11 @@
  import java.io.DataInputStream;
  import java.io.DataOutputStream;
++import java.io.BufferedReader;
++import java.io.FileReader;
 +import java.io.FileWriter;
  import java.io.IOException;
 +import java.io.PrintWriter;
  import java.net.InetSocketAddress;
  import java.net.ServerSocket;
-@@ -765,6 +767,23 @@
+@@ -765,6 +770,46 @@
              self.setZabState(QuorumPeer.ZabState.BROADCAST);
              self.adminServer.setZooKeeperServer(zk);
 
 +            // Jetpack signal: notify that ZooKeeper leader election is complete.
 +            // Write "zookeeper:primary_elected" to /tmp/JM_Jetpack_<host> so
 +            // Jetpack servers can detect the new leader and trigger recovery.
++            // Then wait for Jetpack to confirm fast path is stopped.  This
++            // blocks the leader broadcast setup thread but does NOT affect the
++            // quorum follower handler threads which run independently.
 +            try {
 +                String signalDir = System.getenv("JM_SIGNAL_DIR");
 +                if (signalDir == null || signalDir.isEmpty()) {
@@ -29,6 +34,30 @@
 +                    pw.println("zookeeper:primary_elected");
 +                }
 +                LOG.info("Jetpack signal written: zookeeper:primary_elected -> {}", signalPath);
++
++                // Wait for Jetpack to confirm fast path is stopped.
++                // Timeout after 5 seconds to avoid deadlock.
++                String needle = "jetpack:fastpath_stopped";
++                long deadline = System.currentTimeMillis() + 5000;
++                boolean observed = false;
++                while (System.currentTimeMillis() < deadline) {
++                    try (BufferedReader br = new BufferedReader(new FileReader(signalPath))) {
++                        String line;
++                        while ((line = br.readLine()) != null) {
++                            if (needle.equals(line)) {
++                                observed = true;
++                                break;
++                            }
++                        }
++                    } catch (IOException ignored) {}
++                    if (observed) break;
++                    Thread.sleep(1);
++                }
++                if (observed) {
++                    LOG.info("Jetpack fastpath_stopped observed, resuming request processing");
++                } else {
++                    LOG.warn("Timed out waiting for Jetpack fastpath_stopped, resuming anyway");
++                }
 +            } catch (Exception e) {
 +                LOG.warn("Failed to write Jetpack signal file", e);
 +            }
