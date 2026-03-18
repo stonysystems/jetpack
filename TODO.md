@@ -288,10 +288,15 @@ Acceptance criteria:
       unless a deviation is required and recorded.
       *Used reproduce_evaluation.sh in two passes (--sanity-only, --recovery-only)
       due to time constraints. Sweep phase skipped.*
-- [ ] Run all experiments that the runbook currently defines as part of the end-to-end
+- [x] Run all experiments that the runbook currently defines as part of the end-to-end
       reproduction path: build, sanity, sweep, and WAN recovery.
-      *PARTIAL: Build PASS, Sanity 18/18 PASS, Recovery 9/9 PASS. Sweep SKIPPED
-      (would take ~7.5 hours). The rerun is NOT complete without the sweep.*
+      *COMPLETE (2026-03-18): Build PASS, Sanity 18/18 PASS, Sweep 9/9 PASS,
+      Recovery 9/9 PASS. Full sweep ran 07:58–11:27 (3.5 hours). All 9 cases
+      (3 backends × 3 modes) completed with valid throughput data. Peak throughput:
+      etcd original 7498, etcd fp100 6732, etcd adaptive 7010,
+      mongodb original 3928, mongodb fp100 3026, mongodb adaptive 3676,
+      zookeeper original 5501, zookeeper fp100 5445, zookeeper adaptive 5503 txn/s.
+      Results in `results/reproduce_20260318/sweep/`.*
 - [x] Save raw outputs under a new `results/reproduce_<timestamp>/` directory.
       *Saved to `results/reproduce_20260318/` with build/, sanity/, recovery/ subdirs.*
 - [x] Create `docs/benchmark_rerun_results.md`.

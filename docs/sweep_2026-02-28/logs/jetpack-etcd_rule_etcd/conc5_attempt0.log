@@ -1,7 +1,7 @@
 # Attempt: 0 of 2
 # Concurrency: 5
 # Docker exit code: 0
-# Timestamp: 2026-03-02T19:20:07Z
+# Timestamp: 2026-03-18T12:32:33Z
 ---
 [0;32m[INFO][0m === Benchmark Mode ===
 [0;32m[INFO][0m Site config:       60c1s5r5p.yml
@@ -30,35 +30,35 @@
 [0;32m[INFO][0m Starting process h5
 [0;32m[INFO][0m Waiting for 5 processes to complete (timeout: 90s)...
 [0;32m[INFO][0m --- Benchmark Results ---
-[0;32m[INFO][0m   h1: I [../src/deptran/s_main.cc:893] 2026-03-02 19:19:58.454 | All-efficient-attempts           statistics   count      531   0pct    21.66  50pct    22.91  90pct    24.42  99pct    26.43    ave    23.13
-[0;32m[INFO][0m   h1: I [../src/deptran/s_main.cc:901] 2026-03-02 19:19:58.454 | All-efficient-attempts           distribution     21.66    22.09    22.31    22.50    22.71    22.91    23.14    23.41    23.83    24.42    27.63
-[0;32m[INFO][0m   h1: I [../src/deptran/s_main.cc:904] 2026-03-02 19:19:58.454 | Mid throughput is 53.10
-[0;32m[INFO][0m   h1: I [../src/deptran/s_main.cc:905] 2026-03-02 19:19:58.454 | Fastpath statistics attempted 34 successed 34 rate(pct) 100.00 efficient_successed 0 efficient_rate(pct) 0.00
-[0;32m[INFO][0m   h1: I [../src/deptran/s_main.cc:919] 2026-03-02 19:19:58.454 | Cpu-usage-leaders ave 0.0000 count 292
-[0;32m[INFO][0m   h1: I [../src/deptran/s_main.cc:931] 2026-03-02 19:19:58.454 | Queue-depth ave 6.3058 count 292
-[0;32m[INFO][0m   h2: I [../src/deptran/s_main.cc:893] 2026-03-02 19:19:58.935 | All-efficient-attempts           statistics   count      545   0pct    40.30  50pct    40.46  90pct    40.64  99pct    41.01    ave    40.49
-[0;32m[INFO][0m   h2: I [../src/deptran/s_main.cc:901] 2026-03-02 19:19:58.935 | All-efficient-attempts           distribution     40.30    40.35    40.39    40.41    40.44    40.46    40.49    40.52    40.57    40.64    41.26
-[0;32m[INFO][0m   h2: I [../src/deptran/s_main.cc:904] 2026-03-02 19:19:58.936 | Mid throughput is 54.50
-[0;32m[INFO][0m   h2: I [../src/deptran/s_main.cc:905] 2026-03-02 19:19:58.936 | Fastpath statistics attempted 545 successed 545 rate(pct) 100.00 efficient_successed 545 efficient_rate(pct) 100.00
-[0;32m[INFO][0m   h2: I [../src/deptran/s_main.cc:919] 2026-03-02 19:19:58.936 | Cpu-usage-leaders ave 0.0000 count 1657
-[0;32m[INFO][0m   h2: I [../src/deptran/s_main.cc:931] 2026-03-02 19:19:58.936 | Queue-depth ave 6.9678 count 1657
-[0;32m[INFO][0m   h3: I [../src/deptran/s_main.cc:893] 2026-03-02 19:19:58.935 | All-efficient-attempts           statistics   count      543   0pct    40.30  50pct    40.46  90pct    40.63  99pct    40.91    ave    40.49
-[0;32m[INFO][0m   h3: I [../src/deptran/s_main.cc:901] 2026-03-02 19:19:58.935 | All-efficient-attempts           distribution     40.30    40.36    40.39    40.41    40.44    40.46    40.49    40.52    40.56    40.63    41.11
-[0;32m[INFO][0m   h3: I [../src/deptran/s_main.cc:904] 2026-03-02 19:19:58.935 | Mid throughput is 54.30
-[0;32m[INFO][0m   h3: I [../src/deptran/s_main.cc:905] 2026-03-02 19:19:58.935 | Fastpath statistics attempted 543 successed 543 rate(pct) 100.00 efficient_successed 543 efficient_rate(pct) 100.00
-[0;32m[INFO][0m   h3: I [../src/deptran/s_main.cc:919] 2026-03-02 19:19:58.935 | Cpu-usage-leaders ave 0.0000 count 1652
-[0;32m[INFO][0m   h3: I [../src/deptran/s_main.cc:931] 2026-03-02 19:19:58.935 | Queue-depth ave 6.9436 count 1652
-[0;32m[INFO][0m   h4: I [../src/deptran/s_main.cc:893] 2026-03-02 19:19:58.934 | All-efficient-attempts           statistics   count      551   0pct    40.30  50pct    40.47  90pct    40.68  99pct    41.01    ave    40.50
-[0;32m[INFO][0m   h4: I [../src/deptran/s_main.cc:901] 2026-03-02 19:19:58.935 | All-efficient-attempts           distribution     40.30    40.37    40.39    40.42    40.44    40.47    40.49    40.53    40.58    40.68    41.21
-[0;32m[INFO][0m   h4: I [../src/deptran/s_main.cc:904] 2026-03-02 19:19:58.935 | Mid throughput is 55.10
-[0;32m[INFO][0m   h4: I [../src/deptran/s_main.cc:905] 2026-03-02 19:19:58.935 | Fastpath statistics attempted 551 successed 551 rate(pct) 100.00 efficient_successed 551 efficient_rate(pct) 100.00
-[0;32m[INFO][0m   h4: I [../src/deptran/s_main.cc:919] 2026-03-02 19:19:58.935 | Cpu-usage-leaders ave 0.0000 count 1662
-[0;32m[INFO][0m   h4: I [../src/deptran/s_main.cc:931] 2026-03-02 19:19:58.935 | Queue-depth ave 6.9341 count 1662
-[0;32m[INFO][0m   h5: I [../src/deptran/s_main.cc:893] 2026-03-02 19:19:59.935 | All-efficient-attempts           statistics   count      546   0pct    40.32  50pct    40.48  90pct    40.69  99pct    41.31    ave    40.52
-[0;32m[INFO][0m   h5: I [../src/deptran/s_main.cc:901] 2026-03-02 19:19:59.935 | All-efficient-attempts           distribution     40.32    40.38    40.40    40.43    40.45    40.48    40.50    40.54    40.60    40.69    43.18
-[0;32m[INFO][0m   h5: I [../src/deptran/s_main.cc:904] 2026-03-02 19:19:59.935 | Mid throughput is 54.60
-[0;32m[INFO][0m   h5: I [../src/deptran/s_main.cc:905] 2026-03-02 19:19:59.935 | Fastpath statistics attempted 546 successed 546 rate(pct) 100.00 efficient_successed 546 efficient_rate(pct) 100.00
-[0;32m[INFO][0m   h5: I [../src/deptran/s_main.cc:919] 2026-03-02 19:19:59.935 | Cpu-usage-leaders ave 0.0000 count 1678
-[0;32m[INFO][0m   h5: I [../src/deptran/s_main.cc:931] 2026-03-02 19:19:59.935 | Queue-depth ave 6.9562 count 1678
+[0;32m[INFO][0m   h1: I [../src/deptran/s_main.cc:893] 2026-03-18 12:32:25.909 | All-efficient-attempts           statistics   count      545   0pct    40.19  50pct    40.28  90pct    40.40  99pct    40.74    ave    40.30
+[0;32m[INFO][0m   h1: I [../src/deptran/s_main.cc:901] 2026-03-18 12:32:25.910 | All-efficient-attempts           distribution     40.19    40.23    40.24    40.25    40.27    40.28    40.30    40.31    40.34    40.40    40.89
+[0;32m[INFO][0m   h1: I [../src/deptran/s_main.cc:904] 2026-03-18 12:32:25.910 | Mid throughput is 54.50
+[0;32m[INFO][0m   h1: I [../src/deptran/s_main.cc:905] 2026-03-18 12:32:25.910 | Fastpath statistics attempted 545 successed 545 rate(pct) 100.00 efficient_successed 545 efficient_rate(pct) 100.00
+[0;32m[INFO][0m   h1: I [../src/deptran/s_main.cc:919] 2026-03-18 12:32:25.910 | Cpu-usage-leaders ave 0.0000 count 1666
+[0;32m[INFO][0m   h1: I [../src/deptran/s_main.cc:931] 2026-03-18 12:32:25.910 | Queue-depth ave 12.3520 count 1666
+[0;32m[INFO][0m   h2: I [../src/deptran/s_main.cc:893] 2026-03-18 12:32:26.385 | All-efficient-attempts           statistics   count      531   0pct    40.30  50pct    40.46  90pct    40.66  99pct    41.11    ave    40.50
+[0;32m[INFO][0m   h2: I [../src/deptran/s_main.cc:901] 2026-03-18 12:32:26.386 | All-efficient-attempts           distribution     40.30    40.36    40.39    40.41    40.43    40.46    40.48    40.51    40.57    40.66    43.53
+[0;32m[INFO][0m   h2: I [../src/deptran/s_main.cc:904] 2026-03-18 12:32:26.386 | Mid throughput is 53.10
+[0;32m[INFO][0m   h2: I [../src/deptran/s_main.cc:905] 2026-03-18 12:32:26.386 | Fastpath statistics attempted 531 successed 531 rate(pct) 100.00 efficient_successed 531 efficient_rate(pct) 100.00
+[0;32m[INFO][0m   h2: I [../src/deptran/s_main.cc:919] 2026-03-18 12:32:26.386 | Cpu-usage-leaders ave 0.0000 count 1650
+[0;32m[INFO][0m   h2: I [../src/deptran/s_main.cc:931] 2026-03-18 12:32:26.386 | Queue-depth ave 12.3777 count 1650
+[0;32m[INFO][0m   h3: I [../src/deptran/s_main.cc:893] 2026-03-18 12:32:26.385 | All-efficient-attempts           statistics   count      545   0pct    40.28  50pct    40.46  90pct    40.67  99pct    40.96    ave    40.49
+[0;32m[INFO][0m   h3: I [../src/deptran/s_main.cc:901] 2026-03-18 12:32:26.386 | All-efficient-attempts           distribution     40.28    40.36    40.39    40.41    40.44    40.46    40.49    40.52    40.57    40.67    41.05
+[0;32m[INFO][0m   h3: I [../src/deptran/s_main.cc:904] 2026-03-18 12:32:26.386 | Mid throughput is 54.50
+[0;32m[INFO][0m   h3: I [../src/deptran/s_main.cc:905] 2026-03-18 12:32:26.386 | Fastpath statistics attempted 545 successed 545 rate(pct) 100.00 efficient_successed 545 efficient_rate(pct) 100.00
+[0;32m[INFO][0m   h3: I [../src/deptran/s_main.cc:919] 2026-03-18 12:32:26.386 | Cpu-usage-leaders ave 0.0000 count 1661
+[0;32m[INFO][0m   h3: I [../src/deptran/s_main.cc:931] 2026-03-18 12:32:26.386 | Queue-depth ave 12.3294 count 1661
+[0;32m[INFO][0m   h4: I [../src/deptran/s_main.cc:893] 2026-03-18 12:32:26.386 | All-efficient-attempts           statistics   count      544   0pct    40.31  50pct    40.47  90pct    40.67  99pct    41.01    ave    40.51
+[0;32m[INFO][0m   h4: I [../src/deptran/s_main.cc:901] 2026-03-18 12:32:26.387 | All-efficient-attempts           distribution     40.31    40.38    40.40    40.42    40.45    40.47    40.49    40.53    40.60    40.67    41.60
+[0;32m[INFO][0m   h4: I [../src/deptran/s_main.cc:904] 2026-03-18 12:32:26.387 | Mid throughput is 54.40
+[0;32m[INFO][0m   h4: I [../src/deptran/s_main.cc:905] 2026-03-18 12:32:26.387 | Fastpath statistics attempted 544 successed 544 rate(pct) 100.00 efficient_successed 544 efficient_rate(pct) 100.00
+[0;32m[INFO][0m   h4: I [../src/deptran/s_main.cc:919] 2026-03-18 12:32:26.387 | Cpu-usage-leaders ave 0.0000 count 1639
+[0;32m[INFO][0m   h4: I [../src/deptran/s_main.cc:931] 2026-03-18 12:32:26.387 | Queue-depth ave 12.3616 count 1639
+[0;32m[INFO][0m   h5: I [../src/deptran/s_main.cc:893] 2026-03-18 12:32:26.383 | All-efficient-attempts           statistics   count      535   0pct    40.32  50pct    40.48  90pct    40.69  99pct    41.07    ave    40.51
+[0;32m[INFO][0m   h5: I [../src/deptran/s_main.cc:901] 2026-03-18 12:32:26.384 | All-efficient-attempts           distribution     40.32    40.37    40.40    40.43    40.45    40.48    40.51    40.54    40.59    40.69    41.92
+[0;32m[INFO][0m   h5: I [../src/deptran/s_main.cc:904] 2026-03-18 12:32:26.384 | Mid throughput is 53.50
+[0;32m[INFO][0m   h5: I [../src/deptran/s_main.cc:905] 2026-03-18 12:32:26.384 | Fastpath statistics attempted 535 successed 535 rate(pct) 100.00 efficient_successed 535 efficient_rate(pct) 100.00
+[0;32m[INFO][0m   h5: I [../src/deptran/s_main.cc:919] 2026-03-18 12:32:26.384 | Cpu-usage-leaders ave 0.0000 count 1641
+[0;32m[INFO][0m   h5: I [../src/deptran/s_main.cc:931] 2026-03-18 12:32:26.384 | Queue-depth ave 12.3915 count 1641
 [0;32m[INFO][0m === Benchmark PASSED ===
 [0;32m[INFO][0m Cleaning up...

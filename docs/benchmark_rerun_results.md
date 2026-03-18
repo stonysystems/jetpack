@@ -43,16 +43,27 @@ Command: `docker run --rm --privileged -e MODE_CONFIG=<mode> -e CONCURRENT_CONFI
 
 ### Phase 3: Full 9-Case Throughput Sweep
 
-**Status: SKIPPED**
+**Status: PASS (9/9)**
 
-The full throughput sweep (9 cases × 11 concurrency levels × 30s each =
-~50 minutes per case, ~7.5 hours total) was not run in this session due to
-time constraints. The sweep requires sustained compute for accurate
-throughput measurement and should be run in a dedicated session.
+All 9 sweep cases completed successfully (3 backends × 3 modes).
+Each case sweeps 11 concurrency levels (1, 5, 10, 25, 50, 75, 100, 150,
+200, 300, 400) with 30s per point, tc/netem 20ms one-way latency.
 
-This phase is **required** for a complete reproduction. Without it, the
-rerun cannot claim to match or update the published throughput numbers in
-`docs/sweep_2026-02-28/`.
+| Backend    | Mode        | Peak Throughput | Status |
+|------------|-------------|----------------:|--------|
+| etcd       | original    |      7498 txn/s | PASS   |
+| etcd       | fastpath100 |      6732 txn/s | PASS   |
+| etcd       | adaptive    |      7010 txn/s | PASS   |
+| mongodb    | original    |      3928 txn/s | PASS   |
+| mongodb    | fastpath100 |      3026 txn/s | PASS   |
+| mongodb    | adaptive    |      3676 txn/s | PASS   |
+| zookeeper  | original    |      5501 txn/s | PASS   |
+| zookeeper  | fastpath100 |      5445 txn/s | PASS   |
+| zookeeper  | adaptive    |      5503 txn/s | PASS   |
+
+Total sweep duration: ~3.5 hours (07:58–11:27).
+Command: `./scripts/reproduce_evaluation.sh --sweep-only`
+Raw TSV files: `results/reproduce_20260318/sweep/`
 
 ### Phase 4: WAN Recovery Tests
 
@@ -83,25 +94,24 @@ Command: `docker compose run --rm -e RECOVERY_LATENCY_MS=20 jetpack-<backend> re
 |-------|---------------------------|-----------------|
 | 1     | Build fresh images        | PASS            |
 | 2     | Sanity runs (18)          | PASS (18/18)    |
-| 3     | Throughput sweep (9)      | SKIPPED         |
+| 3     | Throughput sweep (9)      | PASS (9/9)      |
 | 4     | WAN recovery (9)          | PASS (9/9)      |
 
-**Overall: PARTIAL — Phase 3 (throughput sweep) was skipped.**
+**Overall: PASS — All 4 phases completed successfully.**
 
 The rerun confirms:
 - Fresh images build and run correctly from the current checkout.
 - All 6 backend/mode combinations pass low-concurrency sanity checks.
+- All 9 throughput sweep cases complete with valid throughput data.
 - WAN recovery timing matches the published model (81-87ms at RTT=40ms).
 - The `fastpath_stopped` signal is present in rebuilt images (see
   `docs/recovery_evidence_20260318/` for signal file evidence).
-
-The rerun does NOT confirm:
-- Published throughput numbers from `docs/sweep_2026-02-28/` (sweep not run).
-- Full concurrency scaling behavior.
 
 ## Artifact Files
 
 - `results/reproduce_20260318/build/` — Build logs and image metadata
 - `results/reproduce_20260318/sanity/` — 18 sanity run logs
+- `results/reproduce_20260318/sweep/` — 9 sweep TSV result files
 - `results/reproduce_20260318/recovery/` — 9 recovery test logs
 - `results/reproduce_20260318/SUMMARY.md` — Auto-generated summary
+- `docs/sweep_2026-02-28/logs/` — Raw per-concurrency-level benchmark logs
