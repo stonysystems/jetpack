@@ -1,230 +1,276 @@
 # TODO
 
-<!-- NOTE: The old doc/ folder has been merged into docs/. All documentation is now in docs/. -->
-
-Purpose: keep current work, acceptance criteria, and evidence pointers visible. This file
-should carry both the broader project big picture and the detailed active TLA+ closure
-checklist. Do not use it as a live execution transcript.
+Purpose: keep the current real work, acceptance criteria, evidence paths, and
+anti-shortcut rules visible. This file is the handoff checklist for Claude or
+any future agent. It is not a live execution transcript.
 
 ## Review Snapshot
 
-- Latest active phase: `Phase 2I: TLA+ decoupled composition and monolithic closure`
+- Latest active phase:
+  `Backend integration recovery handshake, latency documentation, CI regression coverage, and benchmark rerun`
+- TLA+ closure work is not current scope.
+- Do not spend time on `tla/` deliverables unless the user explicitly reopens them.
 
 ### Highest-Priority Open Work
 
-1. Close the decoupled composition deliverables:
-   `jetpack_raft_composition.tla`, `jetpack_copilot_composition.tla`,
-   and `jetpack_mencius_composition.tla`.
-2. Reconfirm that `base_raft.tla`, `base_copilot.tla`, and `base_mencius.tla`
-   pass their own protocol-needed checks rather than relying only on wrapper results.
-3. Recover or recreate the real monolithic deliverables:
-   `jetpack_raft_monolithic.tla`, `jetpack_copilot_monolithic.tla`,
-   and `jetpack_mencius_monolithic.tla`.
-4. Keep docs aligned so future agents cannot cut corners on naming, cfg usage,
-   runtime windows, or the 3-D log ownership rule.
+1. Finish the MongoDB / etcd / ZooKeeper failure-recovery handshake so the
+   application / original protocol pauses request processing after
+   `primary_elected` and resumes only after Jetpack emits `fastpath_stopped`,
+   without breaking heartbeat or election traffic.
+2. Write a docs report explaining how the current MongoDB / etcd / ZooKeeper
+   integration test paths simulate 20ms network latency.
+3. Add CI regression gates for the requested 12-mode `3c1s3r1p` `SIMULATE_WAN`
+   matrix and the requested 12-mode `5c1s5r5p` `tc` matrix.
+4. Run the benchmark runbook from scratch and record the results in
+   `docs/benchmark_rerun_results.md`.
 
-### Current Phase Status
-
-- Phase 0: done
-- Phase 1: done for local Docker reproducibility
-- Phase 1H remote validation: deferred until AWS / Zoo access returns
-- Phase 2: active
-- Phase 3: done
-- Phase 4: done
-
-### Canonical Artifact Roots
+## Canonical Artifact Roots
 
 - Benchmark / recovery runbook: `docs/benchmark_runbook.md`
-- Benchmark sweep artifacts: `docs/sweep_2026-02-28/`
-- WAN recovery artifacts: `docs/phase1f_wan_recovery_20260311/`
-- TLA design target: `tla/TLA_PLUS_BIG_PICTURE.md`
-- TLA verification guide: `tla/VERIFICATION.md`
-- TLA logs: `tla/log/`
+- Reproduction entrypoint: `scripts/reproduce_evaluation.sh`
+- Sweep helper: `scripts/sweep_benchmark.sh`
+- Signal mechanism doc: `docs/leader_election_signal.md`
+- Recovery design doc: `docs/failure_recovery_design.md`
+- Existing leader-election patches:
+  - `patches/mongodb-leader-signal.patch`
+  - `patches/etcd-leader-signal.patch`
+  - `patches/zookeeper-leader-signal.patch`
+- Accepted benchmark artifacts: `docs/sweep_2026-02-28/`
+- Accepted WAN recovery artifacts: `docs/phase1f_wan_recovery_20260311/`
+- New latency report to create: `docs/integration_latency_20ms_report.md`
+- New rerun results doc to create: `docs/benchmark_rerun_results.md`
+
+## Known Current State
+
+- The checked-in backend patches already appear to write `<backend>:primary_elected`.
+  Treat that as a starting point, not proof that the end-to-end integration is correct.
+- Jetpack recovery code already flips `jetpack_status_` to `RECOVERY` and later back
+  to `READY`.
+- The current client-side pause path waits on `recovery_finish_after_failure`.
+  That is not the same as the required backend-side pause window keyed by
+  `fastpath_stopped`.
+- The benchmark runbook already uses `LATENCY_MS=20` for throughput paths and
+  `RECOVERY_LATENCY_MS=20` for failure-recovery paths.
+- `LATENCY_MS=20` and `RECOVERY_LATENCY_MS=20` are one-way latency settings.
+  They imply RTT = 40ms.
+- `SIMULATE_WAN` and `tc` / `netem` are additive. Do not enable both in the same
+  experiment unless the task explicitly asks for additive delay.
+- There is no checked-in CI workflow directory in the repo root yet. Creating a
+  real checked-in CI entrypoint remains open work.
 
 ## Working Rules
 
 - Keep this file focused on active work, closure gates, and durable evidence paths.
-- For long-running jobs, record only:
-  1. launch command and log path,
-  2. one health check,
-  3. final outcome.
-- Do not append minute-by-minute polling history here.
-- A task is done only when the repo contains the code or doc change, the exact command or
-  runner used, a saved log or artifact, and a clear result classification.
-- If docs and on-disk artifacts disagree, treat that as open work and fix the docs or rerun.
+- Do not reintroduce stale TLA+ deliverables into the active checklist unless the
+  user explicitly asks for that scope again.
+- A task is done only when the repo contains the code or doc change, the exact
+  command or runner used, a saved log or artifact, and a clear result classification.
+- If blocked by environment availability, record the exact blocker and keep the
+  item open. Do not relabel a blocked task as complete.
+- Do not call a short smoke run a benchmark reproduction.
+- Do not claim the backend pause/resume path is fixed unless logs show the full
+  `primary_elected -> wait/pause -> fastpath_stopped -> resume` chain.
+- Do not let the pause mechanism block or starve the original protocol heartbeat,
+  leader election, or required replication maintenance traffic.
+- If docs and on-disk artifacts disagree, treat that as open work and fix the
+  docs or rerun.
 
-## Project Big Picture
+## Active Work
 
-### Phase 0: Documentation Foundations
+### Track 1: MongoDB / etcd / ZooKeeper recovery handshake
 
-- [x] Documentation was consolidated under `docs/`
-- [x] Leader-election signaling was documented
-- [x] Jetpack pseudocode docs were refreshed and validated
+This is the main correctness task.
 
-### Phase 1: Evaluation Reproducibility
+- [ ] Keep or refresh the server-side leader-election signal path for all three backends:
+      MongoDB, etcd, and ZooKeeper must write `<backend>:primary_elected` when the
+      new leader is actually ready at the backend layer.
+- [ ] Add and document a backend-visible pause window after `primary_elected`:
+      from the moment `primary_elected` is written until Jetpack confirms
+      `fastpath_stopped`, the application / original protocol must wait before
+      resuming normal request processing.
+- [ ] Make Jetpack emit the stop signal from the correct place:
+      when the Jetpack component colocated with the new leader sets
+      `jetpack_status_ = RECOVERY`, it must write a signal that means
+      `fastpath_stopped`.
+- [ ] Prefer the signal naming `jetpack:fastpath_stopped` in the existing
+      `JM_Jetpack_<host>` mechanism. If another exact role / value name is used,
+      document it and update every relevant doc and test consistently.
+- [ ] Make the backend side actually honor that signal:
+      normal request handling must stay paused until `fastpath_stopped` is observed.
+- [ ] Ensure the pause applies to request acceptance / fast-path dependent work,
+      not to heartbeat, election, or other protocol liveness traffic.
+- [ ] Check whether any current logic only pauses benchmark clients rather than
+      the backend / server path. If so, do not treat that as satisfying this task.
+- [ ] Remove, replace, or clearly document any stale recovery gating that waits on
+      `recovery_finish_after_failure` when the intended control point is
+      `fastpath_stopped`.
+- [ ] Update the docs so the final signal chain is explicit:
+      `primary_elected` from backend leader election,
+      Jetpack enters `RECOVERY`,
+      Jetpack writes `fastpath_stopped`,
+      backend observes `fastpath_stopped`,
+      backend resumes request processing.
+- [ ] Save evidence for each backend showing:
+      leader failure,
+      new leader election,
+      `primary_elected` write,
+      backend/application pause entered,
+      `fastpath_stopped` write,
+      backend/application resume,
+      and continued heartbeat/election activity during the pause.
 
-Local Docker reproducibility is complete. The canonical local evidence is:
+Likely touch points:
+- `patches/mongodb-leader-signal.patch`
+- `patches/etcd-leader-signal.patch`
+- `patches/zookeeper-leader-signal.patch`
+- `jm_file_signal.h`
+- `src/deptran/scheduler.cc`
+- `src/deptran/mongodb/server.h`
+- `src/deptran/etcd/server.h`
+- `src/deptran/zookeeper/server.h`
+- `src/deptran/client_worker.cc`
+- backend source files under `third_party/` if patch refresh is required
 
-- [x] Fresh-image build gate and build metadata capture
-- [x] Runbook-backed low-concurrency sanity reruns
-- [x] Fresh-image 9-case throughput sweep rerun
-- [x] Runbook-backed 3-backend WAN recovery rerun
-- [x] Published docs reconciled to accepted local artifacts
-- [x] Codex-runnable end-to-end recipe in `docs/benchmark_runbook.md`
+Acceptance criteria:
+- `primary_elected` is emitted from the real backend-ready point, not a guessed proxy.
+- `fastpath_stopped` is emitted when the new-leader-colocated Jetpack instance enters
+  `RECOVERY`, not later after the whole recovery is already done.
+- The backend/server path truly waits between those two signals.
+- Heartbeat and leader-election traffic continue to function during that wait.
+- MongoDB, etcd, and ZooKeeper each have saved artifact-backed evidence.
 
-Primary evidence roots:
+### Track 2: Report how current integration tests simulate 20ms latency
 
-- `docs/sweep_2026-02-28/`
-- `docs/phase1d_low_concurrency_runs.md`
-- `docs/phase1f_wan_recovery_20260311/`
-- `result.md`
-- `docs/latency_analysis.md`
-- `docs/failure_recovery_evaluation.md`
+- [ ] Create `docs/integration_latency_20ms_report.md`.
+- [ ] Explain separately how benchmark tests simulate 20ms latency today.
+- [ ] Explain separately how failure-recovery tests simulate 20ms latency today.
+- [ ] Cover MongoDB, etcd, and ZooKeeper individually rather than describing only
+      one backend and implying the others are the same.
+- [ ] Identify the actual mechanism used on each path:
+      `tc` / `netem`, `SIMULATE_WAN`, polling sleeps, or some mixture.
+- [ ] Cite the current command / script / config entrypoints that matter:
+      `docs/benchmark_runbook.md`,
+      `scripts/sweep_benchmark.sh`,
+      `scripts/reproduce_evaluation.sh`,
+      and any backend-specific Docker entrypoints that shape latency.
+- [ ] State explicitly that `LATENCY_MS=20` and `RECOVERY_LATENCY_MS=20` are
+      one-way latency settings and correspond to RTT = 40ms.
+- [ ] State explicitly that `SIMULATE_WAN` and `tc` must not both be turned on
+      for the same path unless additive delay is intended.
+- [ ] If any current test path does not really implement the claimed 20ms model,
+      say that plainly instead of smoothing it over.
 
-### Phase 1H: Deferred AWS / Zoo Automation Validation
+Acceptance criteria:
+- The report is backend-specific, mechanism-specific, and command-specific.
+- The report distinguishes benchmark latency modeling from recovery latency modeling.
+- The report calls out limitations or mismatches instead of implying a clean story
+  where the repo does not actually support one.
 
-Script refactoring and dry-run validation are complete, but real remote validation remains
-deferred until AWS / Zoo access returns.
+### Track 3: CI regression gates
 
-- [x] `scripts/experiment_defs.sh` centralized the experiment matrix
-- [x] Legacy CLIs and naming were kept compatible
-- [x] Dry-run / self-check support was added
-- Deferred: remote cluster validation is still pending environment availability
+- [ ] Add a checked-in CI entrypoint rather than leaving this as an unwritten plan.
+- [ ] Create a `3c1s3r1p` matrix for one local machine using `SIMULATE_WAN`
+      to simulate 20ms latency.
+- [ ] The `3c1s3r1p` matrix must cover these exact 12 mode configs:
+      `none_raft`, `none_copilot`, `none_mencius`, `none_mongodb`,
+      `none_zookeeper`, `none_etcd`, `rule_raft`, `rule_copilot`,
+      `rule_mencius`, `rule_mongodb`, `rule_zookeeper`, `rule_etcd`.
+- [ ] Use the checked-in topology config `config/3c1s3r1p.yml` for the 1-process lane.
+- [ ] Create a `5c1s5r5p` matrix for one local machine using `tc` to simulate
+      20ms latency.
+- [ ] The `5c1s5r5p` matrix must cover the same exact 12 mode configs.
+- [ ] Use the checked-in topology config `config/5c1s5r5p.yml` for the 5-process lane.
+- [ ] If the 5-process `tc` environment is not ready yet, keep that lane marked
+      blocked or manual. Do not mark the full CI task complete until it has run on
+      a real environment that supports `tc`.
+- [ ] Store logs / artifacts from CI so failures can be inspected instead of only
+      reporting red / green status.
+- [ ] Make the CI failure conditions concrete:
+      build failure, crash, empty output, missing throughput lines, or obviously
+      broken recovery signaling should fail the job.
+- [ ] If CI uses shortened durations or smaller concurrency for practicality,
+      label it as a regression smoke gate. Do not claim it reproduces published
+      benchmark numbers.
+- [ ] Document the runner prerequisites:
+      whether the job needs privileged Docker, whether it needs `tc`, and whether
+      the `SIMULATE_WAN` lane requires a distinct build flavor.
 
-### Phase 2: TLA+ Specifications and Verification
+Acceptance criteria:
+- A checked-in CI config exists.
+- The `3c1s3r1p` `SIMULATE_WAN` lane is automated and artifact-backed.
+- The `5c1s5r5p` `tc` lane is either running for real or is explicitly blocked with
+  the blocker recorded.
+- The CI naming makes it impossible to confuse smoke gates with full benchmark reruns.
 
-This is the active phase. The detailed closure checklist remains below.
+### Track 4: Fresh benchmark rerun from the runbook
 
-### Phase 3: Jetpack + Industry Applications
+- [ ] Follow `docs/benchmark_runbook.md` from scratch.
+- [ ] Use fresh builds from the current checkout. Do not rely on stale prebuilt images.
+- [ ] Use the documented reproduction entrypoint:
+      `./scripts/reproduce_evaluation.sh`
+      unless a deviation is required and recorded.
+- [ ] Run all experiments that the runbook currently defines as part of the end-to-end
+      reproduction path: build, sanity, sweep, and WAN recovery.
+- [ ] Save raw outputs under a new `results/reproduce_<timestamp>/` directory.
+- [ ] Create `docs/benchmark_rerun_results.md`.
+- [ ] In that doc, record:
+      commit hash,
+      exact command(s),
+      image metadata,
+      output directory,
+      per-phase pass/fail,
+      notable failures or deviations,
+      and whether the results match, differ from, or block comparison with the
+      currently published docs.
+- [ ] If any phase fails or is skipped, say exactly which phase and why.
+      Do not summarize the rerun as successful if any required phase is missing.
+- [ ] Do not update canonical published benchmark docs first.
+      The raw rerun result doc must come before any claim that the published baseline
+      should be refreshed.
 
-Integration work is complete for the current scope.
-
-- [x] MongoDB integration
-- [x] etcd integration
-- [x] ZooKeeper integration
-- [x] Docker-based benchmark and recovery paths for all three backends
-
-### Phase 4: Supporting Docs and Project Alignment
-
-Supporting documentation and alignment work is complete.
-
-- [x] Leader watcher analysis docs
-- [x] TLA config alignment
-- [x] README and operator docs refresh
-- [x] TLA debugging / supporting notes
-
-## Active TLA+ Closure Work
-
-The active TLA+ goal is now split into two deliverable families:
-
-- Part 1: standalone base protocols plus real monolithic Jetpack integrations
-- Part 2: decoupled `base_*` + shared `jetpack.tla` + thin `*_composition.tla` wrappers
-
-## Current Naming Status
-
-- [x] Thin wrapper specs were renamed to:
-  - `tla/jetpack_raft_composition.tla`
-  - `tla/jetpack_copilot_composition.tla`
-  - `tla/jetpack_mencius_composition.tla`
-- [ ] Confirm that the separate monolithic integrated specs exist under:
-  - `tla/jetpack_raft_monolithic.tla`
-  - `tla/jetpack_copilot_monolithic.tla`
-  - `tla/jetpack_mencius_monolithic.tla`
-- [ ] If any monolithic file is missing, recover or recreate the real monolithic model.
-      Do not satisfy this by copying or relabeling a `*_composition.tla` wrapper.
-
-## Hard Rules
-
-- Never modify `tla/raft.cfg`, `tla/copilot.cfg`, or `tla/mencius.cfg`.
-- Use those three cfgs whenever the target base or base-adapted spec can consume them directly.
-- Any Jetpack-specific cfg is an explicit exception only. If used for a finish run, it must
-  preserve the same `Server`, `CmdId`, and `Key` cardinalities as the canonical base cfg.
-- Before every TLC run, inspect system memory and cap TLC to at most one third of total RAM.
-- A claimed pass requires a saved log, the exact spec name, the exact cfg name, the runtime,
-  and the memory cap used.
-- Debug or small runs do not satisfy the final finish bar unless the task explicitly says so.
-- Historical logs that mention the old wrapper filenames are reference material only. They do
-  not automatically close the renamed deliverables.
-
-## Acceptance Matrix
-
-### Prerequisite A: Standalone base protocols
-
-- [ ] `tla/raft.tla` passes `CommittedLogAgreement`, `ElectionSafety`, and
-      `LogOrderMatchesExecution` with immutable `tla/raft.cfg`.
-- [ ] `tla/copilot.tla` passes `CommittedLogAgreement`, `ActiveProposerBound`, and
-      `LogOrderMatchesExecution` with immutable `tla/copilot.cfg`.
-- [ ] `tla/mencius.tla` passes `SlotAgreement`, `CommittedLogAgreement`, and
-      `LogOrderMatchesExecution` with immutable `tla/mencius.cfg`.
-
-### Prerequisite B: Decoupled base modules
-
-- [ ] `tla/base_raft.tla` passes the Raft-side invariants needed for composition.
-- [ ] `tla/base_copilot.tla` passes the CoPilot-side invariants needed for composition.
-- [ ] `tla/base_mencius.tla` passes the Mencius-side invariants needed for composition.
-- [ ] For these base-module runs, do not weaken the invariant set just because the
-      composition wrappers are the current focus.
-
-### Highest Priority: Composition Runs
-
-Target runtime:
-- 1 hour per spec
-
-Required deliverables:
-- [ ] `tla/jetpack_raft_composition.tla` passes a 1-hour bounded run.
-- [ ] `tla/jetpack_copilot_composition.tla` passes a 1-hour bounded run.
-- [ ] `tla/jetpack_mencius_composition.tla` passes a 1-hour bounded run.
-
-Each composition pass must cover:
-- [ ] the relevant base-protocol properties
-- [ ] the Jetpack properties
-- [ ] a thin wrapper only; no heavy protocol logic moved into `*_composition.tla`
-
-Composition-specific guardrails:
-- [ ] Keep `tla/jetpack_raft_composition.tla`, `tla/jetpack_copilot_composition.tla`, and
-      `tla/jetpack_mencius_composition.tla` as glue modules only.
-- [ ] Keep `tla/jetpack.tla` shared across all three compositions.
-- [ ] Keep the base protocol as the owner of the real 3-D log `log[i][j][k]`.
-
-### Lowest Priority: Monolithic Runs
-
-Target runtime:
-- 1 hour per spec
-
-Required deliverables:
-- [ ] `tla/jetpack_raft_monolithic.tla` exists as a real monolithic integration and passes a
-      1-hour bounded run.
-- [ ] `tla/jetpack_copilot_monolithic.tla` exists as a real monolithic integration and passes
-      a 1-hour bounded run.
-- [ ] `tla/jetpack_mencius_monolithic.tla` exists as a real monolithic integration and passes
-      a 1-hour bounded run.
-
-Monolithic-specific guardrails:
-- [ ] Do not claim success by pointing at the composition wrappers.
-- [ ] Do not relax the monolithic property set relative to the corresponding base protocol
-      plus Jetpack expectations.
+Acceptance criteria:
+- The rerun starts from fresh images and the current checkout.
+- The rerun result doc points to the full raw artifact directory.
+- The rerun result doc is explicit about pass/fail/block status per phase.
+- No benchmark claim is upgraded without artifact-backed evidence.
 
 ## Evidence Format
 
-For every accepted run, save:
-- the command or runner invocation
-- the log path under `tla/log/`
-- the spec filename
-- the cfg filename
-- the memory cap used
-- one result line: `pass`, `fail`, `timeout-no-error`, or `crash`
+For every accepted code, CI, or benchmark claim, save:
+- the exact command or runner used
+- the commit hash
+- the relevant config names
+- the latency mechanism used (`SIMULATE_WAN`, `tc`, or other documented path)
+- the log or artifact path
+- one result line: `pass`, `fail`, `blocked`, or `partial`
+
+For the backend pause / resume task specifically, save:
+- one artifact or log line for `primary_elected`
+- one artifact or log line for Jetpack entering `RECOVERY`
+- one artifact or log line for `fastpath_stopped`
+- one artifact or log line for backend/application resume
+- one artifact or log line showing heartbeat/election traffic still alive during pause
 
 Keep this file durable:
-- record one concise result line per accepted run
+- record one concise result line per accepted task or run
 - do not paste minute-by-minute polling output
 - if docs and on-disk logs disagree, treat that as open work
 
 ## Anti-Shortcut Reminders For Claude
 
-- Do not rename a composition wrapper to `*_monolithic.tla` unless its contents are actually
-  monolithic.
-- Do not merge Jetpack internals into `*_composition.tla` to make the wrapper "pass".
-- Do not modify the immutable base cfg files.
-- Do not shorten the 1-hour run window and then report the task as complete.
-- Do not reduce the memory cap rule from one third of system RAM.
-- Do not weaken invariants, constants, or state constraints just to get a clean run.
+- Do not revive the old TLA+ checklist and work on that instead.
+- Do not claim the integration bug is fixed just because `primary_elected` already exists.
+- Do not satisfy the pause requirement by pausing only benchmark clients.
+  The backend / original protocol server-side path must honor the wait.
+- Do not emit `fastpath_stopped` at the very end of Jetpack recovery if the intended
+  meaning is "Jetpack has entered RECOVERY and stopped the fast path."
+- Do not block heartbeat or leader-election traffic while implementing the wait.
+- Do not conflate `recovery_finish_after_failure` with the new `fastpath_stopped`
+  handshake unless the user explicitly redefines the requirement.
+- Do not conflate `SIMULATE_WAN` with `tc` / `netem`.
+- Do not run both delay mechanisms together and then report the result as "20ms latency."
+- Do not report the CI work as complete if the `5c1s5r5p` `tc` lane has not actually
+  run on a suitable environment.
+- Do not cherry-pick only passing backends or only passing modes when writing docs.
+- Do not report the benchmark rerun as reproduced if any required phase failed,
+  was skipped, or used an undocumented deviation.
