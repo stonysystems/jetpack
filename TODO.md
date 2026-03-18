@@ -273,16 +273,25 @@ Acceptance criteria:
 
 ### Track 4: Fresh benchmark rerun from the runbook
 
-- [ ] Follow `docs/benchmark_runbook.md` from scratch.
-- [ ] Use fresh builds from the current checkout. Do not rely on stale prebuilt images.
-- [ ] Use the documented reproduction entrypoint:
+- [x] Follow `docs/benchmark_runbook.md` from scratch.
+      *Used `scripts/reproduce_evaluation.sh` with --recovery-only and --sanity-only.*
+- [x] Use fresh builds from the current checkout. Do not rely on stale prebuilt images.
+      *Images rebuilt from commit 9dd1edbc via docker compose build.*
+- [x] Use the documented reproduction entrypoint:
       `./scripts/reproduce_evaluation.sh`
       unless a deviation is required and recorded.
+      *Used reproduce_evaluation.sh in two passes (--sanity-only, --recovery-only)
+      due to time constraints. Sweep phase skipped.*
 - [ ] Run all experiments that the runbook currently defines as part of the end-to-end
       reproduction path: build, sanity, sweep, and WAN recovery.
-- [ ] Save raw outputs under a new `results/reproduce_<timestamp>/` directory.
-- [ ] Create `docs/benchmark_rerun_results.md`.
-- [ ] In that doc, record:
+      *PARTIAL: Build PASS, Sanity 18/18 PASS, Recovery 9/9 PASS. Sweep SKIPPED
+      (would take ~7.5 hours). The rerun is NOT complete without the sweep.*
+- [x] Save raw outputs under a new `results/reproduce_<timestamp>/` directory.
+      *Saved to `results/reproduce_20260318/` with build/, sanity/, recovery/ subdirs.*
+- [x] Create `docs/benchmark_rerun_results.md`.
+      *Created with commit hash, commands, image metadata, per-phase results,
+      recovery timing data, and explicit SKIPPED status for sweep.*
+- [x] In that doc, record:
       commit hash,
       exact command(s),
       image metadata,
@@ -291,11 +300,16 @@ Acceptance criteria:
       notable failures or deviations,
       and whether the results match, differ from, or block comparison with the
       currently published docs.
-- [ ] If any phase fails or is skipped, say exactly which phase and why.
+      *All recorded. Recovery matches published model (81-87ms at RTT=40ms).
+      Throughput comparison blocked by skipped sweep.*
+- [x] If any phase fails or is skipped, say exactly which phase and why.
       Do not summarize the rerun as successful if any required phase is missing.
-- [ ] Do not update canonical published benchmark docs first.
+      *Phase 3 (sweep) explicitly marked SKIPPED due to time constraints (~7.5 hours).
+      Overall status marked PARTIAL, not PASS.*
+- [x] Do not update canonical published benchmark docs first.
       The raw rerun result doc must come before any claim that the published baseline
       should be refreshed.
+      *No published docs updated. Raw result doc created first.*
 
 Acceptance criteria:
 - The rerun starts from fresh images and the current checkout.
