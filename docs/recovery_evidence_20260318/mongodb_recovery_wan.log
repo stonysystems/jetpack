@@ -1,0 +1,55 @@
+[0;32m[INFO][0m === Failure Recovery Test: kill MongoDB primary, measure recovery ===
+[0;32m[INFO][0m Config: 3 server replicas, 1 client, 3-member MongoDB replica set
+[0;32m[INFO][0m External kill: script kills MongoDB primary after 5s, measures recovery
+[0;32m[INFO][0m Duration: 30s
+[0;32m[INFO][0m WAN mode: 20ms one-way latency (RTT=40ms)
+[0;32m[INFO][0m Starting 3-member MongoDB replica set...
+about to fork child process, waiting until server is ready for connections.
+forked process: 11
+child process started successfully, parent exiting
+[0;32m[INFO][0m   mongod0 (127.0.0.1:27017) PID=11
+about to fork child process, waiting until server is ready for connections.
+forked process: 74
+child process started successfully, parent exiting
+[0;32m[INFO][0m   mongod1 (127.0.0.2:27017) PID=74
+about to fork child process, waiting until server is ready for connections.
+forked process: 137
+child process started successfully, parent exiting
+[0;32m[INFO][0m   mongod2 (127.0.0.3:27017) PID=137
+[0;32m[INFO][0m Initiating replica set 'jetpack-rs'...
+[0;32m[INFO][0m Replica set is ready (primary=127.0.0.1)
+[0;32m[INFO][0m Verifying MongoDB read/write at mongodb://127.0.0.1:27017,127.0.0.2:27017,127.0.0.3:27017/?replicaSet=jetpack-rs ...
+[0;32m[INFO][0m MongoDB read/write verification passed
+[0;32m[INFO][0m Setting up network latency: 20ms +/- 0ms on lo
+[0;32m[INFO][0m   127.0.0.2: 20ms +/- 0ms delay
+[0;32m[INFO][0m   127.0.0.3: 20ms +/- 0ms delay
+[0;32m[INFO][0m   127.0.0.4: 20ms +/- 0ms delay
+[0;32m[INFO][0m   127.0.0.5: 20ms +/- 0ms delay
+[0;32m[INFO][0m Latency simulation active
+[0;32m[INFO][0m Starting Jetpack (3-process WAN mode: h1=127.0.0.1, h2=127.0.0.2, h3=127.0.0.3)
+[0;32m[INFO][0m Letting Jetpack run for 5 seconds...
+[0;32m[INFO][0m Current MongoDB primary: 127.0.0.1
+[0;32m[INFO][0m Killing MongoDB node at 127.0.0.1 (PID=11)
+[0;32m[INFO][0m Wrote failure_triggered signal
+[0;32m[INFO][0m Waiting for new MongoDB primary (old primary was 127.0.0.1)...
+[0;32m[INFO][0m New MongoDB primary elected: 127.0.0.2 (took 10864ms)
+[0;32m[INFO][0m MongoDB downtime: 10864ms (new primary: 127.0.0.2)
+[0;32m[INFO][0m Wrote primary_elected signal to /tmp/JM_Jetpack_0.0.0.0
+[0;32m[INFO][0m Jetpack recovery detected (85ms after signal)
+[0;32m[INFO][0m Waiting for Jetpack to finish...
+[0;32m[INFO][0m --- Recovery Result Validation ---
+[0;32m[INFO][0m   Jetpack recovery started (found in logs)
+[0;32m[INFO][0m   Jetpack recovery completed (duration=82ms)
+[0;32m[INFO][0m   MongoDB primary change detected in Jetpack logs
+[0;32m[INFO][0m   MongoDB replica set: 2/3 nodes healthy
+[0;32m[INFO][0m   Signal files:
+[0;32m[INFO][0m     JM_Jetpack_0.0.0.0: mongo:primary_elected
+[0;32m[INFO][0m     JM_Jetpack_failure_triggered: failure:failure_triggered
+[0;32m[INFO][0m     JM_Jetpack_recovery_finish: jetpack:recovery_finish
+[0;32m[INFO][0m     JM_Jetpack_recovery_finish_after_failure: jetpack:recovery_finish_after_failure
+
+[0;32m[INFO][0m === Recovery Timing ===
+[0;32m[INFO][0m   Original protocol (MongoDB) downtime: 10864ms
+[0;32m[INFO][0m   Jetpack downtime: 85ms
+[0;32m[INFO][0m === Failure Recovery Test PASSED ===
+[0;32m[INFO][0m Cleaning up...
