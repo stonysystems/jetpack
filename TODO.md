@@ -646,20 +646,34 @@ Required work:
 
 Required PDFs:
 
-- [ ] conc-50th latency
-- [ ] conc-90th latency
-- [ ] conc-99th latency
-- [ ] conc-average latency
-- [ ] conc-CPU usage
-- [ ] throughput-50th latency
-- [ ] throughput-90th latency
-- [ ] throughput-99th latency
-- [ ] throughput-average latency
-- [ ] throughput-CPU usage
-- [ ] latency-cumulative fraction for a fixed conc for each protocol
-- [ ] conc-memory
+- [x] conc-50th latency
+      *Generated: `figs/30c1s5r5p-zoo_conc_latency_rw_1000000_YCSB_A_ae_50.pdf`*
+- [x] conc-90th latency
+      *Generated: `figs/30c1s5r5p-zoo_conc_latency_rw_1000000_YCSB_A_ae_90.pdf`*
+- [x] conc-99th latency
+      *Generated: `figs/30c1s5r5p-zoo_conc_latency_rw_1000000_YCSB_A_ae_99.pdf`*
+- [x] conc-average latency
+      *Generated: `figs/30c1s5r5p-zoo_conc_latency_rw_1000000_YCSB_A_ae_ave.pdf`*
+- [x] conc-CPU usage
+      *Generated: `figs/30c1s5r5p-zoo_conc_latency_rw_1000000_YCSB_A_cpu_usage.pdf`*
+- [x] throughput-50th latency
+      *Generated: `figs/30c1s5r5p-zoo_throughput_latency_rw_1000000_YCSB_A_ae_50.pdf`*
+- [x] throughput-90th latency
+      *Generated: `figs/30c1s5r5p-zoo_throughput_latency_rw_1000000_YCSB_A_ae_90.pdf`*
+- [x] throughput-99th latency
+      *Generated: `figs/30c1s5r5p-zoo_throughput_latency_rw_1000000_YCSB_A_ae_99.pdf`*
+- [x] throughput-average latency
+      *Generated: `figs/30c1s5r5p-zoo_throughput_latency_rw_1000000_YCSB_A_ae_ave.pdf`*
+- [x] throughput-CPU usage
+      *Generated: `figs/30c1s5r5p-zoo_cpu_usage_ave.pdf`*
+- [x] latency-cumulative fraction for a fixed conc for each protocol
+      *Generated: `figs/30c1s5r5p-zoo_latency_cumulative_rw_1000000_print.pdf`*
+- [x] conc-memory
+      *Generated: `figs/30c1s5r5p-zoo_memory_usage_conc_30c1s5r5p-zoo.pdf`*
 - [ ] zipf_skew-average_latency for 6 protocols
+      *Blocked: needs experiment 1 data (zipfian-skew sweep)*
 - [ ] key_range-average_latency for 6 protocols
+      *Blocked: needs experiment 2 data (key-range sweep)*
 
 Figure layout requirements:
 
