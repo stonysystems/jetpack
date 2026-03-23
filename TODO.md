@@ -7,7 +7,7 @@ any future agent. It is not a live execution transcript.
 ## Review Snapshot
 
 - Latest active phase:
-  `Backend integration recovery handshake, latency documentation, CI regression coverage, and benchmark rerun`
+  `Backend integration recovery handshake, latency documentation, CI regression coverage, benchmark rerun, and Zoo 5-machine multi-server evaluation planning`
 - TLA+ closure work is not current scope.
 - Do not spend time on `tla/` deliverables unless the user explicitly reopens them.
 
@@ -23,6 +23,15 @@ any future agent. It is not a live execution transcript.
    matrix and the requested 12-mode `5c1s5r5p` `tc` matrix.
 4. Run the benchmark runbook from scratch and record the results in
    `docs/benchmark_rerun_results.md`.
+5. Extend the legacy multi-machine Zoo flow centered on `scripts/10-run_all.sh`
+   so it can run the requested 5-machine open-loop evaluation matrix with
+   6 protocol families, the requested result-root naming, and durable manifests.
+6. Add a true Zoo failure-recovery experiment phase that really kills the
+   `deptran_server` task on one machine during the run instead of relying only
+   on synthetic failover toggles or client-only pause behavior.
+7. Update the analysis/export flow centered on `scripts/evaluation.ipynb` so it
+   can consume the new 5-machine result set, handle 6 protocol families, and
+   export the requested tables and PDFs under the new result root.
 
 ## Canonical Artifact Roots
 
@@ -39,6 +48,11 @@ any future agent. It is not a live execution transcript.
 - Accepted WAN recovery artifacts: `docs/phase1f_wan_recovery_20260311/`
 - New latency report to create: `docs/integration_latency_20ms_report.md`
 - New rerun results doc to create: `docs/benchmark_rerun_results.md`
+- Legacy multi-machine runner to extend: `scripts/10-run_all.sh`
+- Shared experiment definitions to extend: `scripts/experiment_defs.sh`
+- Current failover helper to inspect/reuse: `scripts/09-build_and_test_run_wan.sh`
+- Analysis notebook to extend: `scripts/evaluation.ipynb`
+- Zoo site config for the new run: `config/30c1s5r5p-zoo.yml`
 
 ## Known Current State
 
@@ -57,6 +71,21 @@ any future agent. It is not a live execution transcript.
   experiment unless the task explicitly asks for additive delay.
 - There is no checked-in CI workflow directory in the repo root yet. Creating a
   real checked-in CI entrypoint remains open work.
+- `scripts/10-run_all.sh` still reflects the older 4-family legacy sweep and
+  currently uses `SITE_AWS_SWEEP` through the shared definitions.
+- `scripts/experiment_defs.sh` still maps the legacy Jetpack raft family to
+  `rule_fpga_raft`, while the requested Zoo evaluation uses `rule_raft`.
+- `scripts/evaluation.ipynb` still hard-codes a historical result folder,
+  historical contention dataset paths, and result-file host-count assumptions
+  that do not match the requested 5-machine Zoo run.
+- Some ZooKeeper / MongoDB / etcd evaluation paths in the repo have recently
+  been exercised through Docker-oriented helpers (`scripts/reproduce_evaluation.sh`,
+  `scripts/sweep_benchmark.sh`, `docker/*`). Claude may need to update scripts
+  accordingly so the Zoo multi-machine path and any Docker-backed backend control
+  paths stay coherent, instead of forcing one model onto the other.
+- For the requested failure-recovery experiment, the failure event must really
+  kill a `deptran_server` task on one Zoo machine. A synthetic pause, a config
+  flag alone, or a client-only stall is not sufficient.
 
 ## Working Rules
 
@@ -74,6 +103,8 @@ any future agent. It is not a live execution transcript.
   leader election, or required replication maintenance traffic.
 - If docs and on-disk artifacts disagree, treat that as open work and fix the
   docs or rerun.
+- This turn is a TODO-only text update. Do not pretend the Zoo evaluation code,
+  scripts, notebook, or result artifacts were already changed in this turn.
 
 ## Active Work
 
@@ -328,6 +359,226 @@ Acceptance criteria:
 - The rerun result doc is explicit about pass/fail/block status per phase.
 - No benchmark claim is upgraded without artifact-backed evidence.
 
+### Track 5: Zoo 5-machine multi-server open-loop benchmark matrix
+
+This is the new planning/execution track for the user's requested Zoo run.
+
+Ground truth for this track:
+
+- Controller/workspace path: `/home/users/ztang/janus`
+- Zoo username: `ztang`
+- Zoo hosts:
+  - `130.245.173.101`
+  - `130.245.173.102`
+  - `130.245.173.103`
+  - `130.245.173.104`
+  - `130.245.173.105`
+- Repo path on the Zoo machines: `/home/users/ztang/janus`
+- Site config: `config/30c1s5r5p-zoo.yml`
+- All experiments in this track are open-loop.
+- Required result root format:
+  `/home/users/ztang/janus/results/<date>-<time>-zoo-5machines`
+- The site config string must appear in result filenames.
+
+Required work:
+
+- [ ] Restore the previous TODO content as context and add this track on top of it.
+      Do not replace prior tracks again.
+- [ ] Create or refresh `setup.json` for the Zoo environment using the legacy
+      schema that `scripts/10-run_all.sh` and `scripts/09-build_and_test_run_wan.sh`
+      already expect.
+- [ ] Extend `scripts/experiment_defs.sh` so the requested Zoo run can use these
+      6 protocol families:
+      `none_raft/rule_raft`,
+      `none_copilot/rule_copilot`,
+      `none_mencius/rule_mencius`,
+      `none_mongodb/rule_mongodb`,
+      `none_etcd/rule_etcd`,
+      `none_zookeeper/rule_zookeeper`.
+- [ ] Do not silently keep using `rule_fpga_raft` for this evaluation. The user
+      explicitly asked for Raft, not FPGA-Raft.
+- [ ] Keep the main frame of `scripts/10-run_all.sh`. Extend it rather than
+      replacing it with a brand new workflow.
+- [ ] Keep benchmark result naming parseable and site-aware.
+- [ ] Save a dry-run matrix and a run manifest before the real run starts.
+- [ ] Save git commit hash in metadata, not in the result-root directory name.
+- [ ] Keep retry logic for failed points. Do not downgrade the matrix to avoid reruns.
+
+Experiment 0 definition:
+
+- [ ] Run throughput-latency sweep for 6 protocol families.
+- [ ] YCSB: `YCSB_A`
+- [ ] Workload: `rw_1000000`
+- [ ] Variants per family:
+      original + Jetpack 0% + Jetpack 100% + Jetpack adaptive
+- [ ] Use per-protocol concurrency arrays chosen from shared definitions.
+- [ ] If etcd/ZooKeeper need Zoo-specific concurrency arrays, add them in the
+      shared definitions and record why.
+
+Experiment 1 definition:
+
+- [ ] Run zipfian-skew sweep for the same 6 protocol families.
+- [ ] YCSB: `YCSB_A`
+- [ ] Workloads:
+      `rw_zipf_1 rw_zipf_0.9 rw_zipf_0.8 rw_zipf_0.7 rw_zipf_0.6 rw_zipf_0.5`
+- [ ] Variants per family:
+      original + Jetpack 0% + Jetpack 100% + Jetpack adaptive
+- [ ] Use exactly one fixed conc per protocol family, derived from experiment 0.
+
+Experiment 2 definition:
+
+- [ ] Run key-range sweep for the same 6 protocol families.
+- [ ] YCSB: `YCSB_A`
+- [ ] Workloads:
+      `rw_1 rw_10 rw_100 rw_1000 rw_10000 rw_100000 rw_1000000`
+- [ ] Variants per family:
+      original + Jetpack 0% + Jetpack 100% + Jetpack adaptive
+- [ ] Use the same per-protocol fixed conc values chosen for experiment 1.
+
+Fixed-concurrency gate:
+
+- [ ] After experiment 0, choose one fixed conc for each of the 6 protocol families.
+- [ ] Save that decision in both machine-readable and human-readable form:
+      `fixed_conc.json` and `fixed_conc_selection.md`.
+- [ ] The fixed conc values must be derived from experiment 0, not guessed in
+      advance and not copied from an unrelated historical run.
+
+Acceptance criteria:
+
+- The Zoo matrix actually covers all 6 requested families.
+- All benchmark runs are open-loop.
+- Result roots and result filenames follow the requested naming.
+- The fixed conc map exists, is explained, and is reused consistently.
+- No protocol family is dropped because its current path is awkward.
+
+### Track 6: Zoo failure-recovery via real `deptran_server` kill
+
+This track is distinct from the earlier Docker/WAN recovery work.
+
+Definition:
+
+- Protocols:
+  - `rule_raft`
+  - `rule_mongodb`
+  - `rule_etcd`
+  - `rule_zookeeper`
+- YCSB: `YCSB_A`
+- Workload: `rw_1000000`
+- Mode: Jetpack on, adaptive (`-m 101`)
+- Concurrency: one fixed conc per protocol family, derived from experiment 0
+- Result files must include the site config string
+
+Non-negotiable failure semantics:
+
+- [ ] The failure event must really kill the `deptran_server` task on one Zoo machine.
+- [ ] Do not treat `failover.yml` by itself as sufficient unless it truly causes
+      the remote process to die and that death is evidenced.
+- [ ] Do not satisfy this with only client-side pause/resume.
+- [ ] Do not satisfy this with a local synthetic delay, a Docker-only simulation,
+      or a notebook-side visualization of a failure that never happened.
+
+Required work:
+
+- [ ] Inspect whether `scripts/09-build_and_test_run_wan.sh` can be extended
+      cleanly, or whether a thin helper should wrap the same logic for this track.
+- [ ] Add a real remote kill step for the chosen failure target host:
+      targeted `pkill`/PID kill of `deptran_server`, or equivalent concrete
+      process kill with evidence.
+- [ ] Record:
+      target host, target PID if available, exact kill command, kill timestamp,
+      and post-kill confirmation that the process exited.
+- [ ] If leader failure is required for correctness, identify and document how
+      the leader host is chosen or observed before the kill.
+- [ ] Keep the client config open-loop. If `client_open_failure_recovery.yml`
+      is used, document that this is still open-loop.
+- [ ] If MongoDB / etcd / ZooKeeper recovery or restart steps currently rely on
+      Docker-backed helpers or Docker-managed backend processes, update the
+      relevant scripts carefully so the Zoo multi-machine failure-recovery path
+      still performs a real `deptran_server` kill and leaves coherent logs.
+- [ ] Save failure and recovery evidence under the same result root used for the
+      Zoo evaluation, not in an unrelated historical folder.
+
+Acceptance criteria:
+
+- Each requested failure-recovery run includes a real `deptran_server` kill.
+- The kill target and exact command are artifact-backed.
+- Recovery evidence shows the system continuing after the real process death.
+- Docker-backed backend helpers, if involved, are updated coherently instead of
+  bypassing the requested Zoo failure mode.
+
+### Track 7: Zoo result analysis, table export, and figure export
+
+This track covers the new result set, not the historical hard-coded notebook state.
+
+Primary inputs:
+
+- Result root from Track 5 / Track 6
+- `scripts/evaluation.ipynb`
+- Any small helper/wrapper Claude adds to parameterize the notebook
+
+Required work:
+
+- [ ] Stop hard-coding the notebook to a historical `exptime`.
+- [ ] Stop hard-coding the notebook to the historical 4-family plots.
+- [ ] Stop hard-coding `cli_server = server0..server9` for this new run.
+- [ ] Parameterize the notebook or a helper so it can read the new 5-machine Zoo
+      result root and the new fixed-conc map.
+- [ ] Remove the dependence on a separate historical `contention_exptime` for
+      experiments 1 and 2. Those plots must read from the new Zoo run.
+- [ ] Update remaining `rule_fpga_raft` / `none_fpga_raft` notebook references
+      so the new run is plotted as `rule_raft` / `none_raft`.
+- [ ] Save figures under:
+      `/home/users/ztang/janus/results/<date>-<time>-zoo-5machines/figs`
+- [ ] Save tables under:
+      `/home/users/ztang/janus/results/<date>-<time>-zoo-5machines/tables`
+- [ ] Save an executed notebook copy or equivalent durable analysis artifact
+      under the result root.
+
+Required PDFs:
+
+- [ ] conc-50th latency
+- [ ] conc-90th latency
+- [ ] conc-99th latency
+- [ ] conc-average latency
+- [ ] conc-CPU usage
+- [ ] throughput-50th latency
+- [ ] throughput-90th latency
+- [ ] throughput-99th latency
+- [ ] throughput-average latency
+- [ ] throughput-CPU usage
+- [ ] latency-cumulative fraction for a fixed conc for each protocol
+- [ ] conc-memory
+- [ ] zipf_skew-average_latency for 6 protocols
+- [ ] key_range-average_latency for 6 protocols
+
+Figure layout requirements:
+
+- [ ] Each main figure must have 6 subfigures in a single row.
+- [ ] Keep protocol ordering consistent across figures.
+- [ ] Figure filenames must include the site config string.
+
+Recovery figure requirements:
+
+- [ ] Export a separate time-throughput PDF for each of:
+      `rule_raft`, `rule_mongodb`, `rule_etcd`, `rule_zookeeper`
+- [ ] These recovery PDFs must come from the new Zoo failure-recovery runs, not
+      from old checked-in recovery folders.
+
+Table requirements:
+
+- [ ] Export table-like results as durable files under `tables/`.
+- [ ] At minimum, export:
+      fixed-conc selection table,
+      experiment-0 summary table,
+      and CSV source data for the exported figures.
+
+Acceptance criteria:
+
+- The notebook/helper consumes the new Zoo result root without manual one-off edits.
+- All requested PDFs are exported under the new result root.
+- Tables are exported under the new result root.
+- The plotting path uses 5-machine result assumptions instead of the historical 10-host one.
+
 ## Evidence Format
 
 For every accepted code, CI, or benchmark claim, save:
@@ -344,6 +595,14 @@ For the backend pause / resume task specifically, save:
 - one artifact or log line for `fastpath_stopped`
 - one artifact or log line for backend/application resume
 - one artifact or log line showing heartbeat/election traffic still alive during pause
+
+For the new Zoo evaluation tracks specifically, also save:
+- the exact result root path
+- the dry-run matrix or manifest with planned counts
+- the fixed-conc map with justification
+- for failure recovery: killed host, exact kill command, timestamp, and evidence
+  that the remote `deptran_server` task really died
+- the figure/table output directories under the new result root
 
 Keep this file durable:
 - record one concise result line per accepted task or run
@@ -368,3 +627,12 @@ Keep this file durable:
 - Do not cherry-pick only passing backends or only passing modes when writing docs.
 - Do not report the benchmark rerun as reproduced if any required phase failed,
   was skipped, or used an undocumented deviation.
+- Do not replace prior TODO tracks again when adding the Zoo work.
+- Do not use old checked-in `scripts/*failure-recovery-data*` folders or old
+  OSDI notebook constants as substitutes for the new requested Zoo run.
+- Do not call the Zoo failure-recovery track complete unless a real remote
+  `deptran_server` process kill occurred and is evidenced.
+- Do not assume the Docker-based helper path can be reused unchanged for the Zoo
+  multi-server path. Audit MongoDB / etcd / ZooKeeper script interactions carefully.
+- Do not leave the analysis notebook hard-coded to 4 protocols or 10 hosts and
+  then claim the exported figures represent the new 5-machine Zoo evaluation.
