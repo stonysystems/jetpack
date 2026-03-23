@@ -14,9 +14,11 @@
 #
 # This script:
 # 1. Derives fixed concurrencies from experiment 0 (if not already done)
-# 2. Runs the evaluation notebook with ZOO_EXPTIME set to the result dir
-# 3. Saves the executed notebook as <result_dir>/evaluation_executed.ipynb
-# 4. Exports figures to <result_dir>/figs/ and tables to <result_dir>/tables/
+# 2. Runs the sanity check on experiment 0 results
+# 3. Runs the evaluation notebook with ZOO_EXPTIME set to the result dir
+# 4. Saves the executed notebook as <result_dir>/evaluation_executed.ipynb
+# 5. Exports figures to <result_dir>/figs/ and tables to <result_dir>/tables/
+# 6. Generates SUMMARY.md in the result folder
 
 set -euo pipefail
 
@@ -59,9 +61,16 @@ else
     cat "$FIXED_CONC"
 fi
 
-# Step 2: Run the evaluation notebook
+# Step 2: Run sanity checks
 echo ""
-echo "--- Step 2: Running evaluation notebook ---"
+echo "--- Step 2: Running sanity checks ---"
+python3 "$SCRIPT_DIR/sanity_check.py" "$RESULT_DIR" || {
+    echo "WARNING: Sanity check reported failures (see sanity_checks.md for details)"
+}
+
+# Step 3: Run the evaluation notebook
+echo ""
+echo "--- Step 3: Running evaluation notebook ---"
 mkdir -p "$RESULT_DIR/figs" "$RESULT_DIR/tables"
 
 # Create output notebook path
@@ -93,15 +102,24 @@ else
     fi
 fi
 
-# Step 3: Summary
+# Step 4: Generate SUMMARY.md
+echo ""
+echo "--- Step 4: Generating SUMMARY.md ---"
+python3 "$SCRIPT_DIR/generate_summary.py" "$RESULT_DIR"
+
+# Step 5: Final summary
 echo ""
 echo "--- Results ---"
 echo "Executed notebook: $OUTPUT_NB"
 echo "Figures:           $RESULT_DIR/figs/"
 echo "Tables:            $RESULT_DIR/tables/"
+echo "Sanity checks:     $RESULT_DIR/sanity_checks.md"
+echo "Summary:           $RESULT_DIR/SUMMARY.md"
 
 fig_count=$(ls "$RESULT_DIR/figs/"*.pdf 2>/dev/null | wc -l)
+table_count=$(ls "$RESULT_DIR/tables/"* 2>/dev/null | wc -l)
 echo "PDF count:         $fig_count"
+echo "Table count:       $table_count"
 
 echo ""
 echo "=== Done ==="
