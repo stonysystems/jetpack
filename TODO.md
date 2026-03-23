@@ -593,19 +593,28 @@ Primary inputs:
 
 Required work:
 
-- [ ] Stop hard-coding the notebook to a historical `exptime`.
-- [ ] Stop hard-coding the notebook to the historical 4-family plots.
-- [ ] Stop hard-coding `cli_server = server0..server9` for this new run.
-- [ ] Parameterize the notebook or a helper so it can read the new 5-machine Zoo
+- [x] Stop hard-coding the notebook to a historical `exptime`.
+      *Cell 1 now reads ZOO_EXPTIME env var, defaults to Zoo run dir. Committed 8a98fb5b.*
+- [x] Stop hard-coding the notebook to the historical 4-family plots.
+      *protocols list now has 6 families (added etcd, ZooKeeper). All protocol_data
+      lists use dynamic list comprehensions. Subplot layouts are dynamic.*
+- [x] Stop hard-coding `cli_server = server0..server9` for this new run.
+      *Changed to zoo0..zoo4 (5 machines). Both rep_server and cli_server updated.*
+- [x] Parameterize the notebook or a helper so it can read the new 5-machine Zoo
       result root and the new fixed-conc map.
-- [ ] Remove the dependence on a separate historical `contention_exptime` for
+      *Auto-loads results/fixed_conc.json when available. Sites set to 30c1s5r5p-zoo.*
+- [x] Remove the dependence on a separate historical `contention_exptime` for
       experiments 1 and 2. Those plots must read from the new Zoo run.
-- [ ] Update remaining `rule_fpga_raft` / `none_fpga_raft` notebook references
+      *contention_exptime = exptime. Contention data reads from same Zoo result root.*
+- [x] Update remaining `rule_fpga_raft` / `none_fpga_raft` notebook references
       so the new run is plotted as `rule_raft` / `none_raft`.
-- [ ] Save figures under:
+      *All fpga_raft references replaced across all cells.*
+- [x] Save figures under:
       `/home/users/ztang/janus/results/<date>-<time>-zoo-5machines/figs`
-- [ ] Save tables under:
+      *target_folder now points to result_root/figs/. os.makedirs with exist_ok.*
+- [x] Save tables under:
       `/home/users/ztang/janus/results/<date>-<time>-zoo-5machines/tables`
+      *tables_folder now points to result_root/tables/. os.makedirs with exist_ok.*
 - [ ] Save an executed notebook copy or equivalent durable analysis artifact
       under the result root.
 - [ ] Save experiment-related reports in the same result folder as the logs,
