@@ -7,6 +7,8 @@ Exports to <result_dir>/tables/:
   - experiment0_summary.csv: per-protocol peak throughput and latency summary
   - throughput_vs_conc.csv: throughput at each concurrency level per protocol/mode
   - latency_vs_conc.csv: latency percentiles at each concurrency per protocol/mode
+  - zipf_skew_latency.csv: latency/throughput vs zipf coefficient (experiment 1)
+  - key_range_latency.csv: latency/throughput vs key range size (experiment 2)
 
 Usage:
     python3 scripts/generate_tables.py <result_dir>
@@ -246,6 +248,69 @@ def generate_latency_vs_conc(tables_dir, rows):
     return path
 
 
+def generate_zipf_skew_table(tables_dir, rows):
+    """Export zipf_skew_latency.csv — latency/throughput vs zipf coefficient."""
+    zipf_rows = [r for r in rows if r["workload"].startswith("rw_zipf_")]
+    if not zipf_rows:
+        return None
+
+    out_rows = []
+    for r in sorted(zipf_rows, key=lambda x: (x["protocol"], x["mode"],
+                                                x["workload"])):
+        coeff = r["workload"].replace("rw_zipf_", "")
+        out_rows.append({
+            "protocol": r["protocol"],
+            "mode": r["mode"],
+            "mode_label": r["mode_label"],
+            "zipf_coefficient": coeff,
+            "concurrency": r["conc_num"],
+            "throughput": r["total_throughput"],
+            "p50": r["avg_p50"],
+            "p90": r["avg_p90"],
+            "p99": r["avg_p99"],
+            "avg": r["avg_ave"],
+        })
+
+    path = os.path.join(tables_dir, "zipf_skew_latency.csv")
+    fields = ["protocol", "mode", "mode_label", "zipf_coefficient",
+              "concurrency", "throughput", "p50", "p90", "p99", "avg"]
+    write_csv(path, fields, out_rows)
+    return path
+
+
+def generate_key_range_table(tables_dir, rows):
+    """Export key_range_latency.csv — latency/throughput vs key range size."""
+    # Key-range workloads: rw_1, rw_10, ..., rw_1000000 (but exclude rw_zipf_*)
+    kr_rows = [r for r in rows
+                if re.match(r"^rw_\d+$", r["workload"])
+                and r["workload"] != "rw_1000000"]
+    if not kr_rows:
+        return None
+
+    out_rows = []
+    for r in sorted(kr_rows, key=lambda x: (x["protocol"], x["mode"],
+                                             int(x["workload"].replace("rw_", "")))):
+        key_range = r["workload"].replace("rw_", "")
+        out_rows.append({
+            "protocol": r["protocol"],
+            "mode": r["mode"],
+            "mode_label": r["mode_label"],
+            "key_range": key_range,
+            "concurrency": r["conc_num"],
+            "throughput": r["total_throughput"],
+            "p50": r["avg_p50"],
+            "p90": r["avg_p90"],
+            "p99": r["avg_p99"],
+            "avg": r["avg_ave"],
+        })
+
+    path = os.path.join(tables_dir, "key_range_latency.csv")
+    fields = ["protocol", "mode", "mode_label", "key_range",
+              "concurrency", "throughput", "p50", "p90", "p99", "avg"]
+    write_csv(path, fields, out_rows)
+    return path
+
+
 def generate_tables(result_dir):
     """Generate all CSV tables from result directory."""
     tables_dir = os.path.join(result_dir, "tables")
@@ -269,6 +334,14 @@ def generate_tables(result_dir):
         generated.append(path)
 
     path = generate_latency_vs_conc(tables_dir, rows)
+    if path:
+        generated.append(path)
+
+    path = generate_zipf_skew_table(tables_dir, rows)
+    if path:
+        generated.append(path)
+
+    path = generate_key_range_table(tables_dir, rows)
     if path:
         generated.append(path)
 

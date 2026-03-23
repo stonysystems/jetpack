@@ -72,10 +72,14 @@ def parse_res_file(path):
 
 
 def collect_data(result_dir):
-    """Collect per-protocol, per-mode, per-concurrency aggregated data."""
-    data = defaultdict(lambda: defaultdict(lambda: defaultdict(dict)))
+    """Collect per-protocol, per-mode, per-concurrency aggregated data.
+
+    Returns (exp0_results, all_rows) where all_rows includes workload info.
+    """
+    raw = defaultdict(dict)
     pattern = re.compile(
-        r"^(.+?)-" + re.escape(SITE) + r"-rw_(\d+)-concurrent_(\d+)-(\d+)-YCSB_A-(.+)\.res$"
+        r"^(.+?)-" + re.escape(SITE)
+        + r"-(rw_[\d._a-z]+)-concurrent_(\d+)-(\d+)-YCSB_A-(.+)\.res$"
     )
     for fname in os.listdir(result_dir):
         m = pattern.match(fname)
@@ -88,35 +92,36 @@ def collect_data(result_dir):
         if not metrics:
             continue
 
-        key = (protocol, mode, conc_key)
-        if key not in data:
-            data[key] = {"servers": {}, "workload": workload}
-        data[key]["servers"][server] = metrics
+        key = (protocol, workload, mode, conc_key)
+        raw[key][server] = metrics
 
-    # Aggregate: sum throughput, average latencies across servers
-    results = {}
-    for (protocol, mode, conc_key), info in data.items():
-        servers = info["servers"]
+    # Aggregate
+    results = {}  # exp0 only (backward compat)
+    all_rows = []
+    for (protocol, workload, mode, conc_key), servers in raw.items():
         if len(servers) < len(SERVERS):
-            continue  # incomplete
+            continue
         total_tp = sum(s.get("throughput", 0) for s in servers.values())
-        avg_p50 = sum(s.get("p50", 0) for s in servers.values()) / len(servers)
-        avg_p90 = sum(s.get("p90", 0) for s in servers.values()) / len(servers)
-        avg_p99 = sum(s.get("p99", 0) for s in servers.values()) / len(servers)
-        avg_ave = sum(s.get("ave", 0) for s in servers.values()) / len(servers)
+        n = len(servers)
+        avg_p50 = sum(s.get("p50", 0) for s in servers.values()) / n
+        avg_p90 = sum(s.get("p90", 0) for s in servers.values()) / n
+        avg_p99 = sum(s.get("p99", 0) for s in servers.values()) / n
+        avg_ave = sum(s.get("ave", 0) for s in servers.values()) / n
 
-        if protocol not in results:
-            results[protocol] = {}
-        if mode not in results[protocol]:
-            results[protocol][mode] = {}
-        results[protocol][mode][conc_key] = {
-            "throughput": total_tp,
-            "p50": avg_p50,
-            "p90": avg_p90,
-            "p99": avg_p99,
-            "ave": avg_ave,
+        row = {
+            "protocol": protocol, "workload": workload, "mode": mode,
+            "concurrency": conc_key, "throughput": total_tp,
+            "p50": avg_p50, "p90": avg_p90, "p99": avg_p99, "ave": avg_ave,
         }
-    return results
+        all_rows.append(row)
+
+        # Keep exp0 structure for backward compat
+        if workload == "rw_1000000":
+            results.setdefault(protocol, {}).setdefault(mode, {})[conc_key] = {
+                "throughput": total_tp, "p50": avg_p50, "p90": avg_p90,
+                "p99": avg_p99, "ave": avg_ave,
+            }
+    return results, all_rows
 
 
 def find_peak(mode_data):
@@ -163,7 +168,7 @@ def load_fixed_conc(result_dir):
 
 def generate_report(result_dir):
     """Generate the full experiment report."""
-    data = collect_data(result_dir)
+    data, all_rows = collect_data(result_dir)
     fixed_conc = load_fixed_conc(result_dir)
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
@@ -280,6 +285,74 @@ def generate_report(result_dir):
                         f"| {label} | {m['throughput']:.0f} | {m['p50']:.1f} | {m['p90']:.1f} | {m['p99']:.1f} | {m['ave']:.1f} |"
                     )
                 lines.append("")
+
+    # Experiment 1: Zipf-skew sweep
+    zipf_rows = [r for r in all_rows if r["workload"].startswith("rw_zipf_")]
+    if zipf_rows:
+        lines.append("## Experiment 1: Zipfian-Skew Sweep")
+        lines.append("")
+        zipf_workloads = sorted(set(r["workload"] for r in zipf_rows),
+                                 key=lambda w: float(w.replace("rw_zipf_", "")))
+        zipf_protocols = sorted(set(r["protocol"] for r in zipf_rows))
+        lines.append(f"- **Workloads**: {', '.join(zipf_workloads)}")
+        lines.append(f"- **Protocols with data**: {', '.join(zipf_protocols)}")
+        lines.append(f"- **Complete configs**: {len(zipf_rows)}")
+        lines.append("")
+
+        # Show average latency at each zipf coefficient for adaptive mode
+        lines.append("**Average latency (ms) at each zipf coefficient (adaptive mode)**:")
+        lines.append("")
+        header = "| Protocol | " + " | ".join(w.replace("rw_zipf_", "z=") for w in zipf_workloads) + " |"
+        sep = "|----------|" + "|".join("--------" for _ in zipf_workloads) + "|"
+        lines.append(header)
+        lines.append(sep)
+        for proto in zipf_protocols:
+            if not proto.startswith("rule_"):
+                continue
+            cells = []
+            for wl in zipf_workloads:
+                matches = [r for r in zipf_rows
+                           if r["protocol"] == proto and r["workload"] == wl and r["mode"] == "101"]
+                if matches:
+                    cells.append(f"{matches[0]['ave']:.1f}")
+                else:
+                    cells.append("—")
+            lines.append(f"| {proto} | " + " | ".join(cells) + " |")
+        lines.append("")
+
+    # Experiment 2: Key-range sweep
+    kr_rows = [r for r in all_rows
+                if re.match(r"^rw_\d+$", r["workload"]) and r["workload"] != "rw_1000000"]
+    if kr_rows:
+        lines.append("## Experiment 2: Key-Range Sweep")
+        lines.append("")
+        kr_workloads = sorted(set(r["workload"] for r in kr_rows),
+                               key=lambda w: int(w.replace("rw_", "")))
+        kr_protocols = sorted(set(r["protocol"] for r in kr_rows))
+        lines.append(f"- **Workloads**: {', '.join(kr_workloads)}")
+        lines.append(f"- **Protocols with data**: {', '.join(kr_protocols)}")
+        lines.append(f"- **Complete configs**: {len(kr_rows)}")
+        lines.append("")
+
+        lines.append("**Average latency (ms) at each key range (adaptive mode)**:")
+        lines.append("")
+        header = "| Protocol | " + " | ".join(w.replace("rw_", "k=") for w in kr_workloads) + " |"
+        sep = "|----------|" + "|".join("--------" for _ in kr_workloads) + "|"
+        lines.append(header)
+        lines.append(sep)
+        for proto in kr_protocols:
+            if not proto.startswith("rule_"):
+                continue
+            cells = []
+            for wl in kr_workloads:
+                matches = [r for r in kr_rows
+                           if r["protocol"] == proto and r["workload"] == wl and r["mode"] == "101"]
+                if matches:
+                    cells.append(f"{matches[0]['ave']:.1f}")
+                else:
+                    cells.append("—")
+            lines.append(f"| {proto} | " + " | ".join(cells) + " |")
+        lines.append("")
 
     # Artifacts inventory
     lines.append("## Artifacts")
