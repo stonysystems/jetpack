@@ -24,10 +24,15 @@ SERVERS = [f"zoo{i}" for i in range(5)]
 MODE_LABELS = {"0": "original", "1": "jetpack_100pct", "100": "jetpack_0pct", "101": "adaptive"}
 
 
+MAX_RES_FILE_SIZE = 1_000_000  # 1 MB — skip runaway/corrupt files
+
+
 def parse_res_file(path):
     """Extract throughput and latency from a .res file."""
     metrics = {}
     try:
+        if os.path.getsize(path) > MAX_RES_FILE_SIZE:
+            return metrics
         with open(path) as f:
             for line in f:
                 if "Mid throughput is" in line:

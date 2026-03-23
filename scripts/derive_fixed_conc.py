@@ -21,9 +21,14 @@ import sys
 from collections import defaultdict
 
 
+MAX_RES_FILE_SIZE = 1_000_000  # 1 MB — skip runaway/corrupt files
+
+
 def parse_mid_throughput(filepath):
     """Extract 'Mid throughput is <value>' from a .res file."""
     try:
+        if os.path.getsize(filepath) > MAX_RES_FILE_SIZE:
+            return None
         with open(filepath, 'r') as f:
             for line in f:
                 m = re.search(r'Mid throughput is ([\d.]+)', line)

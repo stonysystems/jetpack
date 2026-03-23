@@ -64,6 +64,9 @@ MODE_RULE_100 = "1"      # Jetpack 100% fast-path
 MODE_ADAPTIVE = "101"    # Jetpack adaptive
 
 
+MAX_RES_FILE_SIZE = 1_000_000  # 1 MB — normal .res files are ~35 KB
+
+
 def parse_res_file(filepath):
     """Parse a .res file for latency stats and throughput."""
     result = {
@@ -74,6 +77,14 @@ def parse_res_file(filepath):
         "efficient_path": None,
         "wan_delay_detected": False,
     }
+
+    # Skip runaway/corrupt files (e.g. 1.5 GB debug dumps from crashed runs)
+    try:
+        file_size = os.path.getsize(filepath)
+        if file_size > MAX_RES_FILE_SIZE:
+            return result
+    except OSError:
+        return result
 
     stat_pattern = re.compile(
         r'(All-(?:original|fast|efficient)-path-attempts|All-efficient-attempts)\s+'
@@ -128,38 +139,90 @@ def parse_res_file(filepath):
     return result
 
 
+class LazyExperimentData:
+    """Lazy-loading experiment data that only parses .res files on demand.
+
+    Indexes filenames upfront (fast directory listing), but defers actual file
+    I/O until a specific (protocol, concurrent, mode) key is accessed. This
+    avoids parsing all 1000+ files over NFS when only ~100 are needed.
+    """
+
+    def __init__(self, result_dir):
+        self._result_dir = result_dir
+        self._cache = {}
+        self._index = defaultdict(dict)  # key -> {server: filename}
+        self._build_index()
+
+    def _build_index(self):
+        pattern = re.compile(
+            r'^(.+?)-' +
+            re.escape(SITE) + r'-' +
+            r'(rw_\d+)-' +
+            r'(concurrent_\d+)-' +
+            r'(\d+)-' +
+            r'(YCSB_[A-Z])-' +
+            r'(.+)\.res$'
+        )
+        for fname in os.listdir(self._result_dir):
+            m = pattern.match(fname)
+            if not m:
+                continue
+            protocol, workload, concurrent, mode, ycsb, server = m.groups()
+            if server not in SERVERS:
+                continue
+            key = (protocol, concurrent, mode)
+            self._index[key][server] = fname
+
+    def _load_key(self, key):
+        if key in self._cache:
+            return self._cache[key]
+        if key not in self._index:
+            self._cache[key] = {}
+            return self._cache[key]
+        server_data = {}
+        for server, fname in self._index[key].items():
+            filepath = os.path.join(self._result_dir, fname)
+            server_data[server] = parse_res_file(filepath)
+        self._cache[key] = server_data
+        return server_data
+
+    def __contains__(self, key):
+        return key in self._index
+
+    def __getitem__(self, key):
+        return self._load_key(key)
+
+    def get(self, key, default=None):
+        if key in self._index:
+            return self._load_key(key)
+        return default
+
+    def keys(self):
+        return self._index.keys()
+
+    def items(self):
+        """Iterate over all keys, loading data lazily."""
+        for key in self._index:
+            yield key, self._load_key(key)
+
+    def __len__(self):
+        return len(self._index)
+
+    def __iter__(self):
+        return iter(self._index)
+
+    def __bool__(self):
+        return bool(self._index)
+
+
 def collect_experiment_data(result_dir):
     """
     Collect per-server data for all experiment configs.
 
-    Returns:
-        dict: {(protocol, concurrent, mode): {server: parsed_data}}
+    Returns a LazyExperimentData that indexes filenames immediately but
+    only parses .res files when a specific key is accessed.
     """
-    pattern = re.compile(
-        r'^(.+?)-' +
-        re.escape(SITE) + r'-' +
-        r'(rw_\d+)-' +
-        r'(concurrent_\d+)-' +
-        r'(\d+)-' +
-        r'(YCSB_[A-Z])-' +
-        r'(.+)\.res$'
-    )
-
-    data = defaultdict(dict)
-
-    for fname in os.listdir(result_dir):
-        m = pattern.match(fname)
-        if not m:
-            continue
-        protocol, workload, concurrent, mode, ycsb, server = m.groups()
-        if server not in SERVERS:
-            continue
-
-        filepath = os.path.join(result_dir, fname)
-        parsed = parse_res_file(filepath)
-        data[(protocol, concurrent, mode)][server] = parsed
-
-    return data
+    return LazyExperimentData(result_dir)
 
 
 def get_latency_for_conc(data, protocol, concurrent, mode):
@@ -197,25 +260,30 @@ def find_moderate_conc(data, protocol, mode):
     best_conc = None
     best_tp = -1
 
-    for (proto, conc, m), server_data in data.items():
-        if proto != protocol or m != mode:
-            continue
+    # Filter keys to only matching protocol/mode to avoid loading unrelated files
+    matching_keys = [(proto, conc, m) for (proto, conc, m) in data.keys()
+                     if proto == protocol and m == mode]
+
+    for key in matching_keys:
+        server_data = data[key]
         if len(server_data) < len(SERVERS):
             continue
         tp = sum(sd["mid_throughput"] for sd in server_data.values()
                  if sd["mid_throughput"] is not None)
         if tp > best_tp:
             best_tp = tp
-            best_conc = conc
+            best_conc = key[1]  # conc
 
     return best_conc, best_tp
 
 
 def check_wan_delay(data, protocol):
     """Check if WAN delay was detected in any .res file for this protocol."""
-    for (proto, conc, mode), server_data in data.items():
-        if proto != protocol:
-            continue
+    matching_keys = [(proto, conc, mode) for (proto, conc, mode) in data.keys()
+                     if proto == protocol]
+    # Only check a single key to avoid loading many files
+    for key in matching_keys[:1]:
+        server_data = data[key]
         for sd in server_data.values():
             if sd.get("wan_delay_detected"):
                 return True
@@ -331,8 +399,8 @@ def run_sanity_checks(result_dir, wan_delay_ms=20):
                 "Detected",
                 True
             ))
-        elif any((p, c, m) in data for p in [none_proto, rule_proto]
-                 for (p2, c, m) in data if p2 == p):
+        elif any(proto == p for (proto, c, m) in data.keys()
+                 for p in [none_proto, rule_proto]):
             results.append(SanityResult(
                 f"{family_name}: WAN delay",
                 f"WAN_DELAY_MS={wan_delay_ms} detected",

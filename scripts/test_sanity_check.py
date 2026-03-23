@@ -107,6 +107,19 @@ class TestParseResFile(unittest.TestCase):
         result = parse_res_file("/nonexistent/file.res")
         self.assertIsNone(result["mid_throughput"])
 
+    def test_parse_oversized_file_skipped(self):
+        """Files over MAX_RES_FILE_SIZE are skipped to avoid hanging on corrupt files."""
+        from sanity_check import MAX_RES_FILE_SIZE
+        # Create a file just over the limit
+        path = os.path.join(self.tmpdir, "huge.res")
+        with open(path, 'w') as f:
+            f.write("Mid throughput is 999.0\n")
+            # Pad to exceed limit
+            f.write("x" * (MAX_RES_FILE_SIZE + 1))
+        result = parse_res_file(path)
+        # Should return empty result (file skipped)
+        self.assertIsNone(result["mid_throughput"])
+
     def test_parse_fast_path(self):
         path = self.write_file("test.res", make_res_content(
             fast_count=500, fast_50pct=40.0
@@ -183,6 +196,44 @@ class TestCollectExperimentData(unittest.TestCase):
             f.write("not a res file")
         data = collect_experiment_data(self.tmpdir)
         self.assertEqual(len(data), 0)
+
+    def test_lazy_data_supports_iteration(self):
+        """LazyExperimentData supports len, iter, in, and items."""
+        self.write_experiment("none_raft", "concurrent_100", "0")
+        data = collect_experiment_data(self.tmpdir)
+        # len
+        self.assertEqual(len(data), 1)
+        # iter
+        keys = list(data)
+        self.assertEqual(len(keys), 1)
+        self.assertEqual(keys[0], ("none_raft", "concurrent_100", "0"))
+        # in
+        self.assertIn(("none_raft", "concurrent_100", "0"), data)
+        # items
+        items = list(data.items())
+        self.assertEqual(len(items), 1)
+        # bool
+        self.assertTrue(data)
+
+    def test_lazy_data_skips_oversized_files(self):
+        """Oversized .res files are skipped during lazy loading."""
+        from sanity_check import MAX_RES_FILE_SIZE
+        # Write one normal experiment
+        self.write_experiment("none_raft", "concurrent_100", "0")
+        # Write one oversized file for a different conc
+        for srv in SERVERS:
+            fname = f"none_raft-{SITE}-rw_1000000-concurrent_999-0-YCSB_A-{srv}.res"
+            path = os.path.join(self.tmpdir, fname)
+            with open(path, 'w') as f:
+                f.write("Mid throughput is 999.0\n")
+                f.write("x" * (MAX_RES_FILE_SIZE + 1))
+        data = collect_experiment_data(self.tmpdir)
+        # Both keys should be in index
+        self.assertIn(("none_raft", "concurrent_999", "0"), data)
+        # But oversized files return empty throughput
+        oversized = data[("none_raft", "concurrent_999", "0")]
+        for sd in oversized.values():
+            self.assertIsNone(sd["mid_throughput"])
 
 
 class TestFindModerateConc(unittest.TestCase):

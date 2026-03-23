@@ -35,10 +35,15 @@ PROTOCOL_FAMILIES = {
 MODE_LABELS = {"0": "Original", "1": "Jetpack 100%", "100": "Jetpack 0%", "101": "Adaptive"}
 
 
+MAX_RES_FILE_SIZE = 1_000_000  # 1 MB — skip runaway/corrupt files
+
+
 def parse_res_file(path):
     """Extract key metrics from a .res file."""
     metrics = {}
     try:
+        if os.path.getsize(path) > MAX_RES_FILE_SIZE:
+            return metrics
         with open(path) as f:
             for line in f:
                 if "Mid throughput is" in line:
