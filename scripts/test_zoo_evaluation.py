@@ -526,5 +526,222 @@ class TestResultFilePatterns(unittest.TestCase):
         self.assertTrue(found_throughput, "No result file has a positive throughput")
 
 
+class TestPipelineOutputs(unittest.TestCase):
+    """Verify evaluation pipeline outputs are well-formed."""
+
+    RESULT_DIR = os.path.join(REPO_ROOT, "results", "2026-03-23-10:26:07-zoo-5machines")
+
+    def _skip_if_no_results(self):
+        if not os.path.isdir(self.RESULT_DIR):
+            self.skipTest("Zoo result directory not available")
+
+    def test_figure_input_sanity_json_exists(self):
+        """figure_input_sanity.json must exist after pipeline run."""
+        self._skip_if_no_results()
+        path = os.path.join(self.RESULT_DIR, "figure_input_sanity.json")
+        if not os.path.isfile(path):
+            self.skipTest("figure_input_sanity.json not yet generated")
+        with open(path) as f:
+            data = json.load(f)
+        self.assertIn("pass_count", data)
+        self.assertIn("fail_count", data)
+        self.assertIn("results", data)
+        self.assertIsInstance(data["results"], list)
+        self.assertGreater(len(data["results"]), 0,
+                           "Sanity check should have at least one result entry")
+
+    def test_figure_input_sanity_no_failures(self):
+        """figure_input_sanity.json must have zero failures."""
+        self._skip_if_no_results()
+        path = os.path.join(self.RESULT_DIR, "figure_input_sanity.json")
+        if not os.path.isfile(path):
+            self.skipTest("figure_input_sanity.json not yet generated")
+        with open(path) as f:
+            data = json.load(f)
+        self.assertEqual(data.get("fail_count", -1), 0,
+                         "Figure-input sanity check has failures — PDFs are suspect")
+
+    def test_figure_input_sanity_md_exists(self):
+        """figure_input_sanity.md must exist alongside the JSON."""
+        self._skip_if_no_results()
+        path = os.path.join(self.RESULT_DIR, "figure_input_sanity.md")
+        if not os.path.isfile(path):
+            self.skipTest("figure_input_sanity.md not yet generated")
+        with open(path) as f:
+            content = f.read()
+        self.assertIn("Figure-Input Sanity Check", content)
+        self.assertIn("PASS", content)
+
+    def test_experiment0_pdfs_exist(self):
+        """All experiment-0 PDFs must be present in figs/."""
+        self._skip_if_no_results()
+        figs_dir = os.path.join(self.RESULT_DIR, "figs")
+        if not os.path.isdir(figs_dir):
+            self.skipTest("figs/ directory not yet created")
+        expected_pdfs = [
+            "30c1s5r5p-zoo_conc_latency_rw_1000000_YCSB_A_ae_50.pdf",
+            "30c1s5r5p-zoo_conc_latency_rw_1000000_YCSB_A_ae_90.pdf",
+            "30c1s5r5p-zoo_conc_latency_rw_1000000_YCSB_A_ae_99.pdf",
+            "30c1s5r5p-zoo_conc_latency_rw_1000000_YCSB_A_ae_ave.pdf",
+            "30c1s5r5p-zoo_conc_latency_rw_1000000_YCSB_A_cpu_usage.pdf",
+            "30c1s5r5p-zoo_throughput_latency_rw_1000000_YCSB_A_ae_50.pdf",
+            "30c1s5r5p-zoo_throughput_latency_rw_1000000_YCSB_A_ae_90.pdf",
+            "30c1s5r5p-zoo_throughput_latency_rw_1000000_YCSB_A_ae_99.pdf",
+            "30c1s5r5p-zoo_throughput_latency_rw_1000000_YCSB_A_ae_ave.pdf",
+            "30c1s5r5p-zoo_cpu_usage_ave.pdf",
+            "30c1s5r5p-zoo_latency_cumulative_rw_1000000_print.pdf",
+            "30c1s5r5p-zoo_memory_usage_conc_30c1s5r5p-zoo.pdf",
+        ]
+        for pdf_name in expected_pdfs:
+            pdf_path = os.path.join(figs_dir, pdf_name)
+            self.assertTrue(os.path.isfile(pdf_path),
+                            f"Missing expected PDF: {pdf_name}")
+            size = os.path.getsize(pdf_path)
+            self.assertGreater(size, 5000,
+                               f"PDF too small ({size} bytes): {pdf_name}")
+
+    def test_pdfs_have_site_tag_prefix(self):
+        """All PDFs in figs/ must include the site tag in their filename."""
+        self._skip_if_no_results()
+        figs_dir = os.path.join(self.RESULT_DIR, "figs")
+        if not os.path.isdir(figs_dir):
+            self.skipTest("figs/ directory not yet created")
+        pdfs = [f for f in os.listdir(figs_dir) if f.endswith('.pdf')]
+        for pdf in pdfs:
+            self.assertTrue(pdf.startswith("30c1s5r5p-zoo_"),
+                            f"PDF missing site tag prefix: {pdf}")
+
+    def test_experiment_report_includes_sanity_section(self):
+        """EXPERIMENT_REPORT.md must include figure-input sanity section."""
+        self._skip_if_no_results()
+        report_path = os.path.join(self.RESULT_DIR, "EXPERIMENT_REPORT.md")
+        if not os.path.isfile(report_path):
+            self.skipTest("EXPERIMENT_REPORT.md not yet generated")
+        with open(report_path) as f:
+            content = f.read()
+        self.assertIn("Figure-Input Sanity Check", content)
+        self.assertIn("Plotting Decisions", content)
+
+    def test_experiment_report_includes_plotting_decisions(self):
+        """EXPERIMENT_REPORT.md must document plotting decisions."""
+        self._skip_if_no_results()
+        report_path = os.path.join(self.RESULT_DIR, "EXPERIMENT_REPORT.md")
+        if not os.path.isfile(report_path):
+            self.skipTest("EXPERIMENT_REPORT.md not yet generated")
+        with open(report_path) as f:
+            content = f.read()
+        self.assertIn("200ms", content, "Report should document 200ms y-axis decision")
+        self.assertIn("cumulative", content.lower(),
+                      "Report should document CDF missing lines fix")
+        self.assertIn("CPU", content,
+                      "Report should document CPU layout change")
+
+    def test_tables_directory_has_csvs(self):
+        """tables/ must contain exported CSV files."""
+        self._skip_if_no_results()
+        tables_dir = os.path.join(self.RESULT_DIR, "tables")
+        if not os.path.isdir(tables_dir):
+            self.skipTest("tables/ directory not yet created")
+        csvs = [f for f in os.listdir(tables_dir) if f.endswith('.csv')]
+        self.assertGreaterEqual(len(csvs), 4,
+                                f"Expected at least 4 CSV files, found {len(csvs)}")
+        expected = ["fixed_conc_table.csv", "experiment0_summary.csv",
+                    "throughput_vs_conc.csv", "latency_vs_conc.csv"]
+        for name in expected:
+            self.assertIn(name, csvs, f"Missing expected table: {name}")
+
+
+class TestNotebookSanityCheckCell(unittest.TestCase):
+    """Verify the figure-input sanity check cell is self-contained."""
+
+    @classmethod
+    def setUpClass(cls):
+        nb_path = os.path.join(SCRIPT_DIR, "evaluation.ipynb")
+        with open(nb_path) as f:
+            cls.nb = json.load(f)
+        cls.all_src = [''.join(cell['source']) for cell in cls.nb['cells']]
+
+    def test_sanity_cell_exists_at_position_5(self):
+        """Cell 5 must be the figure-input sanity check."""
+        src = self.all_src[5]
+        self.assertIn("Figure-input sanity check", src)
+        self.assertIn("figure_input_sanity.json", src)
+        self.assertIn("figure_input_sanity.md", src)
+
+    def test_sanity_cell_no_forward_dependencies(self):
+        """Cell 5 must not reference functions defined in later cells."""
+        src = self.all_src[5]
+        # These are defined in cells 12+ and must not appear in cell 5
+        later_funcs = ["safe_latency_metric", "safe_cpu_usage_metric",
+                       "draw_conc_latency", "draw_throughput_latency",
+                       "draw_latency_line", "draw_cpu_usage"]
+        for func in later_funcs:
+            self.assertNotIn(func, src,
+                             f"Cell 5 references '{func}' which is defined in a later cell")
+
+    def test_sanity_cell_uses_inline_lookup(self):
+        """Cell 5 must use inline dict lookup for latency data."""
+        src = self.all_src[5]
+        self.assertIn("data[sites[0]]", src)
+        self.assertIn("ae_50", src)
+        # Should have try/except for KeyError
+        self.assertIn("except KeyError", src)
+
+    def test_sanity_cell_checks_all_protocols(self):
+        """Cell 5 must iterate over all protocols."""
+        src = self.all_src[5]
+        self.assertIn("for (jp, vp), name in zip(protocols, protocol_name)", src)
+        # Must check original, jetpack_0pct, adaptive, jetpack_100pct
+        for variant in ["original", "jetpack_0pct", "adaptive", "jetpack_100pct"]:
+            self.assertIn(variant, src,
+                          f"Cell 5 missing variant '{variant}'")
+
+
+class TestFailureRecoveryScript(unittest.TestCase):
+    """Verify run_failure_recovery.sh is well-formed."""
+
+    @classmethod
+    def setUpClass(cls):
+        script_path = os.path.join(SCRIPT_DIR, "run_failure_recovery.sh")
+        with open(script_path) as f:
+            cls.src = f.read()
+
+    def test_captures_stderr(self):
+        """SSH command must redirect stderr alongside stdout."""
+        self.assertIn('2>&1"', self.src,
+                      "SSH command should capture stderr with 2>&1")
+
+    def test_uses_pkill_9(self):
+        """Kill command must use pkill -9 for guaranteed process death."""
+        self.assertIn("pkill -9 deptran_server", self.src)
+
+    def test_saves_kill_evidence(self):
+        """Script must save kill_evidence.json."""
+        self.assertIn("kill_evidence.json", self.src)
+        self.assertIn("confirmed_dead", self.src)
+
+    def test_generates_recovery_summary(self):
+        """Script must generate RECOVERY_SUMMARY.md."""
+        self.assertIn("RECOVERY_SUMMARY.md", self.src)
+
+    def test_uses_wan_delay(self):
+        """Script must set WAN_DELAY_MS=20."""
+        self.assertIn("WAN_DELAY_MS=20", self.src)
+
+    def test_uses_failover_yml(self):
+        """Script must include failover.yml config."""
+        self.assertIn("failover.yml", self.src)
+
+    def test_uses_open_loop_client(self):
+        """Script must use open-loop client config."""
+        self.assertIn("client_open_failure_recovery.yml", self.src)
+
+    def test_all_four_protocols(self):
+        """Script must run all 4 failure recovery protocols."""
+        for proto in ["rule_raft", "rule_mongodb", "rule_etcd", "rule_zookeeper"]:
+            self.assertIn(proto, self.src,
+                          f"Missing protocol: {proto}")
+
+
 if __name__ == '__main__':
     unittest.main(verbosity=2)

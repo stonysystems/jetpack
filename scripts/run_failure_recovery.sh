@@ -124,7 +124,7 @@ for idx in "${!FR_PROTOCOLS[@]}"; do
         output_file="${fr_dir}/${exp_name}-${replicanames[$i]}.res"
         timeout "${TIMEOUT_SEC}s" \
             ssh "${SERVER_USERNAME}@${servers[$i]}" \
-                "${server_command} -N ${exp_name}-${replicanames[$i]} -P ${replicanames[$i]} > ${output_file}" &
+                "${server_command} -N ${exp_name}-${replicanames[$i]} -P ${replicanames[$i]} > ${output_file} 2>&1" &
     done
 
     # Background kill job: wait KILL_DELAY seconds, then kill leader
