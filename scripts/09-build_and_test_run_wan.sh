@@ -30,20 +30,24 @@ AWS_CONFIG_MODE="101"  # Added -m value for AWS
 
 # Parse CLI arguments for build mode and optional failover test
 usage() {
-    echo "Usage: $0 [full|build] [--failover] [--filename <name>] [--dry-run]"
+    echo "Usage: $0 [full|build] [--failover] [--kill-target <index>] [--kill-delay <sec>] [--filename <name>] [--dry-run]"
     echo ""
     echo "Options:"
-    echo "  full          Regenerate RPC + build before running"
-    echo "  build         Build before running"
-    echo "  --failover|-F Enable failure recovery mode (duration=70s)"
-    echo "  --filename|-o Set custom result filename prefix"
-    echo "  --dry-run|-n  Print commands without executing them"
+    echo "  full                    Regenerate RPC + build before running"
+    echo "  build                   Build before running"
+    echo "  --failover|-F           Enable failure recovery mode (duration=70s)"
+    echo "  --kill-target|-K <idx>  Kill deptran_server on server <idx> mid-run (real kill)"
+    echo "  --kill-delay <sec>      Delay before kill (default: 20s into the run)"
+    echo "  --filename|-o <name>    Set custom result filename prefix"
+    echo "  --dry-run|-n            Print commands without executing them"
 }
 
 FAILOVER_TEST=false
 BUILD_MODE=""
 CUSTOM_FILENAME=""
 DRY_RUN=false
+KILL_TARGET=""        # server index to kill (e.g., 0 for zoo0/server0)
+KILL_DELAY=20         # seconds after experiment start before kill
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -52,6 +56,26 @@ while [[ $# -gt 0 ]]; do
             ;;
         --failover|-F)
             FAILOVER_TEST=true
+            ;;
+        --kill-target|-K)
+            if [[ -n "$2" && "$2" != -* ]]; then
+                KILL_TARGET="$2"
+                shift
+            else
+                echo "Error: --kill-target requires a server index."
+                usage
+                exit 1
+            fi
+            ;;
+        --kill-delay)
+            if [[ -n "$2" && "$2" != -* ]]; then
+                KILL_DELAY="$2"
+                shift
+            else
+                echo "Error: --kill-delay requires a value in seconds."
+                usage
+                exit 1
+            fi
             ;;
         --filename|-o)
             if [[ -n "$2" && "$2" != -* ]]; then
@@ -78,6 +102,11 @@ while [[ $# -gt 0 ]]; do
     esac
     shift
 done
+
+# If --kill-target is set, also enable failover mode (longer duration)
+if [ -n "$KILL_TARGET" ]; then
+    FAILOVER_TEST=true
+fi
 
 # Adjust duration based on failover mode
 if [ "$FAILOVER_TEST" = true ]; then
@@ -107,8 +136,8 @@ fi
 # Set server_command based on environment (AWS or Zoo)
 # Uses derive_client_config() from experiment_defs.sh for AWS client config derivation.
 if [ "$experiment_env" == "zoo" ]; then
-    # Zoo-specific command (fixed config files, not matrix-driven)
-    server_command="cd $repo_directory && build/deptran_server -f config/$CONFIG_FILE_1 -f config/$CONFIG_FILE_2 -f config/$CONFIG_FILE_3 -f config/$CONFIG_FILE_4 -f config/$CONFIG_FILE_5 -m $CONFIG_MODE -d $CONFIG_DURATION"
+    # Zoo-specific command with LD_LIBRARY_PATH and WAN_DELAY_MS
+    server_command="export LD_LIBRARY_PATH=\${HOME}/local/lib:\${LD_LIBRARY_PATH}; export WAN_DELAY_MS=20; cd $repo_directory && build/deptran_server -f config/$CONFIG_FILE_1 -f config/$CONFIG_FILE_2 -f config/$CONFIG_FILE_3 -f config/$CONFIG_FILE_4 -f config/$CONFIG_FILE_5 -m $CONFIG_MODE -d $CONFIG_DURATION"
     if [ "$FAILOVER_TEST" = true ]; then
         server_command+=" -f config/failover.yml"
     fi
@@ -141,10 +170,14 @@ declare -a replicanames
 for i in $(seq 0 $((N_SERVER - 1))); do
     # Extract IP from setup.json using jq
     server_ip=$(jq -r ".servers[$i].server_${i}_ip" setup.json)
-    name_var="server${i}"
+    if [ "$experiment_env" == "zoo" ]; then
+        name_var="zoo${i}"
+    else
+        name_var="server${i}"
+    fi
 
     servers+=("$server_ip")
-    replicanames+=($name_var)
+    replicanames+=("$name_var")
 done
 
 # --- Dry-run mode: print generated commands and exit ---
@@ -190,7 +223,11 @@ if [ "$DRY_RUN" = true ]; then
     done
 
     echo ""
-    echo "[pull]  scp ${SERVER_USERNAME}@${servers[0]}:$repo_directory/results/recent_csv/${result_base}-server*.csv test_output/"
+    if [ "$experiment_env" == "zoo" ]; then
+        echo "[pull]  scp ${SERVER_USERNAME}@${servers[0]}:$repo_directory/results/recent_csv/${result_base}-zoo*.csv test_output/"
+    else
+        echo "[pull]  scp ${SERVER_USERNAME}@${servers[0]}:$repo_directory/results/recent_csv/${result_base}-server*.csv test_output/"
+    fi
     echo "=== END DRY RUN ==="
     exit 0
 fi
@@ -359,6 +396,59 @@ for i in "${!servers[@]}"; do
     jobs[$i]=$!   # save PID at same index as replica/server
 done
 
+# --- Real process kill for Track 6 failure-recovery experiments ---
+if [ -n "$KILL_TARGET" ]; then
+    kill_ip="${servers[$KILL_TARGET]}"
+    kill_replica="${replicanames[$KILL_TARGET]}"
+    echo ""
+    echo "=== REAL KILL SCHEDULED ==="
+    echo "  Target:    ${kill_replica} (${kill_ip})"
+    echo "  Delay:     ${KILL_DELAY}s after experiment start"
+    echo "  Command:   ssh ${SERVER_USERNAME}@${kill_ip} 'pkill -9 -f deptran_server'"
+    echo ""
+
+    # Background the kill: sleep then kill
+    (
+        sleep "$KILL_DELAY"
+        kill_timestamp=$(date '+%Y-%m-%d %H:%M:%S.%3N')
+        echo "[KILL] ${kill_timestamp} — Killing deptran_server on ${kill_replica} (${kill_ip})..."
+
+        # Get PID before kill for evidence
+        remote_pid=$(ssh $SSH_OPTS "${SERVER_USERNAME}@${kill_ip}" "pgrep -f deptran_server" 2>/dev/null || true)
+        echo "[KILL] Target PID(s): ${remote_pid:-unknown}"
+
+        # Execute the kill
+        ssh $SSH_OPTS "${SERVER_USERNAME}@${kill_ip}" "pkill -9 -f deptran_server" 2>/dev/null || true
+
+        # Verify the process is gone
+        sleep 1
+        post_pid=$(ssh $SSH_OPTS "${SERVER_USERNAME}@${kill_ip}" "pgrep -f deptran_server" 2>/dev/null || true)
+        if [ -z "$post_pid" ]; then
+            echo "[KILL] Confirmed: deptran_server on ${kill_replica} is dead."
+        else
+            echo "[KILL] WARNING: deptran_server may still be running (PID: ${post_pid})"
+        fi
+
+        # Save kill evidence
+        mkdir -p test_output
+        cat > "test_output/kill_evidence.json" << KILLEOF
+{
+    "target_host": "${kill_ip}",
+    "target_replica": "${kill_replica}",
+    "kill_timestamp": "${kill_timestamp}",
+    "kill_command": "pkill -9 -f deptran_server",
+    "pre_kill_pid": "${remote_pid}",
+    "post_kill_pid": "${post_pid}",
+    "kill_delay_seconds": ${KILL_DELAY},
+    "confirmed_dead": $([ -z "$post_pid" ] && echo true || echo false)
+}
+KILLEOF
+        echo "[KILL] Evidence saved to test_output/kill_evidence.json"
+    ) &
+    KILL_PID=$!
+    echo "Kill background job PID: $KILL_PID"
+fi
+
 # Wait for all background jobs to complete (or timeout)
 for i in "${!jobs[@]}"; do
     pid=${jobs[$i]}
@@ -375,6 +465,12 @@ for i in "${!jobs[@]}"; do
     fi
 done
 
+# Wait for kill background job if it was started
+if [ -n "$KILL_PID" ]; then
+    wait "$KILL_PID" 2>/dev/null || true
+    echo "Kill job completed."
+fi
+
 # Pull recent CSV results from the shared results directory (available via NFS)
 remote_results_dir="$repo_directory/results/recent_csv"
 echo "Pulling recent CSV results from ${servers[0]}..."
@@ -384,8 +480,13 @@ if [ "$FAILOVER_TEST" = true ]; then
 fi
 
 # Prefer result_base on remote; fallback to test-server naming if needed
-remote_pattern="$remote_results_dir/${result_base}-server*.csv"
-fallback_pattern="$remote_results_dir/test-server*.csv"
+if [ "$experiment_env" == "zoo" ]; then
+    remote_pattern="$remote_results_dir/${result_base}-zoo*.csv"
+    fallback_pattern="$remote_results_dir/test-zoo*.csv"
+else
+    remote_pattern="$remote_results_dir/${result_base}-server*.csv"
+    fallback_pattern="$remote_results_dir/test-server*.csv"
+fi
 
 if ssh "${SERVER_USERNAME}@${servers[0]}" "[ -d '$remote_results_dir' ] && ls $remote_pattern >/dev/null 2>&1"; then
     pattern_to_pull="$remote_pattern"
@@ -398,14 +499,20 @@ if [ -n "$pattern_to_pull" ]; then
     if scp "${SERVER_USERNAME}@${servers[0]}:$pattern_to_pull" test_output/; then
         echo "Result CSV files copied to test_output/"
         # Normalize filenames locally to result_base
+        # Determine server prefix pattern based on environment
+        if [ "$experiment_env" == "zoo" ]; then
+            srv_prefix="zoo"
+        else
+            srv_prefix="server"
+        fi
         for csv_file in test_output/*.csv; do
             [ -e "$csv_file" ] || continue
             base_name=$(basename "$csv_file")
-            # Accept both test-serverX.csv and <result_base>-serverX.csv
-            if [[ "$base_name" == test-server*.csv ]]; then
-                server_suffix=${base_name#test-}          # server0.csv
-            elif [[ "$base_name" == ${result_base}-server*.csv ]]; then
-                server_suffix=${base_name#${result_base}-} # server0.csv
+            # Accept both test-<srv>X.csv and <result_base>-<srv>X.csv
+            if [[ "$base_name" == test-${srv_prefix}*.csv ]]; then
+                server_suffix=${base_name#test-}
+            elif [[ "$base_name" == ${result_base}-${srv_prefix}*.csv ]]; then
+                server_suffix=${base_name#${result_base}-}
             else
                 continue
             fi

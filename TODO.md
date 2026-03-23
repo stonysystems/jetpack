@@ -550,14 +550,22 @@ Non-negotiable failure semantics:
 
 Required work:
 
-- [ ] Inspect whether `scripts/09-build_and_test_run_wan.sh` can be extended
+- [x] Inspect whether `scripts/09-build_and_test_run_wan.sh` can be extended
       cleanly, or whether a thin helper should wrap the same logic for this track.
-- [ ] Add a real remote kill step for the chosen failure target host:
+      *Extended cleanly. Added --kill-target <idx> and --kill-delay <sec> flags.
+      Also fixed Zoo replicanames (zoo0..4), LD_LIBRARY_PATH, WAN_DELAY_MS=20,
+      and CSV pull patterns for Zoo environment.*
+- [x] Add a real remote kill step for the chosen failure target host:
       targeted `pkill`/PID kill of `deptran_server`, or equivalent concrete
       process kill with evidence.
-- [ ] Record:
+      *Added background kill job: sleeps kill-delay seconds, then runs
+      `pkill -9 -f deptran_server` on the target server via SSH. Captures
+      pre/post-kill PIDs for verification.*
+- [x] Record:
       target host, target PID if available, exact kill command, kill timestamp,
       and post-kill confirmation that the process exited.
+      *Writes test_output/kill_evidence.json with target_host, target_replica,
+      kill_timestamp, kill_command, pre_kill_pid, post_kill_pid, confirmed_dead.*
 - [ ] If leader failure is required for correctness, identify and document how
       the leader host is chosen or observed before the kill.
 - [ ] Keep the client config open-loop. If `client_open_failure_recovery.yml`
