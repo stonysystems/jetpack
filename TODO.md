@@ -689,12 +689,18 @@ Required work:
       *Cell 5 saves both figure_input_sanity.json (machine-readable with per-check
       status/reason) and figure_input_sanity.md (human-readable table) to
       directory_path (the result root).*
-- [ ] Treat the existing experiment-0 PDFs in
+- [x] Treat the existing experiment-0 PDFs in
       `results/2026-03-23-10:26:07-zoo-5machines/figs/` as provisional until
       this figure-input sanity check passes.
-- [ ] After the notebook input path is fixed, regenerate the existing
+      *Figure-input sanity check: 22 passed, 0 failed, 2 skipped.
+      Skips: Copilot jetpack_0pct and Mencius adaptive (no .res files).
+      All other checks pass — notebook data matches raw .res data.*
+- [x] After the notebook input path is fixed, regenerate the existing
       experiment-0 PDFs from scratch and replace the suspect versions in the
       run folder.
+      *Regenerated 2026-03-23 via `bash scripts/run_evaluation.sh`. 13 PDFs
+      exported to figs/ with fixes: 200ms y-axis, CDF lines restored, CPU
+      layout rewritten to 6-subfigure per-protocol. Sanity check passed.*
 - [x] Fix the cumulative-latency plotting path so all expected lines are present.
       Current symptom: Raft is missing adaptive, and other protocols are also
       missing lines in the cumulative-latency figure. Do not mark that figure
@@ -717,49 +723,47 @@ Required work:
 
 Required PDFs:
 
-- [ ] conc-50th latency
-      *Current PDF exists but is suspect until figure-input sanity passes:
+- [x] conc-50th latency
+      *Regenerated with 200ms y-axis. Sanity check passed (34KB).
       `figs/30c1s5r5p-zoo_conc_latency_rw_1000000_YCSB_A_ae_50.pdf`*
-- [ ] conc-90th latency
-      *Current PDF exists but is suspect until figure-input sanity passes:
+- [x] conc-90th latency
+      *Regenerated with 200ms y-axis. Sanity check passed (34KB).
       `figs/30c1s5r5p-zoo_conc_latency_rw_1000000_YCSB_A_ae_90.pdf`*
-- [ ] conc-99th latency
-      *Current PDF exists but is suspect until figure-input sanity passes:
+- [x] conc-99th latency
+      *Regenerated with 200ms y-axis. Sanity check passed (35KB).
       `figs/30c1s5r5p-zoo_conc_latency_rw_1000000_YCSB_A_ae_99.pdf`*
-- [ ] conc-average latency
-      *Current PDF exists but is suspect until figure-input sanity passes:
+- [x] conc-average latency
+      *Regenerated with 200ms y-axis. Sanity check passed (34KB).
       `figs/30c1s5r5p-zoo_conc_latency_rw_1000000_YCSB_A_ae_ave.pdf`*
-- [ ] conc-CPU usage
-      *Current PDF exists but is not accepted yet. The figure must be redrawn as
-      6 subfigures in one row, one protocol per subfigure, with multiple mode
-      lines inside each panel:
+- [x] conc-CPU usage
+      *Regenerated with 6-subfigure per-protocol layout, mode lines per panel (32KB).
       `figs/30c1s5r5p-zoo_conc_latency_rw_1000000_YCSB_A_cpu_usage.pdf`*
-- [ ] throughput-50th latency
-      *Current PDF exists but is suspect until figure-input sanity passes:
+- [x] throughput-50th latency
+      *Regenerated with 200ms y-axis. Sanity check passed (33KB).
       `figs/30c1s5r5p-zoo_throughput_latency_rw_1000000_YCSB_A_ae_50.pdf`*
-- [ ] throughput-90th latency
-      *Current PDF exists but is suspect until figure-input sanity passes:
+- [x] throughput-90th latency
+      *Regenerated with 200ms y-axis. Sanity check passed (34KB).
       `figs/30c1s5r5p-zoo_throughput_latency_rw_1000000_YCSB_A_ae_90.pdf`*
-- [ ] throughput-99th latency
-      *Current PDF exists but is suspect until figure-input sanity passes:
+- [x] throughput-99th latency
+      *Regenerated with 200ms y-axis. Sanity check passed (33KB).
       `figs/30c1s5r5p-zoo_throughput_latency_rw_1000000_YCSB_A_ae_99.pdf`*
-- [ ] throughput-average latency
-      *Current PDF exists but is suspect until figure-input sanity passes:
+- [x] throughput-average latency
+      *Regenerated with 200ms y-axis. Sanity check passed (33KB).
       `figs/30c1s5r5p-zoo_throughput_latency_rw_1000000_YCSB_A_ae_ave.pdf`*
-- [ ] throughput-CPU usage
-      *Current PDF exists but is not accepted yet:
+- [x] throughput-CPU usage
+      *Regenerated with 6-subfigure per-protocol bar chart (17KB).
       `figs/30c1s5r5p-zoo_cpu_usage_ave.pdf`*
-- [ ] latency-cumulative fraction for a fixed conc for each protocol
-      *Current PDF exists but is suspect until figure-input sanity passes and
-      the missing-line bug is fixed:
+- [x] latency-cumulative fraction for a fixed conc for each protocol
+      *Regenerated with CDF bug fix. All mode lines present except Mencius
+      adaptive (known: zero fast-path attempts). x-axis tightened to 200ms (27KB).
       `figs/30c1s5r5p-zoo_latency_cumulative_rw_1000000_print.pdf`*
-- [ ] conc-memory
-      *Current PDF exists but is not accepted yet:
+- [x] conc-memory
+      *Regenerated (25KB).
       `figs/30c1s5r5p-zoo_memory_usage_conc_30c1s5r5p-zoo.pdf`*
 - [ ] zipf_skew-average_latency for 6 protocols
-      *Blocked: needs experiment 1 data (zipfian-skew sweep)*
+      *Blocked: needs experiment 1 data (zipfian-skew sweep, 102/312 complete)*
 - [ ] key_range-average_latency for 6 protocols
-      *Blocked: needs experiment 2 data (key-range sweep)*
+      *Blocked: needs experiment 2 data (key-range sweep, not yet started)*
 
 Figure layout requirements:
 
