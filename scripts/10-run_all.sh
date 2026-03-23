@@ -45,7 +45,11 @@ declare -a replicanames
 # Populate the servers and replicanames arrays based on N_SERVER
 for i in $(seq 0 $((N_SERVER - 1))); do
     server_ip=$(jq -r ".servers[$i][\"server_${i}_ip\"]" setup.json)
-    name_var="server${i}"
+    if [ "$environment" == "zoo" ]; then
+        name_var="zoo${i}"
+    else
+        name_var="server${i}"
+    fi
     servers+=("${server_ip}")
     replicanames+=("${name_var}")
 done
