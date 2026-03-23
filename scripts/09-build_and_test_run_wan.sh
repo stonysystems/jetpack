@@ -30,7 +30,7 @@ AWS_CONFIG_MODE="101"  # Added -m value for AWS
 
 # Parse CLI arguments for build mode and optional failover test
 usage() {
-    echo "Usage: $0 [full|build] [--failover] [--kill-target <index>] [--kill-delay <sec>] [--filename <name>] [--dry-run]"
+    echo "Usage: $0 [full|build] [--failover] [--kill-target <index>] [--kill-delay <sec>] [--filename <name>] [--result-dir <path>] [--dry-run]"
     echo ""
     echo "Options:"
     echo "  full                    Regenerate RPC + build before running"
@@ -39,6 +39,7 @@ usage() {
     echo "  --kill-target|-K <idx>  Kill deptran_server on server <idx> mid-run (real kill)"
     echo "  --kill-delay <sec>      Delay before kill (default: 20s into the run)"
     echo "  --filename|-o <name>    Set custom result filename prefix"
+    echo "  --result-dir|-R <path>  Save results/evidence to this directory (default: test_output)"
     echo "  --dry-run|-n            Print commands without executing them"
 }
 
@@ -48,6 +49,7 @@ CUSTOM_FILENAME=""
 DRY_RUN=false
 KILL_TARGET=""        # server index to kill (e.g., 0 for zoo0/server0)
 KILL_DELAY=20         # seconds after experiment start before kill
+RESULT_DIR=""         # output directory (default: test_output)
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -87,6 +89,16 @@ while [[ $# -gt 0 ]]; do
                 exit 1
             fi
             ;;
+        --result-dir|-R)
+            if [[ -n "$2" && "$2" != -* ]]; then
+                RESULT_DIR="$2"
+                shift
+            else
+                echo "Error: --result-dir requires a path."
+                usage
+                exit 1
+            fi
+            ;;
         --dry-run|-n)
             DRY_RUN=true
             ;;
@@ -106,6 +118,11 @@ done
 # If --kill-target is set, also enable failover mode (longer duration)
 if [ -n "$KILL_TARGET" ]; then
     FAILOVER_TEST=true
+fi
+
+# Default result directory
+if [ -z "$RESULT_DIR" ]; then
+    RESULT_DIR="test_output"
 fi
 
 # Adjust duration based on failover mode
@@ -191,6 +208,7 @@ if [ "$DRY_RUN" = true ]; then
     echo "Failover:     $FAILOVER_TEST"
     echo "Duration:     ${CONFIG_DURATION}s"
     echo "Timeout:      180s"
+    echo "Result dir:   $RESULT_DIR"
     echo "Servers:      ${#servers[@]}"
     echo ""
 
@@ -218,15 +236,15 @@ if [ "$DRY_RUN" = true ]; then
 
     for i in "${!servers[@]}"; do
         run_name="${result_base}-${replicanames[$i]}"
-        output_file="test_output/${result_base}-${replicanames[$i]}.res"
+        output_file="${RESULT_DIR}/${result_base}-${replicanames[$i]}.res"
         echo "[run]   timeout 180s ssh ${SERVER_USERNAME}@${servers[$i]} \"${server_command} -P ${replicanames[$i]} -N ${run_name}\" > $output_file 2>&1 &"
     done
 
     echo ""
     if [ "$experiment_env" == "zoo" ]; then
-        echo "[pull]  scp ${SERVER_USERNAME}@${servers[0]}:$repo_directory/results/recent_csv/${result_base}-zoo*.csv test_output/"
+        echo "[pull]  scp ${SERVER_USERNAME}@${servers[0]}:$repo_directory/results/recent_csv/${result_base}-zoo*.csv ${RESULT_DIR}/"
     else
-        echo "[pull]  scp ${SERVER_USERNAME}@${servers[0]}:$repo_directory/results/recent_csv/${result_base}-server*.csv test_output/"
+        echo "[pull]  scp ${SERVER_USERNAME}@${servers[0]}:$repo_directory/results/recent_csv/${result_base}-server*.csv ${RESULT_DIR}/"
     fi
     echo "=== END DRY RUN ==="
     exit 0
@@ -335,10 +353,12 @@ start_scp_monitors() {
 }
 
 # Prepare the output directory
-mkdir -p test_output
+mkdir -p "$RESULT_DIR"
 
-# Remove old test output files
-rm -f test_output/*
+# Remove old test output files (only when using default test_output dir)
+if [ "$RESULT_DIR" = "test_output" ]; then
+    rm -f "${RESULT_DIR}"/*
+fi
 
 # Kill any leftover scp_jm_file.sh monitors and clean JM_Jetpack_* + state before each run
 cleanup_remote_state
@@ -380,7 +400,7 @@ for i in "${!servers[@]}"; do
         result_base="$DEFAULT_RESULT_PREFIX"
     fi
 
-    output_file="test_output/${result_base}-${replicanames[$i]}.res"
+    output_file="${RESULT_DIR}/${result_base}-${replicanames[$i]}.res"
     run_name="${result_base}-${replicanames[$i]}"
 
     output_files[$i]="$output_file"
@@ -430,8 +450,8 @@ if [ -n "$KILL_TARGET" ]; then
         fi
 
         # Save kill evidence
-        mkdir -p test_output
-        cat > "test_output/kill_evidence.json" << KILLEOF
+        mkdir -p "$RESULT_DIR"
+        cat > "${RESULT_DIR}/kill_evidence.json" << KILLEOF
 {
     "target_host": "${kill_ip}",
     "target_replica": "${kill_replica}",
@@ -443,7 +463,7 @@ if [ -n "$KILL_TARGET" ]; then
     "confirmed_dead": $([ -z "$post_pid" ] && echo true || echo false)
 }
 KILLEOF
-        echo "[KILL] Evidence saved to test_output/kill_evidence.json"
+        echo "[KILL] Evidence saved to ${RESULT_DIR}/kill_evidence.json"
     ) &
     KILL_PID=$!
     echo "Kill background job PID: $KILL_PID"
@@ -496,8 +516,8 @@ else
     pattern_to_pull=""
 fi
 if [ -n "$pattern_to_pull" ]; then
-    if scp "${SERVER_USERNAME}@${servers[0]}:$pattern_to_pull" test_output/; then
-        echo "Result CSV files copied to test_output/"
+    if scp "${SERVER_USERNAME}@${servers[0]}:$pattern_to_pull" ${RESULT_DIR}/; then
+        echo "Result CSV files copied to ${RESULT_DIR}/"
         # Normalize filenames locally to result_base
         # Determine server prefix pattern based on environment
         if [ "$experiment_env" == "zoo" ]; then
@@ -505,7 +525,7 @@ if [ -n "$pattern_to_pull" ]; then
         else
             srv_prefix="server"
         fi
-        for csv_file in test_output/*.csv; do
+        for csv_file in ${RESULT_DIR}/*.csv; do
             [ -e "$csv_file" ] || continue
             base_name=$(basename "$csv_file")
             # Accept both test-<srv>X.csv and <result_base>-<srv>X.csv
@@ -516,7 +536,7 @@ if [ -n "$pattern_to_pull" ]; then
             else
                 continue
             fi
-            new_name="test_output/${result_base}-${server_suffix}"
+            new_name="${RESULT_DIR}/${result_base}-${server_suffix}"
             mv "$csv_file" "$new_name"
         done
     else
