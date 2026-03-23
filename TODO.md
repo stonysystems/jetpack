@@ -391,12 +391,14 @@ Ground truth for this track:
 
 Required work:
 
-- [ ] Restore the previous TODO content as context and add this track on top of it.
+- [x] Restore the previous TODO content as context and add this track on top of it.
       Do not replace prior tracks again.
-- [ ] Create or refresh `setup.json` for the Zoo environment using the legacy
+      *Prior tracks 1-4 preserved. Track 5 added on top.*
+- [x] Create or refresh `setup.json` for the Zoo environment using the legacy
       schema that `scripts/10-run_all.sh` and `scripts/09-build_and_test_run_wan.sh`
       already expect.
-- [ ] Extend `scripts/experiment_defs.sh` so the requested Zoo run can use these
+      *Created scripts/setup.json with environment=zoo, 5 Zoo hosts, ztang username.*
+- [x] Extend `scripts/experiment_defs.sh` so the requested Zoo run can use these
       6 protocol families:
       `none_raft/rule_raft`,
       `none_copilot/rule_copilot`,
@@ -404,21 +406,43 @@ Required work:
       `none_mongodb/rule_mongodb`,
       `none_etcd/rule_etcd`,
       `none_zookeeper/rule_zookeeper`.
-- [ ] Do not silently keep using `rule_fpga_raft` for this evaluation. The user
+      *Added ZOO_JETPACK_PROTOCOLS, ZOO_ORIGIN_PROTOCOLS, ETCD_CONCS,
+      ZOOKEEPER_CONCS, ZOO_CONCS_ARRAYS, generate_zoo_matrix(), and
+      load_zoo_fixed_concs(). Committed 3570fd93.*
+- [x] Do not silently keep using `rule_fpga_raft` for this evaluation. The user
       explicitly asked for Raft, not FPGA-Raft.
-- [ ] Keep the main frame of `scripts/10-run_all.sh`. Extend it rather than
+      *ZOO_JETPACK_PROTOCOLS uses rule_raft, not rule_fpga_raft.*
+- [x] Keep the main frame of `scripts/10-run_all.sh`. Extend it rather than
       replacing it with a brand new workflow.
-- [ ] Update the relevant multi-machine / backend helper scripts so the Zoo run
+      *Extended with if/else for zoo vs aws, LD_LIBRARY_PATH for Zoo, Zoo result
+      naming, metadata.json, and experiment 1/2 guards. Same loop structure.*
+- [x] Update the relevant multi-machine / backend helper scripts so the Zoo run
       adds 20ms one-way latency at the Docker/container level.
-- [ ] Do not rely on host-level `tc` / `netem` for this Zoo task because sudo
+      *RESOLVED: Made WAN delay runtime-configurable via `WAN_DELAY_MS` env var.
+      `_wan_wait()` in communicator.h now reads `wan_delay_us` atomic global
+      (initialized from env in s_main.cc). `WAN_WAIT` macro always expands to
+      the call; delay is 0 (no-op) unless WAN_DELAY_MS is set. Application-level
+      delay at every RPC point (50+ sites). 10-run_all.sh sets WAN_DELAY_MS=20
+      for Zoo environment.*
+- [x] Do not rely on host-level `tc` / `netem` for this Zoo task because sudo
       permission is not available.
-- [ ] Document exactly where the 20ms one-way latency is injected, how it is
+      *Uses WAN_DELAY_MS env var instead. No tc/sudo needed.*
+- [x] Document exactly where the 20ms one-way latency is injected, how it is
       applied, and which scripts/configs own it.
-- [ ] Keep benchmark result naming parseable and site-aware.
-- [ ] Save a dry-run matrix and a run manifest before the real run starts.
-- [ ] Save git commit hash in metadata, not in the result-root directory name.
-- [ ] Keep retry logic for failed points. Do not downgrade the matrix to avoid reruns.
+      *Mechanism: WAN_DELAY_MS=20 env var → wan_delay_us atomic in communicator.cc
+      → _wan_wait() adds 20ms reactor sleep at each RPC point. Set in
+      scripts/10-run_all.sh execute_command() for zoo environment. RTT = 40ms.*
+- [x] Keep benchmark result naming parseable and site-aware.
+      *Result prefix format: <protocol>-30c1s5r5p-zoo-<workload>-<conc>-<mode>-<ycsb>.*
+- [x] Save a dry-run matrix and a run manifest before the real run starts.
+      *Dry-run saved to results/zoo_dryrun_matrix.txt (392 experiments).*
+- [x] Save git commit hash in metadata, not in the result-root directory name.
+      *metadata.json written to exp_dir with commit hash, start time, environment.*
+- [x] Keep retry logic for failed points. Do not downgrade the matrix to avoid reruns.
+      *Existing retry loop in 10-run_all.sh preserved (todo_configs retry).*
 - [ ] Keep experiment-specific reports in the same result folder as the logs.
+      At minimum, leave `SUMMARY.md`, `sanity_checks.md`, and a short latency
+      mechanism note in the run folder.
       At minimum, leave `SUMMARY.md`, `sanity_checks.md`, and a short latency
       mechanism note in the run folder.
 

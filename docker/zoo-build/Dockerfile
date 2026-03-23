@@ -1,6 +1,12 @@
-# Build Jetpack for Debian 13 (trixie) Zoo machines.
-# Matches the library versions on the Zoo cluster.
-FROM debian:trixie
+# Build Jetpack for Zoo cluster machines.
+# Uses Ubuntu 22.04 as the base (lowest glibc version among Zoo machines).
+# The resulting binary is compatible with all Zoo servers:
+#   - 130.245.173.101: Debian trixie (glibc 2.38)
+#   - 130.245.173.102: Ubuntu 22.04 (glibc 2.35)
+#   - 130.245.173.103: Debian bookworm (glibc 2.36)
+#   - 130.245.173.104: Ubuntu 22.04 (glibc 2.35)
+#   - 130.245.173.105: Debian trixie (glibc 2.38)
+FROM ubuntu:22.04
 
 ENV DEBIAN_FRONTEND=noninteractive
 
@@ -14,6 +20,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     python3-pip \
     python3-setuptools \
     wget \
+    ca-certificates \
     # MongoDB driver dependencies
     libssl-dev \
     libsasl2-dev \
@@ -114,23 +121,13 @@ COPY . /build/
 # Build Jetpack
 RUN python3 waf configure && python3 waf build -j"$(nproc)"
 
-# Output stage: binary, third-party libs, and required system libs
-FROM debian:trixie-slim
-COPY --from=0 /build/build/deptran_server /output/build/deptran_server
-# Third-party libraries
-COPY --from=0 /usr/local/lib/libmongoc* /output/lib/
-COPY --from=0 /usr/local/lib/libbson* /output/lib/
-COPY --from=0 /usr/local/lib/libmongocxx* /output/lib/
-COPY --from=0 /usr/local/lib/libbsoncxx* /output/lib/
-COPY --from=0 /usr/local/lib/libetcd* /output/lib/
-COPY --from=0 /usr/local/lib/libzookeeper.a /output/lib/
-COPY --from=0 /usr/local/lib/libhashtable.a /output/lib/
-# System libraries not present on Zoo machines
-COPY --from=0 /usr/lib/x86_64-linux-gnu/libcpprest.so.2.10 /output/lib/
-COPY --from=0 /usr/lib/x86_64-linux-gnu/libgrpc++.so.1.51* /output/lib/
-COPY --from=0 /usr/lib/x86_64-linux-gnu/libgrpc.so.29* /output/lib/
-COPY --from=0 /usr/lib/x86_64-linux-gnu/libgpr.so.29* /output/lib/
-COPY --from=0 /usr/lib/x86_64-linux-gnu/libupb.so.29* /output/lib/
-COPY --from=0 /usr/lib/x86_64-linux-gnu/libaddress_sorting.so.29* /output/lib/
-COPY --from=0 /usr/lib/x86_64-linux-gnu/libre2.so.11* /output/lib/
-CMD ["echo", "Build complete. Copy /output/ contents to target."]
+# Collect all needed shared libraries into /output/lib
+# This includes third-party libs and system libs that may differ across Zoo machines
+RUN mkdir -p /output/lib && \
+    cp /build/build/deptran_server /output/ && \
+    # Use ldd to find all shared library dependencies and copy them
+    ldd /build/build/deptran_server | grep "=> /" | awk '{print $3}' | sort -u | \
+    while read lib; do cp "$lib" /output/lib/ 2>/dev/null; done && \
+    # Also copy the dynamic linker
+    cp /lib64/ld-linux-x86-64.so.2 /output/lib/ 2>/dev/null || true && \
+    ls -la /output/lib/ | wc -l

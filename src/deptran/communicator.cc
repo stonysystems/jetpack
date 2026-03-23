@@ -15,6 +15,9 @@
 
 namespace janus {
 
+// Runtime WAN delay in microseconds. 0 = disabled.
+std::atomic<uint64_t> wan_delay_us{0};
+
 // Static member definitions
 std::map<parid_t, View> Communicator::partition_views_;
 std::mutex Communicator::partition_views_mutex_;

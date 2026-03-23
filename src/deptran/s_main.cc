@@ -8,6 +8,7 @@
 #include "../rrr/reactor/event.h"
 #include "scheduler.h"
 #include "config.h"
+#include "communicator.h"
 #include <chrono>
 #include <cstdlib>
 #include <thread>
@@ -781,6 +782,22 @@ int main(int argc, char *argv[]) {
   } else {
     Log_fatal("Read config failed");
     return ret;
+  }
+
+  // Initialize runtime WAN delay from environment or compile-time flag.
+  {
+    const char* wan_env = getenv("WAN_DELAY_MS");
+    if (wan_env != nullptr) {
+      uint64_t ms = strtoull(wan_env, nullptr, 10);
+      wan_delay_us.store(ms * 1000, std::memory_order_relaxed);
+      Log_info("WAN delay enabled via WAN_DELAY_MS=%s (%lu us)", wan_env, ms * 1000);
+    }
+#ifdef SIMULATE_WAN
+    else {
+      wan_delay_us.store(20 * 1000, std::memory_order_relaxed);
+      Log_info("WAN delay enabled via SIMULATE_WAN compile flag (20ms)");
+    }
+#endif
   }
 
 

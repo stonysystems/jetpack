@@ -164,9 +164,10 @@ execute_command() {
     exp_name=$(build_result_prefix "$protocol" "$site" "$workload" "$concurrent" "$fastpath_mode" "$ycsb")
     server_command=$(build_deptran_cmd "$repo_dir" "$protocol" "$site" "$workload" "$concurrent" "$fastpath_mode" "30" "$ycsb" "")
 
-    # For Zoo, prepend LD_LIBRARY_PATH for locally-installed third-party libs
+    # For Zoo, prepend LD_LIBRARY_PATH and WAN_DELAY_MS for locally-installed libs
+    # and runtime 20ms one-way WAN delay simulation
     if [ "$environment" == "zoo" ]; then
-        server_command="export LD_LIBRARY_PATH=\${HOME}/local/lib:\${LD_LIBRARY_PATH}; ${server_command}"
+        server_command="export LD_LIBRARY_PATH=\${HOME}/local/lib:\${LD_LIBRARY_PATH}; export WAN_DELAY_MS=20; ${server_command}"
     fi
 
     # Clean up any previous JM_Jetpack_* files before starting a new run

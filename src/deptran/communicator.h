@@ -12,19 +12,19 @@
 
 namespace janus {
 
+// Runtime-configurable WAN delay (microseconds). Set via WAN_DELAY_MS env var
+// or enabled at compile time with -DSIMULATE_WAN (defaults to 20ms).
+// 0 means disabled (no delay).
+extern std::atomic<uint64_t> wan_delay_us;
+
 static void _wan_wait() {
-  Reactor::CreateSpEvent<NeverEvent>()->Wait(20*1000);
+  uint64_t delay = wan_delay_us.load(std::memory_order_relaxed);
+  if (delay > 0) {
+    Reactor::CreateSpEvent<NeverEvent>()->Wait(delay);
+  }
 }
 
-#ifdef SIMULATE_WAN
-
 #define WAN_WAIT _wan_wait();
-
-#else
-
-#define WAN_WAIT ;
-
-#endif
 
 
 class Coordinator;
