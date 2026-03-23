@@ -39,6 +39,10 @@ def parse_res_file(path):
                     m = re.search(r"Mid throughput is ([\d.]+)", line)
                     if m:
                         metrics["throughput"] = float(m.group(1))
+                if "Total throughtput is" in line and "throughput" not in metrics:
+                    m = re.search(r"Total throughtput is ([\d.]+)", line)
+                    if m:
+                        metrics["throughput"] = float(m.group(1))
                 if "All-original-path-attempts" in line and "statistics" in line:
                     m = re.search(
                         r"count\s+(\d+)\s+0pct\s+([\d.-]+)\s+50pct\s+([\d.-]+)\s+"

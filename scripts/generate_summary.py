@@ -28,6 +28,7 @@ from datetime import datetime
 
 SITE = "30c1s5r5p-zoo"
 SERVERS = [f"zoo{i}" for i in range(5)]
+MAX_RES_FILE_SIZE = 1_000_000  # 1 MB — skip runaway/corrupt files
 ZOO_HOSTS = [
     "130.245.173.101",
     "130.245.173.102",
@@ -70,16 +71,29 @@ def get_git_info():
 
 
 def parse_mid_throughput(filepath):
-    """Extract mid throughput from a .res file."""
+    """Extract throughput from a .res file.
+
+    Prefers 'Mid throughput' (steady-state). Falls back to 'Total throughtput'
+    when Mid is unavailable (e.g. shorter MongoDB runs).
+    """
+    mid_tp = None
+    total_tp = None
     try:
+        if os.path.getsize(filepath) > MAX_RES_FILE_SIZE:
+            return None
         with open(filepath, 'r') as f:
             for line in f:
-                m = re.search(r'Mid throughput is ([\d.]+)', line)
-                if m:
-                    return float(m.group(1))
+                if mid_tp is None:
+                    m = re.search(r'Mid throughput is ([\d.]+)', line)
+                    if m:
+                        mid_tp = float(m.group(1))
+                if total_tp is None:
+                    m2 = re.search(r'Total throughtput is ([\d.]+)', line)
+                    if m2:
+                        total_tp = float(m2.group(1))
     except (FileNotFoundError, IOError):
         pass
-    return None
+    return mid_tp if mid_tp is not None else total_tp
 
 
 def scan_results(result_dir):

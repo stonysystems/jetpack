@@ -35,6 +35,7 @@ cpu_usages = []
 
 # Patterns
 throughput_pattern = re.compile(r"Mid throughput is ([\d.]+)")
+total_throughput_pattern = re.compile(r"Total throughtput is ([\d.]+)")
 efficient_latency_pattern = re.compile(
     r"All-efficient-attempts.*?50pct\s+([\d.]+)\s+90pct\s+([\d.]+)\s+99pct\s+([\d.]+)")
 loadyml_pattern = re.compile(r"LoadYML:\s*(.*)")
@@ -47,10 +48,14 @@ for file_path in files:
     with open(file_path, 'r') as f:
         content = f.read()
 
-        # Throughput
+        # Throughput — prefer Mid, fall back to Total for shorter runs
         m = throughput_pattern.search(content)
         if m:
             total_throughput += float(m.group(1))
+        else:
+            m = total_throughput_pattern.search(content)
+            if m:
+                total_throughput += float(m.group(1))
 
         # Latency from All-efficient-attempts line
         m = efficient_latency_pattern.search(content)
