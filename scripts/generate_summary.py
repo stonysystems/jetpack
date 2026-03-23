@@ -266,11 +266,18 @@ def generate_summary(result_dir):
     lines.append("- Modes: original (0), Jetpack 0% (100), Jetpack 100% (1), Jetpack adaptive (101)")
     lines.append("- Per-protocol concurrency sweep\n")
 
-    lines.append("### Experiment 1: Zipfian-Skew Sweep (pending)")
+    exp1_count = sum(1 for k in scan["experiments"]
+                     if k[1].startswith("rw_zipf_") and len(scan["experiments"][k]) >= len(SERVERS))
+    exp1_status = f"({exp1_count} complete configs)" if exp1_count else "(pending)"
+    lines.append(f"### Experiment 1: Zipfian-Skew Sweep {exp1_status}")
     lines.append("- Workloads: `rw_zipf_{1,0.9,0.8,0.7,0.6,0.5}`")
     lines.append("- Fixed concurrency per protocol (derived from experiment 0)\n")
 
-    lines.append("### Experiment 2: Key-Range Sweep (pending)")
+    exp2_count = sum(1 for k in scan["experiments"]
+                     if re.match(r"^rw_\d+$", k[1]) and k[1] != "rw_1000000"
+                     and len(scan["experiments"][k]) >= len(SERVERS))
+    exp2_status = f"({exp2_count} complete configs)" if exp2_count else "(pending)"
+    lines.append(f"### Experiment 2: Key-Range Sweep {exp2_status}")
     lines.append("- Workloads: `rw_{1,10,100,1000,10000,100000,1000000}`")
     lines.append("- Fixed concurrency per protocol (derived from experiment 0)\n")
 
