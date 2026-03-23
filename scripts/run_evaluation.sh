@@ -19,7 +19,8 @@
 # 4. Saves the executed notebook as <result_dir>/evaluation_executed.ipynb
 # 5. Exports figures to <result_dir>/figs/ and tables to <result_dir>/tables/
 # 6. Generates SUMMARY.md in the result folder
-# 7. Generates EXPERIMENT_REPORT.md with per-protocol analysis
+# 7. Exports CSV tables to <result_dir>/tables/
+# 8. Generates EXPERIMENT_REPORT.md with per-protocol analysis
 
 set -euo pipefail
 
@@ -108,12 +109,17 @@ echo ""
 echo "--- Step 4: Generating SUMMARY.md ---"
 python3 "$SCRIPT_DIR/generate_summary.py" "$RESULT_DIR"
 
-# Step 5: Generate EXPERIMENT_REPORT.md
+# Step 5: Export CSV tables
 echo ""
-echo "--- Step 5: Generating EXPERIMENT_REPORT.md ---"
+echo "--- Step 5: Exporting CSV tables ---"
+python3 "$SCRIPT_DIR/generate_tables.py" "$RESULT_DIR"
+
+# Step 6: Generate EXPERIMENT_REPORT.md
+echo ""
+echo "--- Step 6: Generating EXPERIMENT_REPORT.md ---"
 python3 "$SCRIPT_DIR/generate_experiment_report.py" "$RESULT_DIR"
 
-# Step 6: Final summary
+# Step 7: Final summary
 echo ""
 echo "--- Results ---"
 echo "Executed notebook: $OUTPUT_NB"

@@ -676,13 +676,22 @@ Recovery figure requirements:
 
 Table requirements:
 
-- [ ] Export table-like results as durable files under `tables/`.
-- [ ] At minimum, export:
+- [x] Export table-like results as durable files under `tables/`.
+      *`generate_tables.py` exports 4 CSV files to `<result_dir>/tables/`:
+      `fixed_conc_table.csv`, `experiment0_summary.csv`,
+      `throughput_vs_conc.csv`, `latency_vs_conc.csv`.
+      Integrated as pipeline step 5 in `run_evaluation.sh`.*
+- [x] At minimum, export:
       fixed-conc selection table,
       experiment-0 summary table,
       and CSV source data for the exported figures.
-- [ ] Keep a concise experiment report in the run folder that references the
+      *All three exported: fixed_conc_table.csv has per-protocol concurrency,
+      experiment0_summary.csv has peak throughput/latency per protocol/mode,
+      throughput_vs_conc.csv and latency_vs_conc.csv provide figure source data.*
+- [x] Keep a concise experiment report in the run folder that references the
       exported tables/figures and the latency/throughput sanity-check results.
+      *`EXPERIMENT_REPORT.md` references all artifacts including tables, figures,
+      sanity checks, and fixed-conc selection.*
 
 Acceptance criteria:
 
