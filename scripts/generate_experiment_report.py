@@ -244,7 +244,8 @@ def generate_report(result_dir):
                 fc_conc = str(fc_entry)
                 # Look up throughput from data
                 fc_tp = mode0.get(fc_conc, {}).get("throughput", "?") if mode0 else "?"
-            lines.append(f"**Fixed concurrency**: {fc_conc} (throughput {fc_tp} txn/s)")
+            fc_tp_str = f"{fc_tp:.1f}" if isinstance(fc_tp, (int, float)) else str(fc_tp)
+            lines.append(f"**Fixed concurrency**: {fc_conc} (throughput {fc_tp_str} txn/s)")
             lines.append("")
 
         # Mode comparison table at fixed concurrency

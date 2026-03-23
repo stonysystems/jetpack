@@ -228,6 +228,50 @@ class TestNotebookIntegrity(unittest.TestCase):
         src2 = self.all_src[2]
         self.assertIn('fixed_conc.json', src2, "Cell 2 missing fixed_conc.json loading")
 
+    def test_project_root_derivation(self):
+        """Cell 1 must derive project_root from cwd, not use cwd directly as base."""
+        src1 = self.all_src[1]
+        self.assertIn('project_root', src1,
+                      "Cell 1 must define project_root for reliable path resolution")
+        # directory_path should use project_root, not current_dir
+        self.assertIn('project_root', src1,
+                      "Cell 1 directory_path should use project_root")
+
+    def test_fixed_conc_json_uses_project_root(self):
+        """Cell 2 fixed_conc.json path must use project_root, not current_dir."""
+        src2 = self.all_src[2]
+        if 'fixed_conc_json' in src2:
+            for line in src2.split('\n'):
+                if 'fixed_conc_json' in line and '=' in line and 'os.path.join' in line:
+                    self.assertIn('project_root', line,
+                                  f"fixed_conc_json should use project_root: {line.strip()}")
+
+    def test_throughput_latency_metrics_complete(self):
+        """Cells 12 and 13 must have all 4 throughput-latency metrics enabled."""
+        required_metrics = ['ae_ave', 'ae_50', 'ae_90', 'ae_99']
+        for cell_idx in [12, 13]:
+            src = self.all_src[cell_idx]
+            # Find the throughput_latency_metrics definition
+            in_metrics = False
+            found_metrics = []
+            for line in src.split('\n'):
+                if 'throughput_latency_metrics' in line and '=' in line:
+                    in_metrics = True
+                    continue
+                if in_metrics:
+                    if ']' in line:
+                        break
+                    # Extract metric key from uncommented lines
+                    stripped = line.strip()
+                    if stripped.startswith('#'):
+                        continue
+                    for metric in required_metrics:
+                        if f'"{metric}"' in stripped:
+                            found_metrics.append(metric)
+            for metric in required_metrics:
+                self.assertIn(metric, found_metrics,
+                              f"Cell {cell_idx} throughput_latency_metrics missing {metric}")
+
 
 class TestNotebookDataGuards(unittest.TestCase):
     """Verify that notebook cells have proper guards for missing data."""
