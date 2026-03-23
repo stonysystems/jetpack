@@ -229,6 +229,111 @@ class TestNotebookIntegrity(unittest.TestCase):
         self.assertIn('fixed_conc.json', src2, "Cell 2 missing fixed_conc.json loading")
 
 
+class TestNotebookDataGuards(unittest.TestCase):
+    """Verify that notebook cells have proper guards for missing data."""
+
+    @classmethod
+    def setUpClass(cls):
+        nb_path = os.path.join(SCRIPT_DIR, "evaluation.ipynb")
+        with open(nb_path) as f:
+            cls.nb = json.load(f)
+        cls.code_cells = []
+        for i, cell in enumerate(cls.nb['cells']):
+            src = ''.join(cell['source'])
+            cls.code_cells.append((i, cell.get('cell_type', ''), cell.get('id', ''), src))
+
+    def _get_code_cell(self, index):
+        """Get source of a code cell by notebook index."""
+        _, ctype, cid, src = self.code_cells[index]
+        return src
+
+    def test_cell15_uses_dynamic_n_servers(self):
+        """Cell 15 must use dynamic server count, not hardcoded 10."""
+        src = self._get_code_cell(15)
+        self.assertNotIn('range(num_leader[proto], 10)', src,
+                         "Cell 15 still has hardcoded 10-server range")
+        self.assertIn('n_servers', src, "Cell 15 should use n_servers variable")
+
+    def test_cell16_has_6_cpu_line_entries(self):
+        """Cell 16 cpu_line_info must have entries for all 6 protocols."""
+        src = self._get_code_cell(16)
+        self.assertIn('etcd', src, "Cell 16 cpu_line_info missing etcd")
+        self.assertIn('zookeeper', src, "Cell 16 cpu_line_info missing zookeeper")
+
+    def test_cell18_guards_mode101_memory(self):
+        """Cell 18 must guard against missing mode 101 memory_usage data."""
+        src = self._get_code_cell(18)
+        has_guard = ('try:' in src or '_mem_protocols_done' in src
+                     or 'except' in src or '.get(' in src)
+        self.assertTrue(has_guard,
+                        "Cell 18 accesses mode 101 memory_usage without a guard")
+
+    def test_cell18_handles_empty_protocol_data(self):
+        """Cell 18 should not crash when no protocol has mode 101 data."""
+        src = self._get_code_cell(18)
+        # Should have a fallback message for when no data is available
+        self.assertIn('not available', src.lower(),
+                      "Cell 18 should print a message when mode 101 data is missing")
+
+    def test_cell24_guards_copilot_property(self):
+        """Cell 24 must guard copilot property experiment loading."""
+        src = self._get_code_cell(24)
+        has_guard = ('try:' in src or 'except' in src or '_copilot_property' in src)
+        self.assertTrue(has_guard,
+                        "Cell 24 loads copilot property data without a guard")
+
+    def test_cell14_guards_mode_access(self):
+        """Cell 14 draw_latency_line must handle missing mode data."""
+        src = self._get_code_cell(14)
+        has_guard = ('try:' in src or 'except' in src or '.get(' in src
+                     or 'continue' in src)
+        self.assertTrue(has_guard,
+                        "Cell 14 accesses mode data in pcts loop without a guard")
+
+    def test_zipf_cells_have_guards(self):
+        """Cells referencing zipf data must have _has_zipf guard."""
+        for i, ctype, cid, src in self.code_cells:
+            if ctype != 'code':
+                continue
+            if 'rw_zipf' in src and '_has_zipf' not in src and not src.strip().startswith('#'):
+                # Check it's not in a comment
+                for line in src.split('\n'):
+                    if 'rw_zipf' in line and not line.strip().startswith('#'):
+                        self.fail(f"Cell {i} references zipf data without _has_zipf guard")
+
+    def test_legacy_cells_are_raw(self):
+        """Cells after 'Everything below is not used' marker must be raw."""
+        found_marker = False
+        for i, ctype, cid, src in self.code_cells:
+            if 'Everything below is not used' in src:
+                found_marker = True
+                continue
+            if found_marker and ctype == 'code' and src.strip():
+                self.fail(f"Cell {i} is still executable code after legacy marker")
+
+    def test_contention_cells_have_guards(self):
+        """Cells referencing contention data must have _has_contention guard."""
+        for i, ctype, cid, src in self.code_cells:
+            if ctype != 'code':
+                continue
+            if 'contention_protocol_data' in src and 'for' in src:
+                if '_has_contention' not in src:
+                    self.fail(f"Cell {i} uses contention data without _has_contention guard")
+
+    def test_key_range_cells_have_guards(self):
+        """Cells that plot key range data must have _has_key_range guard."""
+        for i, ctype, cid, src in self.code_cells:
+            if ctype != 'code':
+                continue
+            # Only check cells that plot/iterate over key range data, not definitions
+            if '_has_key_range' in src or 'key_range' not in src.lower():
+                continue
+            # Look for data access patterns like data[...]['rw_10'] or looping over key ranges
+            if ('key_range' in src.lower() and ('plot' in src.lower() or 'axes' in src.lower()
+                    or 'savefig' in src)):
+                self.fail(f"Cell {i} plots key range data without _has_key_range guard")
+
+
 class TestResultFilePatterns(unittest.TestCase):
     """Verify result file naming matches what the notebook expects."""
 
