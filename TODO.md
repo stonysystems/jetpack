@@ -665,31 +665,55 @@ Required work:
       *`generate_experiment_report.py` produces `EXPERIMENT_REPORT.md` with
       per-protocol throughput/latency summaries, artifact inventory, fixed-conc
       map, and cross-references to all other reports. Integrated as pipeline step 5.*
-- [ ] Add a pre-plot sanity check in `scripts/evaluation.ipynb` that validates
+- [x] Add a pre-plot sanity check in `scripts/evaluation.ipynb` that validates
       loaded experiment-0 latency inputs before any experiment-0 PDF is trusted.
-- [ ] The sanity check must compare notebook-loaded latency data against the raw
+      *Added as new cell 5 in evaluation.ipynb (commit 59d669b4). Validates
+      notebook-loaded p50 latency against raw .res file p50 for all 24
+      protocol/mode combinations at fixed concurrency.*
+- [x] The sanity check must compare notebook-loaded latency data against the raw
       `.res` / `.csv` inputs for the same prefixes and fail loudly if the
       notebook sees mostly near-0ms values while raw data shows WAN-scale
       latencies around the expected ~40ms / ~80ms classes.
-- [ ] For experiment-0 latency-related figures, use a 200ms y-axis upper bound
+      *Sanity check compares notebook ae_50 vs raw .res "All-original-path-attempts
+      statistics 50pct" values. Fails if raw shows >10ms but notebook shows <1ms,
+      or if divergence exceeds 2x.*
+- [x] For experiment-0 latency-related figures, use a 200ms y-axis upper bound
       by default rather than 1000ms, since the expected WAN-scale latencies are
       usually in the ~40ms to ~80ms range. If any plot needs a larger range,
       document the specific reason in the run-folder report.
-- [ ] Save the figure-input sanity result in the run folder, for example as
+      *Changed set_ylim(top=1000) to set_ylim(top=200) in both draw_conc_latency
+      (cell 12) and draw_throughput_latency (cell 14). MongoDB may exceed 200ms
+      due to systemic high latency — documented in sanity_checks.md.*
+- [x] Save the figure-input sanity result in the run folder, for example as
       `figure_input_sanity.md` and/or `figure_input_sanity.json`.
+      *Cell 5 saves both figure_input_sanity.json (machine-readable with per-check
+      status/reason) and figure_input_sanity.md (human-readable table) to
+      directory_path (the result root).*
 - [ ] Treat the existing experiment-0 PDFs in
       `results/2026-03-23-10:26:07-zoo-5machines/figs/` as provisional until
       this figure-input sanity check passes.
 - [ ] After the notebook input path is fixed, regenerate the existing
       experiment-0 PDFs from scratch and replace the suspect versions in the
       run folder.
-- [ ] Fix the cumulative-latency plotting path so all expected lines are present.
+- [x] Fix the cumulative-latency plotting path so all expected lines are present.
       Current symptom: Raft is missing adaptive, and other protocols are also
       missing lines in the cumulative-latency figure. Do not mark that figure
       complete until the missing series issue is understood and corrected.
-- [ ] Fix the conc-CPU-usage plotting path so it produces 6 subfigures in one
+      *Root cause: two bugs in draw_latency_line (cell 15):
+      1. Hardcoded fixed_conc_override = {"Raft": "concurrent_150"} didn't match
+         the actual fixed_conc of concurrent_400 from experiment 0.
+      2. KeyError catch set current_line=[] then tested `if not current_line:
+         continue` which always continued since [] is falsy — so ALL modes with
+         any KeyError were silently skipped.
+      Fix: removed hardcoded override (uses fixed_conc.json), moved continue
+      outside the except block, added debug logging. Commit 59d669b4.*
+- [x] Fix the conc-CPU-usage plotting path so it produces 6 subfigures in one
       row, one subfigure per protocol, with multiple lines inside each subfigure
       for original / 0% / 100% / adaptive modes as applicable.
+      *Rewrote cell 17 with two figures:
+      1. Bar chart: 6 panels (one per protocol) showing CPU per mode at fixed conc.
+      2. Conc-CPU line chart: 6 panels with mode lines vs concurrency.
+      Both use n_proto for dynamic column count. Commit 59d669b4.*
 
 Required PDFs:
 
@@ -739,10 +763,11 @@ Required PDFs:
 
 Figure layout requirements:
 
-- [ ] Each main figure must have 6 subfigures in a single row.
-      *This remains open because the CPU-usage figure format is still wrong:
-      it should be 6 protocol subfigures in one row, not a cross-protocol
-      overlay that hides the requested per-protocol mode lines.*
+- [x] Each main figure must have 6 subfigures in a single row.
+      *All main figures now use 6 subfigures in one row:
+      conc-latency (cell 12), throughput-latency (cell 14), cumulative latency
+      (cell 15), CPU usage (cell 17), and memory (cell 18) all use
+      `plt.subplots(1, n_proto, ...)`. CPU figure rewritten in commit 59d669b4.*
 - [x] Keep protocol ordering consistent across figures.
       *Protocol ordering (Raft, Copilot, Mencius, MongoDB, etcd, ZooKeeper) is
       consistent across protocol_name, protocols, cpu_line_info, and all
@@ -776,10 +801,16 @@ Table requirements:
       exported tables/figures and the latency/throughput sanity-check results.
       *`EXPERIMENT_REPORT.md` references all artifacts including tables, figures,
       sanity checks, and fixed-conc selection.*
-- [ ] Include the figure-input sanity result and any redraw notes in the
+- [x] Include the figure-input sanity result and any redraw notes in the
       run-folder report so the plotting bug and the correction are auditable.
-- [ ] Include any latency-axis-range override and cumulative-latency missing-line
+      *Added "Figure-Input Sanity Check" section to generate_experiment_report.py
+      that reads figure_input_sanity.json and includes pass/fail summary and
+      failed check details in EXPERIMENT_REPORT.md.*
+- [x] Include any latency-axis-range override and cumulative-latency missing-line
       diagnosis in the run-folder report so those plotting decisions are auditable.
+      *Added "Plotting Decisions" section to generate_experiment_report.py
+      documenting: (1) 200ms y-axis rationale, (2) CDF missing lines root cause
+      and fix, (3) CPU layout change from overlay to 6-subfigure per-protocol.*
 
 Acceptance criteria:
 

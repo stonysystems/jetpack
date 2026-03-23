@@ -354,6 +354,68 @@ def generate_report(result_dir):
             lines.append(f"| {proto} | " + " | ".join(cells) + " |")
         lines.append("")
 
+    # Figure-input sanity check results
+    sanity_json_path = os.path.join(result_dir, "figure_input_sanity.json")
+    if os.path.isfile(sanity_json_path):
+        try:
+            with open(sanity_json_path) as f:
+                sanity_data = json.load(f)
+            lines.append("## Figure-Input Sanity Check")
+            lines.append("")
+            pc = sanity_data.get("pass_count", 0)
+            fc = sanity_data.get("fail_count", 0)
+            sc = sanity_data.get("skip_count", 0)
+            status_str = "PASS" if fc == 0 else "FAIL"
+            lines.append(f"**Overall**: {status_str} — {pc} passed, {fc} failed, {sc} skipped")
+            lines.append("")
+            lines.append("This check validates that notebook-loaded experiment-0 latency data")
+            lines.append("matches raw `.res` file data. A FAIL means the notebook sees near-0ms")
+            lines.append("values while raw data shows WAN-scale latencies (~40-80ms).")
+            lines.append("")
+            if fc > 0:
+                lines.append("**Failed checks**:")
+                lines.append("")
+                for r in sanity_data.get("results", []):
+                    if r.get("status") == "FAIL":
+                        lines.append(f"- {r['protocol']} {r['variant']}: {r['reason']}")
+                lines.append("")
+            lines.append(f"Full details: `figure_input_sanity.json` and `figure_input_sanity.md`")
+            lines.append("")
+        except (json.JSONDecodeError, KeyError):
+            pass
+    else:
+        lines.append("## Figure-Input Sanity Check")
+        lines.append("")
+        lines.append("**Status**: Not yet run. Run the evaluation pipeline to generate.")
+        lines.append("")
+
+    # Plotting decisions and fixes
+    lines.append("## Plotting Decisions")
+    lines.append("")
+    lines.append("The following plotting decisions and fixes are documented for auditability:")
+    lines.append("")
+    lines.append("1. **Latency y-axis upper bound**: Changed from 1000ms to **200ms** for")
+    lines.append("   experiment-0 latency plots (conc-latency and throughput-latency).")
+    lines.append("   Rationale: WAN-scale latencies are in the ~40-80ms range; 1000ms")
+    lines.append("   compressed the data into an unreadable bottom band.")
+    lines.append("   Exception: MongoDB may exceed 200ms due to systemic high latency —")
+    lines.append("   see `sanity_checks.md` for details.")
+    lines.append("")
+    lines.append("2. **Cumulative latency missing lines fix**: Two bugs caused missing CDF")
+    lines.append("   lines (including Raft adaptive):")
+    lines.append("   - Hardcoded `fixed_conc_override = {\"Raft\": \"concurrent_150\"}` did not")
+    lines.append("     match experiment-0 fixed concurrency (Raft = concurrent_400).")
+    lines.append("   - `except` handler set `current_line = []` then tested `if not current_line:`")
+    lines.append("     which always continued, silently dropping ALL modes with any KeyError.")
+    lines.append("   Fix: Removed override (uses fixed_conc.json), restructured error handling.")
+    lines.append("   Non-MongoDB x-axis tightened from 600ms to 200ms for WAN-scale data.")
+    lines.append("")
+    lines.append("3. **CPU usage figure layout**: Rewritten from single cross-protocol overlay")
+    lines.append("   to **6 subfigures in one row** (one per protocol). Each panel shows")
+    lines.append("   CPU usage per mode (vanilla/0%/adaptive/100%) as bars at fixed concurrency,")
+    lines.append("   plus a separate conc-CPU line chart with mode lines per protocol.")
+    lines.append("")
+
     # Artifacts inventory
     lines.append("## Artifacts")
     lines.append("")
@@ -361,6 +423,8 @@ def generate_report(result_dir):
         ("EXPERIMENT_REPORT.md", "This report"),
         ("SUMMARY.md", "Auto-generated progress summary"),
         ("sanity_checks.md", "Latency/throughput sanity check"),
+        ("figure_input_sanity.json", "Figure-input sanity check (machine-readable)"),
+        ("figure_input_sanity.md", "Figure-input sanity check (human-readable)"),
         ("fixed_conc_selection.md", "Fixed concurrency derivation"),
         ("LATENCY_MECHANISM.md", "WAN latency injection documentation"),
         ("evaluation_executed.ipynb", "Executed analysis notebook"),
