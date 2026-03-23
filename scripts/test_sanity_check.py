@@ -22,6 +22,7 @@ from sanity_check import (
     SERVERS,
     LEADER_SERVER,
     SITE,
+    PROTOCOL_LATENCY_MODEL,
 )
 
 
@@ -423,6 +424,101 @@ class TestGenerateReport(unittest.TestCase):
         ]
         report = generate_report(results, {}, "/tmp/test")
         self.assertIn("**Overall**: PARTIAL", report)
+
+
+class TestProtocolLatencyModel(unittest.TestCase):
+    """Test protocol-specific latency expectations."""
+
+    def test_all_protocols_have_models(self):
+        """Every protocol family must have a latency model."""
+        from sanity_check import PROTOCOL_FAMILIES
+        for family in PROTOCOL_FAMILIES:
+            self.assertIn(family, PROTOCOL_LATENCY_MODEL,
+                          f"Missing latency model for {family}")
+
+    def test_model_has_required_fields(self):
+        """Each model must have leader_rtt, follower_rtt, reason."""
+        for proto, model in PROTOCOL_LATENCY_MODEL.items():
+            self.assertIn("leader_rtt", model, f"{proto} missing leader_rtt")
+            self.assertIn("follower_rtt", model, f"{proto} missing follower_rtt")
+            self.assertIn("reason", model, f"{proto} missing reason")
+            self.assertIsInstance(model["leader_rtt"], (int, float))
+            self.assertIsInstance(model["follower_rtt"], (int, float))
+
+    def test_copilot_expects_2_rtt(self):
+        """Copilot (2-leader) should expect 2 RTT for both leader and follower."""
+        model = PROTOCOL_LATENCY_MODEL["copilot"]
+        self.assertEqual(model["leader_rtt"], 2)
+        self.assertEqual(model["follower_rtt"], 2)
+
+    def test_raft_single_leader_model(self):
+        """Raft (1-leader) should expect 1 RTT leader, 2 RTT follower."""
+        model = PROTOCOL_LATENCY_MODEL["raft"]
+        self.assertEqual(model["leader_rtt"], 1)
+        self.assertEqual(model["follower_rtt"], 2)
+
+    def test_mencius_multi_leader_model(self):
+        """Mencius (all-leader) should expect 1 RTT for both."""
+        model = PROTOCOL_LATENCY_MODEL["mencius"]
+        self.assertEqual(model["leader_rtt"], 1)
+        self.assertEqual(model["follower_rtt"], 1)
+
+    def test_copilot_2rtt_latency_passes(self):
+        """Copilot with ~82ms latency should pass (expected ~80ms = 2 RTT)."""
+        tmpdir = tempfile.mkdtemp()
+        try:
+            # Write Copilot mode 0 data: all servers ~82ms (2 RTT)
+            for srv in SERVERS:
+                fname = f"none_copilot-{SITE}-rw_1000000-concurrent_100-0-YCSB_A-{srv}.res"
+                with open(os.path.join(tmpdir, fname), 'w') as f:
+                    f.write(make_res_content(
+                        mid_throughput=500.0,
+                        original_count=1000, original_50pct=82.0,
+                        original_90pct=83.0, original_99pct=84.0,
+                        original_ave=82.0
+                    ))
+            results, _ = run_sanity_checks(tmpdir, wan_delay_ms=20)
+            copilot_leader = [r for r in results
+                              if "copilot" in r.name and "leader" in r.name]
+            self.assertTrue(len(copilot_leader) > 0)
+            self.assertTrue(copilot_leader[0].passed,
+                            f"Copilot 82ms should pass: {copilot_leader[0].expected}")
+            self.assertIn("80ms", copilot_leader[0].expected,
+                          "Expected should mention ~80ms (2 RTT)")
+        finally:
+            shutil.rmtree(tmpdir)
+
+    def test_copilot_1rtt_latency_fails(self):
+        """Copilot with ~20ms latency should fail (too low for 2 RTT)."""
+        tmpdir = tempfile.mkdtemp()
+        try:
+            for srv in SERVERS:
+                fname = f"none_copilot-{SITE}-rw_1000000-concurrent_10-0-YCSB_A-{srv}.res"
+                with open(os.path.join(tmpdir, fname), 'w') as f:
+                    f.write(make_res_content(
+                        mid_throughput=500.0,
+                        original_count=1000, original_50pct=20.0,
+                        original_90pct=25.0, original_99pct=30.0,
+                        original_ave=21.0
+                    ))
+            results, _ = run_sanity_checks(tmpdir, wan_delay_ms=20)
+            copilot_leader = [r for r in results
+                              if "copilot" in r.name and "leader" in r.name]
+            self.assertTrue(len(copilot_leader) > 0)
+            # 20ms is below 0.5 * 80ms = 40ms threshold
+            self.assertFalse(copilot_leader[0].passed,
+                             "Copilot 20ms should fail for 2-RTT protocol")
+        finally:
+            shutil.rmtree(tmpdir)
+
+    def test_report_has_per_protocol_table(self):
+        """Report should have protocol-specific expected latency table."""
+        results = [SanityResult("test", "e", "o", True)]
+        report = generate_report(results, {"raft": []}, "/tmp/test", wan_delay_ms=20)
+        self.assertIn("Copilot", report)
+        self.assertIn("Mencius", report)
+        self.assertIn("2 RTT", report)
+        self.assertIn("1 RTT", report)
 
 
 class TestWithRealData(unittest.TestCase):

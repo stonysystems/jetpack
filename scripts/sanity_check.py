@@ -39,6 +39,25 @@ PROTOCOL_FAMILIES = {
     "zookeeper":  {"none": "none_zookeeper",  "rule": "rule_zookeeper"},
 }
 
+# Protocol-specific latency characteristics in original (vanilla) mode.
+# leader_rtt: expected leader-colocated latency in multiples of RTT
+# follower_rtt: expected follower/non-leader latency in multiples of RTT
+# reason: protocol-specific explanation
+PROTOCOL_LATENCY_MODEL = {
+    "raft":       {"leader_rtt": 1, "follower_rtt": 2,
+                   "reason": "leader replicates in 1 RTT; follower forwards + replicates in 2 RTT"},
+    "copilot":    {"leader_rtt": 2, "follower_rtt": 2,
+                   "reason": "both pilots must agree (~2 RTT); all clients see ~2 RTT"},
+    "mencius":    {"leader_rtt": 1, "follower_rtt": 1,
+                   "reason": "multi-leader: each server commits locally in ~1 RTT"},
+    "mongodb":    {"leader_rtt": 1, "follower_rtt": 2,
+                   "reason": "single-leader like Raft; leader 1 RTT, follower 2 RTT"},
+    "etcd":       {"leader_rtt": 1, "follower_rtt": 2,
+                   "reason": "single-leader Raft-based; leader 1 RTT, follower 2 RTT"},
+    "zookeeper":  {"leader_rtt": 1, "follower_rtt": 2,
+                   "reason": "single-leader ZAB; leader 1 RTT, follower 2 RTT"},
+}
+
 # Mode codes
 MODE_ORIGINAL = "0"      # vanilla protocol
 MODE_RULE_100 = "1"      # Jetpack 100% fast-path
@@ -292,36 +311,33 @@ def run_sanity_checks(result_dir, wan_delay_ms=20):
                 )
 
                 if leader_lat is not None:
-                    # For original Raft: leader-colocated clients need 1 RTT for replication
-                    # Actually: all clients connect to the leader in Raft.
-                    # Clients on zoo0 (leader): local send + 1 RTT (replication) ≈ 40ms + overhead
-                    # Clients on other machines: 1 RTT (to leader) + 1 RTT (replication) ≈ 80ms + overhead
-                    # But in this setup, each process runs both server AND clients, with open-loop.
-                    # The latency reported per-process includes all clients of that process.
-                    # In open-loop, all clients send to their local proxy which forwards to leader.
-                    # So the zoo0 process's latency ≈ fewer network hops than others.
-
-                    expected_leader = f"~{rtt_ms}ms (1 RTT) + overhead"
+                    lat_model = PROTOCOL_LATENCY_MODEL.get(family_name, {"leader_rtt": 1, "follower_rtt": 2})
+                    leader_rtt_mult = lat_model["leader_rtt"]
+                    expected_ms = rtt_ms * leader_rtt_mult
+                    expected_leader = f"~{expected_ms:.0f}ms ({leader_rtt_mult} RTT) + overhead"
                     observed_leader = f"{leader_lat:.1f}ms"
-                    # Reasonable if within 0.5*RTT to 3*RTT
-                    leader_ok = rtt_ms * 0.5 <= leader_lat <= rtt_ms * 4
+                    # Reasonable if within 0.5x to 3x of expected
+                    leader_ok = expected_ms * 0.5 <= leader_lat <= expected_ms * 3
                     results.append(SanityResult(
                         f"{family_name} original: leader (zoo0) p50 latency @ {mod_conc}",
                         expected_leader,
                         observed_leader,
                         leader_ok,
-                        f"throughput={orig_tp:.0f} txn/s" + (
+                        f"throughput={orig_tp:.0f} txn/s ({lat_model['reason']})" + (
                             "" if leader_ok else
-                            f" WARNING: expected {rtt_ms*0.5:.0f}-{rtt_ms*4:.0f}ms"
+                            f" WARNING: expected {expected_ms*0.5:.0f}-{expected_ms*3:.0f}ms"
                         )
                     ))
                     family_results.append(("leader_lat", leader_lat))
 
                 if avg_follower is not None:
-                    expected_follower = f"~{rtt_ms*2}ms (2 RTT) + overhead"
+                    lat_model = PROTOCOL_LATENCY_MODEL.get(family_name, {"leader_rtt": 1, "follower_rtt": 2})
+                    follower_rtt_mult = lat_model["follower_rtt"]
+                    expected_ms = rtt_ms * follower_rtt_mult
+                    expected_follower = f"~{expected_ms:.0f}ms ({follower_rtt_mult} RTT) + overhead"
                     observed_follower = f"{avg_follower:.1f}ms (followers avg)"
-                    # Reasonable if within 1*RTT to 4*RTT
-                    follower_ok = rtt_ms * 0.5 <= avg_follower <= rtt_ms * 5
+                    # Reasonable if within 0.5x to 3x of expected
+                    follower_ok = expected_ms * 0.5 <= avg_follower <= expected_ms * 3
                     results.append(SanityResult(
                         f"{family_name} original: follower avg p50 latency @ {mod_conc}",
                         expected_follower,
@@ -424,12 +440,16 @@ def generate_report(results, protocol_summaries, result_dir, wan_delay_ms=20):
     lines.append(f"- Mechanism: Application-level delay via `_wan_wait()` in communicator.h")
     lines.append(f"- Leader: {LEADER_SERVER} (loc_id=0, 130.245.173.101)\n")
 
-    lines.append("\n## Expected Latency Patterns\n")
-    lines.append(f"| Mode | Leader-colocated | Non-leader-colocated |")
-    lines.append(f"|------|-----------------|---------------------|")
-    lines.append(f"| Original | ~{rtt_ms}ms (1 RTT) + overhead | ~{rtt_ms*2}ms (2 RTT) + overhead |")
-    lines.append(f"| Jetpack rule | ~{rtt_ms}ms (1 RTT) | ~{rtt_ms}ms (1 RTT) |")
-    lines.append(f"| Jetpack adaptive | between original and rule | between original and rule |\n")
+    lines.append("\n## Expected Latency Patterns (Original Mode)\n")
+    lines.append(f"| Protocol | Leader-colocated | Non-leader | Reason |")
+    lines.append(f"|----------|-----------------|------------|--------|")
+    for family_name, lat_model in PROTOCOL_LATENCY_MODEL.items():
+        lr = lat_model["leader_rtt"]
+        fr = lat_model["follower_rtt"]
+        lines.append(f"| {family_name.title()} | ~{rtt_ms*lr}ms ({lr} RTT) | ~{rtt_ms*fr}ms ({fr} RTT) | {lat_model['reason']} |")
+    lines.append("")
+    lines.append(f"**Jetpack rule mode**: ~{rtt_ms}ms (1 RTT) for all clients (fast-path bypass)")
+    lines.append(f"**Jetpack adaptive**: between original and rule mode\n")
 
     lines.append("\n## Per-Check Results\n")
     lines.append("| # | Check | Expected | Observed | Status | Note |")
@@ -459,9 +479,10 @@ def generate_report(results, protocol_summaries, result_dir, wan_delay_ms=20):
     lines.append("\n\n## Interpretation Notes\n")
     lines.append("""
 - Latency checks use the concurrency level that maximizes original-mode throughput.
-- \"Leader-colocated\" means clients running on the same machine as the Raft/protocol leader.
-- For Raft: leader is at loc_id=0 (zoo0). Clients on zoo0 skip one network hop.
-- Tolerance is generous (0.5x-4x expected) to account for queuing at high concurrency.
+- \"Leader-colocated\" means clients running on the same machine as the protocol leader (zoo0).
+- Expected RTTs are protocol-specific (see table above): Copilot needs 2 RTT for cross-pilot
+  agreement; Mencius achieves 1 RTT for all servers as a multi-leader protocol.
+- Tolerance is 0.5x-3x of protocol-specific expected value to allow for processing overhead.
 - Adaptive mode throughput should be in the same ballpark as original mode at the same concurrency.
 - If a protocol shows no data, it means experiment 0 hasn't completed for that family yet.
 """)
