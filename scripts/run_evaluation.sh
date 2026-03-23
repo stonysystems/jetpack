@@ -19,6 +19,7 @@
 # 4. Saves the executed notebook as <result_dir>/evaluation_executed.ipynb
 # 5. Exports figures to <result_dir>/figs/ and tables to <result_dir>/tables/
 # 6. Generates SUMMARY.md in the result folder
+# 7. Generates EXPERIMENT_REPORT.md with per-protocol analysis
 
 set -euo pipefail
 
@@ -107,7 +108,12 @@ echo ""
 echo "--- Step 4: Generating SUMMARY.md ---"
 python3 "$SCRIPT_DIR/generate_summary.py" "$RESULT_DIR"
 
-# Step 5: Final summary
+# Step 5: Generate EXPERIMENT_REPORT.md
+echo ""
+echo "--- Step 5: Generating EXPERIMENT_REPORT.md ---"
+python3 "$SCRIPT_DIR/generate_experiment_report.py" "$RESULT_DIR"
+
+# Step 6: Final summary
 echo ""
 echo "--- Results ---"
 echo "Executed notebook: $OUTPUT_NB"
@@ -115,6 +121,7 @@ echo "Figures:           $RESULT_DIR/figs/"
 echo "Tables:            $RESULT_DIR/tables/"
 echo "Sanity checks:     $RESULT_DIR/sanity_checks.md"
 echo "Summary:           $RESULT_DIR/SUMMARY.md"
+echo "Experiment report: $RESULT_DIR/EXPERIMENT_REPORT.md"
 
 fig_count=$(ls "$RESULT_DIR/figs/"*.pdf 2>/dev/null | wc -l)
 table_count=$(ls "$RESULT_DIR/tables/"* 2>/dev/null | wc -l)

@@ -634,10 +634,15 @@ Required work:
 - [x] Save tables under:
       `/home/users/ztang/janus/results/<date>-<time>-zoo-5machines/tables`
       *tables_folder now points to result_root/tables/. os.makedirs with exist_ok.*
-- [ ] Save an executed notebook copy or equivalent durable analysis artifact
+- [x] Save an executed notebook copy or equivalent durable analysis artifact
       under the result root.
-- [ ] Save experiment-related reports in the same result folder as the logs,
+      *Pipeline step 3 in `run_evaluation.sh` saves `evaluation_executed.ipynb`
+      in the result directory via `jupyter nbconvert --execute`.*
+- [x] Save experiment-related reports in the same result folder as the logs,
       not only in `docs/` or only in notebook output cells.
+      *`generate_experiment_report.py` produces `EXPERIMENT_REPORT.md` with
+      per-protocol throughput/latency summaries, artifact inventory, fixed-conc
+      map, and cross-references to all other reports. Integrated as pipeline step 5.*
 
 Required PDFs:
 
