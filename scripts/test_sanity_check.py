@@ -16,6 +16,7 @@ from sanity_check import (
     find_moderate_conc,
     check_wan_delay,
     compute_latency_stats,
+    compute_path_usage,
     run_sanity_checks,
     generate_report,
     SanityResult,
@@ -519,6 +520,142 @@ class TestProtocolLatencyModel(unittest.TestCase):
         self.assertIn("Mencius", report)
         self.assertIn("2 RTT", report)
         self.assertIn("1 RTT", report)
+
+
+class TestComputePathUsage(unittest.TestCase):
+    """Test compute_path_usage function."""
+
+    def test_basic_path_usage(self):
+        """Should count fast, original, and efficient path attempts."""
+        server_data = {
+            "zoo0": {
+                "fast_path": {"count": 100, "50pct": 40.0, "90pct": 45.0, "99pct": 50.0, "0pct": 38.0, "ave": 41.0},
+                "original_path": {"count": 200, "50pct": 80.0, "90pct": 85.0, "99pct": 90.0, "0pct": 75.0, "ave": 81.0},
+                "efficient_path": {"count": 300, "50pct": 42.0, "90pct": 45.0, "99pct": 48.0, "0pct": 40.0, "ave": 43.0},
+            },
+            "zoo1": {
+                "fast_path": {"count": 150, "50pct": 41.0, "90pct": 46.0, "99pct": 51.0, "0pct": 39.0, "ave": 42.0},
+                "original_path": {"count": 250, "50pct": 82.0, "90pct": 87.0, "99pct": 92.0, "0pct": 77.0, "ave": 83.0},
+                "efficient_path": {"count": 350, "50pct": 43.0, "90pct": 46.0, "99pct": 49.0, "0pct": 41.0, "ave": 44.0},
+            },
+        }
+        usage = compute_path_usage(server_data)
+        self.assertEqual(usage["fast_count"], 250)
+        self.assertEqual(usage["original_count"], 450)
+        self.assertEqual(usage["efficient_count"], 650)
+        self.assertAlmostEqual(usage["avg_original_lat"], 81.0, places=0)
+        self.assertAlmostEqual(usage["avg_efficient_lat"], 42.5, places=0)
+
+    def test_zero_fast_path(self):
+        """Should handle zero fast-path attempts correctly."""
+        server_data = {
+            "zoo0": {
+                "fast_path": {"count": 0, "50pct": -1.0, "90pct": -1.0, "99pct": -1.0, "0pct": -1.0, "ave": -1.0},
+                "original_path": {"count": 500, "50pct": 19127.0, "90pct": 19138.0, "99pct": 19143.0, "0pct": 18823.0, "ave": 18993.0},
+                "efficient_path": {"count": 500, "50pct": 19127.0, "90pct": 19138.0, "99pct": 19143.0, "0pct": 18823.0, "ave": 18993.0},
+            },
+        }
+        usage = compute_path_usage(server_data)
+        self.assertEqual(usage["fast_count"], 0)
+        self.assertEqual(usage["original_count"], 500)
+        self.assertAlmostEqual(usage["avg_original_lat"], 19127.0, places=0)
+
+    def test_missing_paths(self):
+        """Should handle missing path data gracefully."""
+        server_data = {
+            "zoo0": {
+                "original_path": None,
+                "fast_path": None,
+                "efficient_path": None,
+            },
+        }
+        usage = compute_path_usage(server_data)
+        self.assertEqual(usage["fast_count"], 0)
+        self.assertEqual(usage["original_count"], 0)
+        self.assertEqual(usage["efficient_count"], 0)
+        self.assertIsNone(usage["avg_original_lat"])
+        self.assertIsNone(usage["avg_efficient_lat"])
+
+
+class TestAdaptiveAnomaly(unittest.TestCase):
+    """Test detection and reporting of adaptive mode anomalies."""
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp()
+
+    def tearDown(self):
+        shutil.rmtree(self.tmpdir)
+
+    def test_adaptive_anomaly_includes_diagnostics(self):
+        """When adaptive throughput is catastrophically low, note should include path-usage."""
+        # Write original mode (high throughput)
+        for srv in SERVERS:
+            fname = f"none_raft-{SITE}-rw_1000000-concurrent_100-0-YCSB_A-{srv}.res"
+            with open(os.path.join(self.tmpdir, fname), 'w') as f:
+                f.write(make_res_content(mid_throughput=1000.0))
+        # Write adaptive mode (extremely low throughput, zero fast-path)
+        for srv in SERVERS:
+            fname = f"rule_raft-{SITE}-rw_1000000-concurrent_100-101-YCSB_A-{srv}.res"
+            with open(os.path.join(self.tmpdir, fname), 'w') as f:
+                f.write(make_res_content(
+                    mid_throughput=10.0,
+                    original_count=50, original_50pct=19000.0,
+                    original_90pct=19100.0, original_99pct=19200.0,
+                    original_ave=19000.0,
+                    fast_count=0, fast_50pct=-1.0
+                ))
+        results, summaries = run_sanity_checks(self.tmpdir, wan_delay_ms=20)
+        adaptive_results = [r for r in results if "adaptive" in r.name.lower()]
+        self.assertTrue(len(adaptive_results) > 0)
+        self.assertFalse(adaptive_results[0].passed)
+        # Should have path-usage diagnostics in the note
+        self.assertIn("fast=0", adaptive_results[0].note)
+        self.assertIn("original=", adaptive_results[0].note)
+        self.assertIn("DIAGNOSTIC: zero fast-path", adaptive_results[0].note)
+
+    def test_adaptive_anomaly_in_report(self):
+        """Report should contain Flagged Anomalies section for catastrophic failures."""
+        # Write original mode
+        for srv in SERVERS:
+            fname = f"none_raft-{SITE}-rw_1000000-concurrent_100-0-YCSB_A-{srv}.res"
+            with open(os.path.join(self.tmpdir, fname), 'w') as f:
+                f.write(make_res_content(mid_throughput=1000.0))
+        # Write adaptive mode with anomaly
+        for srv in SERVERS:
+            fname = f"rule_raft-{SITE}-rw_1000000-concurrent_100-101-YCSB_A-{srv}.res"
+            with open(os.path.join(self.tmpdir, fname), 'w') as f:
+                f.write(make_res_content(
+                    mid_throughput=10.0,
+                    original_count=50, original_50pct=19000.0,
+                    fast_count=0, fast_50pct=-1.0,
+                    efficient_count=50, efficient_50pct=19000.0
+                ))
+        results, summaries = run_sanity_checks(self.tmpdir, wan_delay_ms=20)
+        report = generate_report(results, summaries, self.tmpdir, wan_delay_ms=20)
+        self.assertIn("Flagged Anomalies", report)
+        self.assertIn("Adaptive Mode Throughput Anomaly", report)
+        self.assertIn("Fast-path attempts", report)
+        self.assertIn("Zero fast-path attempts", report)
+
+    def test_normal_adaptive_no_anomaly_section(self):
+        """Report should NOT have anomaly section when adaptive is fine."""
+        # Write original mode
+        for srv in SERVERS:
+            fname = f"none_raft-{SITE}-rw_1000000-concurrent_100-0-YCSB_A-{srv}.res"
+            with open(os.path.join(self.tmpdir, fname), 'w') as f:
+                f.write(make_res_content(mid_throughput=1000.0))
+        # Write adaptive mode with normal throughput
+        for srv in SERVERS:
+            fname = f"rule_raft-{SITE}-rw_1000000-concurrent_100-101-YCSB_A-{srv}.res"
+            with open(os.path.join(self.tmpdir, fname), 'w') as f:
+                f.write(make_res_content(
+                    mid_throughput=950.0,
+                    original_count=500, original_50pct=80.0,
+                    efficient_count=500, efficient_50pct=42.0
+                ))
+        results, summaries = run_sanity_checks(self.tmpdir, wan_delay_ms=20)
+        report = generate_report(results, summaries, self.tmpdir, wan_delay_ms=20)
+        self.assertNotIn("Flagged Anomalies", report)
 
 
 class TestWithRealData(unittest.TestCase):

@@ -263,6 +263,47 @@ class SanityResult:
         self.note = note
 
 
+def compute_path_usage(server_data):
+    """
+    Compute fast-path vs original-path usage stats from server data.
+
+    Returns dict with:
+        fast_count: total fast-path attempts across servers
+        original_count: total original-path attempts across servers
+        efficient_count: total efficient-path attempts across servers
+        avg_original_lat: average original-path p50 latency (ms)
+        avg_efficient_lat: average efficient-path p50 latency (ms)
+    """
+    fast_count = 0
+    original_count = 0
+    efficient_count = 0
+    original_lats = []
+    efficient_lats = []
+
+    for server, sd in server_data.items():
+        fp = sd.get("fast_path")
+        op = sd.get("original_path")
+        ep = sd.get("efficient_path")
+        if fp and fp["count"] > 0:
+            fast_count += fp["count"]
+        if op and op["count"] > 0:
+            original_count += op["count"]
+            if op["50pct"] > 0:
+                original_lats.append(op["50pct"])
+        if ep and ep["count"] > 0:
+            efficient_count += ep["count"]
+            if ep["50pct"] > 0:
+                efficient_lats.append(ep["50pct"])
+
+    return {
+        "fast_count": fast_count,
+        "original_count": original_count,
+        "efficient_count": efficient_count,
+        "avg_original_lat": (sum(original_lats) / len(original_lats)) if original_lats else None,
+        "avg_efficient_lat": (sum(efficient_lats) / len(efficient_lats)) if efficient_lats else None,
+    }
+
+
 def run_sanity_checks(result_dir, wan_delay_ms=20):
     """Run all sanity checks. Returns (list[SanityResult], summary_dict)."""
     rtt_ms = wan_delay_ms * 2  # 40ms for 20ms one-way
@@ -392,14 +433,43 @@ def run_sanity_checks(result_dir, wan_delay_ms=20):
                 expected_adaptive = f"within 0.5x-2.0x of original ({orig_tp:.0f} txn/s)"
                 observed_adaptive = f"{adaptive_tp:.0f} txn/s ({ratio:.2f}x of original)"
                 adaptive_ok = 0.3 <= ratio <= 2.5
+
+                # Build diagnostic note for failures
+                diag_note = ""
+                if not adaptive_ok:
+                    diag_note = "WARNING: throughput significantly different from original"
+                    # Add path-usage diagnostics
+                    adaptive_server_data = get_latency_for_conc(
+                        data, rule_proto, mod_conc, MODE_ADAPTIVE
+                    )
+                    if adaptive_server_data:
+                        usage = compute_path_usage(adaptive_server_data)
+                        diag_note += (
+                            f" | path-usage: fast={usage['fast_count']}"
+                            f", original={usage['original_count']}"
+                            f", efficient={usage['efficient_count']}"
+                        )
+                        if usage["avg_original_lat"] is not None:
+                            diag_note += f" | original-path p50={usage['avg_original_lat']:.1f}ms"
+                        if usage["fast_count"] == 0:
+                            diag_note += " | DIAGNOSTIC: zero fast-path attempts in adaptive mode"
+
                 results.append(SanityResult(
                     f"{family_name} adaptive: throughput @ {mod_conc}",
                     expected_adaptive,
                     observed_adaptive,
                     adaptive_ok,
-                    "" if adaptive_ok else "WARNING: throughput significantly different from original"
+                    diag_note
                 ))
                 family_results.append(("adaptive_ratio", ratio))
+
+                # Store path usage for report if anomalous
+                if not adaptive_ok and adaptive_server_data:
+                    family_results.append(("adaptive_anomaly", {
+                        "throughput": adaptive_tp,
+                        "ratio": ratio,
+                        "path_usage": compute_path_usage(adaptive_server_data),
+                    }))
 
         if not has_data:
             results.append(SanityResult(
@@ -457,7 +527,7 @@ def generate_report(results, protocol_summaries, result_dir, wan_delay_ms=20):
     for i, r in enumerate(results, 1):
         status = "PASS" if r.passed else "FAIL"
         icon = "+" if r.passed else "-"
-        note = r.note[:80] if r.note else ""
+        note = r.note[:120] if r.note else ""
         lines.append(f"| {i} | {r.name} | {r.expected} | {r.observed} | {icon} {status} | {note} |")
 
     lines.append("\n\n## Protocol-Level Summary\n")
@@ -475,6 +545,38 @@ def generate_report(results, protocol_summaries, result_dir, wan_delay_ms=20):
                 lines.append(f"- Rule mode avg p50 latency: {value:.1f}ms")
             elif check_type == "adaptive_ratio":
                 lines.append(f"- Adaptive throughput ratio vs original: {value:.2f}x")
+            elif check_type == "adaptive_anomaly":
+                # Don't duplicate ratio line, just add diagnostic detail
+                pass
+
+    # --- Flagged Anomalies section ---
+    anomalies = []
+    for family, checks in protocol_summaries.items():
+        for check_type, value in checks:
+            if check_type == "adaptive_anomaly":
+                anomalies.append((family, value))
+
+    if anomalies:
+        lines.append("\n\n## Flagged Anomalies\n")
+        lines.append("These failures require investigation or a protocol-specific explanation.\n")
+        for family, info in anomalies:
+            usage = info["path_usage"]
+            lines.append(f"\n### {family.title()} — Adaptive Mode Throughput Anomaly\n")
+            lines.append(f"- **Throughput**: {info['throughput']:.0f} txn/s ({info['ratio']:.2f}x of original)")
+            lines.append(f"- **Fast-path attempts**: {usage['fast_count']}")
+            lines.append(f"- **Original-path attempts**: {usage['original_count']}")
+            lines.append(f"- **Efficient-path attempts**: {usage['efficient_count']}")
+            if usage["avg_original_lat"] is not None:
+                lines.append(f"- **Original-path p50 latency**: {usage['avg_original_lat']:.1f}ms")
+            if usage["avg_efficient_lat"] is not None:
+                lines.append(f"- **Efficient-path p50 latency**: {usage['avg_efficient_lat']:.1f}ms")
+            if usage["fast_count"] == 0:
+                lines.append(f"\n**Diagnosis**: Zero fast-path attempts in adaptive mode. "
+                             f"The adaptive algorithm never activated the Jetpack fast path "
+                             f"for {family.title()}. All requests went through the original "
+                             f"protocol path, but with anomalously high latency. This suggests "
+                             f"a potential issue with the adaptive controller for this protocol.")
+            lines.append("")
 
     lines.append("\n\n## Interpretation Notes\n")
     lines.append("""
