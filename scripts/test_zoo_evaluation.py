@@ -334,6 +334,119 @@ class TestNotebookDataGuards(unittest.TestCase):
                 self.fail(f"Cell {i} plots key range data without _has_key_range guard")
 
 
+class TestFigureLayout(unittest.TestCase):
+    """Verify figure layout requirements for Zoo 5-machine evaluation."""
+
+    @classmethod
+    def setUpClass(cls):
+        nb_path = os.path.join(SCRIPT_DIR, "evaluation.ipynb")
+        with open(nb_path) as f:
+            cls.nb = json.load(f)
+        cls.code_cells = {}
+        for i, cell in enumerate(cls.nb['cells']):
+            src = ''.join(cell['source'])
+            cls.code_cells[i] = (cell.get('cell_type', ''), src)
+
+    def test_site_tag_defined(self):
+        """Cell 2 must define site_tag variable for figure filenames."""
+        _, src = self.code_cells[2]
+        self.assertIn('site_tag', src, "Cell 2 missing site_tag definition")
+
+    def test_savefig_includes_site_tag(self):
+        """All savefig calls in active cells must include site_tag."""
+        for i in range(33):  # active cells only
+            ctype, src = self.code_cells[i]
+            if ctype != 'code':
+                continue
+            for line in src.split('\n'):
+                if 'savefig' in line and not line.strip().startswith('#'):
+                    # If it saves to a variable (filename, save_path, etc.)
+                    # the variable should have been constructed with site_tag
+                    if 'target_folder' in line or '.pdf' in line:
+                        self.assertIn('site_tag', line,
+                                      f"Cell {i} savefig missing site_tag: {line.strip()[:80]}")
+
+    def test_figure_variable_paths_include_site_tag(self):
+        """Figure output path variables must include site_tag."""
+        # Check known figure-path variable assignments
+        path_vars = ['filename =', 'throughput_fig =', 'dispatch_fig =',
+                     'overlay_fig =', 'save_path=']
+        for i in range(33):
+            ctype, src = self.code_cells[i]
+            if ctype != 'code':
+                continue
+            for line in src.split('\n'):
+                stripped = line.strip()
+                if stripped.startswith('#'):
+                    continue
+                if any(pv in stripped for pv in path_vars) and '.pdf' in stripped:
+                    self.assertIn('site_tag', stripped,
+                                  f"Cell {i} figure path missing site_tag: {stripped[:80]}")
+
+    def test_main_subplot_cells_use_n_proto(self):
+        """Main figure cells must use dynamic n_proto for ncols."""
+        for i in [11, 12, 13, 17]:
+            _, src = self.code_cells[i]
+            if 'subplots' in src:
+                self.assertIn('n_proto', src,
+                              f"Cell {i} subplots should use n_proto for ncols")
+                self.assertNotIn('ncols=4', src,
+                                 f"Cell {i} has hardcoded ncols=4")
+
+    def test_cpu_cell_uses_dynamic_ncols(self):
+        """Cell 16 must use dynamic ncols for workload count."""
+        _, src = self.code_cells[16]
+        self.assertNotIn('ncols=2,', src,
+                         "Cell 16 has hardcoded ncols=2")
+        self.assertIn('len(workloads)', src,
+                      "Cell 16 should use len(workloads) for dynamic ncols")
+
+    def test_protocol_ordering_consistent(self):
+        """Protocol ordering in cpu_line_info must match protocol_name."""
+        _, src2 = self.code_cells[2]
+        _, src16 = self.code_cells[16]
+
+        # Extract protocol_name order
+        proto_names = []
+        in_array = False
+        for line in src2.split('\n'):
+            if 'protocol_name = [' in line:
+                in_array = True
+                continue
+            if in_array:
+                if ']' in line:
+                    break
+                name = line.strip().strip('",')
+                if name:
+                    proto_names.append(name.lower())
+
+        # Extract cpu_line_info order
+        cpu_names = []
+        in_array = False
+        for line in src16.split('\n'):
+            if 'cpu_line_info = [' in line:
+                in_array = True
+                continue
+            if in_array:
+                if line.strip() == ']':
+                    break
+                if '"' in line:
+                    import re
+                    m = re.search(r'"(\w+)"', line)
+                    if m:
+                        cpu_names.append(m.group(1).lower())
+
+        self.assertEqual(proto_names, cpu_names,
+                         "Protocol ordering mismatch between protocol_name and cpu_line_info")
+
+    def test_latency_cumulative_uses_dynamic_ncols(self):
+        """Cell 14 subplots must use dynamic column count."""
+        _, src = self.code_cells[14]
+        if 'subplots' in src:
+            self.assertNotIn('ncols=4', src,
+                             "Cell 14 has hardcoded ncols=4")
+
+
 class TestResultFilePatterns(unittest.TestCase):
     """Verify result file naming matches what the notebook expects."""
 

@@ -663,9 +663,17 @@ Required PDFs:
 
 Figure layout requirements:
 
-- [ ] Each main figure must have 6 subfigures in a single row.
-- [ ] Keep protocol ordering consistent across figures.
-- [ ] Figure filenames must include the site config string.
+- [x] Each main figure must have 6 subfigures in a single row.
+      *Cells 11, 12, 13, 17 use `n_proto` for ncols (dynamic 6-column layout).
+      Cell 16 (CPU overlay) uses `len(workloads)` for ncols with all 6 protocols
+      as overlaid lines. Cell 14 uses `len(latency_data)` for ncols.*
+- [x] Keep protocol ordering consistent across figures.
+      *Protocol ordering (Raft, Copilot, Mencius, MongoDB, etcd, ZooKeeper) is
+      consistent across protocol_name, protocols, cpu_line_info, and all
+      protocol_data list comprehensions.*
+- [x] Figure filenames must include the site config string.
+      *Added `site_tag = sites[0]` variable. All savefig calls and figure path
+      variables now include `{site_tag}_` prefix (e.g., `30c1s5r5p-zoo_conc_latency_...pdf`).*
 
 Recovery figure requirements:
 
