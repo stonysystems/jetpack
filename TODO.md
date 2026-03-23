@@ -33,6 +33,8 @@ any future agent. It is not a live execution transcript.
 7. Update the analysis/export flow centered on `scripts/evaluation.ipynb` so it
    can consume the new 5-machine result set, handle 6 protocol families, and
    export the requested tables and PDFs under the new result root.
+8. Add a figure-input sanity check before drawing experiment-0 figures and redo
+   the current suspect experiment-0 PDFs if the notebook input path is wrong.
 
 ## Canonical Artifact Roots
 
@@ -79,6 +81,11 @@ any future agent. It is not a live execution transcript.
 - `scripts/evaluation.ipynb` still hard-codes a historical result folder,
   historical contention dataset paths, and result-file host-count assumptions
   that do not match the requested 5-machine Zoo run.
+- The current experiment-0 figure set under
+  `results/2026-03-23-10:26:07-zoo-5machines/figs/` is suspect because many raw
+  Zoo result files show WAN-scale latencies around ~40ms / ~80ms while several
+  plotted figures appear mostly near 0ms. Treat those PDFs as provisional until
+  notebook input-data sanity checks and redraw are complete.
 - For the requested Zoo multi-machine task, host-level `tc` is not the intended
   mechanism because sudo permission is not available. The WAN model for this
   track must be implemented at the Docker/container level with 20ms one-way
@@ -658,33 +665,73 @@ Required work:
       *`generate_experiment_report.py` produces `EXPERIMENT_REPORT.md` with
       per-protocol throughput/latency summaries, artifact inventory, fixed-conc
       map, and cross-references to all other reports. Integrated as pipeline step 5.*
+- [ ] Add a pre-plot sanity check in `scripts/evaluation.ipynb` that validates
+      loaded experiment-0 latency inputs before any experiment-0 PDF is trusted.
+- [ ] The sanity check must compare notebook-loaded latency data against the raw
+      `.res` / `.csv` inputs for the same prefixes and fail loudly if the
+      notebook sees mostly near-0ms values while raw data shows WAN-scale
+      latencies around the expected ~40ms / ~80ms classes.
+- [ ] For experiment-0 latency-related figures, use a 200ms y-axis upper bound
+      by default rather than 1000ms, since the expected WAN-scale latencies are
+      usually in the ~40ms to ~80ms range. If any plot needs a larger range,
+      document the specific reason in the run-folder report.
+- [ ] Save the figure-input sanity result in the run folder, for example as
+      `figure_input_sanity.md` and/or `figure_input_sanity.json`.
+- [ ] Treat the existing experiment-0 PDFs in
+      `results/2026-03-23-10:26:07-zoo-5machines/figs/` as provisional until
+      this figure-input sanity check passes.
+- [ ] After the notebook input path is fixed, regenerate the existing
+      experiment-0 PDFs from scratch and replace the suspect versions in the
+      run folder.
+- [ ] Fix the cumulative-latency plotting path so all expected lines are present.
+      Current symptom: Raft is missing adaptive, and other protocols are also
+      missing lines in the cumulative-latency figure. Do not mark that figure
+      complete until the missing series issue is understood and corrected.
+- [ ] Fix the conc-CPU-usage plotting path so it produces 6 subfigures in one
+      row, one subfigure per protocol, with multiple lines inside each subfigure
+      for original / 0% / 100% / adaptive modes as applicable.
 
 Required PDFs:
 
-- [x] conc-50th latency
-      *Generated: `figs/30c1s5r5p-zoo_conc_latency_rw_1000000_YCSB_A_ae_50.pdf`*
-- [x] conc-90th latency
-      *Generated: `figs/30c1s5r5p-zoo_conc_latency_rw_1000000_YCSB_A_ae_90.pdf`*
-- [x] conc-99th latency
-      *Generated: `figs/30c1s5r5p-zoo_conc_latency_rw_1000000_YCSB_A_ae_99.pdf`*
-- [x] conc-average latency
-      *Generated: `figs/30c1s5r5p-zoo_conc_latency_rw_1000000_YCSB_A_ae_ave.pdf`*
-- [x] conc-CPU usage
-      *Generated: `figs/30c1s5r5p-zoo_conc_latency_rw_1000000_YCSB_A_cpu_usage.pdf`*
-- [x] throughput-50th latency
-      *Generated: `figs/30c1s5r5p-zoo_throughput_latency_rw_1000000_YCSB_A_ae_50.pdf`*
-- [x] throughput-90th latency
-      *Generated: `figs/30c1s5r5p-zoo_throughput_latency_rw_1000000_YCSB_A_ae_90.pdf`*
-- [x] throughput-99th latency
-      *Generated: `figs/30c1s5r5p-zoo_throughput_latency_rw_1000000_YCSB_A_ae_99.pdf`*
-- [x] throughput-average latency
-      *Generated: `figs/30c1s5r5p-zoo_throughput_latency_rw_1000000_YCSB_A_ae_ave.pdf`*
-- [x] throughput-CPU usage
-      *Generated: `figs/30c1s5r5p-zoo_cpu_usage_ave.pdf`*
-- [x] latency-cumulative fraction for a fixed conc for each protocol
-      *Generated: `figs/30c1s5r5p-zoo_latency_cumulative_rw_1000000_print.pdf`*
-- [x] conc-memory
-      *Generated: `figs/30c1s5r5p-zoo_memory_usage_conc_30c1s5r5p-zoo.pdf`*
+- [ ] conc-50th latency
+      *Current PDF exists but is suspect until figure-input sanity passes:
+      `figs/30c1s5r5p-zoo_conc_latency_rw_1000000_YCSB_A_ae_50.pdf`*
+- [ ] conc-90th latency
+      *Current PDF exists but is suspect until figure-input sanity passes:
+      `figs/30c1s5r5p-zoo_conc_latency_rw_1000000_YCSB_A_ae_90.pdf`*
+- [ ] conc-99th latency
+      *Current PDF exists but is suspect until figure-input sanity passes:
+      `figs/30c1s5r5p-zoo_conc_latency_rw_1000000_YCSB_A_ae_99.pdf`*
+- [ ] conc-average latency
+      *Current PDF exists but is suspect until figure-input sanity passes:
+      `figs/30c1s5r5p-zoo_conc_latency_rw_1000000_YCSB_A_ae_ave.pdf`*
+- [ ] conc-CPU usage
+      *Current PDF exists but is not accepted yet. The figure must be redrawn as
+      6 subfigures in one row, one protocol per subfigure, with multiple mode
+      lines inside each panel:
+      `figs/30c1s5r5p-zoo_conc_latency_rw_1000000_YCSB_A_cpu_usage.pdf`*
+- [ ] throughput-50th latency
+      *Current PDF exists but is suspect until figure-input sanity passes:
+      `figs/30c1s5r5p-zoo_throughput_latency_rw_1000000_YCSB_A_ae_50.pdf`*
+- [ ] throughput-90th latency
+      *Current PDF exists but is suspect until figure-input sanity passes:
+      `figs/30c1s5r5p-zoo_throughput_latency_rw_1000000_YCSB_A_ae_90.pdf`*
+- [ ] throughput-99th latency
+      *Current PDF exists but is suspect until figure-input sanity passes:
+      `figs/30c1s5r5p-zoo_throughput_latency_rw_1000000_YCSB_A_ae_99.pdf`*
+- [ ] throughput-average latency
+      *Current PDF exists but is suspect until figure-input sanity passes:
+      `figs/30c1s5r5p-zoo_throughput_latency_rw_1000000_YCSB_A_ae_ave.pdf`*
+- [ ] throughput-CPU usage
+      *Current PDF exists but is not accepted yet:
+      `figs/30c1s5r5p-zoo_cpu_usage_ave.pdf`*
+- [ ] latency-cumulative fraction for a fixed conc for each protocol
+      *Current PDF exists but is suspect until figure-input sanity passes and
+      the missing-line bug is fixed:
+      `figs/30c1s5r5p-zoo_latency_cumulative_rw_1000000_print.pdf`*
+- [ ] conc-memory
+      *Current PDF exists but is not accepted yet:
+      `figs/30c1s5r5p-zoo_memory_usage_conc_30c1s5r5p-zoo.pdf`*
 - [ ] zipf_skew-average_latency for 6 protocols
       *Blocked: needs experiment 1 data (zipfian-skew sweep)*
 - [ ] key_range-average_latency for 6 protocols
@@ -692,10 +739,10 @@ Required PDFs:
 
 Figure layout requirements:
 
-- [x] Each main figure must have 6 subfigures in a single row.
-      *Cells 11, 12, 13, 17 use `n_proto` for ncols (dynamic 6-column layout).
-      Cell 16 (CPU overlay) uses `len(workloads)` for ncols with all 6 protocols
-      as overlaid lines. Cell 14 uses `len(latency_data)` for ncols.*
+- [ ] Each main figure must have 6 subfigures in a single row.
+      *This remains open because the CPU-usage figure format is still wrong:
+      it should be 6 protocol subfigures in one row, not a cross-protocol
+      overlay that hides the requested per-protocol mode lines.*
 - [x] Keep protocol ordering consistent across figures.
       *Protocol ordering (Raft, Copilot, Mencius, MongoDB, etcd, ZooKeeper) is
       consistent across protocol_name, protocols, cpu_line_info, and all
@@ -729,11 +776,24 @@ Table requirements:
       exported tables/figures and the latency/throughput sanity-check results.
       *`EXPERIMENT_REPORT.md` references all artifacts including tables, figures,
       sanity checks, and fixed-conc selection.*
+- [ ] Include the figure-input sanity result and any redraw notes in the
+      run-folder report so the plotting bug and the correction are auditable.
+- [ ] Include any latency-axis-range override and cumulative-latency missing-line
+      diagnosis in the run-folder report so those plotting decisions are auditable.
 
 Acceptance criteria:
 
 - The notebook/helper consumes the new Zoo result root without manual one-off edits.
+- The pre-plot figure-input sanity check passes before experiment-0 PDFs are
+  trusted as correct.
+- Latency-related experiment-0 figures use a 200ms y-axis upper bound by
+  default unless a documented exception is justified.
 - All requested PDFs are exported under the new result root.
+- Existing suspect experiment-0 PDFs are regenerated after the figure-input bug
+  is fixed.
+- The cumulative-latency figure contains the expected mode lines for all
+  protocols, including Raft adaptive.
+- The conc-CPU-usage figure uses the requested 6-subfigure per-protocol layout.
 - Tables are exported under the new result root.
 - Run-folder reports exist alongside the logs and figures.
 - The plotting path uses 5-machine result assumptions instead of the historical 10-host one.
@@ -762,6 +822,7 @@ For the new Zoo evaluation tracks specifically, also save:
 - the fixed-conc map with justification
 - the exact Docker/container latency-injection mechanism and where it is applied
 - the sanity-check report path and one-line sanity outcome per protocol family
+- the figure-input sanity report path and one-line figure-input sanity outcome
 - for failure recovery: killed host, exact kill command, timestamp, and evidence
   that the remote `deptran_server` task really died
 - the figure/table output directories under the new result root
@@ -803,3 +864,11 @@ Keep this file durable:
 - Do not skip the latency/throughput sanity check for the new Zoo WAN runs.
 - Do not leave the sanity reasoning only in chat. Save it in the same result
   folder as the raw logs, tables, and figures.
+- Do not accept experiment-0 figures that are mostly near 0ms when the raw Zoo
+  result files show many ~40ms / ~80ms latencies. Fix the notebook input path,
+  rerun the sanity check, and redraw the figures.
+- Do not leave experiment-0 latency plots at a 1000ms y-axis scale when the
+  relevant data is mostly in the ~40ms to ~80ms range unless the exception is
+  explicitly justified in the run-folder report.
+- Do not accept a cumulative-latency figure that is missing adaptive for Raft
+  or missing other expected protocol/mode lines.
