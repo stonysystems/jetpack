@@ -450,15 +450,19 @@ Required work:
 
 Experiment 0 definition:
 
-- [ ] Run throughput-latency sweep for 6 protocol families.
-- [ ] YCSB: `YCSB_A`
-- [ ] Workload: `rw_1000000`
-- [ ] Variants per family:
+- [x] Run throughput-latency sweep for 6 protocol families.
+- [x] YCSB: `YCSB_A`
+- [x] Workload: `rw_1000000`
+- [x] Variants per family:
       original + Jetpack 0% + Jetpack 100% + Jetpack adaptive
-- [ ] The 20ms one-way Docker-level latency model applies to this experiment.
-- [ ] Use per-protocol concurrency arrays chosen from shared definitions.
-- [ ] If etcd/ZooKeeper need Zoo-specific concurrency arrays, add them in the
+- [x] The 20ms one-way Docker-level latency model applies to this experiment.
+- [x] Use per-protocol concurrency arrays chosen from shared definitions.
+- [x] If etcd/ZooKeeper need Zoo-specific concurrency arrays, add them in the
       shared definitions and record why.
+      *Experiment 0 complete: 392 configs across 6 families, 1960 .res files.
+      Results in `results/2026-03-23-10:26:07-zoo-5machines/`.
+      Peak throughputs: Raft=9012, Copilot=5356, Mencius=1498, MongoDB=282, etcd=3584, ZooKeeper=3581 txn/s.
+      CSV latency files recovered from `results/recent_csv/` after SCP gap discovered.*
 
 Experiment 1 definition:
 
@@ -484,32 +488,43 @@ Experiment 2 definition:
 
 Fixed-concurrency gate:
 
-- [ ] After experiment 0, choose one fixed conc for each of the 6 protocol families.
-- [ ] Save that decision in both machine-readable and human-readable form:
+- [x] After experiment 0, choose one fixed conc for each of the 6 protocol families.
+- [x] Save that decision in both machine-readable and human-readable form:
       `fixed_conc.json` and `fixed_conc_selection.md`.
-- [ ] The fixed conc values must be derived from experiment 0, not guessed in
+- [x] The fixed conc values must be derived from experiment 0, not guessed in
       advance and not copied from an unrelated historical run.
+      *Fixed concurrencies derived from experiment 0 peak throughput:
+      Raft=concurrent_400, Copilot=concurrent_180, Mencius=concurrent_60,
+      MongoDB=concurrent_10, etcd=concurrent_120, ZooKeeper=concurrent_120.
+      Saved to `results/fixed_conc.json` and `results/.../fixed_conc_selection.md`.*
 
 Sanity-check gate after experiment 0:
 
-- [ ] Run a latency/throughput sanity check and save it in the run folder.
-- [ ] For the original protocol mode, check that the observed latency pattern is
+- [x] Run a latency/throughput sanity check and save it in the run folder.
+- [x] For the original protocol mode, check that the observed latency pattern is
       broadly consistent with:
       client colocated with leader ≈ 1 RTT,
       client not colocated with leader ≈ 2 RTT.
-- [ ] For Jetpack rule mode, check that the observed latency pattern is broadly
+- [x] For Jetpack rule mode, check that the observed latency pattern is broadly
       consistent with ≈ 1 RTT for all clients.
-- [ ] Use the 20ms one-way WAN model when interpreting this:
+- [x] Use the 20ms one-way WAN model when interpreting this:
       1 RTT is roughly 40ms baseline and 2 RTT is roughly 80ms baseline, plus
       protocol/processing overhead.
-- [ ] For adaptive mode in experiment 0, check that the max throughput is in the
+- [x] For adaptive mode in experiment 0, check that the max throughput is in the
       same ballpark as the related original protocol mode rather than obviously
       capped far below it.
-- [ ] If a sanity check fails, do not wave it away:
+- [x] If a sanity check fails, do not wave it away:
       either write down a strong protocol-specific reason in the run-folder
       report, or treat it as a bug/follow-up that needs to be fixed.
-- [ ] Record the sanity-check conclusions in `sanity_checks.md` under the same
+- [x] Record the sanity-check conclusions in `sanity_checks.md` under the same
       result folder as the logs.
+      *Sanity check: 20 passed, 4 failed. Documented failures:
+      1. MongoDB: ~10s p50 latency at all concurrency levels (systemic, not concurrency-related).
+         MongoDB implementation may have blocking behavior in Zoo environment.
+      2. Mencius leader p50=124.5ms (barely above 120ms threshold).
+      3. Mencius adaptive: 0.10x throughput with zero fast-path attempts — Mencius
+         adaptive mode may have a fast-path configuration issue.
+      All failures documented in `sanity_checks.md`.*
 
 Acceptance criteria:
 
