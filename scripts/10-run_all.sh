@@ -3,25 +3,56 @@
 # Parse CLI arguments
 DRY_RUN=false
 BUILD_ARG=""
-for arg in "$@"; do
-    case "$arg" in
+EXP_SELECTOR=""       # comma-separated experiment numbers, e.g. "1,2"
+EXP_DIR_OVERRIDE=""   # reuse an existing experiment directory
+while [[ $# -gt 0 ]]; do
+    case "$1" in
         --dry-run|-n)
             DRY_RUN=true
+            shift
+            ;;
+        --exp)
+            EXP_SELECTOR="$2"
+            shift 2
+            ;;
+        --exp-dir)
+            EXP_DIR_OVERRIDE="$2"
+            shift 2
             ;;
         full|build)
-            BUILD_ARG="$arg"
+            BUILD_ARG="$1"
+            shift
             ;;
         --help|-h)
-            echo "Usage: $0 [full|build] [--dry-run]"
+            echo "Usage: $0 [full|build] [--dry-run] [--exp 0,1,2] [--exp-dir <path>]"
             echo ""
             echo "Options:"
-            echo "  full        Regenerate RPC + build before running"
-            echo "  build       Build before running"
-            echo "  --dry-run   Print experiment matrix without executing"
+            echo "  full            Regenerate RPC + build before running"
+            echo "  build           Build before running"
+            echo "  --dry-run       Print experiment matrix without executing"
+            echo "  --exp <list>    Run only specified experiments (comma-separated: 0,1,2)"
+            echo "  --exp-dir <dir> Reuse an existing experiment result directory"
             exit 0
+            ;;
+        *)
+            shift
             ;;
     esac
 done
+
+# Parse --exp selector into a set for quick lookup
+declare -A RUN_EXPS
+if [[ -n "$EXP_SELECTOR" ]]; then
+    IFS=',' read -ra _exp_parts <<< "$EXP_SELECTOR"
+    for e in "${_exp_parts[@]}"; do
+        RUN_EXPS["$e"]=1
+    done
+else
+    # Default: run all experiments
+    RUN_EXPS[0]=1
+    RUN_EXPS[1]=1
+    RUN_EXPS[2]=1
+fi
 
 # Check if setup.json exists and read values from it
 if [ -f "setup.json" ]; then
@@ -133,8 +164,10 @@ if [ "$DRY_RUN" != true ]; then
     fi
 
     # Construct the directory path.
-    # Zoo runs use the required naming format; AWS uses the legacy format.
-    if [ "$environment" == "zoo" ]; then
+    # If --exp-dir was given, reuse it; otherwise create a new one.
+    if [[ -n "$EXP_DIR_OVERRIDE" ]]; then
+        exp_dir="$EXP_DIR_OVERRIDE"
+    elif [ "$environment" == "zoo" ]; then
         exp_dir="results/${current_time}-zoo-5machines"
     else
         exp_dir="results/${current_time}-${latest_commit_hash}"
@@ -145,7 +178,15 @@ if [ "$DRY_RUN" != true ]; then
     echo "{\"commit\": \"${latest_commit_hash}\", \"started_at\": \"${current_time}\", \"environment\": \"${environment}\"}" > "${exp_dir}/metadata.json"
 
     echo "Experiment directory created: $exp_dir"
-    ssh ${SERVER_USERNAME}@"${servers[0]}" "cd ${repo_dir} && mkdir -p ${exp_dir} && mkdir -p results/recent_csv && rm results/recent_csv/*"
+    ssh ${SERVER_USERNAME}@"${servers[0]}" "cd ${repo_dir} && mkdir -p ${exp_dir} && mkdir -p results/recent_csv && rm -f results/recent_csv/*"
+
+    # Kill any lingering deptran_server processes before starting new experiments
+    echo "Cleaning up lingering deptran_server processes..."
+    for ip in "${servers[@]}"; do
+        ssh "${SERVER_USERNAME}@${ip}" "pkill -9 -f deptran_server" &>/dev/null &
+    done
+    wait
+    sleep 2  # brief pause for ports to be released
 fi
 
 declare -a all_configs todo_configs
@@ -170,26 +211,11 @@ execute_command() {
         server_command="export LD_LIBRARY_PATH=\${HOME}/local/lib:\${LD_LIBRARY_PATH}; export WAN_DELAY_MS=20; ${server_command}"
     fi
 
-    # Clean up any previous JM_Jetpack_* files before starting a new run
-    local cleanup_target
-    cleanup_target="/tmp/JM_*"
-
-    local -a cleanup_pids=()
+    # Clean up any previous deptran_server processes and JM_Jetpack_* files
     for ip in "${servers[@]}"; do
-        {
-            echo "[$ip] Cleaning JM_Jetpack_*..."
-            if ssh "${SERVER_USERNAME}@${ip}" "rm -f $cleanup_target"; then
-                echo "[$ip] Cleanup OK"
-            else
-                echo "[$ip] Cleanup FAILED"
-            fi
-        } &
-        cleanup_pids+=($!)
+        ssh "${SERVER_USERNAME}@${ip}" "pkill -9 deptran_server 2>/dev/null; rm -f /tmp/JM_*" &>/dev/null || true
     done
-
-    for pid in "${cleanup_pids[@]}"; do
-        wait "$pid"
-    done
+    sleep 1
 
     for i in "${!servers[@]}"; do
         output_file="${exp_dir}/${exp_name}-${replicanames[$i]}.res"
@@ -200,12 +226,12 @@ execute_command() {
 
     wait
 
+    # Kill any lingering deptran_server processes on all servers (sequential for reliability)
     for i in "${!servers[@]}"; do
         server_ip="${servers[$i]}"
-        ssh ${SERVER_USERNAME}@"$server_ip" "pkill -9 -f deptran_server" &> /dev/null &
+        ssh ${SERVER_USERNAME}@"$server_ip" "pkill -9 deptran_server" &> /dev/null || true
     done
-
-    wait
+    sleep 1
 
     scp ${SERVER_USERNAME}@"${servers[0]}:${repo_dir}/${exp_dir}/${exp_name}-*" "${exp_dir}" & 		# scp from svr 0 since nfs
     scp ${SERVER_USERNAME}@"${servers[0]}:${repo_dir}/results/recent_csv/${exp_name}-*" "${exp_dir}" & 	# scp from svr 0 since nfs
@@ -236,9 +262,13 @@ execute_command() {
         if grep -q "Mid throughput is" "${to_check_file}" && grep -q "Dumped to" "${to_check_file}" && ! grep -q "generic server error" "${to_check_file}"; then
             mid_tp=$(grep -m1 "Mid throughput is" "${to_check_file}" | awk '{print $NF}' || echo 0)
             mid_tp=${mid_tp:-0}
-            if [ "$(printf '%.0f' "${mid_tp}" 2>/dev/null || echo 0)" -lt 1 ]; then
-                status=1
-                fail_reason="low throughput (${mid_tp})"
+            # For zipf and key-range workloads, 0 throughput under extreme contention
+            # is a valid data point. Only fail on low throughput for rw_1000000 (exp 0).
+            if [[ "$workload" == "rw_1000000" ]]; then
+                if [ "$(printf '%.0f' "${mid_tp}" 2>/dev/null || echo 0)" -lt 1 ]; then
+                    status=1
+                    fail_reason="low throughput (${mid_tp})"
+                fi
             fi
         else
             status=1
@@ -262,10 +292,11 @@ execute_command() {
 for site in "${sites[@]}"; do
 
     #experiment0: 4 protocols * (1 original + 2 workloads * 2 fastpath rate * n conc)
+    if [[ -n "${RUN_EXPS[0]+x}" ]]; then
     for i in "${!origin_protocols[@]}"; do
-        
+
         ycsb="YCSB_A"
-        
+
         concs_array_name="${concurrents[$i]}"
 
         # Original protocols
@@ -288,10 +319,11 @@ for site in "${sites[@]}"; do
             done
         done
     done
+    fi
 
     # experiment1: N protocols * (1 original + ycsbs * zipf_workloads * 3 fastpath rate * 1 conc)
     # Requires fixed_concurrents to be set (from experiment 0 results).
-    if [[ ${#fixed_concurrents[@]} -gt 0 ]]; then
+    if [[ -n "${RUN_EXPS[1]+x}" ]] && [[ ${#fixed_concurrents[@]} -gt 0 ]]; then
     for i in "${!origin_protocols[@]}"; do
 
         concs_array_name="${concurrents[$i]}"
@@ -340,7 +372,7 @@ for site in "${sites[@]}"; do
 
     # experiment2: N protocols * (1 original + ycsbs * key_range_workloads * 3 fastpath rate * 1 conc)
     # Requires fixed_concurrents to be set (from experiment 0 results).
-    if [[ ${#fixed_concurrents[@]} -gt 0 ]]; then
+    if [[ -n "${RUN_EXPS[2]+x}" ]] && [[ ${#fixed_concurrents[@]} -gt 0 ]]; then
     for i in "${!origin_protocols[@]}"; do
 
         concs_array_name="${concurrents[$i]}"
@@ -394,6 +426,9 @@ if [ "$DRY_RUN" = true ]; then
     echo "Servers:      ${#servers[@]} (${servers[*]})"
     echo "Build mode:   ${BUILD_ARG:-none}"
     echo "Timeout:      ${TIMEOUT_SEC}s per run"
+    echo ""
+    echo "Experiments:   ${!RUN_EXPS[*]}"
+    echo "Exp dir:      ${EXP_DIR_OVERRIDE:-<new>}"
     echo ""
     echo "--- All ${num_experiments} configs (site,protocol,workload,concurrency,fastpath_mode,ycsb) ---"
     for item in "${all_configs[@]}"; do

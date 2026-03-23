@@ -431,9 +431,14 @@ load_zoo_fixed_concs() {
     fi
     ZOO_FIXED_CONCS=()
     for i in "${!ZOO_ORIGIN_PROTOCOLS[@]}"; do
-        local proto="${ZOO_ORIGIN_PROTOCOLS[$i]#none_}"
+        local proto="${ZOO_ORIGIN_PROTOCOLS[$i]}"
         local val
-        val=$(jq -r ".${proto} // empty" "$json_file")
+        # Try none_<family> key first (e.g. "none_raft"), then the family suffix
+        val=$(jq -r ".[\"${proto}\"] // empty" "$json_file")
+        if [[ -z "$val" ]]; then
+            local suffix="${proto#none_}"
+            val=$(jq -r ".[\"${suffix}\"] // empty" "$json_file")
+        fi
         if [[ -z "$val" ]]; then
             echo "WARNING: no fixed conc for $proto in $json_file" >&2
             val="concurrent_50"
