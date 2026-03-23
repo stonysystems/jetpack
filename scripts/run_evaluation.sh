@@ -63,6 +63,15 @@ else
     cat "$FIXED_CONC"
 fi
 
+# Step 1.5: Invalidate summary cache so new experiment data gets loaded
+CACHE_FILE="$SCRIPT_DIR/results/${EXPTIME}-summary.pkl"
+if [ -f "$CACHE_FILE" ]; then
+    echo ""
+    echo "--- Step 1.5: Removing stale summary cache ---"
+    rm -f "$CACHE_FILE"
+    echo "Removed: $CACHE_FILE"
+fi
+
 # Step 2: Run sanity checks
 echo ""
 echo "--- Step 2: Running sanity checks ---"
