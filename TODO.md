@@ -25,7 +25,8 @@ any future agent. It is not a live execution transcript.
    `docs/benchmark_rerun_results.md`.
 5. Extend the legacy multi-machine Zoo flow centered on `scripts/10-run_all.sh`
    so it can run the requested 5-machine open-loop evaluation matrix with
-   6 protocol families, the requested result-root naming, and durable manifests.
+   6 protocol families, 20ms one-way Docker-level latency injection, the
+   requested result-root naming, and durable manifests.
 6. Add a true Zoo failure-recovery experiment phase that really kills the
    `deptran_server` task on one machine during the run instead of relying only
    on synthetic failover toggles or client-only pause behavior.
@@ -78,6 +79,10 @@ any future agent. It is not a live execution transcript.
 - `scripts/evaluation.ipynb` still hard-codes a historical result folder,
   historical contention dataset paths, and result-file host-count assumptions
   that do not match the requested 5-machine Zoo run.
+- For the requested Zoo multi-machine task, host-level `tc` is not the intended
+  mechanism because sudo permission is not available. The WAN model for this
+  track must be implemented at the Docker/container level with 20ms one-way
+  latency, and that exact mechanism must be documented in the run folder.
 - Some ZooKeeper / MongoDB / etcd evaluation paths in the repo have recently
   been exercised through Docker-oriented helpers (`scripts/reproduce_evaluation.sh`,
   `scripts/sweep_benchmark.sh`, `docker/*`). Claude may need to update scripts
@@ -376,6 +381,10 @@ Ground truth for this track:
 - Repo path on the Zoo machines: `/home/users/ztang/janus`
 - Site config: `config/30c1s5r5p-zoo.yml`
 - All experiments in this track are open-loop.
+- WAN latency model for this track:
+  20ms one-way latency added at the Docker/container level, not host-level `tc`
+  and not `SIMULATE_WAN`.
+- Effective RTT target for latency sanity reasoning: about 40ms baseline.
 - Required result root format:
   `/home/users/ztang/janus/results/<date>-<time>-zoo-5machines`
 - The site config string must appear in result filenames.
@@ -399,10 +408,19 @@ Required work:
       explicitly asked for Raft, not FPGA-Raft.
 - [ ] Keep the main frame of `scripts/10-run_all.sh`. Extend it rather than
       replacing it with a brand new workflow.
+- [ ] Update the relevant multi-machine / backend helper scripts so the Zoo run
+      adds 20ms one-way latency at the Docker/container level.
+- [ ] Do not rely on host-level `tc` / `netem` for this Zoo task because sudo
+      permission is not available.
+- [ ] Document exactly where the 20ms one-way latency is injected, how it is
+      applied, and which scripts/configs own it.
 - [ ] Keep benchmark result naming parseable and site-aware.
 - [ ] Save a dry-run matrix and a run manifest before the real run starts.
 - [ ] Save git commit hash in metadata, not in the result-root directory name.
 - [ ] Keep retry logic for failed points. Do not downgrade the matrix to avoid reruns.
+- [ ] Keep experiment-specific reports in the same result folder as the logs.
+      At minimum, leave `SUMMARY.md`, `sanity_checks.md`, and a short latency
+      mechanism note in the run folder.
 
 Experiment 0 definition:
 
@@ -411,6 +429,7 @@ Experiment 0 definition:
 - [ ] Workload: `rw_1000000`
 - [ ] Variants per family:
       original + Jetpack 0% + Jetpack 100% + Jetpack adaptive
+- [ ] The 20ms one-way Docker-level latency model applies to this experiment.
 - [ ] Use per-protocol concurrency arrays chosen from shared definitions.
 - [ ] If etcd/ZooKeeper need Zoo-specific concurrency arrays, add them in the
       shared definitions and record why.
@@ -423,6 +442,7 @@ Experiment 1 definition:
       `rw_zipf_1 rw_zipf_0.9 rw_zipf_0.8 rw_zipf_0.7 rw_zipf_0.6 rw_zipf_0.5`
 - [ ] Variants per family:
       original + Jetpack 0% + Jetpack 100% + Jetpack adaptive
+- [ ] The 20ms one-way Docker-level latency model applies to this experiment.
 - [ ] Use exactly one fixed conc per protocol family, derived from experiment 0.
 
 Experiment 2 definition:
@@ -433,6 +453,7 @@ Experiment 2 definition:
       `rw_1 rw_10 rw_100 rw_1000 rw_10000 rw_100000 rw_1000000`
 - [ ] Variants per family:
       original + Jetpack 0% + Jetpack 100% + Jetpack adaptive
+- [ ] The 20ms one-way Docker-level latency model applies to this experiment.
 - [ ] Use the same per-protocol fixed conc values chosen for experiment 1.
 
 Fixed-concurrency gate:
@@ -443,12 +464,36 @@ Fixed-concurrency gate:
 - [ ] The fixed conc values must be derived from experiment 0, not guessed in
       advance and not copied from an unrelated historical run.
 
+Sanity-check gate after experiment 0:
+
+- [ ] Run a latency/throughput sanity check and save it in the run folder.
+- [ ] For the original protocol mode, check that the observed latency pattern is
+      broadly consistent with:
+      client colocated with leader ≈ 1 RTT,
+      client not colocated with leader ≈ 2 RTT.
+- [ ] For Jetpack rule mode, check that the observed latency pattern is broadly
+      consistent with ≈ 1 RTT for all clients.
+- [ ] Use the 20ms one-way WAN model when interpreting this:
+      1 RTT is roughly 40ms baseline and 2 RTT is roughly 80ms baseline, plus
+      protocol/processing overhead.
+- [ ] For adaptive mode in experiment 0, check that the max throughput is in the
+      same ballpark as the related original protocol mode rather than obviously
+      capped far below it.
+- [ ] If a sanity check fails, do not wave it away:
+      either write down a strong protocol-specific reason in the run-folder
+      report, or treat it as a bug/follow-up that needs to be fixed.
+- [ ] Record the sanity-check conclusions in `sanity_checks.md` under the same
+      result folder as the logs.
+
 Acceptance criteria:
 
 - The Zoo matrix actually covers all 6 requested families.
 - All benchmark runs are open-loop.
+- The Zoo runs use Docker/container-level 20ms one-way latency rather than
+  host-level `tc`.
 - Result roots and result filenames follow the requested naming.
 - The fixed conc map exists, is explained, and is reused consistently.
+- The sanity check exists and either passes or is explained/followed up clearly.
 - No protocol family is dropped because its current path is awkward.
 
 ### Track 6: Zoo failure-recovery via real `deptran_server` kill
@@ -466,6 +511,8 @@ Definition:
 - Workload: `rw_1000000`
 - Mode: Jetpack on, adaptive (`-m 101`)
 - Concurrency: one fixed conc per protocol family, derived from experiment 0
+- WAN latency model: same 20ms one-way Docker/container-level latency used for
+  the Zoo benchmark tracks
 - Result files must include the site config string
 
 Non-negotiable failure semantics:
@@ -491,12 +538,16 @@ Required work:
       the leader host is chosen or observed before the kill.
 - [ ] Keep the client config open-loop. If `client_open_failure_recovery.yml`
       is used, document that this is still open-loop.
+- [ ] Preserve the same 20ms one-way Docker-level latency injection during the
+      failure-recovery runs. Do not silently drop WAN latency for this phase.
 - [ ] If MongoDB / etcd / ZooKeeper recovery or restart steps currently rely on
       Docker-backed helpers or Docker-managed backend processes, update the
       relevant scripts carefully so the Zoo multi-machine failure-recovery path
       still performs a real `deptran_server` kill and leaves coherent logs.
 - [ ] Save failure and recovery evidence under the same result root used for the
       Zoo evaluation, not in an unrelated historical folder.
+- [ ] Save any failure-recovery report or diagnosis under the same result folder
+      as the raw logs.
 
 Acceptance criteria:
 
@@ -533,6 +584,8 @@ Required work:
       `/home/users/ztang/janus/results/<date>-<time>-zoo-5machines/tables`
 - [ ] Save an executed notebook copy or equivalent durable analysis artifact
       under the result root.
+- [ ] Save experiment-related reports in the same result folder as the logs,
+      not only in `docs/` or only in notebook output cells.
 
 Required PDFs:
 
@@ -571,12 +624,15 @@ Table requirements:
       fixed-conc selection table,
       experiment-0 summary table,
       and CSV source data for the exported figures.
+- [ ] Keep a concise experiment report in the run folder that references the
+      exported tables/figures and the latency/throughput sanity-check results.
 
 Acceptance criteria:
 
 - The notebook/helper consumes the new Zoo result root without manual one-off edits.
 - All requested PDFs are exported under the new result root.
 - Tables are exported under the new result root.
+- Run-folder reports exist alongside the logs and figures.
 - The plotting path uses 5-machine result assumptions instead of the historical 10-host one.
 
 ## Evidence Format
@@ -585,7 +641,8 @@ For every accepted code, CI, or benchmark claim, save:
 - the exact command or runner used
 - the commit hash
 - the relevant config names
-- the latency mechanism used (`SIMULATE_WAN`, `tc`, or other documented path)
+- the latency mechanism used (`SIMULATE_WAN`, `tc`, `docker-level 20ms one-way`,
+  or other documented path)
 - the log or artifact path
 - one result line: `pass`, `fail`, `blocked`, or `partial`
 
@@ -600,6 +657,8 @@ For the new Zoo evaluation tracks specifically, also save:
 - the exact result root path
 - the dry-run matrix or manifest with planned counts
 - the fixed-conc map with justification
+- the exact Docker/container latency-injection mechanism and where it is applied
+- the sanity-check report path and one-line sanity outcome per protocol family
 - for failure recovery: killed host, exact kill command, timestamp, and evidence
   that the remote `deptran_server` task really died
 - the figure/table output directories under the new result root
@@ -622,6 +681,8 @@ Keep this file durable:
   handshake unless the user explicitly redefines the requirement.
 - Do not conflate `SIMULATE_WAN` with `tc` / `netem`.
 - Do not run both delay mechanisms together and then report the result as "20ms latency."
+- For the new Zoo multi-machine task, do not use host-level `tc` as the main
+  WAN mechanism. The requirement here is Docker/container-level 20ms one-way latency.
 - Do not report the CI work as complete if the `5c1s5r5p` `tc` lane has not actually
   run on a suitable environment.
 - Do not cherry-pick only passing backends or only passing modes when writing docs.
@@ -636,3 +697,6 @@ Keep this file durable:
   multi-server path. Audit MongoDB / etcd / ZooKeeper script interactions carefully.
 - Do not leave the analysis notebook hard-coded to 4 protocols or 10 hosts and
   then claim the exported figures represent the new 5-machine Zoo evaluation.
+- Do not skip the latency/throughput sanity check for the new Zoo WAN runs.
+- Do not leave the sanity reasoning only in chat. Save it in the same result
+  folder as the raw logs, tables, and figures.
