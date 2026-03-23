@@ -743,5 +743,55 @@ class TestFailureRecoveryScript(unittest.TestCase):
                           f"Missing protocol: {proto}")
 
 
+class TestZooRecoveryPDFCell(unittest.TestCase):
+    """Verify the Zoo per-protocol failure recovery PDF cell."""
+
+    @classmethod
+    def setUpClass(cls):
+        nb_path = os.path.join(SCRIPT_DIR, "evaluation.ipynb")
+        with open(nb_path) as f:
+            cls.nb = json.load(f)
+        cls.all_src = [''.join(cell['source']) for cell in cls.nb['cells']]
+
+    def test_cell28_is_zoo_recovery_pdf(self):
+        """Cell 28 must be the Zoo per-protocol recovery PDF generator."""
+        src = self.all_src[28]
+        self.assertIn("Zoo per-protocol failure recovery", src)
+        self.assertIn("failure_recovery", src)
+
+    def test_cell28_guards_data_availability(self):
+        """Cell 28 must check for Zoo failure recovery data before plotting."""
+        src = self.all_src[28]
+        self.assertIn("_use_zoo_fr", src)
+        self.assertIn("Skipping", src)
+
+    def test_cell28_covers_all_protocols(self):
+        """Cell 28 must handle all 4 failure recovery protocols."""
+        src = self.all_src[28]
+        for proto in ["rule_raft", "rule_mongodb", "rule_etcd", "rule_zookeeper"]:
+            self.assertIn(proto, src, f"Cell 28 missing protocol display for {proto}")
+
+    def test_cell28_uses_helper_functions(self):
+        """Cell 28 must use make_time_grid and throughput_on_grid from cell 26."""
+        src = self.all_src[28]
+        self.assertIn("make_time_grid", src)
+        self.assertIn("throughput_on_grid", src)
+
+    def test_cell28_saves_pdfs_with_site_tag(self):
+        """Cell 28 must save PDFs with site_tag prefix."""
+        src = self.all_src[28]
+        self.assertIn("site_tag", src)
+        self.assertIn("savefig", src)
+        self.assertIn(".pdf", src)
+
+    def test_cell28_shows_failure_markers(self):
+        """Cell 28 must plot failure, recovery start, and recovery done markers."""
+        src = self.all_src[28]
+        self.assertIn("Failure Trigger", src)
+        self.assertIn("Recovery Start", src)
+        self.assertIn("Recovery Done", src)
+        self.assertIn("axvline", src)
+
+
 if __name__ == '__main__':
     unittest.main(verbosity=2)
