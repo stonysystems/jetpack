@@ -566,16 +566,25 @@ Required work:
       and post-kill confirmation that the process exited.
       *Writes test_output/kill_evidence.json with target_host, target_replica,
       kill_timestamp, kill_command, pre_kill_pid, post_kill_pid, confirmed_dead.*
-- [ ] If leader failure is required for correctness, identify and document how
+- [x] If leader failure is required for correctness, identify and document how
       the leader host is chosen or observed before the kill.
-- [ ] Keep the client config open-loop. If `client_open_failure_recovery.yml`
+      *All 4 protocols use loc_id_==0 as leader. In Zoo config, zoo0 (130.245.173.101)
+      is locale_id 0. Use --kill-target 0 for leader kill.
+      Full analysis in docs/zoo_failure_recovery_design.md.*
+- [x] Keep the client config open-loop. If `client_open_failure_recovery.yml`
       is used, document that this is still open-loop.
-- [ ] Preserve the same 20ms one-way Docker-level latency injection during the
+      *client_open_failure_recovery.yml uses type: open (rate=1000, max_undone=180).
+      Documented in docs/zoo_failure_recovery_design.md.*
+- [x] Preserve the same 20ms one-way Docker-level latency injection during the
       failure-recovery runs. Do not silently drop WAN latency for this phase.
-- [ ] If MongoDB / etcd / ZooKeeper recovery or restart steps currently rely on
+      *09-build_and_test_run_wan.sh injects WAN_DELAY_MS=20 in the SSH command
+      for Zoo environment. Same mechanism as experiment 0.*
+- [x] If MongoDB / etcd / ZooKeeper recovery or restart steps currently rely on
       Docker-backed helpers or Docker-managed backend processes, update the
       relevant scripts carefully so the Zoo multi-machine failure-recovery path
       still performs a real `deptran_server` kill and leaves coherent logs.
+      *Zoo path uses direct SSH + pkill -9. No Docker dependency. The --kill-target
+      flag handles real process kill with evidence recording.*
 - [ ] Save failure and recovery evidence under the same result root used for the
       Zoo evaluation, not in an unrelated historical folder.
 - [ ] Save any failure-recovery report or diagnosis under the same result folder
