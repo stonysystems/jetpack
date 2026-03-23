@@ -130,11 +130,16 @@ def configure(conf):
     # enable mongodb
     # conf.env.append_value('CXXFLAGS', ['-std=c++17', '-ggdb'])
     # conf.env.append_value('INCLUDES', ['lib', 'include'])
-    conf.env.append_value('INCLUDES', ['/usr/local/include/mongocxx/v_noabi', '/usr/local/include/bsoncxx/v_noabi'])
+    user_local = os.path.expanduser('~/local')
+    conf.env.append_value('INCLUDES', [
+        '/usr/local/include/mongocxx/v_noabi', '/usr/local/include/bsoncxx/v_noabi',
+        user_local + '/include/mongocxx/v_noabi', user_local + '/include/bsoncxx/v_noabi',
+        user_local + '/include',
+    ])
     # conf.env.append_value("LINKFLAGS", ['-lboost_system', '-lpthread', '-lcrypto', '-lssl', '-lmongocxx', '-lbsoncxx'])
     # conf.env.append_value("LDFLAGS", ['-lboost_system', '-lpthread', '-lcrypto', '-lssl', '-lmongocxx', '-lbsoncxx'])
-    conf.env.append_value('LIBPATH', [os.path.expanduser('~/.local/lib')])
-    conf.env.append_value('RPATH', [os.path.expanduser('~/.local/lib')])
+    conf.env.append_value('LIBPATH', [os.path.expanduser('~/.local/lib'), user_local + '/lib'])
+    conf.env.append_value('RPATH', [os.path.expanduser('~/.local/lib'), user_local + '/lib'])
     conf.env.append_value("LDFLAGS", ["-lmongocxx", "-lbsoncxx"])
     conf.env.append_value("LDFLAGS", "-lcpprest")
     conf.env.append_value("LDFLAGS", "-letcd-cpp-api")

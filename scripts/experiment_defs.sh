@@ -41,6 +41,11 @@ CURRENT_BACKENDS=("etcd" "mongodb" "zookeeper")
 CURRENT_JETPACK_PROTOCOLS=("rule_etcd" "rule_mongodb" "rule_zookeeper")
 CURRENT_ORIGIN_PROTOCOLS=("none_etcd" "none_mongodb" "none_zookeeper")
 
+# Zoo 5-machine protocol families — all 6 requested protocols.
+# Uses rule_raft (not rule_fpga_raft) per explicit requirement.
+ZOO_JETPACK_PROTOCOLS=("rule_raft" "rule_copilot" "rule_mencius" "rule_mongodb" "rule_etcd" "rule_zookeeper")
+ZOO_ORIGIN_PROTOCOLS=("none_raft" "none_copilot" "none_mencius" "none_mongodb" "none_etcd" "none_zookeeper")
+
 # Docker image names (indexed same as CURRENT_BACKENDS)
 CURRENT_DOCKER_IMAGES=("jetpack-etcd" "jetpack-mongodb" "jetpack-zookeeper")
 
@@ -115,6 +120,20 @@ DOCKER_SWEEP_CONCS=(
     concurrent_400
 )
 
+# Zoo-specific concurrency arrays for etcd and zookeeper.
+# These cover a similar range to MongoDB since the backends have comparable
+# throughput characteristics on a 5-machine cluster with WAN latency.
+ETCD_CONCS=(
+    concurrent_1 concurrent_10 concurrent_20 concurrent_30 concurrent_40
+    concurrent_50 concurrent_60 concurrent_70 concurrent_80 concurrent_90
+    concurrent_100 concurrent_110 concurrent_120
+)
+ZOOKEEPER_CONCS=(
+    concurrent_1 concurrent_10 concurrent_20 concurrent_30 concurrent_40
+    concurrent_50 concurrent_60 concurrent_70 concurrent_80 concurrent_90
+    concurrent_100 concurrent_110 concurrent_120
+)
+
 # Fixed concurrency for secondary experiments (indexed: raft, copilot, mencius, mongodb)
 LEGACY_FIXED_CONCS=("concurrent_150" "concurrent_50" "concurrent_16" "concurrent_40")
 
@@ -123,12 +142,13 @@ LEGACY_FIXED_CONCS=("concurrent_150" "concurrent_50" "concurrent_16" "concurrent
 concs_array_for() {
     local proto="$1"
     case "$proto" in
-        *raft|*fpga_raft)  echo "RAFT_CONCS" ;;
+        *fpga_raft)        echo "RAFT_CONCS" ;;
+        *raft)             echo "RAFT_CONCS" ;;
         *copilot)          echo "COPILOT_CONCS" ;;
         *mencius)          echo "MENCIUS_CONCS" ;;
         *mongodb)          echo "MONGODB_CONCS" ;;
-        *etcd)             echo "DOCKER_SWEEP_CONCS" ;;
-        *zookeeper)        echo "DOCKER_SWEEP_CONCS" ;;
+        *etcd)             echo "ETCD_CONCS" ;;
+        *zookeeper)        echo "ZOOKEEPER_CONCS" ;;
         *)                 echo "DOCKER_SWEEP_CONCS" ;;
     esac
 }
@@ -141,6 +161,7 @@ SITE_AWS_SWEEP="60c1s5r10p"       # AWS 10-node layout
 SITE_DOCKER_SWEEP="60c1s5r5p"     # Docker single-host 5-process
 SITE_LOCAL_SANITY="3c1s3r1p"      # Single-process local sanity check
 SITE_LOCAL_MULTI="5c1s5r5p"       # Docker 5-process low-client
+SITE_ZOO_SWEEP="30c1s5r5p-zoo"   # Zoo 5-machine cluster
 
 # ──────────────────────────────────────────────────────────────────────
 # Docker backend failure-recovery definitions
@@ -386,4 +407,113 @@ print_matrix_summary() {
     for item in "${configs_ref[@]}"; do
         echo "  $item"
     done
+}
+
+# ──────────────────────────────────────────────────────────────────────
+# Zoo 5-machine experiment matrix generation
+# ──────────────────────────────────────────────────────────────────────
+
+# Zoo concurrency array names (indexed same as ZOO_*_PROTOCOLS)
+ZOO_CONCS_ARRAYS=("RAFT_CONCS" "COPILOT_CONCS" "MENCIUS_CONCS" "MONGODB_CONCS" "ETCD_CONCS" "ZOOKEEPER_CONCS")
+
+# Zoo fixed concurrencies — initially empty; populated after experiment 0.
+# Format: one value per protocol family in ZOO_*_PROTOCOLS order.
+# After experiment 0, save to fixed_conc.json and source back here.
+ZOO_FIXED_CONCS=()
+
+# Load Zoo fixed concurrencies from a JSON file if it exists.
+# Usage: load_zoo_fixed_concs "/path/to/fixed_conc.json"
+load_zoo_fixed_concs() {
+    local json_file="$1"
+    if [[ ! -f "$json_file" ]]; then
+        echo "WARNING: $json_file not found; Zoo fixed concurrencies not loaded." >&2
+        return 1
+    fi
+    ZOO_FIXED_CONCS=()
+    for i in "${!ZOO_ORIGIN_PROTOCOLS[@]}"; do
+        local proto="${ZOO_ORIGIN_PROTOCOLS[$i]#none_}"
+        local val
+        val=$(jq -r ".${proto} // empty" "$json_file")
+        if [[ -z "$val" ]]; then
+            echo "WARNING: no fixed conc for $proto in $json_file" >&2
+            val="concurrent_50"
+        fi
+        ZOO_FIXED_CONCS+=("$val")
+    done
+}
+
+# Generate experiment matrix for Zoo 5-machine cluster.
+# Populates GENERATED_CONFIGS with comma-separated tuples:
+#   site,protocol,workload,concurrent,fastpath_mode,ycsb
+#
+# Arguments:
+#   $1 = experiment type: "concurrency_sweep" | "zipf_sweep" | "keyrange_sweep"
+#   $2 = site config name (e.g. "30c1s5r5p-zoo")
+generate_zoo_matrix() {
+    local exp_type="$1"
+    local site="$2"
+    GENERATED_CONFIGS=()
+
+    case "$exp_type" in
+        concurrency_sweep)
+            for i in "${!ZOO_ORIGIN_PROTOCOLS[@]}"; do
+                local origin="${ZOO_ORIGIN_PROTOCOLS[$i]}"
+                local jetpack="${ZOO_JETPACK_PROTOCOLS[$i]}"
+                local concs_name="${ZOO_CONCS_ARRAYS[$i]}"
+                local -n concs_ref="$concs_name"
+
+                # Original protocol
+                for conc in "${concs_ref[@]}"; do
+                    GENERATED_CONFIGS+=("${site},${origin},rw_1000000,${conc},0,YCSB_A")
+                done
+                # Jetpack protocol with all fastpath modes
+                for mode in "${ALL_FASTPATH_MODES[@]}"; do
+                    for conc in "${concs_ref[@]}"; do
+                        GENERATED_CONFIGS+=("${site},${jetpack},rw_1000000,${conc},${mode},YCSB_A")
+                    done
+                done
+            done
+            ;;
+        zipf_sweep)
+            if [[ ${#ZOO_FIXED_CONCS[@]} -eq 0 ]]; then
+                echo "ERROR: ZOO_FIXED_CONCS not set. Run experiment 0 first." >&2
+                return 1
+            fi
+            local -a zipf_wl=(
+                rw_zipf_1 rw_zipf_0.9 rw_zipf_0.8
+                rw_zipf_0.7 rw_zipf_0.6 rw_zipf_0.5
+            )
+            for i in "${!ZOO_ORIGIN_PROTOCOLS[@]}"; do
+                local origin="${ZOO_ORIGIN_PROTOCOLS[$i]}"
+                local jetpack="${ZOO_JETPACK_PROTOCOLS[$i]}"
+                local fixed_conc="${ZOO_FIXED_CONCS[$i]}"
+
+                for wl in "${zipf_wl[@]}"; do
+                    GENERATED_CONFIGS+=("${site},${origin},${wl},${fixed_conc},0,YCSB_A")
+                    for mode in "${ALL_FASTPATH_MODES[@]}"; do
+                        GENERATED_CONFIGS+=("${site},${jetpack},${wl},${fixed_conc},${mode},YCSB_A")
+                    done
+                done
+            done
+            ;;
+        keyrange_sweep)
+            if [[ ${#ZOO_FIXED_CONCS[@]} -eq 0 ]]; then
+                echo "ERROR: ZOO_FIXED_CONCS not set. Run experiment 0 first." >&2
+                return 1
+            fi
+            local -a kr_wl=(rw_1 rw_10 rw_100 rw_1000 rw_10000 rw_100000 rw_1000000)
+            for i in "${!ZOO_ORIGIN_PROTOCOLS[@]}"; do
+                local origin="${ZOO_ORIGIN_PROTOCOLS[$i]}"
+                local jetpack="${ZOO_JETPACK_PROTOCOLS[$i]}"
+                local fixed_conc="${ZOO_FIXED_CONCS[$i]}"
+
+                for wl in "${kr_wl[@]}"; do
+                    GENERATED_CONFIGS+=("${site},${origin},${wl},${fixed_conc},0,YCSB_A")
+                    for mode in "${ALL_FASTPATH_MODES[@]}"; do
+                        GENERATED_CONFIGS+=("${site},${jetpack},${wl},${fixed_conc},${mode},YCSB_A")
+                    done
+                done
+            done
+            ;;
+    esac
 }

@@ -57,16 +57,35 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/experiment_defs.sh"
 
 # Experiment configs — use centralized definitions from experiment_defs.sh.
-# Local aliases for backward compatibility with the loop structure below.
-declare -a jetpack_protocols=("${LEGACY_JETPACK_PROTOCOLS[@]}")
-declare -a origin_protocols=("${LEGACY_ORIGIN_PROTOCOLS[@]}")
-declare -a sites=("$SITE_AWS_SWEEP")
+# Select protocol families and site based on the environment.
+if [ "$environment" == "zoo" ]; then
+    declare -a jetpack_protocols=("${ZOO_JETPACK_PROTOCOLS[@]}")
+    declare -a origin_protocols=("${ZOO_ORIGIN_PROTOCOLS[@]}")
+    declare -a sites=("$SITE_ZOO_SWEEP")
+    declare -a concurrents=("${ZOO_CONCS_ARRAYS[@]}")
+
+    # Load Zoo fixed concurrencies if available (for experiments 1 and 2).
+    FIXED_CONC_JSON="${SCRIPT_DIR}/../results/fixed_conc.json"
+    if [[ -f "$FIXED_CONC_JSON" ]]; then
+        load_zoo_fixed_concs "$FIXED_CONC_JSON"
+        declare -a fixed_concurrents=("${ZOO_FIXED_CONCS[@]}")
+    else
+        # Placeholder — experiment 0 must run first to derive these.
+        declare -a fixed_concurrents=()
+    fi
+else
+    declare -a jetpack_protocols=("${LEGACY_JETPACK_PROTOCOLS[@]}")
+    declare -a origin_protocols=("${LEGACY_ORIGIN_PROTOCOLS[@]}")
+    declare -a sites=("$SITE_AWS_SWEEP")
+    declare -a concurrents=("RAFT_CONCS" "COPILOT_CONCS" "MENCIUS_CONCS" "MONGODB_CONCS")
+    declare -a fixed_concurrents=("${LEGACY_FIXED_CONCS[@]}")
+fi
+
 declare -a workloads=("rw_1000000")
 declare -a ycsbs=("YCSB_A")
 declare -a zipf_workloads=(
-    rw_zipf_1 rw_zipf_0.95 rw_zipf_0.9 rw_zipf_0.85 rw_zipf_0.8
-    rw_zipf_0.75 rw_zipf_0.7 rw_zipf_0.65 rw_zipf_0.6 rw_zipf_0.55
-    rw_zipf_0.5
+    rw_zipf_1 rw_zipf_0.9 rw_zipf_0.8
+    rw_zipf_0.7 rw_zipf_0.6 rw_zipf_0.5
 )
 declare -a key_range_workloads=(rw_1 rw_10 rw_100 rw_1000 rw_10000 rw_100000 rw_1000000)
 
@@ -75,8 +94,8 @@ declare -a raft_concs=("${RAFT_CONCS[@]}")
 declare -a copilot_concs=("${COPILOT_CONCS[@]}")
 declare -a mencius_concs=("${MENCIUS_CONCS[@]}")
 declare -a mongodb_concs=("${MONGODB_CONCS[@]}")
-declare -a concurrents=("raft_concs" "copilot_concs" "mencius_concs" "mongodb_concs")
-declare -a fixed_concurrents=("${LEGACY_FIXED_CONCS[@]}")
+declare -a etcd_concs=("${ETCD_CONCS[@]}")
+declare -a zookeeper_concs=("${ZOOKEEPER_CONCS[@]}")
 declare -a fastpath_modes=("${ALL_FASTPATH_MODES[@]}")
 
 
@@ -109,9 +128,18 @@ if [ "$DRY_RUN" != true ]; then
         echo "Latest commit hash: $latest_commit_hash"
     fi
 
-    # Construct the directory path
-    exp_dir="results/${current_time}-${latest_commit_hash}"
+    # Construct the directory path.
+    # Zoo runs use the required naming format; AWS uses the legacy format.
+    if [ "$environment" == "zoo" ]; then
+        exp_dir="results/${current_time}-zoo-5machines"
+    else
+        exp_dir="results/${current_time}-${latest_commit_hash}"
+    fi
     mkdir -p "$exp_dir"
+
+    # Save git commit hash in metadata file (not in directory name for Zoo)
+    echo "{\"commit\": \"${latest_commit_hash}\", \"started_at\": \"${current_time}\", \"environment\": \"${environment}\"}" > "${exp_dir}/metadata.json"
+
     echo "Experiment directory created: $exp_dir"
     ssh ${SERVER_USERNAME}@"${servers[0]}" "cd ${repo_dir} && mkdir -p ${exp_dir} && mkdir -p results/recent_csv && rm results/recent_csv/*"
 fi
@@ -131,6 +159,11 @@ execute_command() {
 
     exp_name=$(build_result_prefix "$protocol" "$site" "$workload" "$concurrent" "$fastpath_mode" "$ycsb")
     server_command=$(build_deptran_cmd "$repo_dir" "$protocol" "$site" "$workload" "$concurrent" "$fastpath_mode" "30" "$ycsb" "")
+
+    # For Zoo, prepend LD_LIBRARY_PATH for locally-installed third-party libs
+    if [ "$environment" == "zoo" ]; then
+        server_command="export LD_LIBRARY_PATH=\${HOME}/local/lib:\${LD_LIBRARY_PATH}; ${server_command}"
+    fi
 
     # Clean up any previous JM_Jetpack_* files before starting a new run
     local cleanup_target
@@ -251,9 +284,11 @@ for site in "${sites[@]}"; do
         done
     done
 
-    # experiment1: 4 protocols * (1 original + 2 ycsb * 16 workloads * 3 fastpath rate * 1 conc)
+    # experiment1: N protocols * (1 original + ycsbs * zipf_workloads * 3 fastpath rate * 1 conc)
+    # Requires fixed_concurrents to be set (from experiment 0 results).
+    if [[ ${#fixed_concurrents[@]} -gt 0 ]]; then
     for i in "${!origin_protocols[@]}"; do
-        
+
         concs_array_name="${concurrents[$i]}"
 
         # Original protocols
@@ -265,7 +300,7 @@ for site in "${sites[@]}"; do
                 all_configs+=("${site},${protocol},${workload},${conc},${fastpath_mode},${ycsb}")
             done
         done
-        
+
         # Jetpack protocols
         protocol="${jetpack_protocols[$i]}"
         conc="${fixed_concurrents[$i]}"
@@ -277,6 +312,9 @@ for site in "${sites[@]}"; do
             done
         done
     done
+    else
+        echo "WARNING: fixed_concurrents not set, skipping experiment 1 (zipf sweep)."
+    fi
 
     # # experiment xxx: 4 protocols * (1 ycsb * 1 workloads * 3 fastpath rate * 1 conc)
     # for i in "${!origin_protocols[@]}"; do
@@ -295,9 +333,11 @@ for site in "${sites[@]}"; do
 
     # done
 
-    # experiment2: 4 protocols * (1 original + 2 ycsb * 7 workloads * 3 fastpath rate * 1 conc)
+    # experiment2: N protocols * (1 original + ycsbs * key_range_workloads * 3 fastpath rate * 1 conc)
+    # Requires fixed_concurrents to be set (from experiment 0 results).
+    if [[ ${#fixed_concurrents[@]} -gt 0 ]]; then
     for i in "${!origin_protocols[@]}"; do
-        
+
         concs_array_name="${concurrents[$i]}"
 
         # Original protocols
@@ -309,7 +349,7 @@ for site in "${sites[@]}"; do
                 all_configs+=("${site},${protocol},${workload},${conc},${fastpath_mode},${ycsb}")
             done
         done
-        
+
         # Jetpack protocols
         protocol="${jetpack_protocols[$i]}"
         conc="${fixed_concurrents[$i]}"
@@ -321,6 +361,9 @@ for site in "${sites[@]}"; do
             done
         done
     done
+    else
+        echo "WARNING: fixed_concurrents not set, skipping experiment 2 (key-range sweep)."
+    fi
 
 done
 
