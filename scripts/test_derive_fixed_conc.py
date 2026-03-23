@@ -18,23 +18,32 @@ from derive_fixed_conc import (
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _write_res(directory, protocol, site, workload, conc, mode, ycsb, server, throughput):
-    """Create a minimal .res file with a Mid throughput line."""
+def _write_res(directory, protocol, site, workload, conc, mode, ycsb, server, throughput,
+               total_only=False):
+    """Create a minimal .res file with a throughput line.
+
+    If total_only=True, writes only 'Total throughtput' (no Mid) to simulate
+    shorter runs like MongoDB that don't produce the Mid measurement.
+    """
     fname = f"{protocol}-{site}-{workload}-{conc}-{mode}-{ycsb}-{server}.res"
     path = os.path.join(directory, fname)
     with open(path, "w") as f:
-        f.write(f"Mid throughput is {throughput}\n")
+        if total_only:
+            f.write(f"Total throughtput is {throughput}\n")
+        else:
+            f.write(f"Mid throughput is {throughput}\n")
     return path
 
 
 def _make_complete_experiment(directory, protocol, conc, mode, throughputs,
                                site="30c1s5r5p-zoo", workload="rw_1000000",
-                               ycsb="YCSB_A", servers=None):
+                               ycsb="YCSB_A", servers=None, total_only=False):
     """Create .res files for all 5 servers for one experiment point."""
     if servers is None:
         servers = [f"zoo{i}" for i in range(5)]
     for server, tp in zip(servers, throughputs):
-        _write_res(directory, protocol, site, workload, conc, mode, ycsb, server, tp)
+        _write_res(directory, protocol, site, workload, conc, mode, ycsb, server, tp,
+                   total_only=total_only)
 
 
 # ---------------------------------------------------------------------------
@@ -70,6 +79,25 @@ class TestParseMidThroughput:
         p = tmp_path / "test.res"
         p.write_text("Mid throughput is 100.0\nMid throughput is 200.0\n")
         assert parse_mid_throughput(str(p)) == pytest.approx(100.0)
+
+    def test_total_only_fallback(self, tmp_path):
+        """When only 'Total throughtput' is present (e.g. shorter MongoDB runs),
+        fall back to that value."""
+        p = tmp_path / "test.res"
+        p.write_text("Total throughtput is 40.00\nAfter worker.WaitForShutdown();\n")
+        assert parse_mid_throughput(str(p)) == pytest.approx(40.0)
+
+    def test_mid_preferred_over_total(self, tmp_path):
+        """Mid throughput takes priority when both are present."""
+        p = tmp_path / "test.res"
+        p.write_text("Total throughtput is 120.00\nMid throughput is 100.00\n")
+        assert parse_mid_throughput(str(p)) == pytest.approx(100.0)
+
+    def test_neither_present(self, tmp_path):
+        """Return None when neither throughput line is present."""
+        p = tmp_path / "test.res"
+        p.write_text("Some random log\nNo throughput here\n")
+        assert parse_mid_throughput(str(p)) is None
 
 
 # ---------------------------------------------------------------------------
@@ -160,6 +188,31 @@ class TestCollectThroughputs:
     def test_empty_directory(self, tmp_path):
         data = collect_throughputs(str(tmp_path))
         assert len(data) == 0
+
+    def test_total_only_files_included(self, tmp_path):
+        """Files with only 'Total throughtput' (no Mid) should be picked up
+        via the fallback — this happens for MongoDB shorter runs."""
+        _make_complete_experiment(str(tmp_path), "none_mongodb",
+                                  "concurrent_10", "0", [40, 38, 42, 39, 41],
+                                  total_only=True)
+        data = collect_throughputs(str(tmp_path))
+        assert "none_mongodb" in data
+        assert "concurrent_10" in data["none_mongodb"]
+        total = data["none_mongodb"]["concurrent_10"]["0"]
+        assert total == pytest.approx(200.0)
+
+    def test_mixed_mid_and_total_only(self, tmp_path):
+        """Protocols with Mid throughput coexist with total-only protocols."""
+        _make_complete_experiment(str(tmp_path), "none_raft",
+                                  "concurrent_400", "0", [1800]*5)
+        _make_complete_experiment(str(tmp_path), "none_mongodb",
+                                  "concurrent_10", "0", [40]*5,
+                                  total_only=True)
+        data = collect_throughputs(str(tmp_path))
+        assert "none_raft" in data
+        assert "none_mongodb" in data
+        assert data["none_raft"]["concurrent_400"]["0"] == pytest.approx(9000.0)
+        assert data["none_mongodb"]["concurrent_10"]["0"] == pytest.approx(200.0)
 
 
 # ---------------------------------------------------------------------------

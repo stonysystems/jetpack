@@ -236,8 +236,19 @@ def get_latency_for_conc(data, protocol, concurrent, mode):
     return server_data
 
 
+def _effective_throughput(sd):
+    """Return the best available throughput for a server: mid preferred, total as fallback."""
+    if sd["mid_throughput"] is not None:
+        return sd["mid_throughput"]
+    return sd["total_throughput"]
+
+
 def get_total_throughput(data, protocol, concurrent, mode):
-    """Sum mid_throughput across all servers for a config."""
+    """Sum throughput across all servers for a config.
+
+    Prefers mid_throughput (steady-state); falls back to total_throughput
+    when mid is unavailable (e.g. shorter MongoDB runs).
+    """
     key = (protocol, concurrent, mode)
     if key not in data:
         return None
@@ -245,8 +256,8 @@ def get_total_throughput(data, protocol, concurrent, mode):
     if len(server_data) < len(SERVERS):
         return None
     total = sum(
-        sd["mid_throughput"] for sd in server_data.values()
-        if sd["mid_throughput"] is not None
+        _effective_throughput(sd) for sd in server_data.values()
+        if _effective_throughput(sd) is not None
     )
     return total if total > 0 else None
 
@@ -268,8 +279,8 @@ def find_moderate_conc(data, protocol, mode):
         server_data = data[key]
         if len(server_data) < len(SERVERS):
             continue
-        tp = sum(sd["mid_throughput"] for sd in server_data.values()
-                 if sd["mid_throughput"] is not None)
+        tp = sum(_effective_throughput(sd) for sd in server_data.values()
+                 if _effective_throughput(sd) is not None)
         if tp > best_tp:
             best_tp = tp
             best_conc = key[1]  # conc

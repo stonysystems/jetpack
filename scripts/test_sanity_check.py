@@ -19,6 +19,8 @@ from sanity_check import (
     compute_path_usage,
     run_sanity_checks,
     generate_report,
+    get_total_throughput,
+    _effective_throughput,
     SanityResult,
     SERVERS,
     LEADER_SERVER,
@@ -137,6 +139,39 @@ class TestParseResFile(unittest.TestCase):
         self.assertIsNotNone(result["efficient_path"])
         self.assertEqual(result["efficient_path"]["count"], 800)
         self.assertAlmostEqual(result["efficient_path"]["50pct"], 42.0)
+
+    def test_parse_total_only_throughput(self):
+        """Files with only 'Total throughtput' (no 'Mid throughput') should
+        still have total_throughput parsed — e.g. shorter MongoDB runs."""
+        content = (
+            "I [s_main.cc:859] 2026-03-23 11:24:21.708 | Total throughtput is 40.00\n"
+            "I [s_main.cc:869] 2026-03-23 11:24:31.709 | After worker.WaitForShutdown();\n"
+        )
+        path = self.write_file("total_only.res", content)
+        result = parse_res_file(path)
+        self.assertIsNone(result["mid_throughput"])
+        self.assertAlmostEqual(result["total_throughput"], 40.0)
+
+
+class TestEffectiveThroughput(unittest.TestCase):
+    """Test _effective_throughput helper for mid/total fallback."""
+
+    def test_prefers_mid(self):
+        sd = {"mid_throughput": 100.0, "total_throughput": 120.0}
+        self.assertAlmostEqual(_effective_throughput(sd), 100.0)
+
+    def test_falls_back_to_total(self):
+        sd = {"mid_throughput": None, "total_throughput": 40.0}
+        self.assertAlmostEqual(_effective_throughput(sd), 40.0)
+
+    def test_both_none(self):
+        sd = {"mid_throughput": None, "total_throughput": None}
+        self.assertIsNone(_effective_throughput(sd))
+
+    def test_zero_mid_still_used(self):
+        """Mid throughput of 0 is a valid measurement, not a missing value."""
+        sd = {"mid_throughput": 0.0, "total_throughput": 19.0}
+        self.assertAlmostEqual(_effective_throughput(sd), 0.0)
 
 
 class TestCollectExperimentData(unittest.TestCase):
@@ -734,14 +769,17 @@ class TestWithRealData(unittest.TestCase):
         data = collect_experiment_data(self.RESULT_DIR)
         self.assertTrue(check_wan_delay(data, "none_raft"))
 
-    def test_real_throughput_positive(self):
+    def test_real_throughput_non_negative(self):
+        """Per-server throughput should be non-negative.  Zero is valid —
+        follower servers at low concurrency may process no requests during
+        the measurement window (e.g. Mencius followers at concurrent_45)."""
         data = collect_experiment_data(self.RESULT_DIR)
         for (proto, conc, mode), server_data in data.items():
             if len(server_data) == len(SERVERS):
                 for srv, sd in server_data.items():
                     if sd["mid_throughput"] is not None:
-                        self.assertGreater(sd["mid_throughput"], 0,
-                                           f"{proto} {conc} mode={mode} {srv}")
+                        self.assertGreaterEqual(sd["mid_throughput"], 0,
+                                                f"{proto} {conc} mode={mode} {srv}")
 
     def test_real_sanity_runs(self):
         results, summaries = run_sanity_checks(self.RESULT_DIR, wan_delay_ms=20)
