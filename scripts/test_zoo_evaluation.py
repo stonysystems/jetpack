@@ -247,9 +247,9 @@ class TestNotebookIntegrity(unittest.TestCase):
                                   f"fixed_conc_json should use project_root: {line.strip()}")
 
     def test_throughput_latency_metrics_complete(self):
-        """Cells 12 and 13 must have all 4 throughput-latency metrics enabled."""
+        """Cells 13 and 14 must have all 4 throughput-latency metrics enabled."""
         required_metrics = ['ae_ave', 'ae_50', 'ae_90', 'ae_99']
-        for cell_idx in [12, 13]:
+        for cell_idx in [13, 14]:
             src = self.all_src[cell_idx]
             # Find the throughput_latency_metrics definition
             in_metrics = False
@@ -291,48 +291,48 @@ class TestNotebookDataGuards(unittest.TestCase):
         _, ctype, cid, src = self.code_cells[index]
         return src
 
-    def test_cell15_uses_dynamic_n_servers(self):
-        """Cell 15 must use dynamic server count, not hardcoded 10."""
-        src = self._get_code_cell(15)
-        self.assertNotIn('range(num_leader[proto], 10)', src,
-                         "Cell 15 still has hardcoded 10-server range")
-        self.assertIn('n_servers', src, "Cell 15 should use n_servers variable")
-
-    def test_cell16_has_6_cpu_line_entries(self):
-        """Cell 16 cpu_line_info must have entries for all 6 protocols."""
+    def test_cell16_uses_dynamic_n_servers(self):
+        """Cell 16 must use dynamic server count, not hardcoded 10."""
         src = self._get_code_cell(16)
-        self.assertIn('etcd', src, "Cell 16 cpu_line_info missing etcd")
-        self.assertIn('zookeeper', src, "Cell 16 cpu_line_info missing zookeeper")
+        self.assertNotIn('range(num_leader[proto], 10)', src,
+                         "Cell 16 still has hardcoded 10-server range")
+        self.assertIn('n_servers', src, "Cell 16 should use n_servers variable")
 
-    def test_cell18_guards_mode101_memory(self):
-        """Cell 18 must guard against missing mode 101 memory_usage data."""
-        src = self._get_code_cell(18)
+    def test_cell17_has_6_cpu_line_entries(self):
+        """Cell 17 cpu_line_info must have entries for all 6 protocols."""
+        src = self._get_code_cell(17)
+        self.assertIn('etcd', src, "Cell 17 cpu_line_info missing etcd")
+        self.assertIn('zookeeper', src, "Cell 17 cpu_line_info missing zookeeper")
+
+    def test_cell19_guards_mode101_memory(self):
+        """Cell 19 must guard against missing mode 101 memory_usage data."""
+        src = self._get_code_cell(19)
         has_guard = ('try:' in src or '_mem_protocols_done' in src
                      or 'except' in src or '.get(' in src)
         self.assertTrue(has_guard,
-                        "Cell 18 accesses mode 101 memory_usage without a guard")
+                        "Cell 19 accesses mode 101 memory_usage without a guard")
 
-    def test_cell18_handles_empty_protocol_data(self):
-        """Cell 18 should not crash when no protocol has mode 101 data."""
-        src = self._get_code_cell(18)
+    def test_cell19_handles_empty_protocol_data(self):
+        """Cell 19 should not crash when no protocol has mode 101 data."""
+        src = self._get_code_cell(19)
         # Should have a fallback message for when no data is available
         self.assertIn('not available', src.lower(),
-                      "Cell 18 should print a message when mode 101 data is missing")
+                      "Cell 19 should print a message when mode 101 data is missing")
 
-    def test_cell24_guards_copilot_property(self):
-        """Cell 24 must guard copilot property experiment loading."""
-        src = self._get_code_cell(24)
+    def test_cell25_guards_copilot_property(self):
+        """Cell 25 must guard copilot property experiment loading."""
+        src = self._get_code_cell(25)
         has_guard = ('try:' in src or 'except' in src or '_copilot_property' in src)
         self.assertTrue(has_guard,
-                        "Cell 24 loads copilot property data without a guard")
+                        "Cell 25 loads copilot property data without a guard")
 
-    def test_cell14_guards_mode_access(self):
-        """Cell 14 draw_latency_line must handle missing mode data."""
-        src = self._get_code_cell(14)
+    def test_cell15_guards_mode_access(self):
+        """Cell 15 draw_latency_line must handle missing mode data."""
+        src = self._get_code_cell(15)
         has_guard = ('try:' in src or 'except' in src or '.get(' in src
                      or 'continue' in src)
         self.assertTrue(has_guard,
-                        "Cell 14 accesses mode data in pcts loop without a guard")
+                        "Cell 15 accesses mode data in pcts loop without a guard")
 
     def test_zipf_cells_have_guards(self):
         """Cells referencing zipf data must have _has_zipf guard."""
@@ -429,7 +429,7 @@ class TestFigureLayout(unittest.TestCase):
 
     def test_main_subplot_cells_use_n_proto(self):
         """Main figure cells must use dynamic n_proto for ncols."""
-        for i in [11, 12, 13, 17]:
+        for i in [12, 13, 14, 18]:
             _, src = self.code_cells[i]
             if 'subplots' in src:
                 self.assertIn('n_proto', src,
@@ -438,17 +438,18 @@ class TestFigureLayout(unittest.TestCase):
                                  f"Cell {i} has hardcoded ncols=4")
 
     def test_cpu_cell_uses_dynamic_ncols(self):
-        """Cell 16 must use dynamic ncols for workload count."""
-        _, src = self.code_cells[16]
+        """Cell 17 must use dynamic ncols for CPU usage figure."""
+        _, src = self.code_cells[17]
         self.assertNotIn('ncols=2,', src,
-                         "Cell 16 has hardcoded ncols=2")
-        self.assertIn('len(workloads)', src,
-                      "Cell 16 should use len(workloads) for dynamic ncols")
+                         "Cell 17 has hardcoded ncols=2")
+        # New layout uses n_proto for 6-subfigure per-protocol layout
+        self.assertTrue('n_proto' in src or 'len(workloads)' in src,
+                        "Cell 17 should use n_proto or len(workloads) for dynamic ncols")
 
     def test_protocol_ordering_consistent(self):
         """Protocol ordering in cpu_line_info must match protocol_name."""
         _, src2 = self.code_cells[2]
-        _, src16 = self.code_cells[16]
+        _, src16 = self.code_cells[17]
 
         # Extract protocol_name order
         proto_names = []
@@ -484,11 +485,11 @@ class TestFigureLayout(unittest.TestCase):
                          "Protocol ordering mismatch between protocol_name and cpu_line_info")
 
     def test_latency_cumulative_uses_dynamic_ncols(self):
-        """Cell 14 subplots must use dynamic column count."""
-        _, src = self.code_cells[14]
+        """Cell 15 subplots must use dynamic column count."""
+        _, src = self.code_cells[15]
         if 'subplots' in src:
             self.assertNotIn('ncols=4', src,
-                             "Cell 14 has hardcoded ncols=4")
+                             "Cell 15 has hardcoded ncols=4")
 
 
 class TestResultFilePatterns(unittest.TestCase):
@@ -501,7 +502,7 @@ class TestResultFilePatterns(unittest.TestCase):
             self.skipTest("Zoo result directory not available")
 
         pattern = re.compile(
-            r'^(.+?)-30c1s5r5p-zoo-rw_\d+(-rw_zipf_[\d.]+)?-concurrent_\d+-\d+-YCSB_[A-Z]-zoo\d\.res$'
+            r'^(.+?)-30c1s5r5p-zoo-(rw_[\d._a-z]+)-concurrent_\d+-\d+-YCSB_[A-Z]-zoo\d\.res$'
         )
         res_files = [f for f in os.listdir(result_dir) if f.endswith('.res')]
         self.assertGreater(len(res_files), 0, "No .res files found")
