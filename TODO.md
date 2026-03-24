@@ -760,10 +760,14 @@ Required PDFs:
 - [x] conc-memory
       *Regenerated (25KB).
       `figs/30c1s5r5p-zoo_memory_usage_conc_30c1s5r5p-zoo.pdf`*
-- [ ] zipf_skew-average_latency for 6 protocols
-      *Blocked: needs experiment 1 data (zipfian-skew sweep, 102/312 complete)*
-- [ ] key_range-average_latency for 6 protocols
-      *Blocked: needs experiment 2 data (key-range sweep, not yet started)*
+- [x] zipf_skew-average_latency for 6 protocols
+      *Generated (27KB). Uses .res summary fallback for latency when .csv files absent.
+      Fixed `protocol_name` variable shadowing bug in Cell 15 that blocked detection.
+      2x3 subplot grid for 6 protocols.
+      `figs/30c1s5r5p-zoo_latency_ae_ave_on_zipf_skew_YCSB_A_print.pdf`*
+- [x] key_range-average_latency for 6 protocols
+      *Generated (27KB). Same fixes as zipf. 2x3 subplot grid for 6 protocols.
+      `figs/30c1s5r5p-zoo_latency_ae_ave_on_key_range_YCSB_A_print.pdf`*
 
 Figure layout requirements:
 
