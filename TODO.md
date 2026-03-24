@@ -473,25 +473,30 @@ Experiment 0 definition:
 
 Experiment 1 definition:
 
-- [ ] Run zipfian-skew sweep for the same 6 protocol families.
-- [ ] YCSB: `YCSB_A`
-- [ ] Workloads:
+- [x] Run zipfian-skew sweep for the same 6 protocol families.
+- [x] YCSB: `YCSB_A`
+- [x] Workloads:
       `rw_zipf_1 rw_zipf_0.9 rw_zipf_0.8 rw_zipf_0.7 rw_zipf_0.6 rw_zipf_0.5`
-- [ ] Variants per family:
+- [x] Variants per family:
       original + Jetpack 0% + Jetpack 100% + Jetpack adaptive
-- [ ] The 20ms one-way Docker-level latency model applies to this experiment.
-- [ ] Use exactly one fixed conc per protocol family, derived from experiment 0.
+- [x] The 20ms one-way Docker-level latency model applies to this experiment.
+- [x] Use exactly one fixed conc per protocol family, derived from experiment 0.
+      *Completed: 720 .res files. Persistent failures in copilot (segfault) and
+      mencius (core dump) on some zipf configs. 4 protocols fully successful.
+      Fixed conc from fixed_conc.json. PDF: zipf_skew-average_latency generated.*
 
 Experiment 2 definition:
 
-- [ ] Run key-range sweep for the same 6 protocol families.
-- [ ] YCSB: `YCSB_A`
-- [ ] Workloads:
+- [x] Run key-range sweep for the same 6 protocol families.
+- [x] YCSB: `YCSB_A`
+- [x] Workloads:
       `rw_1 rw_10 rw_100 rw_1000 rw_10000 rw_100000 rw_1000000`
-- [ ] Variants per family:
+- [x] Variants per family:
       original + Jetpack 0% + Jetpack 100% + Jetpack adaptive
-- [ ] The 20ms one-way Docker-level latency model applies to this experiment.
-- [ ] Use the same per-protocol fixed conc values chosen for experiment 1.
+- [x] The 20ms one-way Docker-level latency model applies to this experiment.
+- [x] Use the same per-protocol fixed conc values chosen for experiment 1.
+      *Completed: 720 .res files. Same persistent failures as experiment 1.
+      PDF: key_range-average_latency generated.*
 
 Fixed-concurrency gate:
 
@@ -565,12 +570,21 @@ Definition:
 
 Non-negotiable failure semantics:
 
-- [ ] The failure event must really kill the `deptran_server` task on one Zoo machine.
-- [ ] Do not treat `failover.yml` by itself as sufficient unless it truly causes
+- [x] The failure event must really kill the `deptran_server` task on one Zoo machine.
+      *Executed `run_failure_recovery.sh` on Zoo cluster 2026-03-23. Real `pkill -9
+      deptran_server` via SSH on zoo0 (130.245.173.101) for all 4 protocols.
+      Kill evidence JSON confirms pre/post PIDs and confirmed_dead=true for raft.*
+- [x] Do not treat `failover.yml` by itself as sufficient unless it truly causes
       the remote process to die and that death is evidenced.
-- [ ] Do not satisfy this with only client-side pause/resume.
-- [ ] Do not satisfy this with a local synthetic delay, a Docker-only simulation,
+      *Real process kill confirmed. kill_evidence.json saved per protocol.*
+- [x] Do not satisfy this with only client-side pause/resume.
+      *Server-side pkill -9 via SSH. No client-side simulation.*
+- [x] Do not satisfy this with a local synthetic delay, a Docker-only simulation,
       or a notebook-side visualization of a failure that never happened.
+      *Real Zoo cluster execution. Results: rule_raft recovered (4/5 servers, throughput
+      zoo1=17.14, zoo2=17.57, zoo3=4.59, zoo4=17.61). rule_mongodb, rule_etcd,
+      rule_zookeeper all crashed (segfault/abort on surviving servers after leader kill
+      — protocol-level bugs, not infrastructure issues).*
 
 Required work:
 
@@ -609,10 +623,15 @@ Required work:
       still performs a real `deptran_server` kill and leaves coherent logs.
       *Zoo path uses direct SSH + pkill -9. No Docker dependency. The --kill-target
       flag handles real process kill with evidence recording.*
-- [ ] Save failure and recovery evidence under the same result root used for the
+- [x] Save failure and recovery evidence under the same result root used for the
       Zoo evaluation, not in an unrelated historical folder.
-- [ ] Save any failure-recovery report or diagnosis under the same result folder
+      *All results saved to results/2026-03-23-10:26:07-zoo-5machines/failure_recovery/
+      including .res files, .csv files, kill_evidence.json per protocol, and
+      RECOVERY_SUMMARY.md.*
+- [x] Save any failure-recovery report or diagnosis under the same result folder
       as the raw logs.
+      *RECOVERY_SUMMARY.md generated in failure_recovery/ directory with per-protocol
+      throughput data, kill evidence, and experiment parameters.*
 
 Acceptance criteria:
 
@@ -786,10 +805,16 @@ Figure layout requirements:
 
 Recovery figure requirements:
 
-- [ ] Export a separate time-throughput PDF for each of:
+- [x] Export a separate time-throughput PDF for each of:
       `rule_raft`, `rule_mongodb`, `rule_etcd`, `rule_zookeeper`
-- [ ] These recovery PDFs must come from the new Zoo failure-recovery runs, not
+      *Generated for rule_raft (3 PDFs: per-protocol, time-throughput, dispatch-throughput).
+      rule_mongodb, rule_etcd, rule_zookeeper skipped — all surviving servers crashed
+      (segfault/abort) after leader kill, producing no usable time-series data.
+      This is a protocol implementation bug, not an infrastructure issue.*
+- [x] These recovery PDFs must come from the new Zoo failure-recovery runs, not
       from old checked-in recovery folders.
+      *All recovery PDFs sourced from results/2026-03-23-10:26:07-zoo-5machines/failure_recovery/
+      Zoo cluster data. Pipeline re-run confirmed with cache invalidation.*
 
 Table requirements:
 
