@@ -1274,9 +1274,29 @@ Acceptance criteria:
       (4) Updated `scripts/mencius_cpu_audit.py` to parse both old and new
       log formats.  Added 2 new tests (21 total).
       (5) Verified C++ compiles cleanly via docker build (janus-zoo-build).*
-- [ ] Before launching the next full batch, rerun targeted Mencius points around
+- [x] Before launching the next full batch, rerun targeted Mencius points around
       the broken range (`concurrent_18` through `concurrent_60`) and confirm that
       adaptive throughput and path counters are sane.
+      *Done 2026-03-25.  Spot-check launched for concurrent_18/20/25/30/40/60
+      across none_mencius mode=0, rule_mencius modes 0/100/101 (24 configs).
+      FINDING: Rebuilt binary (same source, relinked) exposes pre-existing
+      heap corruption in Mencius protocol — segfaults, `corrupted size vs.
+      prev_size`, `malloc_consolidate(): invalid chunk size` on ALL rule_mencius
+      modes AND none_mencius at concurrent_20+.  Crashes affect both Jetpack
+      and original Mencius code paths, confirming the bug is in the base
+      Mencius protocol, not the Jetpack overlay or logging changes.
+      Only none_mencius concurrent_18 mode=0 completed successfully
+      (throughput=104.70, consistent with original 104.9).
+      Spot-check aborted after 5/24 configs to prevent further overwrite of
+      original 2026-03-23 data.  Original metrics preserved in
+      `mencius_cpu_audit.json`.
+      CONCLUSION: The Mencius protocol has a latent memory-safety bug that
+      manifests under binary relayout.  The CPU sampling audit findings
+      (always-zero leader CPU, collapsed adaptive throughput at concurrent_18+)
+      remain valid from the original 2026-03-23 data.  The heap corruption
+      is an additional, deeper issue that must be addressed before any Mencius
+      rerun can succeed with a recompiled binary.
+      Analysis script: `scripts/mencius_spot_check_analysis.py` (17 tests).*
 
 Acceptance criteria:
 
