@@ -1243,9 +1243,23 @@ Acceptance criteria:
       The adaptive controller cannot help when the underlying fast path is broken.
       Source files: scheduler.cc:62-90, communicator.cc:38-46, communicator.h:103,
       rule/coordinator.cc:78-94, mencius/server.h:55-57.*
-- [ ] Audit the branch direction and threshold logic in the adaptive rule.
+- [x] Audit the branch direction and threshold logic in the adaptive rule.
       High CPU should cause backoff to the lower-CPU path. Low CPU should not
       randomly reject the fast path because of a stale or zero sample.
+      *Done: Audited `rule/coordinator.cc:78-94`.  Findings:
+      (1) BRANCH DIRECTION IS CORRECT: high CPU → disable fast path (line 88-89).
+      (2) THRESHOLD RANGE IS REASONABLE: `(max_leader_avg - 60.0) > rand(0,30)`
+      means CPU < 60% never disables; 60-90% probabilistic; >90% always disables.
+      (3) CRITICAL BUG — MONOTONIC RATCHET: `static double max_leader_avg = 0.0`
+      (line 81) only increases, never decays.  Once CPU spikes, fast path is
+      permanently throttled for the rest of the run.  Compare to the queue-depth
+      throttle (lines 99-120) which correctly uses a live rolling average.
+      (4) STALE ZERO PROBLEM: With CPU always 0.0 (see previous audit), the
+      threshold check is dead code.  Even if fixed, the ratchet bug would cause
+      a single CPU spike to permanently disable fast path.
+      (5) The one-armed bandit (line 75-77) controls baseline; the Mencius CPU
+      check can only disable, never enable — directionally correct but moot
+      when CPU is always zero.*
 - [ ] Add or preserve enough logging to prove the controller input and decision:
       sampled CPU, smoothed CPU, threshold, random draw (if still used),
       chosen path, and path-attempt counters.
