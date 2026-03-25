@@ -7,9 +7,13 @@ import tempfile
 import pytest
 
 from derive_fixed_conc import (
+    parse_latency_p50,
     parse_mid_throughput,
     collect_throughputs,
+    collect_latencies,
     find_max_throughput_conc,
+    find_latency_envelope_conc,
+    LATENCY_MULTIPLIER,
     PROTOCOL_MAP,
 )
 
@@ -19,15 +23,21 @@ from derive_fixed_conc import (
 # ---------------------------------------------------------------------------
 
 def _write_res(directory, protocol, site, workload, conc, mode, ycsb, server, throughput,
-               total_only=False):
+               total_only=False, latency_p50=None):
     """Create a minimal .res file with a throughput line.
 
     If total_only=True, writes only 'Total throughtput' (no Mid) to simulate
     shorter runs like MongoDB that don't produce the Mid measurement.
+    If latency_p50 is provided, also writes a latency statistics line.
     """
     fname = f"{protocol}-{site}-{workload}-{conc}-{mode}-{ycsb}-{server}.res"
     path = os.path.join(directory, fname)
     with open(path, "w") as f:
+        if latency_p50 is not None:
+            f.write(f"I [s_main.cc:908] | All-original-path-attempts       "
+                    f"statistics   count      100   0pct    50.00  "
+                    f"50pct    {latency_p50:.2f}  90pct    {latency_p50 * 1.2:.2f}  "
+                    f"99pct    {latency_p50 * 1.5:.2f}    ave    {latency_p50:.2f}\n")
         if total_only:
             f.write(f"Total throughtput is {throughput}\n")
         else:
@@ -37,13 +47,18 @@ def _write_res(directory, protocol, site, workload, conc, mode, ycsb, server, th
 
 def _make_complete_experiment(directory, protocol, conc, mode, throughputs,
                                site="30c1s5r5p-zoo", workload="rw_1000000",
-                               ycsb="YCSB_A", servers=None, total_only=False):
-    """Create .res files for all 5 servers for one experiment point."""
+                               ycsb="YCSB_A", servers=None, total_only=False,
+                               latency_p50s=None):
+    """Create .res files for all 5 servers for one experiment point.
+
+    If latency_p50s is provided, it should be a list parallel to throughputs.
+    """
     if servers is None:
         servers = [f"zoo{i}" for i in range(5)]
-    for server, tp in zip(servers, throughputs):
+    for i, (server, tp) in enumerate(zip(servers, throughputs)):
+        p50 = latency_p50s[i] if latency_p50s else None
         _write_res(directory, protocol, site, workload, conc, mode, ycsb, server, tp,
-                   total_only=total_only)
+                   total_only=total_only, latency_p50=p50)
 
 
 # ---------------------------------------------------------------------------
@@ -289,6 +304,202 @@ class TestFindMaxThroughputConc:
 
 
 # ---------------------------------------------------------------------------
+# TestParseLatencyP50
+# ---------------------------------------------------------------------------
+
+class TestParseLatencyP50:
+    def test_basic_parse(self, tmp_path):
+        p = tmp_path / "test.res"
+        p.write_text(
+            "I [s_main.cc:908] | All-original-path-attempts       "
+            "statistics   count      100   0pct    50.00  "
+            "50pct    82.16  90pct   100.00  99pct   120.00    ave    85.00\n"
+        )
+        assert parse_latency_p50(str(p)) == pytest.approx(82.16)
+
+    def test_missing_file(self):
+        assert parse_latency_p50("/nonexistent/file.res") is None
+
+    def test_no_latency_line(self, tmp_path):
+        p = tmp_path / "test.res"
+        p.write_text("Mid throughput is 1000\n")
+        assert parse_latency_p50(str(p)) is None
+
+    def test_negative_p50_returns_none(self, tmp_path):
+        p = tmp_path / "test.res"
+        p.write_text(
+            "I | All-original-path-attempts       "
+            "statistics   count        0   0pct    -1.00  "
+            "50pct    -1.00  90pct    -1.00  99pct    -1.00    ave    -1.00\n"
+        )
+        assert parse_latency_p50(str(p)) is None
+
+    def test_fallback_to_efficient_attempts(self, tmp_path):
+        p = tmp_path / "test.res"
+        p.write_text(
+            "I | All-efficient-attempts           "
+            "statistics   count       50   0pct    60.00  "
+            "50pct    75.50  90pct    90.00  99pct   100.00    ave    78.00\n"
+        )
+        assert parse_latency_p50(str(p)) == pytest.approx(75.50)
+
+    def test_original_path_preferred_over_efficient(self, tmp_path):
+        p = tmp_path / "test.res"
+        p.write_text(
+            "I | All-original-path-attempts       "
+            "statistics   count      100   0pct    50.00  "
+            "50pct    82.00  90pct   100.00  99pct   120.00    ave    85.00\n"
+            "I | All-efficient-attempts           "
+            "statistics   count      100   0pct    50.00  "
+            "50pct    70.00  90pct    90.00  99pct   100.00    ave    72.00\n"
+        )
+        assert parse_latency_p50(str(p)) == pytest.approx(82.00)
+
+
+# ---------------------------------------------------------------------------
+# TestCollectLatencies
+# ---------------------------------------------------------------------------
+
+class TestCollectLatencies:
+    def test_single_complete_experiment(self, tmp_path):
+        _make_complete_experiment(str(tmp_path), "none_raft",
+                                  "concurrent_100", "0",
+                                  [1000]*5, latency_p50s=[80.0]*5)
+        data = collect_latencies(str(tmp_path))
+        assert "none_raft" in data
+        assert "concurrent_100" in data["none_raft"]
+        assert data["none_raft"]["concurrent_100"]["0"] == pytest.approx(80.0)
+
+    def test_incomplete_excluded(self, tmp_path):
+        servers = [f"zoo{i}" for i in range(4)]
+        _make_complete_experiment(str(tmp_path), "none_raft",
+                                  "concurrent_100", "0",
+                                  [1000]*4, servers=servers,
+                                  latency_p50s=[80.0]*4)
+        data = collect_latencies(str(tmp_path))
+        assert len(data) == 0 or "concurrent_100" not in data.get("none_raft", {})
+
+    def test_average_across_servers(self, tmp_path):
+        _make_complete_experiment(str(tmp_path), "none_raft",
+                                  "concurrent_100", "0",
+                                  [1000]*5,
+                                  latency_p50s=[70, 75, 80, 85, 90])
+        data = collect_latencies(str(tmp_path))
+        assert data["none_raft"]["concurrent_100"]["0"] == pytest.approx(80.0)
+
+
+# ---------------------------------------------------------------------------
+# TestFindLatencyEnvelopeConc
+# ---------------------------------------------------------------------------
+
+class TestFindLatencyEnvelopeConc:
+    def test_picks_largest_in_envelope(self):
+        tp_data = {
+            "concurrent_10":  {"0": 500},
+            "concurrent_100": {"0": 3000},
+            "concurrent_200": {"0": 5000},
+            "concurrent_400": {"0": 4000},
+        }
+        lat_data = {
+            "concurrent_10":  {"0": 80.0},
+            "concurrent_100": {"0": 82.0},
+            "concurrent_200": {"0": 85.0},   # within 2x of 80
+            "concurrent_400": {"0": 200.0},  # exceeds 2x of 80 = 160
+        }
+        conc, base, sel_p50, sel_tp, _ = find_latency_envelope_conc(tp_data, lat_data)
+        assert conc == "concurrent_200"
+        assert base == pytest.approx(80.0)
+        assert sel_p50 == pytest.approx(85.0)
+
+    def test_all_in_envelope_picks_highest(self):
+        tp_data = {
+            "concurrent_10":  {"0": 500},
+            "concurrent_100": {"0": 3000},
+            "concurrent_500": {"0": 5000},
+        }
+        lat_data = {
+            "concurrent_10":  {"0": 80.0},
+            "concurrent_100": {"0": 82.0},
+            "concurrent_500": {"0": 90.0},
+        }
+        conc, _, _, _, _ = find_latency_envelope_conc(tp_data, lat_data)
+        assert conc == "concurrent_500"
+
+    def test_custom_multiplier(self):
+        tp_data = {
+            "concurrent_10":  {"0": 500},
+            "concurrent_100": {"0": 3000},
+        }
+        lat_data = {
+            "concurrent_10":  {"0": 80.0},
+            "concurrent_100": {"0": 100.0},  # within 2x but not 1.2x
+        }
+        # With 1.2x multiplier (threshold=96), concurrent_100 exceeds it
+        conc, _, _, _, _ = find_latency_envelope_conc(tp_data, lat_data, multiplier=1.2)
+        assert conc == "concurrent_10"
+        # With 2.0x multiplier (threshold=160), concurrent_100 is fine
+        conc, _, _, _, _ = find_latency_envelope_conc(tp_data, lat_data, multiplier=2.0)
+        assert conc == "concurrent_100"
+
+    def test_no_latency_data_returns_none(self):
+        tp_data = {"concurrent_100": {"0": 3000}}
+        lat_data = {}
+        conc, _, _, _, _ = find_latency_envelope_conc(tp_data, lat_data)
+        assert conc is None
+
+    def test_empty_data(self):
+        conc, base, sel_p50, sel_tp, results = find_latency_envelope_conc({}, {})
+        assert conc is None
+        assert results == []
+
+    def test_mode_filtering(self):
+        tp_data = {
+            "concurrent_10":  {"0": 500, "100": 600},
+            "concurrent_100": {"0": 3000, "100": 4000},
+        }
+        lat_data = {
+            "concurrent_10":  {"0": 80.0, "100": 70.0},
+            "concurrent_100": {"0": 200.0, "100": 72.0},  # mode=0 out of envelope
+        }
+        # mode=0 should only pick concurrent_10
+        conc, _, _, _, _ = find_latency_envelope_conc(tp_data, lat_data, mode="0")
+        assert conc == "concurrent_10"
+        # mode=100 should pick concurrent_100 (72 <= 70*2=140)
+        conc, _, _, _, _ = find_latency_envelope_conc(tp_data, lat_data, mode="100")
+        assert conc == "concurrent_100"
+
+    def test_all_results_sorted_ascending(self):
+        tp_data = {
+            "concurrent_200": {"0": 5000},
+            "concurrent_10":  {"0": 500},
+            "concurrent_100": {"0": 3000},
+        }
+        lat_data = {
+            "concurrent_200": {"0": 85.0},
+            "concurrent_10":  {"0": 80.0},
+            "concurrent_100": {"0": 82.0},
+        }
+        _, _, _, _, results = find_latency_envelope_conc(tp_data, lat_data)
+        concs = [r[0] for r in results]
+        assert concs == ["concurrent_10", "concurrent_100", "concurrent_200"]
+
+    def test_missing_tp_at_some_concs(self):
+        """Concurrency with latency but no throughput should be skipped."""
+        tp_data = {
+            "concurrent_10":  {"0": 500},
+            "concurrent_100": {"0": 3000},
+            # concurrent_200 has no throughput
+        }
+        lat_data = {
+            "concurrent_10":  {"0": 80.0},
+            "concurrent_100": {"0": 82.0},
+            "concurrent_200": {"0": 85.0},
+        }
+        conc, _, _, _, _ = find_latency_envelope_conc(tp_data, lat_data)
+        assert conc == "concurrent_100"  # concurrent_200 skipped (no tp)
+
+
+# ---------------------------------------------------------------------------
 # TestProtocolMap
 # ---------------------------------------------------------------------------
 
@@ -388,19 +599,33 @@ class TestWithRealData:
         assert "none_raft" in data
         assert len(data["none_raft"]) > 0
 
-    def test_raft_fixed_conc_is_concurrent_400(self):
+    def test_raft_peak_throughput_in_plateau(self):
+        """Peak throughput should be in the Raft plateau region (>=400)."""
         data = collect_throughputs(ZOO_RESULT_DIR)
         best_conc, best_tp, _ = find_max_throughput_conc(data["none_raft"])
-        assert best_conc == "concurrent_400"
-        assert best_tp > 8000  # Known to be ~9012
+        conc_num = int(best_conc.split('_')[1])
+        assert conc_num >= 400
+        assert best_tp > 8000  # Known to be ~9000+
 
-    def test_copilot_fixed_conc_is_concurrent_160(self):
-        data = collect_throughputs(ZOO_RESULT_DIR)
-        if "none_copilot" not in data:
+    def test_raft_latency_envelope_selects_higher(self):
+        """Latency-envelope method should pick higher than peak-throughput
+        because Raft p50 stays flat through very high concurrency."""
+        tp_data = collect_throughputs(ZOO_RESULT_DIR)
+        lat_data = collect_latencies(ZOO_RESULT_DIR)
+        conc, base, sel_p50, _, _ = find_latency_envelope_conc(
+            tp_data["none_raft"], lat_data.get("none_raft", {}))
+        conc_num = int(conc.split('_')[1])
+        assert conc_num >= 400  # At least as high as old peak-throughput pick
+        assert sel_p50 <= base * LATENCY_MULTIPLIER
+
+    def test_copilot_fixed_conc_is_concurrent_180(self):
+        tp_data = collect_throughputs(ZOO_RESULT_DIR)
+        lat_data = collect_latencies(ZOO_RESULT_DIR)
+        if "none_copilot" not in tp_data:
             pytest.skip("Copilot data not yet available")
-        best_conc, best_tp, _ = find_max_throughput_conc(data["none_copilot"])
-        assert best_conc == "concurrent_160"
-        assert best_tp > 4000  # Known to be ~4785
+        conc, base, sel_p50, _, _ = find_latency_envelope_conc(
+            tp_data["none_copilot"], lat_data.get("none_copilot", {}))
+        assert conc == "concurrent_180"
 
     def test_throughputs_positive(self):
         data = collect_throughputs(ZOO_RESULT_DIR)

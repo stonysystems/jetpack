@@ -1028,21 +1028,32 @@ Acceptance criteria:
       - *ZooKeeper: add concurrent_140/160/180 to find the exact knee between 120–200;
         drop concurrent_250+ (all timeout)*
       - *Raft: keep up to concurrent_2000 (plateau well-documented)*
-- [ ] Update the fixed-concurrency selection logic and docs before the full
+- [x] Update the fixed-concurrency selection logic and docs before the full
       rerun:
       the selected fixed conc for experiment 1 / 2 must be the largest
       concurrency that still preserves the minimum-concurrency latency envelope
       for that protocol family, not the highest-throughput point.
-- [ ] When picking the fixed conc, compare against the minimum tested
+      *Done: `derive_fixed_conc.py` now uses `find_latency_envelope_conc()` with
+      `LATENCY_MULTIPLIER=2.0`. New functions: `parse_latency_p50()`,
+      `collect_latencies()`, `find_latency_envelope_conc()`.  Results with
+      2026-03-23 data: Raft→concurrent_2000 (was 400), etcd→concurrent_300
+      (was 120), ZooKeeper→concurrent_120 (unchanged), Copilot→concurrent_180
+      (unchanged), Mencius→concurrent_40 (was 60), MongoDB→concurrent_100 (was 10).*
+- [x] When picking the fixed conc, compare against the minimum tested
       concurrency for the same protocol family and mode. Use the protocol's own
       observed baseline latency class; do not force every protocol into the same
       absolute target.
-- [ ] For the rerun write-up, `fixed_conc_selection.md` must show, per protocol:
+      *Done: baseline is the lowest-concurrency p50 for that protocol's mode=0.
+      Threshold = baseline × 2.0. Each protocol has its own baseline.*
+- [x] For the rerun write-up, `fixed_conc_selection.md` must show, per protocol:
       - minimum-concurrency original latency baseline
       - minimum-concurrency Jetpack baselines for adaptive / 100%
       - selected fixed conc
       - evidence that the selected point is still in the same latency class
       while being as large as possible
+      *Done: `fixed_conc_selection.md` now shows summary table with baseline p50,
+      selected p50, threshold; per-protocol tables show every concurrency with
+      throughput, p50, and in-envelope flag.*
 - [ ] After the rerun, derive `fixed_conc.json` again from the new experiment-0
       results using the latency-envelope rule above. Do not carry forward fixed
       concurrencies from the 2026-03-23 baseline if the sweep range changed.
