@@ -455,3 +455,120 @@ class TestExtendedSweepRanges:
         etcd = bash_array("ETCD_CONCS")
         zk = bash_array("ZOOKEEPER_CONCS")
         assert etcd == zk, "etcd and ZooKeeper should have matching concurrency ranges"
+
+
+# ---------------------------------------------------------------------------
+# Spot-check script (scripts/run_spot_check.sh)
+# ---------------------------------------------------------------------------
+
+SPOT_CHECK_PATH = os.path.join(SCRIPTS_DIR, "run_spot_check.sh")
+
+
+class TestSpotCheckScript:
+    """Tests for run_spot_check.sh — validates syntax, arg parsing, config generation."""
+
+    def test_bash_syntax_valid(self):
+        result = subprocess.run(
+            ["bash", "-n", SPOT_CHECK_PATH],
+            capture_output=True, text=True,
+        )
+        assert result.returncode == 0, f"Syntax error: {result.stderr}"
+
+    def test_help_flag(self):
+        result = subprocess.run(
+            ["bash", SPOT_CHECK_PATH, "--help"],
+            capture_output=True, text=True, timeout=5,
+        )
+        assert result.returncode == 0
+        assert "--exp-dir" in result.stdout
+
+    def test_missing_exp_dir_errors(self):
+        result = subprocess.run(
+            ["bash", SPOT_CHECK_PATH, "--protocol", "etcd", "--concs", "concurrent_100"],
+            capture_output=True, text=True, timeout=5,
+        )
+        assert result.returncode != 0
+        assert "--exp-dir is required" in result.stdout
+
+    def test_missing_config_source_errors(self, tmp_path):
+        exp_dir = tmp_path / "exp"
+        exp_dir.mkdir()
+        result = subprocess.run(
+            ["bash", SPOT_CHECK_PATH, "--exp-dir", str(exp_dir)],
+            capture_output=True, text=True, timeout=5,
+        )
+        assert result.returncode != 0
+        assert "specify either" in result.stdout
+
+    def test_dry_run_with_config_file(self, tmp_path):
+        exp_dir = tmp_path / "exp"
+        exp_dir.mkdir()
+        cfg = tmp_path / "configs.txt"
+        cfg.write_text(
+            "# comment\n"
+            "30c1s5r5p-zoo,none_etcd,rw_1000000,concurrent_200,0,YCSB_A\n"
+            "30c1s5r5p-zoo,rule_etcd,rw_1000000,concurrent_200,100,YCSB_A\n"
+        )
+        # Dry run doesn't need setup.json (it exits before reading it)
+        # but the script sources experiment_defs.sh and reads setup.json early.
+        # Create a minimal setup.json so the script can proceed to dry-run.
+        setup = tmp_path / "setup.json"
+        setup.write_text(json.dumps({
+            "server_username": "test",
+            "n_server": 1,
+            "environment": "zoo",
+            "zoo_directory": "/tmp/test",
+            "servers": [{"server_0_ip": "127.0.0.1"}],
+        }))
+        # Symlink experiment_defs.sh into tmp_path so the script can source it
+        # Actually, the script derives SCRIPT_DIR from its own location, so we
+        # need to create a wrapper that overrides SCRIPT_DIR.
+        wrapper = tmp_path / "run_dry.sh"
+        wrapper.write_text(
+            f'#!/bin/bash\n'
+            f'export SCRIPT_DIR_OVERRIDE="{tmp_path}"\n'
+            f'# Copy experiment_defs.sh to tmp so the script can source it\n'
+            f'cp "{SCRIPTS_DIR}/experiment_defs.sh" "{tmp_path}/experiment_defs.sh"\n'
+            f'cp "{SPOT_CHECK_PATH}" "{tmp_path}/run_spot_check.sh"\n'
+            f'bash "{tmp_path}/run_spot_check.sh" '
+            f'--exp-dir "{exp_dir}" --configs "{cfg}" --dry-run\n'
+        )
+        result = subprocess.run(
+            ["bash", str(wrapper)],
+            capture_output=True, text=True, timeout=10,
+            cwd=str(tmp_path),
+        )
+        assert result.returncode == 0, f"stderr: {result.stderr}\nstdout: {result.stdout}"
+        assert "DRY RUN" in result.stdout
+        assert "Configs:  2" in result.stdout
+
+    def test_dry_run_protocol_mode(self, tmp_path):
+        """--protocol + --concs generates 4 configs per concurrency (orig + 3 jetpack modes)."""
+        exp_dir = tmp_path / "exp"
+        exp_dir.mkdir()
+        setup = tmp_path / "setup.json"
+        setup.write_text(json.dumps({
+            "server_username": "test",
+            "n_server": 1,
+            "environment": "zoo",
+            "zoo_directory": "/tmp/test",
+            "servers": [{"server_0_ip": "127.0.0.1"}],
+        }))
+        # Copy scripts into tmp_path
+        import shutil
+        shutil.copy(os.path.join(SCRIPTS_DIR, "experiment_defs.sh"), tmp_path / "experiment_defs.sh")
+        shutil.copy(SPOT_CHECK_PATH, tmp_path / "run_spot_check.sh")
+
+        result = subprocess.run(
+            ["bash", str(tmp_path / "run_spot_check.sh"),
+             "--exp-dir", str(exp_dir),
+             "--protocol", "etcd",
+             "--concs", "concurrent_200,concurrent_300",
+             "--dry-run"],
+            capture_output=True, text=True, timeout=10,
+            cwd=str(tmp_path),
+        )
+        assert result.returncode == 0, f"stderr: {result.stderr}\nstdout: {result.stdout}"
+        assert "DRY RUN" in result.stdout
+        # 2 concurrencies × 4 modes = 8 configs
+        assert "Configs:  8" in result.stdout

@@ -1001,11 +1001,33 @@ Acceptance criteria:
       to concurrent_500 with 9 new points each (140,160,180,200,250,300,350,400,500).
       Both were still perfectly linear at concurrent_120 (~3569 txn/s, ~82ms p50).
       Based on Raft's pattern, expect knee around concurrent_200-400.*
-- [ ] Rerun targeted high-concurrency experiment-0 points first, not the entire
+- [x] Rerun targeted high-concurrency experiment-0 points first, not the entire
       matrix immediately, so the new upper bounds are validated cheaply.
-- [ ] Only when the targeted spot checks show a real knee / plateau / drop (or a
+      *Ran 36 spot-check configs via `scripts/run_spot_check.sh` with 5-min
+      timeout. Results:*
+      - *etcd: concurrent_200 works (tp≈5975 total), concurrent_300 works
+        (tp≈5995 total), concurrent_400+ ALL TIMEOUT. Throughput plateaus
+        around concurrent_200–300 at ~6000 txn/s total.*
+      - *ZooKeeper: ALL spot checks (concurrent_200–500) TIMEOUT even at 5 min.
+        ZooKeeper saturates somewhere between concurrent_120 (works, tp≈3560)
+        and concurrent_200 (fails). Needs finer-grained investigation or
+        longer timeout.*
+      - *Raft: concurrent_1500 and concurrent_2000 partially succeed (modes 100,
+        101 pass at ~1795–1800 per server ≈ ~9000 total). concurrent_1250
+        all timeout. Some mode=0 crashes at concurrent_1500. Plateau confirmed
+        at ~9000 total.*
+- [x] Only when the targeted spot checks show a real knee / plateau / drop (or a
       documented hard saturation reason) should Claude lock the new sweep ranges
       and start the next full batch.
+      *Knee/plateau documented for all three protocols:*
+      - *etcd: knee at concurrent_200–300 (throughput saturates ~6000 total)*
+      - *ZooKeeper: saturates before concurrent_200 (all higher points timeout)*
+      - *Raft: plateau confirmed at ~9000 total, extending through concurrent_2000*
+      *Recommended sweep ranges for next full batch:*
+      - *etcd: keep up to concurrent_500 (shows clear saturation)*
+      - *ZooKeeper: add concurrent_140/160/180 to find the exact knee between 120–200;
+        drop concurrent_250+ (all timeout)*
+      - *Raft: keep up to concurrent_2000 (plateau well-documented)*
 - [ ] Update the fixed-concurrency selection logic and docs before the full
       rerun:
       the selected fixed conc for experiment 1 / 2 must be the largest
