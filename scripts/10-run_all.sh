@@ -231,7 +231,15 @@ execute_command() {
         server_ip="${servers[$i]}"
         ssh ${SERVER_USERNAME}@"$server_ip" "pkill -9 deptran_server" &> /dev/null || true
     done
-    sleep 1
+
+    # Flush NFS write-behind cache on all servers before scp.
+    # Without sync, NFS attribute caching (3-60s) can hide files that the
+    # server already wrote and closed.  See scp_race_audit.py for evidence.
+    for ip in "${servers[@]}"; do
+        ssh ${SERVER_USERNAME}@"${ip}" "sync" &>/dev/null &
+    done
+    wait
+    sleep 3  # additional settle time for NFS attribute cache propagation
 
     scp ${SERVER_USERNAME}@"${servers[0]}:${repo_dir}/${exp_dir}/${exp_name}-*" "${exp_dir}" & 		# scp from svr 0 since nfs
     scp ${SERVER_USERNAME}@"${servers[0]}:${repo_dir}/results/recent_csv/${exp_name}-*" "${exp_dir}" & 	# scp from svr 0 since nfs
@@ -269,6 +277,14 @@ execute_command() {
                     status=1
                     fail_reason="low throughput (${mid_tp})"
                 fi
+            fi
+            # Verify CSV artifact is actually present locally after scp.
+            # The .res file says "Dumped to" but NFS lag or scp failure can
+            # leave the CSV missing.  Do not count this prefix as successful.
+            csv_file="${exp_dir}/${exp_name}-${replicanames[$i]}.csv"
+            if [ ! -f "${csv_file}" ]; then
+                status=1
+                fail_reason="csv_missing_after_scp"
             fi
         else
             status=1

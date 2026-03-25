@@ -1209,8 +1209,15 @@ Acceptance criteria:
       Fixes for the rerun: (a) add remote `sync` before scp, (b) use SIGTERM
       before SIGKILL, (c) increase sleep to ≥5s, (d) verify CSV line count
       matches "Dumped to" count after scp.*
-- [ ] For the rerun, do not count a prefix as successful unless its expected CSV
+- [x] For the rerun, do not count a prefix as successful unless its expected CSV
       artifacts are present or a documented intentional exception applies.
+      *Done: Updated `scripts/10-run_all.sh` and `scripts/run_spot_check.sh`:
+      (1) Added remote `sync` on all servers before scp to flush NFS write-behind
+      cache; (2) Increased post-kill sleep from 1s to 3s for NFS attribute cache
+      propagation; (3) Added CSV presence check — if .res says "Dumped to" but
+      the .csv file is missing locally, the prefix is marked failed with reason
+      `csv_missing_after_scp` and queued for retry.
+      12 tests in `scripts/test_csv_validation.sh`.*
 
 Acceptance criteria:
 

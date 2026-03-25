@@ -138,7 +138,13 @@ execute_command() {
     for i in "${!servers[@]}"; do
         ssh "${SERVER_USERNAME}@${servers[$i]}" "pkill -9 deptran_server" &>/dev/null || true
     done
-    sleep 1
+
+    # Flush NFS write-behind cache before scp (see scp_race_audit.py)
+    for ip in "${servers[@]}"; do
+        ssh "${SERVER_USERNAME}@${ip}" "sync" &>/dev/null &
+    done
+    wait
+    sleep 3
 
     # Collect results — use relative exp_dir path for remote scp
     local remote_exp_dir="${EXP_DIR}"
@@ -173,6 +179,11 @@ execute_command() {
                 if [[ "$(printf '%.0f' "${mid_tp}" 2>/dev/null || echo 0)" -lt 1 ]]; then
                     status=1; fail_reason="low throughput (${mid_tp})"
                 fi
+            fi
+            # Verify CSV artifact is present locally after scp
+            local csv_file="${EXP_DIR}/${exp_name}-${replicanames[$i]}.csv"
+            if [[ ! -f "$csv_file" ]]; then
+                status=1; fail_reason="csv_missing_after_scp"
             fi
         else
             status=1; fail_reason="missing success markers"
