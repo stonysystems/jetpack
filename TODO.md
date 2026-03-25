@@ -1327,9 +1327,15 @@ Acceptance criteria:
 
 #### 8H. Clean rerun command sequence and result-root policy
 
-- [ ] Do not reuse the 2026-03-23 result root for the clean rerun.
-- [ ] After the targeted fixes and spot checks above, use a fresh result root and
+- [x] Do not reuse the 2026-03-23 result root for the clean rerun.
+      *Done 2026-03-25.  Fresh result root created for clean rerun.*
+- [x] After the targeted fixes and spot checks above, use a fresh result root and
       keep all follow-on phases in that same root.
+      *Done 2026-03-25.  Tracks 8A-8F complete.  Mencius temporarily excluded
+      from the clean rerun due to heap corruption (segfaults caused by
+      glibc 2.35 binary on glibc 2.41 host exposing latent memory-safety bug
+      in Mencius protocol).  5 of 6 protocols proceed.  See
+      `scripts/experiment_defs.sh` for exclusion comment.*
 - [ ] Preferred operator sequence:
 
 ```bash
