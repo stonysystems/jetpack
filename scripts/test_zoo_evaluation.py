@@ -793,5 +793,82 @@ class TestZooRecoveryPDFCell(unittest.TestCase):
         self.assertIn("axvline", src)
 
 
+class TestTriageClassification(unittest.TestCase):
+    """Verify the 2026-03-23 run is classified as PARTIAL with triage docs."""
+
+    RESULT_DIR = os.path.join(
+        REPO_ROOT, "results", "2026-03-23-10:26:07-zoo-5machines"
+    )
+
+    def _skip_if_no_results(self):
+        if not os.path.isdir(self.RESULT_DIR):
+            self.skipTest("Result directory not present")
+
+    def test_status_file_exists(self):
+        """STATUS file must exist in the result root."""
+        self._skip_if_no_results()
+        status_path = os.path.join(self.RESULT_DIR, "STATUS")
+        self.assertTrue(os.path.isfile(status_path), "STATUS file missing")
+
+    def test_status_says_partial(self):
+        """STATUS file must say PARTIAL, not PASS or COMPLETE."""
+        self._skip_if_no_results()
+        status_path = os.path.join(self.RESULT_DIR, "STATUS")
+        if not os.path.isfile(status_path):
+            self.skipTest("STATUS file not yet created")
+        with open(status_path) as f:
+            content = f.read()
+        self.assertIn("PARTIAL", content)
+        self.assertNotRegex(content, r'(?i)\bpass\b')
+        self.assertNotRegex(content, r'(?i)\bcomplete\b')
+
+    def test_triage_md_exists(self):
+        """TRIAGE.md must exist in the result root."""
+        self._skip_if_no_results()
+        triage_path = os.path.join(self.RESULT_DIR, "TRIAGE.md")
+        self.assertTrue(os.path.isfile(triage_path), "TRIAGE.md missing")
+
+    def test_triage_covers_key_blockers(self):
+        """TRIAGE.md must mention key open blockers."""
+        self._skip_if_no_results()
+        triage_path = os.path.join(self.RESULT_DIR, "TRIAGE.md")
+        if not os.path.isfile(triage_path):
+            self.skipTest("TRIAGE.md not yet created")
+        with open(triage_path) as f:
+            content = f.read()
+        for keyword in [
+            "3400", "1838",           # res/csv counts
+            "rule_raft",              # recovery protocol
+            "MongoDB",                # bottleneck
+            "Mencius",                # adaptive broken
+            "turning point",          # sweep range
+        ]:
+            self.assertIn(keyword, content,
+                          f"TRIAGE.md missing blocker keyword: {keyword}")
+
+    def test_summary_has_partial_banner(self):
+        """SUMMARY.md must have a PARTIAL status banner."""
+        self._skip_if_no_results()
+        summary_path = os.path.join(self.RESULT_DIR, "SUMMARY.md")
+        if not os.path.isfile(summary_path):
+            self.skipTest("SUMMARY.md not present")
+        with open(summary_path) as f:
+            # Check first 500 chars for the banner
+            head = f.read(500)
+        self.assertIn("PARTIAL", head,
+                       "SUMMARY.md missing PARTIAL status banner at top")
+
+    def test_experiment_report_has_partial_banner(self):
+        """EXPERIMENT_REPORT.md must have a PARTIAL status banner."""
+        self._skip_if_no_results()
+        report_path = os.path.join(self.RESULT_DIR, "EXPERIMENT_REPORT.md")
+        if not os.path.isfile(report_path):
+            self.skipTest("EXPERIMENT_REPORT.md not present")
+        with open(report_path) as f:
+            head = f.read(500)
+        self.assertIn("PARTIAL", head,
+                       "EXPERIMENT_REPORT.md missing PARTIAL status banner at top")
+
+
 if __name__ == '__main__':
     unittest.main(verbosity=2)

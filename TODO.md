@@ -964,17 +964,23 @@ debug from, not the accepted final deliverable.
 
 #### 8A. Reclassify the current run correctly
 
-- [ ] Reclassify `results/2026-03-23-10:26:07-zoo-5machines/` as `partial` or
+- [x] Reclassify `results/2026-03-23-10:26:07-zoo-5machines/` as `partial` or
       `fail`, not `pass`, until the follow-up gates below are closed.
-- [ ] Add a short triage note under that result root summarizing the exact open
+      *Added `STATUS` file ("PARTIAL — diagnostic baseline") in result root.*
+- [x] Add a short triage note under that result root summarizing the exact open
       blockers with counts:
       `3400 .res / 1838 .csv`, failure recovery `20 .res / 4 .csv`,
       only one per-protocol recovery PDF, no turning point yet for the
       Raft / etcd / ZooKeeper throughput-latency curves, MongoDB bottleneck
       unresolved, and Mencius adaptive unresolved.
-- [ ] If any existing run-folder report says or strongly implies "complete",
+      *Added `TRIAGE.md` with 6 categorized open blockers, artifact counts table,
+      and what the run is good for.*
+- [x] If any existing run-folder report says or strongly implies "complete",
       update the report or add an override note. Do not let stale generated docs
       overrule the actual artifacts on disk.
+      *Added "STATUS: PARTIAL" override banners at top of SUMMARY.md and
+      EXPERIMENT_REPORT.md. Existing "complete" usage in reports refers only to
+      per-config server counts (technical term), not run status.*
 
 Acceptance criteria:
 
