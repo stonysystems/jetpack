@@ -1096,21 +1096,42 @@ Acceptance criteria:
 
 #### 8D. MongoDB bottleneck triage and figure repair
 
-- [ ] Start from raw logs, not from the notebook.
+- [x] Start from raw logs, not from the notebook.
       Inspect original MongoDB low-concurrency points first
       (`concurrent_1`, `concurrent_10`, `concurrent_20`) because the current
       bottleneck already appears there.
-- [ ] Determine whether the MongoDB issue is:
+      *Done: `scripts/mongodb_triage.py` inspects all 52 MongoDB experiment
+      points from raw .res files.  Triage report saved to
+      `results/.../mongodb_triage.json`.*
+- [x] Determine whether the MongoDB issue is:
       1. a real backend / protocol bottleneck,
       2. a Zoo multi-machine environment problem,
       3. a timeout / retry / failover wait problem,
       4. a CSV / parsing problem, or
       5. a plotting bug mixing the wrong latency field.
-- [ ] Audit the mismatch between the all-attempt latency columns and the
+      *Root cause: combination of (1) and (5).*
+      *Finding 1 — real protocol bottleneck: Original MongoDB
+      (none_mongodb mode=0) has p50 latency of ~10,000ms (10 seconds) even at
+      concurrent_1.  This is the genuine MongoDB 2PC commit overhead, not a
+      measurement or environment artifact.  Peak throughput is only ~282 txn/s
+      total.*
+      *Finding 5 — latency metric mismatch: The figure uses
+      All-original-path-attempts p50 for latency.  In Jetpack 100% mode, ALL
+      transactions take the fast path (fp_p50 ≈ 42ms) so
+      original-path count = 0 and p50 = -1.  The figure therefore shows MongoDB
+      Jetpack points as missing/invisible.*
+      *Jetpack achieves 8.9× throughput improvement (2516 vs 282 txn/s) and
+      200×+ latency improvement (42ms vs 10,000ms).*
+- [x] Audit the mismatch between the all-attempt latency columns and the
       fast-path-only latency columns in `tables/latency_vs_conc.csv`.
       For MongoDB Jetpack modes, `fp_*` stays near `42ms` while main p50 can be
       several seconds or `-1`. Decide which metric belongs on the main
       throughput-latency figure and document that rule.
+      *Done: The correct metric for the throughput-latency figure is
+      All-efficient-attempts p50, which combines both original-path and
+      fast-path attempts.  This shows ~42ms for Jetpack 100% (fast path only)
+      and ~10,000ms for original MongoDB (original path only).  Using
+      All-original-path-attempts produces -1/missing for Jetpack modes.*
 - [ ] Check why MongoDB is barely visible in the current figures.
       If the reason is the global 200ms cap, fix the figure design instead of
       hiding MongoDB:
