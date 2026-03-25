@@ -76,20 +76,28 @@ void CoordinatorRule::GotoNextPhase() {
                           || (client_worker_->cli2cli_[6+cmd_is_write_].count() > 0 && client_worker_->cli2cli_[6+cmd_is_write_].recent_100_ave() < std::min(client_worker_->cli2cli_[8+cmd_is_write_].recent_100_ave(), 500.0))
                           || client_worker_->one_armed_bandit_.ConsultAttempt();
         if (Config::GetConfig()->replica_proto_ == MODE_MENCIUS) {
-          // double avg_all = client_worker_->cpu_usage_all_.recent_100_ave();
+          double avg_all = client_worker_->cpu_usage_all_.recent_100_ave();
           double avg_leaders = client_worker_->cpu_usage_leaders_.recent_100_ave();
           static double max_leader_avg = 0.0;
           if (avg_leaders > max_leader_avg) {
             max_leader_avg = avg_leaders;
           }
-          // Log_info("[CPU-MENC] recent100 all=%.2f leaders=%.2f max_leader=%.2f",
-          //          avg_all, avg_leaders, max_leader_avg);
           double rand_val = RandomGenerator::rand(0, 30);
-          if (max_leader_avg - 60.0 > rand_val) {
+          bool cpu_disabled = (max_leader_avg - 60.0 > rand_val);
+          if (cpu_disabled) {
             go_to_fastpath_ = false;
-            Log_info("[CPU-MENC] Disabling fastpath due to leader CPU %.2f, max_leader_avg - 60.0 %.2f > rand=%.2f", max_leader_avg, max_leader_avg - 60.0, rand_val);
-          } else {
-            Log_info("[CPU-MENC] Let go fastpath due to leader CPU %.2f, max_leader_avg - 60.0 %.2f <= rand=%.2f", max_leader_avg, max_leader_avg - 60.0, rand_val);
+          }
+          // Log controller state periodically (every 500 txns) to avoid
+          // flooding .res files while still capturing decision evidence.
+          static int mencius_log_counter = 0;
+          if (++mencius_log_counter % 500 == 1) {
+            Log_info("[CPU-MENC] avg_all=%.2f avg_leaders=%.2f max_leader=%.2f "
+                     "threshold=%.2f rand=%.2f cpu_disabled=%d go_fp=%d "
+                     "fp_cnt=%d",
+                     avg_all, avg_leaders, max_leader_avg,
+                     max_leader_avg - 60.0, rand_val,
+                     cpu_disabled, go_to_fastpath_,
+                     client_worker_->go_to_jetpack_fastpath_cnt_);
           }
         }
       } else {

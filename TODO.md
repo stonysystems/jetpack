@@ -1260,9 +1260,20 @@ Acceptance criteria:
       (5) The one-armed bandit (line 75-77) controls baseline; the Mencius CPU
       check can only disable, never enable — directionally correct but moot
       when CPU is always zero.*
-- [ ] Add or preserve enough logging to prove the controller input and decision:
+- [x] Add or preserve enough logging to prove the controller input and decision:
       sampled CPU, smoothed CPU, threshold, random draw (if still used),
       chosen path, and path-attempt counters.
+      *Done: Rewrote the Mencius [CPU-MENC] logging in
+      `src/deptran/rule/coordinator.cc:78-102`.  Changes:
+      (1) Uncommented `avg_all` (was dead code) to log all-server CPU average.
+      (2) Replaced per-transaction logging with periodic logging (every 500 txns)
+      to avoid 135K+ log lines per run.
+      (3) New log format includes all controller inputs and decisions:
+      `avg_all`, `avg_leaders`, `max_leader`, `threshold`, `rand`,
+      `cpu_disabled`, `go_fp`, `fp_cnt`.
+      (4) Updated `scripts/mencius_cpu_audit.py` to parse both old and new
+      log formats.  Added 2 new tests (21 total).
+      (5) Verified C++ compiles cleanly via docker build (janus-zoo-build).*
 - [ ] Before launching the next full batch, rerun targeted Mencius points around
       the broken range (`concurrent_18` through `concurrent_60`) and confirm that
       adaptive throughput and path counters are sane.

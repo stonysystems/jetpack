@@ -30,8 +30,13 @@ import re
 import sys
 from collections import defaultdict
 
-CPU_MENC_RE = re.compile(
+# Match both old format ("leader CPU 0.00") and new format ("avg_leaders=0.00")
+CPU_MENC_OLD_RE = re.compile(
     r"\[CPU-MENC\] (?:Disabling|Let go) fastpath due to leader CPU ([\d.]+)"
+)
+CPU_MENC_NEW_RE = re.compile(
+    r"\[CPU-MENC\] avg_all=([\d.]+) avg_leaders=([\d.]+) max_leader=([\d.]+) "
+    r"threshold=([\d.-]+) rand=([\d.]+) cpu_disabled=(\d) go_fp=(\d) fp_cnt=(\d+)"
 )
 MID_THROUGHPUT_RE = re.compile(r"Mid throughput is ([\d.]+)")
 FP_STATS_RE = re.compile(
@@ -86,8 +91,12 @@ def extract_mencius_cpu_data(res_path):
         content = f.read().decode("utf-8", errors="replace")
 
     cpu_values = []
-    for m in CPU_MENC_RE.finditer(content):
+    # Match old format: "leader CPU <value>"
+    for m in CPU_MENC_OLD_RE.finditer(content):
         cpu_values.append(float(m.group(1)))
+    # Match new format: "avg_leaders=<value>"
+    for m in CPU_MENC_NEW_RE.finditer(content):
+        cpu_values.append(float(m.group(2)))  # group 2 = avg_leaders
 
     result["total_cpu_lines"] = len(cpu_values)
     result["cpu_zero_count"] = sum(1 for v in cpu_values if v == 0.0)

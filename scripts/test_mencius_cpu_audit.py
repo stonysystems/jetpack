@@ -18,7 +18,8 @@ from mencius_cpu_audit import (
 # ---------------------------------------------------------------------------
 
 def _write_mencius_res(directory, protocol, conc, mode, server,
-                       cpu_values=None, throughput=None,
+                       cpu_values=None, new_format_cpu_values=None,
+                       throughput=None,
                        fp_count=None, orig_count=None,
                        site="30c1s5r5p-zoo", workload="rw_1000000",
                        ycsb="YCSB_A"):
@@ -37,6 +38,13 @@ def _write_mencius_res(directory, protocol, conc, mode, server,
                 else:
                     f.write(f"I | [CPU-MENC] Disabling fastpath due to leader CPU {cv:.2f}, "
                             f"max_leader_avg - 60.0 {cv - 60.0:.2f} > rand=5.00\n")
+        if new_format_cpu_values:
+            for cv in new_format_cpu_values:
+                disabled = 1 if cv > 60 else 0
+                f.write(f"I | [CPU-MENC] avg_all={cv:.2f} avg_leaders={cv:.2f} "
+                        f"max_leader={cv:.2f} threshold={cv - 60.0:.2f} "
+                        f"rand=15.00 cpu_disabled={disabled} go_fp={1 - disabled} "
+                        f"fp_cnt=100\n")
 
         if fp_count is not None:
             f.write(f"I | All-fast-path-attempts           statistics   "
@@ -78,6 +86,31 @@ class TestExtractMenciusCpuData:
         assert result["cpu_nonzero_count"] == 2
         assert 45.5 in result["unique_cpu_values"]
         assert 72.3 in result["unique_cpu_values"]
+
+    def test_new_format_cpu_values(self, tmp_path):
+        """Test parsing of the new periodic [CPU-MENC] log format."""
+        d = str(tmp_path)
+        path = _write_mencius_res(d, "rule_mencius", 25, "101", "zoo0",
+                                   new_format_cpu_values=[0.0, 35.5, 72.0],
+                                   throughput=100.0)
+        result = extract_mencius_cpu_data(path)
+        assert result["total_cpu_lines"] == 3
+        assert result["cpu_zero_count"] == 1
+        assert result["cpu_nonzero_count"] == 2
+        assert 35.5 in result["unique_cpu_values"]
+        assert 72.0 in result["unique_cpu_values"]
+
+    def test_mixed_old_and_new_format(self, tmp_path):
+        """Test parsing when both old and new format lines are present."""
+        d = str(tmp_path)
+        path = _write_mencius_res(d, "rule_mencius", 25, "101", "zoo0",
+                                   cpu_values=[0.0, 0.0],
+                                   new_format_cpu_values=[0.0, 45.0],
+                                   throughput=50.0)
+        result = extract_mencius_cpu_data(path)
+        assert result["total_cpu_lines"] == 4
+        assert result["cpu_zero_count"] == 3  # three 0.0 values
+        assert result["cpu_nonzero_count"] == 1  # one 45.0
 
     def test_no_cpu_lines(self, tmp_path):
         d = str(tmp_path)
