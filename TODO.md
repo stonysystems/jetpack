@@ -1193,9 +1193,22 @@ Acceptance criteria:
       The 403 incomplete runs are 226 startup failures (process died in <30s during
       connection phase, e.g. ZooKeeper at concurrent_200+) and 177 mid-run failures —
       none caused by the timeout boundary.  No change to TIMEOUT_SEC needed.*
-- [ ] Audit whether the current post-run cleanup / `scp` sequence races with CSV
+- [x] Audit whether the current post-run cleanup / `scp` sequence races with CSV
       dump completion. If yes, fix the race rather than relying on notebook
       fallbacks from `.res` summaries.
+      *Done: YES, confirmed race condition.  Created `scripts/scp_race_audit.py`
+      (20 tests in `scripts/test_scp_race_audit.py`).
+      Three race modes found across 3,620 server runs:
+      (1) nfs_cache_lag=1,295 — server logged "Dumped to" but CSV not found by scp
+      (dominant cause, 36% of all runs);
+      (2) pkill_before_dump=59 — killed before CSV write completed;
+      (3) partial_csv=10 — CSV truncated mid-write.
+      Root cause: `10-run_all.sh` sends `pkill -9` immediately after SSH wait,
+      sleeps only 1s, then runs scp.  NFS attribute cache (3-60s default) means
+      files written by the server aren't visible yet.
+      Fixes for the rerun: (a) add remote `sync` before scp, (b) use SIGTERM
+      before SIGKILL, (c) increase sleep to ≥5s, (d) verify CSV line count
+      matches "Dumped to" count after scp.*
 - [ ] For the rerun, do not count a prefix as successful unless its expected CSV
       artifacts are present or a documented intentional exception applies.
 
