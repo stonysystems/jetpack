@@ -7,34 +7,41 @@ any future agent. It is not a live execution transcript.
 ## Review Snapshot
 
 - Latest active phase:
-  `Backend integration recovery handshake, latency documentation, CI regression coverage, benchmark rerun, and Zoo 5-machine multi-server evaluation planning`
+  `Zoo 2026-03-23 result-set triage, MongoDB and Mencius bug fixing, figure/export correction, and clean 5-machine rerun planning`
+- Treat `results/2026-03-23-10:26:07-zoo-5machines/` as a diagnostic baseline, not
+  as a publishable final run.
 - TLA+ closure work is not current scope.
 - Do not spend time on `tla/` deliverables unless the user explicitly reopens them.
 
 ### Highest-Priority Open Work
 
-1. Finish the MongoDB / etcd / ZooKeeper failure-recovery handshake so the
-   application / original protocol pauses request processing after
-   `primary_elected` and resumes only after Jetpack emits `fastpath_stopped`,
-   without breaking heartbeat or election traffic.
-2. Write a docs report explaining how the current MongoDB / etcd / ZooKeeper
-   integration test paths simulate 20ms network latency.
-3. Add CI regression gates for the requested 12-mode `3c1s3r1p` `SIMULATE_WAN`
-   matrix and the requested 12-mode `5c1s5r5p` `tc` matrix.
-4. Run the benchmark runbook from scratch and record the results in
-   `docs/benchmark_rerun_results.md`.
-5. Extend the legacy multi-machine Zoo flow centered on `scripts/10-run_all.sh`
-   so it can run the requested 5-machine open-loop evaluation matrix with
-   6 protocol families, 20ms one-way Docker-level latency injection, the
-   requested result-root naming, and durable manifests.
-6. Add a true Zoo failure-recovery experiment phase that really kills the
-   `deptran_server` task on one machine during the run instead of relying only
-   on synthetic failover toggles or client-only pause behavior.
-7. Update the analysis/export flow centered on `scripts/evaluation.ipynb` so it
-   can consume the new 5-machine result set, handle 6 protocol families, and
-   export the requested tables and PDFs under the new result root.
-8. Add a figure-input sanity check before drawing experiment-0 figures and redo
-   the current suspect experiment-0 PDFs if the notebook input path is wrong.
+Historical tracks 1-4 stay below for context, but the immediate user-visible
+blockers are now:
+
+1. Reopen the 2026-03-23 Zoo 5-machine run as incomplete and fix the blockers
+   before claiming the figures or tables are final.
+2. Extend experiment-0 concurrency sweeps for Raft / etcd / ZooKeeper until the
+   throughput-latency curves show a real turning point, plateau, or regression
+   rather than stopping at a still-rising edge.
+3. Replace the current CPU deliverable with the requested figure shape:
+   x-axis = concurrency, y-axis = CPU usage, one line per mode
+   (original / 0% / 100% / adaptive) inside each protocol panel.
+4. Find the original MongoDB bottleneck from logs first, then fix either the
+   experiment path or the plotting/input path so MongoDB data points are real,
+   visible, and auditable.
+5. Audit why the current Zoo run has many `.res` files without matching `.csv`
+   files, fix the root cause if possible, and stop silently plotting from
+   partial data.
+6. Fix Mencius adaptive mode so CPU-based path selection uses valid CPU samples
+   and sane switching logic instead of the current obviously wrong
+   `[CPU-MENC] ... leader CPU 0.00 ...` behavior.
+7. Rerun Zoo failure recovery with the notebook-expected recovery log names and
+   do not close the task until 4 per-protocol recovery figures exist
+   (`rule_raft`, `rule_mongodb`, `rule_etcd`, `rule_zookeeper`) or a blocker is
+   explicitly proven with logs.
+8. After the fixes above, start a clean new batched run via `scripts/10-run_all.sh`
+   in a fresh result root, then reuse that same result root for experiments 1/2,
+   failure recovery, and figure export.
 
 ## Canonical Artifact Roots
 
@@ -56,6 +63,10 @@ any future agent. It is not a live execution transcript.
 - Current failover helper to inspect/reuse: `scripts/09-build_and_test_run_wan.sh`
 - Analysis notebook to extend: `scripts/evaluation.ipynb`
 - Zoo site config for the new run: `config/30c1s5r5p-zoo.yml`
+- Current suspect Zoo run to triage:
+  `results/2026-03-23-10:26:07-zoo-5machines`
+- Evaluation wrapper to reuse after rerun: `scripts/run_evaluation.sh`
+- Failure-recovery runner to reuse after rerun: `scripts/run_failure_recovery.sh`
 
 ## Known Current State
 
@@ -98,6 +109,50 @@ any future agent. It is not a live execution transcript.
 - For the requested failure-recovery experiment, the failure event must really
   kill a `deptran_server` task on one Zoo machine. A synthetic pause, a config
   flag alone, or a client-only stall is not sufficient.
+- The current Zoo run root `results/2026-03-23-10:26:07-zoo-5machines/`
+  contains `3400` `.res` files but only `1838` `.csv` files.
+- The current failure-recovery subdir
+  `results/2026-03-23-10:26:07-zoo-5machines/failure_recovery/` contains
+  `20` `.res` files but only `4` `.csv` files, all for `rule_raft`.
+- Many prefixes have all 5 server `.res` files but only partial `.csv`
+  coverage, so the main missing-artifact problem is not "the run never started";
+  it is a post-start abnormal-termination / timeout / dump / pull problem.
+- The current run folder only has one per-protocol recovery PDF:
+  `figs/30c1s5r5p-zoo_failure_recovery_rule_raft.pdf`.
+  The 4-protocol recovery-figure requirement is still open.
+- The current throughput sweep still does not show a convincing turning point
+  for at least:
+  - Raft original: `none_raft` is still ~`8992.2 txn/s` at `concurrent_1000`
+    and `rule_raft` adaptive is ~`9010.3 txn/s` at `concurrent_1000`.
+  - etcd original: peak is still at the highest tested point `concurrent_120`
+    (`3569.1 txn/s`).
+  - ZooKeeper original: peak is still at the highest tested point
+    `concurrent_120` (`3559.5 txn/s`).
+- Original MongoDB is already pathological at very low concurrency:
+  `none_mongodb` p50 is about `9587.87ms` at `concurrent_1` and about
+  `10348.57ms` at `concurrent_10`. This is not a "small late surge near max
+  throughput" pattern.
+- MongoDB Jetpack rows in `tables/latency_vs_conc.csv` are internally mixed:
+  fast-path latency stays around `42ms`, while all-attempt latency is either
+  multi-second or `-1`. The plotting path must decide which latency metric is
+  the real y-axis for the main latency figures and document it.
+- `figure_input_sanity.md` is not yet trustworthy enough to gate figure
+  correctness. It currently marks several obvious mismatches as `PASS`, for
+  example:
+  - MongoDB adaptive: notebook p50 `42.05ms` vs raw avg p50 `4429.36ms`
+  - MongoDB 100%: notebook p50 `42.09ms` vs raw avg p50 `4159.75ms`
+  - Mencius original: notebook p50 `122.42ms` vs raw avg p50 `5904.04ms`
+  - Raft adaptive: notebook p50 `41.89ms` vs raw avg p50 `88.51ms`
+- The global 200ms latency-axis rule that was previously used for experiment-0
+  figures hides real MongoDB points. Do not keep a global cap if it makes a
+  protocol effectively disappear.
+- Mencius adaptive logs show repeated lines like:
+  `[CPU-MENC] Let go fastpath due to leader CPU 0.00, max_leader_avg - 60.0 -60.00 <= rand=25.00`
+  Treat that as proof that CPU sampling and/or branch direction is wrong.
+- The notebook recovery loader expects the exact recovery filename pattern
+  `<protocol>-30c1s5r5p-zoo-rw_1000000-<fixed_conc>-101-YCSB_A-recovery`
+  under the `failure_recovery/` subdir. Do not improvise a different naming
+  scheme for the rerun.
 
 ## Working Rules
 
@@ -115,6 +170,14 @@ any future agent. It is not a live execution transcript.
   leader election, or required replication maintenance traffic.
 - If docs and on-disk artifacts disagree, treat that as open work and fix the
   docs or rerun.
+- Do not reuse `results/2026-03-23-10:26:07-zoo-5machines/` as the "clean"
+  rerun target. The next full batch must use a new result root.
+- Do not accept a figure-input sanity gate that passes when notebook-vs-raw
+  latency differs by seconds vs milliseconds or by multi-x at the same prefix.
+- Do not accept a latency figure that makes MongoDB effectively invisible by
+  clipping away its real values.
+- Do not launch the next full batch until the targeted MongoDB / Mencius /
+  missing-CSV spot checks are good enough that the rerun will be informative.
 - This turn is a TODO-only text update. Do not pretend the Zoo evaluation code,
   scripts, notebook, or result artifacts were already changed in this turn.
 
@@ -481,6 +544,22 @@ Experiment 1 definition:
       original + Jetpack 0% + Jetpack 100% + Jetpack adaptive
 - [x] The 20ms one-way Docker-level latency model applies to this experiment.
 - [x] Use exactly one fixed conc per protocol family, derived from experiment 0.
+      Principle update for all future reruns:
+      do not choose the fixed conc by peak throughput alone.
+      Choose the largest concurrency whose latency still matches the
+      small-concurrency baseline envelope for that protocol family.
+      At minimum:
+      - original mode should stay in the same latency class as original at the
+        minimum tested concurrency
+      - Jetpack adaptive and Jetpack 100% should stay in the same latency class
+        as their own minimum-concurrency baselines
+      - if Jetpack 0% is part of the plotted comparison, keep it in its own
+        minimum-concurrency latency class too
+      Example only: if a protocol shows original about `80ms` and rule/adaptive
+      about `40ms` at the smallest concurrency, select the largest fixed conc
+      where original is still about `80ms` and rule/adaptive/100% are still
+      about `40ms`. Some protocols may have a higher baseline even at minimum
+      concurrency; use that protocol-specific baseline, not a hard-coded 80/40.
       *Completed: 720 .res files. Persistent failures in copilot (segfault) and
       mencius (core dump) on some zipf configs. 4 protocols fully successful.
       Fixed conc from fixed_conc.json. PDF: zipf_skew-average_latency generated.*
@@ -505,10 +584,24 @@ Fixed-concurrency gate:
       `fixed_conc.json` and `fixed_conc_selection.md`.
 - [x] The fixed conc values must be derived from experiment 0, not guessed in
       advance and not copied from an unrelated historical run.
-      *Fixed concurrencies derived from experiment 0 peak throughput:
-      Raft=concurrent_400, Copilot=concurrent_180, Mencius=concurrent_60,
-      MongoDB=concurrent_10, etcd=concurrent_120, ZooKeeper=concurrent_120.
-      Saved to `results/fixed_conc.json` and `results/.../fixed_conc_selection.md`.*
+- [x] Fixed-concurrency selection principle for experiment 1 / 2:
+      choose the largest concurrency that preserves the minimum-concurrency
+      latency envelope for the relevant modes of that protocol family.
+      Do not choose the fixed conc by the maximum-throughput point alone.
+- [x] `fixed_conc_selection.md` must record, for each protocol family:
+      the minimum-concurrency baseline latency for original and Jetpack modes,
+      the selected fixed conc, and why that selected point still matches the
+      baseline latency class closely enough.
+- [x] If no larger concurrency preserves the baseline latency class, use a
+      smaller fixed conc instead of forcing a high-throughput point.
+      *Historical baseline only, now superseded as a selection rule:
+      the 2026-03-23 run picked fixed concurrencies close to peak throughput
+      (Raft=concurrent_400, Copilot=concurrent_180, Mencius=concurrent_60,
+      MongoDB=concurrent_10, etcd=concurrent_120, ZooKeeper=concurrent_120).
+      Future reruns must instead choose the largest point that still preserves
+      the protocol-specific small-concurrency latency envelope, and save that
+      justification in `results/fixed_conc.json` and
+      `results/.../fixed_conc_selection.md`.*
 
 Sanity-check gate after experiment 0:
 
@@ -546,6 +639,8 @@ Acceptance criteria:
   host-level `tc`.
 - Result roots and result filenames follow the requested naming.
 - The fixed conc map exists, is explained, and is reused consistently.
+- The fixed conc map is chosen by the latency-envelope rule, not by peak
+  throughput alone.
 - The sanity check exists and either passes or is explained/followed up clearly.
 - No protocol family is dropped because its current path is awkward.
 
@@ -862,6 +957,223 @@ Acceptance criteria:
 - Run-folder reports exist alongside the logs and figures.
 - The plotting path uses 5-machine result assumptions instead of the historical 10-host one.
 
+### Track 8: 2026-03-23 Zoo remediation and clean rerun
+
+This is now the active execution track. The 2026-03-23 Zoo run is a baseline to
+debug from, not the accepted final deliverable.
+
+#### 8A. Reclassify the current run correctly
+
+- [ ] Reclassify `results/2026-03-23-10:26:07-zoo-5machines/` as `partial` or
+      `fail`, not `pass`, until the follow-up gates below are closed.
+- [ ] Add a short triage note under that result root summarizing the exact open
+      blockers with counts:
+      `3400 .res / 1838 .csv`, failure recovery `20 .res / 4 .csv`,
+      only one per-protocol recovery PDF, no turning point yet for the
+      Raft / etcd / ZooKeeper throughput-latency curves, MongoDB bottleneck
+      unresolved, and Mencius adaptive unresolved.
+- [ ] If any existing run-folder report says or strongly implies "complete",
+      update the report or add an override note. Do not let stale generated docs
+      overrule the actual artifacts on disk.
+
+Acceptance criteria:
+
+- Anyone opening the 2026-03-23 run folder can tell immediately that it is a
+  diagnostic baseline and exactly why it is not the final accepted run.
+
+#### 8B. Extend experiment-0 sweep ranges until the turning point exists
+
+- [ ] Expand the concurrency arrays in `scripts/experiment_defs.sh` for the
+      protocols whose experiment-0 curves still stop on a rising edge.
+      Start with:
+      - Raft beyond `concurrent_1000`
+      - etcd beyond `concurrent_120`
+      - ZooKeeper beyond `concurrent_120`
+- [ ] Rerun targeted high-concurrency experiment-0 points first, not the entire
+      matrix immediately, so the new upper bounds are validated cheaply.
+- [ ] Only when the targeted spot checks show a real knee / plateau / drop (or a
+      documented hard saturation reason) should Claude lock the new sweep ranges
+      and start the next full batch.
+- [ ] Update the fixed-concurrency selection logic and docs before the full
+      rerun:
+      the selected fixed conc for experiment 1 / 2 must be the largest
+      concurrency that still preserves the minimum-concurrency latency envelope
+      for that protocol family, not the highest-throughput point.
+- [ ] When picking the fixed conc, compare against the minimum tested
+      concurrency for the same protocol family and mode. Use the protocol's own
+      observed baseline latency class; do not force every protocol into the same
+      absolute target.
+- [ ] For the rerun write-up, `fixed_conc_selection.md` must show, per protocol:
+      - minimum-concurrency original latency baseline
+      - minimum-concurrency Jetpack baselines for adaptive / 100%
+      - selected fixed conc
+      - evidence that the selected point is still in the same latency class
+      while being as large as possible
+- [ ] After the rerun, derive `fixed_conc.json` again from the new experiment-0
+      results using the latency-envelope rule above. Do not carry forward fixed
+      concurrencies from the 2026-03-23 baseline if the sweep range changed.
+
+Acceptance criteria:
+
+- The throughput-latency figure for Raft / etcd / ZooKeeper no longer stops at a
+  still-rising edge.
+- The fixed-concurrency choice is derived from the new sweep, not inherited from
+  the old incomplete one.
+- The fixed-concurrency choice is justified by "largest conc that still matches
+  the small-concurrency latency class", not by "peak throughput".
+
+#### 8C. Replace the CPU figure with the requested deliverable
+
+- [ ] The requested CPU figure is not a single-concurrency bar chart.
+      The accepted deliverable is:
+      x-axis = concurrency, y-axis = CPU usage, one line per mode
+      (original / 0% / 100% / adaptive), one panel per protocol.
+- [ ] If the current bar chart is still useful, keep it only as a secondary
+      auxiliary figure with a different filename or a clearly different role.
+      Do not keep a bar chart under the main requested CPU figure name.
+- [ ] Export the raw source data for the CPU figure under `tables/`, for example
+      a `cpu_vs_conc.csv` table, so the plotted lines are auditable.
+- [ ] Keep protocol ordering consistent with the other main figures.
+
+Acceptance criteria:
+
+- The main CPU figure uses concurrency on the x-axis and CPU usage on the y-axis.
+- All requested modes are visible as separate lines inside each protocol panel.
+
+#### 8D. MongoDB bottleneck triage and figure repair
+
+- [ ] Start from raw logs, not from the notebook.
+      Inspect original MongoDB low-concurrency points first
+      (`concurrent_1`, `concurrent_10`, `concurrent_20`) because the current
+      bottleneck already appears there.
+- [ ] Determine whether the MongoDB issue is:
+      1. a real backend / protocol bottleneck,
+      2. a Zoo multi-machine environment problem,
+      3. a timeout / retry / failover wait problem,
+      4. a CSV / parsing problem, or
+      5. a plotting bug mixing the wrong latency field.
+- [ ] Audit the mismatch between the all-attempt latency columns and the
+      fast-path-only latency columns in `tables/latency_vs_conc.csv`.
+      For MongoDB Jetpack modes, `fp_*` stays near `42ms` while main p50 can be
+      several seconds or `-1`. Decide which metric belongs on the main
+      throughput-latency figure and document that rule.
+- [ ] Check why MongoDB is barely visible in the current figures.
+      If the reason is the global 200ms cap, fix the figure design instead of
+      hiding MongoDB:
+      use per-protocol y-axis ranges, a broken axis, or a separate documented
+      MongoDB companion figure. Do not crop away the real points and call it done.
+- [ ] If the experiment path is wrong or unstable, create a separate blocked task
+      under the rerun plan and do not fabricate a clean MongoDB curve from
+      partial data.
+
+Acceptance criteria:
+
+- MongoDB points shown in the figure trace cleanly back to raw `.res` / `.csv`
+  inputs and the chosen latency metric is explicitly documented.
+- The root-cause classification for the MongoDB bottleneck is written down with
+  artifact-backed evidence.
+
+#### 8E. Missing CSV audit and abnormal-termination root cause
+
+- [ ] Produce a machine-readable audit of prefixes with incomplete CSV coverage.
+      At minimum, classify each affected prefix into:
+      `timeout`, `crash/abort`, `never dumped csv`, `scp/pull gap`,
+      or `other documented cause`.
+- [ ] Use the current bad prefixes as the starting sample set. Do not stop at one
+      anecdote. Examples already visible in the 2026-03-23 run:
+      - `rule_mencius-30c1s5r5p-zoo-rw_1000000-concurrent_25-101-YCSB_A`
+        has only `2/5` CSVs
+      - `none_mongodb-30c1s5r5p-zoo-rw_1000000-concurrent_120-0-YCSB_A`
+        has only `1/5` CSVs
+      - `rule_mongodb-30c1s5r5p-zoo-rw_1000000-concurrent_30-100-YCSB_A`
+        has only `3/5` CSVs
+- [ ] Audit whether `TIMEOUT_SEC=180` in `scripts/10-run_all.sh` is too short for
+      the slow protocols. If a run is still alive or still flushing output at the
+      timeout boundary, increase the timeout before the full rerun.
+- [ ] Audit whether the current post-run cleanup / `scp` sequence races with CSV
+      dump completion. If yes, fix the race rather than relying on notebook
+      fallbacks from `.res` summaries.
+- [ ] For the rerun, do not count a prefix as successful unless its expected CSV
+      artifacts are present or a documented intentional exception applies.
+
+Acceptance criteria:
+
+- For the clean rerun, every successful prefix has the expected CSV artifacts.
+- Any missing CSV in the rerun is explicitly classified and left open as a real
+  failure, not silently ignored.
+
+#### 8F. Mencius adaptive controller fix
+
+- [ ] Audit the CPU sampling path used by Mencius adaptive mode.
+      The current `leader CPU 0.00` logs are not believable enough to drive a
+      controller decision.
+- [ ] Audit the branch direction and threshold logic in the adaptive rule.
+      High CPU should cause backoff to the lower-CPU path. Low CPU should not
+      randomly reject the fast path because of a stale or zero sample.
+- [ ] Add or preserve enough logging to prove the controller input and decision:
+      sampled CPU, smoothed CPU, threshold, random draw (if still used),
+      chosen path, and path-attempt counters.
+- [ ] Before launching the next full batch, rerun targeted Mencius points around
+      the broken range (`concurrent_18` through `concurrent_60`) and confirm that
+      adaptive throughput and path counters are sane.
+
+Acceptance criteria:
+
+- The repeated `leader CPU 0.00` nonsense is gone or explicitly justified.
+- Mencius adaptive no longer collapses to near-zero useful work because of a bad
+  controller input or inverted decision rule.
+
+#### 8G. Failure recovery rerun with notebook-expected names and 4 figures
+
+- [ ] Keep the exact notebook-expected recovery prefix shape:
+      `<protocol>-30c1s5r5p-zoo-rw_1000000-<fixed_conc>-101-YCSB_A-recovery`
+      under `failure_recovery/`.
+- [ ] Use `client_open_failure_recovery.yml`, real `pkill -9 deptran_server`
+      against zoo0, and keep `kill_evidence.json` per protocol.
+- [ ] Do not close this track until all 4 requested protocols have fresh
+      recovery runs and fresh per-protocol recovery figures:
+      `rule_raft`, `rule_mongodb`, `rule_etcd`, `rule_zookeeper`.
+- [ ] The notebook must export a separate recovery PDF for each protocol, not
+      only `rule_raft`.
+- [ ] If a protocol still crashes and therefore cannot generate a figure, save
+      the blocking logs under the new result root and keep the item open as a
+      protocol bug. Do not silently skip the figure and call the phase complete.
+
+Acceptance criteria:
+
+- The rerun produces 4 per-protocol recovery figure outputs under `figs/`, or a
+  blocked status with explicit raw-log evidence per missing figure.
+
+#### 8H. Clean rerun command sequence and result-root policy
+
+- [ ] Do not reuse the 2026-03-23 result root for the clean rerun.
+- [ ] After the targeted fixes and spot checks above, use a fresh result root and
+      keep all follow-on phases in that same root.
+- [ ] Preferred operator sequence:
+
+```bash
+NEW_RUN_DIR="results/$(date +%Y-%m-%d-%H:%M:%S)-zoo-5machines-rerun"
+mkdir -p "$NEW_RUN_DIR"
+
+bash scripts/10-run_all.sh build --exp 0 --exp-dir "$NEW_RUN_DIR"
+python3 scripts/derive_fixed_conc.py "$NEW_RUN_DIR"
+bash scripts/10-run_all.sh --exp 1,2 --exp-dir "$NEW_RUN_DIR"
+bash scripts/run_failure_recovery.sh --exp-dir "$NEW_RUN_DIR"
+bash scripts/run_evaluation.sh "$NEW_RUN_DIR"
+```
+
+- [ ] Save the exact commands actually used in the new run folder, including any
+      timeout override or rerun-only experiment subset.
+- [ ] If Claude must do a limited preflight before the full batch, record those
+      spot-check commands separately and do not confuse them with the accepted
+      full rerun.
+
+Acceptance criteria:
+
+- The next accepted run lives in a fresh result root.
+- `scripts/10-run_all.sh` remains the main batch entrypoint for experiments 0/1/2.
+- Failure recovery and evaluation reuse that same fresh result root.
+
 ## Evidence Format
 
 For every accepted code, CI, or benchmark claim, save:
@@ -884,9 +1196,15 @@ For the new Zoo evaluation tracks specifically, also save:
 - the exact result root path
 - the dry-run matrix or manifest with planned counts
 - the fixed-conc map with justification
+- the minimum-concurrency latency baselines used to choose each fixed conc
+- the experiment-0 sweep upper bounds and whether a real turning point / plateau
+  was observed for each protocol family
 - the exact Docker/container latency-injection mechanism and where it is applied
 - the sanity-check report path and one-line sanity outcome per protocol family
 - the figure-input sanity report path and one-line figure-input sanity outcome
+- the CSV coverage summary (`res` count, `csv` count, and missing-prefix audit)
+- for MongoDB, the exact latency metric used in the main figure
+  (`all-attempt` vs `fast-path-only`) and why
 - for failure recovery: killed host, exact kill command, timestamp, and evidence
   that the remote `deptran_server` task really died
 - the figure/table output directories under the new result root
@@ -936,3 +1254,17 @@ Keep this file durable:
   explicitly justified in the run-folder report.
 - Do not accept a cumulative-latency figure that is missing adaptive for Raft
   or missing other expected protocol/mode lines.
+- Do not stop the next experiment-0 sweep at the old Raft / etcd / ZooKeeper
+  upper bounds if the turning point still has not appeared.
+- Do not choose experiment-1 / experiment-2 fixed concurrencies by peak
+  throughput alone. They must be the largest points that still preserve the
+  protocol-specific minimum-concurrency latency class.
+- Do not accept a figure-input sanity report that marks seconds-vs-milliseconds
+  mismatches as `PASS`.
+- Do not hide MongoDB by clipping it out of the main latency figures.
+- Do not treat "there is a `.res` file" as equivalent to "the run ended
+  normally". The `.csv` dump and its completeness matter.
+- Do not skip the targeted preflight checks for MongoDB, Mencius adaptive, and
+  CSV loss, then immediately burn cluster time on a full rerun.
+- Do not claim failure recovery is complete while only `rule_raft` has a usable
+  recovery PDF.
