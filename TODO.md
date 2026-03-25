@@ -1182,9 +1182,17 @@ Acceptance criteria:
       *Done: All three known incomplete prefixes are confirmed in the audit output.
       The full audit covers all 353 incomplete prefixes (not just these examples)
       with per-server classification and evidence strings.*
-- [ ] Audit whether `TIMEOUT_SEC=180` in `scripts/10-run_all.sh` is too short for
+- [x] Audit whether `TIMEOUT_SEC=180` in `scripts/10-run_all.sh` is too short for
       the slow protocols. If a run is still alive or still flushing output at the
       timeout boundary, increase the timeout before the full rerun.
+      *Done: Created `scripts/timeout_audit.py` — scans all .res files, extracts
+      wall-clock durations (first-to-last timestamp), and classifies timeout risk.
+      26 tests in `scripts/test_timeout_audit.py`.
+      Result: TIMEOUT_SEC=180 is SUFFICIENT.  Max completed wall time is 82s
+      (rule_mongodb), giving 54% headroom (98s spare).  Zero genuine timeouts found.
+      The 403 incomplete runs are 226 startup failures (process died in <30s during
+      connection phase, e.g. ZooKeeper at concurrent_200+) and 177 mid-run failures —
+      none caused by the timeout boundary.  No change to TIMEOUT_SEC needed.*
 - [ ] Audit whether the current post-run cleanup / `scp` sequence races with CSV
       dump completion. If yes, fix the race rather than relying on notebook
       fallbacks from `.res` summaries.
