@@ -1069,16 +1069,25 @@ Acceptance criteria:
 
 #### 8C. Replace the CPU figure with the requested deliverable
 
-- [ ] The requested CPU figure is not a single-concurrency bar chart.
+- [x] The requested CPU figure is not a single-concurrency bar chart.
       The accepted deliverable is:
       x-axis = concurrency, y-axis = CPU usage, one line per mode
       (original / 0% / 100% / adaptive), one panel per protocol.
-- [ ] If the current bar chart is still useful, keep it only as a secondary
+      *Done: `scripts/generate_cpu_figure.py` produces
+      `figs/<site>_cpu_vs_conc.pdf` with 6 panels (one per protocol),
+      4 mode lines each (Original, 0%, Adaptive, 100%).  386 data points
+      from the 2026-03-23 Zoo run.*
+- [x] If the current bar chart is still useful, keep it only as a secondary
       auxiliary figure with a different filename or a clearly different role.
       Do not keep a bar chart under the main requested CPU figure name.
-- [ ] Export the raw source data for the CPU figure under `tables/`, for example
+      *Done: the bar chart remains at `_cpu_usage_ave.pdf` (notebook Cell 17).
+      The new primary is `_cpu_vs_conc.pdf`.*
+- [x] Export the raw source data for the CPU figure under `tables/`, for example
       a `cpu_vs_conc.csv` table, so the plotted lines are auditable.
-- [ ] Keep protocol ordering consistent with the other main figures.
+      *Done: `tables/cpu_vs_conc.csv` with columns: protocol, mode,
+      concurrency, avg_cpu_pct.*
+- [x] Keep protocol ordering consistent with the other main figures.
+      *Done: Raft, Copilot, Mencius, MongoDB, etcd, ZooKeeper — same order.*
 
 Acceptance criteria:
 
