@@ -1159,11 +1159,19 @@ Acceptance criteria:
 
 #### 8E. Missing CSV audit and abnormal-termination root cause
 
-- [ ] Produce a machine-readable audit of prefixes with incomplete CSV coverage.
+- [x] Produce a machine-readable audit of prefixes with incomplete CSV coverage.
       At minimum, classify each affected prefix into:
       `timeout`, `crash/abort`, `never dumped csv`, `scp/pull gap`,
       or `other documented cause`.
-- [ ] Use the current bad prefixes as the starting sample set. Do not stop at one
+      *Done: Created `scripts/csv_audit.py` — scans result dir, classifies each
+      missing CSV by root cause (scp_pull_gap, crash_abort, never_dumped, timeout,
+      zero_throughput, other).  Reads only head+tail of .res files for performance
+      (handles multi-GB files).  Outputs `csv_audit.json` with per-prefix breakdown.
+      30 tests in `scripts/test_csv_audit.py`.
+      Results for 2026-03-23 run: 724 prefixes, 371 complete, 353 incomplete.
+      Cause breakdown: scp_pull_gap=1258, never_dumped=283, timeout=125,
+      crash_abort=16, zero_throughput=5.*
+- [x] Use the current bad prefixes as the starting sample set. Do not stop at one
       anecdote. Examples already visible in the 2026-03-23 run:
       - `rule_mencius-30c1s5r5p-zoo-rw_1000000-concurrent_25-101-YCSB_A`
         has only `2/5` CSVs
@@ -1171,6 +1179,9 @@ Acceptance criteria:
         has only `1/5` CSVs
       - `rule_mongodb-30c1s5r5p-zoo-rw_1000000-concurrent_30-100-YCSB_A`
         has only `3/5` CSVs
+      *Done: All three known incomplete prefixes are confirmed in the audit output.
+      The full audit covers all 353 incomplete prefixes (not just these examples)
+      with per-server classification and evidence strings.*
 - [ ] Audit whether `TIMEOUT_SEC=180` in `scripts/10-run_all.sh` is too short for
       the slow protocols. If a run is still alive or still flushing output at the
       timeout boundary, increase the timeout before the full rerun.
