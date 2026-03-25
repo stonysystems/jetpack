@@ -21,6 +21,10 @@
 #   The runner auto-detects total memory and caps TLC to at most 1/3 of that value.
 #   - local mode: applies a JVM heap cap with -Xmx
 #   - docker mode: applies --memory/--memory-swap plus the same JVM heap cap
+# CPU affinity policy:
+#   Optional override:
+#   - TLC_CPUSET=<cpuset> : CPU set to pin the TLC process/container to
+#                           (example: "96-103" or "0,2,4,6")
 #   Optional overrides:
 #   - TLC_MEMORY_MB=<mb>  : lower or equal total TLC memory budget in MB
 #   - TLC_HEAP_MB=<mb>    : lower JVM heap cap in MB within that budget
@@ -40,6 +44,7 @@
 #
 #   # Custom config:
 #   ./run-tlc.sh jetpack_raft_composition.tla jetpack_raft_custom.cfg -workers 4
+#   ./run-tlc.sh jetpack_raft_composition.tla tla/large.cfg -workers 4
 #
 #   # Force Docker mode:
 #   TLC_MODE=docker ./run-tlc.sh jetpack_raft_composition.tla small
@@ -150,6 +155,7 @@ if [ -z "$SPEC" ]; then
     echo "  (default)  - large config (5 servers, 3 cmds, 2 keys)"
     echo "  small      - small config (3 servers, 1 cmd, 1 key)"
     echo "  <file.cfg> - explicit config file"
+    echo "               also accepts paths like tla/large.cfg"
     echo ""
     echo "Environment variables:"
     echo "  TLC_MODE=local   - Use local Java + tla2tools.jar"
@@ -179,26 +185,38 @@ esac
 # Determine config file
 CONFIG_ARG="$1"
 CONFIG_LABEL=""
+CFG=""
+CFG_DISPLAY=""
 if [ "$CONFIG_ARG" = "small" ]; then
     if [ -f "$SCRIPT_DIR/${SPEC_NAME}_small.cfg" ]; then
-        CFG="${SPEC_NAME}_small.cfg"
+        CFG="${SCRIPT_DIR}/${SPEC_NAME}_small.cfg"
     else
-        CFG="${CFG_FAMILY}_small.cfg"
+        CFG="${SCRIPT_DIR}/${CFG_FAMILY}_small.cfg"
     fi
+    CFG_DISPLAY="$(basename "$CFG")"
     CONFIG_LABEL="_small"
     shift || true
 elif [ -n "$CONFIG_ARG" ] && [ -f "$SCRIPT_DIR/$CONFIG_ARG" ]; then
-    CFG="$CONFIG_ARG"
+    CFG="${SCRIPT_DIR}/$CONFIG_ARG"
+    CFG_DISPLAY="$CONFIG_ARG"
+    CONFIG_LABEL="_$(basename "${CFG%.cfg}")"
+    shift || true
+elif [ -n "$CONFIG_ARG" ] && [ -f "$CONFIG_ARG" ]; then
+    CFG="$(cd "$(dirname "$CONFIG_ARG")" && pwd)/$(basename "$CONFIG_ARG")"
+    CFG_DISPLAY="$CONFIG_ARG"
     CONFIG_LABEL="_$(basename "${CFG%.cfg}")"
     shift || true
 elif [ -f "$SCRIPT_DIR/${SPEC_NAME}.cfg" ]; then
-    CFG="${SPEC_NAME}.cfg"
+    CFG="${SCRIPT_DIR}/${SPEC_NAME}.cfg"
+    CFG_DISPLAY="$(basename "$CFG")"
     CONFIG_LABEL=""
 elif [ -f "$SCRIPT_DIR/${CFG_FAMILY}.cfg" ]; then
-    CFG="${CFG_FAMILY}.cfg"
+    CFG="${SCRIPT_DIR}/${CFG_FAMILY}.cfg"
+    CFG_DISPLAY="$(basename "$CFG")"
     CONFIG_LABEL=""
 else
     CFG=""
+    CFG_DISPLAY=""
 fi
 
 # Determine execution mode
@@ -273,11 +291,14 @@ LOGFILE="$SCRIPT_DIR/log/${TIMESTAMP}_${SPEC_NAME}${CONFIG_LABEL}.log"
 
 echo "=== TLC Run ===" | tee "$LOGFILE"
 echo "Spec:      $SPEC" | tee -a "$LOGFILE"
-echo "Config:    ${CFG:-none}" | tee -a "$LOGFILE"
+echo "Config:    ${CFG_DISPLAY:-none}" | tee -a "$LOGFILE"
 echo "Mode:      $TLC_MODE" | tee -a "$LOGFILE"
 echo "Detected total memory: ${TOTAL_MEM_MB}MB" | tee -a "$LOGFILE"
 echo "Auto 1/3 memory cap: ${AUTO_TLC_MEMORY_MB}MB" | tee -a "$LOGFILE"
 echo "Configured TLC memory cap: ${TLC_MEMORY_MB}MB" | tee -a "$LOGFILE"
+if [ -n "${TLC_CPUSET:-}" ]; then
+    echo "Configured TLC cpuset: ${TLC_CPUSET}" | tee -a "$LOGFILE"
+fi
 if [ "$TLC_MODE" = "local" ]; then
     echo "Local Java bitness: ${LOCAL_JAVA_BITS}" | tee -a "$LOGFILE"
     if [ -n "$LOCAL_JAVA_HEAP_MAX_MB" ]; then
@@ -295,11 +316,11 @@ echo "===============" | tee -a "$LOGFILE"
 
 # Assemble TLC arguments
 TLC_ARGS=()
-if [ -n "$CFG" ] && [ -f "$SCRIPT_DIR/$CFG" ]; then
+if [ -n "$CFG" ] && [ -f "$CFG" ]; then
     TLC_ARGS+=("-config" "$CFG")
-    echo "Using config: $CFG" | tee -a "$LOGFILE"
+    echo "Using config: $CFG_DISPLAY" | tee -a "$LOGFILE"
     echo "--- Config contents ---" >> "$LOGFILE"
-    cat "$SCRIPT_DIR/$CFG" >> "$LOGFILE"
+    cat "$CFG" >> "$LOGFILE"
     echo "--- End config ---" >> "$LOGFILE"
 else
     echo "WARNING: No config file found for $SPEC" | tee -a "$LOGFILE"
@@ -314,16 +335,28 @@ echo "" | tee -a "$LOGFILE"
 # Run TLC
 if [ "$TLC_MODE" = "local" ]; then
     cd "$SCRIPT_DIR"
-    java "$JAVA_HEAP_ARG" -cp tla2tools.jar tlc2.TLC -nowarning -deadlock "${TLC_ARGS[@]}" 2>&1 | tee -a "$LOGFILE"
+    JAVA_CMD=(java "$JAVA_HEAP_ARG" -cp tla2tools.jar tlc2.TLC -nowarning -deadlock "${TLC_ARGS[@]}")
+    if [ -n "${TLC_CPUSET:-}" ]; then
+        taskset -c "$TLC_CPUSET" "${JAVA_CMD[@]}" 2>&1 | tee -a "$LOGFILE"
+    else
+        "${JAVA_CMD[@]}" 2>&1 | tee -a "$LOGFILE"
+    fi
 elif [ "$TLC_MODE" = "docker" ]; then
     echo "Building Docker image..." | tee -a "$LOGFILE"
     docker build -t tlaplus "$SCRIPT_DIR" >> "$LOGFILE" 2>&1
-    docker run --rm --privileged \
-        --memory "${TLC_MEMORY_MB}m" \
-        --memory-swap "${TLC_MEMORY_MB}m" \
-        -e "JAVA_TOOL_OPTIONS=${JAVA_HEAP_ARG}" \
-        -v "$SCRIPT_DIR":/tla tlaplus \
-        tlc2.TLC -nowarning -deadlock "${TLC_ARGS[@]}" 2>&1 | tee -a "$LOGFILE"
+    DOCKER_CMD=(docker run --rm --privileged)
+    if [ -n "${TLC_CPUSET:-}" ]; then
+        DOCKER_CMD+=(--cpuset-cpus "$TLC_CPUSET")
+    fi
+    DOCKER_CMD+=(
+        --memory "${TLC_MEMORY_MB}m"
+        --memory-swap "${TLC_MEMORY_MB}m"
+        -e "JAVA_TOOL_OPTIONS=${JAVA_HEAP_ARG}"
+        -v "$SCRIPT_DIR":/tla
+        tlaplus
+        tlc2.TLC -nowarning -deadlock "${TLC_ARGS[@]}"
+    )
+    "${DOCKER_CMD[@]}" 2>&1 | tee -a "$LOGFILE"
 else
     echo "ERROR: Unknown TLC_MODE=$TLC_MODE (must be 'local' or 'docker')" | tee -a "$LOGFILE"
     exit 1
