@@ -1227,9 +1227,22 @@ Acceptance criteria:
 
 #### 8F. Mencius adaptive controller fix
 
-- [ ] Audit the CPU sampling path used by Mencius adaptive mode.
+- [x] Audit the CPU sampling path used by Mencius adaptive mode.
       The current `leader CPU 0.00` logs are not believable enough to drive a
       controller decision.
+      *Done: Created `scripts/mencius_cpu_audit.py` (19 tests).
+      ROOT CAUSE: 100% of 135,879 CPU log lines show 0.00.  The bug chain:
+      (1) `SampleCpuUsage()` returns `last_cpu_usage_=-1.0` before first sample pair
+      (scheduler.cc:87-89); (2) `FeedResponse` discards -1.0 via `>= 0.0` guard
+      (communicator.cc:39); (3) `AvgCpuLeaders()` falls back to 0.0 when
+      `leader_cpu_samples_==0` (communicator.h:103); (4) This 0.0 is treated as
+      real measurement, so `max_leader_avg` stays at 0.0; (5) Decision check
+      `(0.0 - 60.0) > rand(0,30)` is always false → fast path never disabled.
+      ADDITIONAL FINDING: Even if CPU sampling were fixed, Mencius fast path
+      (mode=100) itself collapses to zero throughput at concurrent_18+.
+      The adaptive controller cannot help when the underlying fast path is broken.
+      Source files: scheduler.cc:62-90, communicator.cc:38-46, communicator.h:103,
+      rule/coordinator.cc:78-94, mencius/server.h:55-57.*
 - [ ] Audit the branch direction and threshold logic in the adaptive rule.
       High CPU should cause backoff to the lower-CPU path. Low CPU should not
       randomly reject the fast path because of a stale or zero sample.
