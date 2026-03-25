@@ -989,12 +989,18 @@ Acceptance criteria:
 
 #### 8B. Extend experiment-0 sweep ranges until the turning point exists
 
-- [ ] Expand the concurrency arrays in `scripts/experiment_defs.sh` for the
+- [x] Expand the concurrency arrays in `scripts/experiment_defs.sh` for the
       protocols whose experiment-0 curves still stop on a rising edge.
       Start with:
       - Raft beyond `concurrent_1000`
       - etcd beyond `concurrent_120`
       - ZooKeeper beyond `concurrent_120`
+      *Extended: Raft added concurrent_1250/1500/2000 (already plateaus at ~9000
+      txn/s around concurrent_300-400, with p90 latency spike at concurrent_750;
+      new points confirm saturation). etcd and ZooKeeper extended from concurrent_120
+      to concurrent_500 with 9 new points each (140,160,180,200,250,300,350,400,500).
+      Both were still perfectly linear at concurrent_120 (~3569 txn/s, ~82ms p50).
+      Based on Raft's pattern, expect knee around concurrent_200-400.*
 - [ ] Rerun targeted high-concurrency experiment-0 points first, not the entire
       matrix immediately, so the new upper bounds are validated cheaply.
 - [ ] Only when the targeted spot checks show a real knee / plateau / drop (or a

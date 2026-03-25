@@ -286,9 +286,9 @@ class TestZooMatrixGeneration:
         )
         assert rc == 0
         count = int(stdout)
-        # Raft: 4*21=84, Copilot: 4*22=88, Mencius: 4*15=60,
-        # MongoDB: 4*14=56, etcd: 4*13=52, ZK: 4*13=52
-        assert count == 392, f"Expected 392 experiments, got {count}"
+        # Raft: 4*24=96, Copilot: 4*22=88, Mencius: 4*15=60,
+        # MongoDB: 4*14=56, etcd: 4*22=88, ZK: 4*22=88
+        assert count == 476, f"Expected 476 experiments, got {count}"
 
     def test_concurrency_sweep_format(self):
         """Each config line should have the right comma-separated format."""
@@ -412,3 +412,46 @@ class TestLoadZooFixedConcs:
         # raft should be concurrent_400, others concurrent_50 (default)
         assert lines[1] == "concurrent_400"
         assert "WARNING" in stderr
+
+
+# ---------------------------------------------------------------------------
+# Extended sweep ranges (Track 8B)
+# ---------------------------------------------------------------------------
+
+class TestExtendedSweepRanges:
+    """Verify concurrency arrays extend beyond the 2026-03-23 baseline ranges."""
+
+    def test_raft_extends_beyond_1000(self):
+        vals = bash_array("RAFT_CONCS")
+        nums = [int(v.replace("concurrent_", "")) for v in vals]
+        assert max(nums) >= 1500, f"Raft max conc {max(nums)} should be >= 1500"
+
+    def test_etcd_extends_beyond_120(self):
+        vals = bash_array("ETCD_CONCS")
+        nums = [int(v.replace("concurrent_", "")) for v in vals]
+        assert max(nums) >= 400, f"etcd max conc {max(nums)} should be >= 400"
+
+    def test_zookeeper_extends_beyond_120(self):
+        vals = bash_array("ZOOKEEPER_CONCS")
+        nums = [int(v.replace("concurrent_", "")) for v in vals]
+        assert max(nums) >= 400, f"ZooKeeper max conc {max(nums)} should be >= 400"
+
+    def test_etcd_has_dense_coverage_200_400(self):
+        """etcd should have points in the expected turning-point region."""
+        vals = bash_array("ETCD_CONCS")
+        nums = sorted(int(v.replace("concurrent_", "")) for v in vals)
+        region = [n for n in nums if 200 <= n <= 400]
+        assert len(region) >= 3, f"etcd needs >= 3 points in [200,400], got {region}"
+
+    def test_zookeeper_has_dense_coverage_200_400(self):
+        """ZooKeeper should have points in the expected turning-point region."""
+        vals = bash_array("ZOOKEEPER_CONCS")
+        nums = sorted(int(v.replace("concurrent_", "")) for v in vals)
+        region = [n for n in nums if 200 <= n <= 400]
+        assert len(region) >= 3, f"ZooKeeper needs >= 3 points in [200,400], got {region}"
+
+    def test_etcd_and_zookeeper_ranges_match(self):
+        """etcd and ZooKeeper should have the same sweep range (similar protocols)."""
+        etcd = bash_array("ETCD_CONCS")
+        zk = bash_array("ZOOKEEPER_CONCS")
+        assert etcd == zk, "etcd and ZooKeeper should have matching concurrency ranges"

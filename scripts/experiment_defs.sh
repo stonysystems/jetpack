@@ -93,7 +93,7 @@ RAFT_CONCS=(
     concurrent_80 concurrent_100 concurrent_120 concurrent_140 concurrent_150
     concurrent_160 concurrent_170 concurrent_180 concurrent_190 concurrent_200
     concurrent_250 concurrent_300 concurrent_400 concurrent_500 concurrent_750
-    concurrent_1000
+    concurrent_1000 concurrent_1250 concurrent_1500 concurrent_2000
 )
 COPILOT_CONCS=(
     concurrent_1 concurrent_10 concurrent_20 concurrent_30 concurrent_40
@@ -126,12 +126,16 @@ DOCKER_SWEEP_CONCS=(
 ETCD_CONCS=(
     concurrent_1 concurrent_10 concurrent_20 concurrent_30 concurrent_40
     concurrent_50 concurrent_60 concurrent_70 concurrent_80 concurrent_90
-    concurrent_100 concurrent_110 concurrent_120
+    concurrent_100 concurrent_110 concurrent_120 concurrent_140 concurrent_160
+    concurrent_180 concurrent_200 concurrent_250 concurrent_300 concurrent_350
+    concurrent_400 concurrent_500
 )
 ZOOKEEPER_CONCS=(
     concurrent_1 concurrent_10 concurrent_20 concurrent_30 concurrent_40
     concurrent_50 concurrent_60 concurrent_70 concurrent_80 concurrent_90
-    concurrent_100 concurrent_110 concurrent_120
+    concurrent_100 concurrent_110 concurrent_120 concurrent_140 concurrent_160
+    concurrent_180 concurrent_200 concurrent_250 concurrent_300 concurrent_350
+    concurrent_400 concurrent_500
 )
 
 # Fixed concurrency for secondary experiments (indexed: raft, copilot, mencius, mongodb)
