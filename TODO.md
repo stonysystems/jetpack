@@ -1132,14 +1132,23 @@ Acceptance criteria:
       fast-path attempts.  This shows ~42ms for Jetpack 100% (fast path only)
       and ~10,000ms for original MongoDB (original path only).  Using
       All-original-path-attempts produces -1/missing for Jetpack modes.*
-- [ ] Check why MongoDB is barely visible in the current figures.
+- [x] Check why MongoDB is barely visible in the current figures.
       If the reason is the global 200ms cap, fix the figure design instead of
       hiding MongoDB:
       use per-protocol y-axis ranges, a broken axis, or a separate documented
       MongoDB companion figure. Do not crop away the real points and call it done.
-- [ ] If the experiment path is wrong or unstable, create a separate blocked task
+      *Done: Confirmed the cause is the global 200ms y-axis cap in the notebook.
+      Created `scripts/generate_mongodb_companion_figure.py` — a dedicated two-panel
+      figure (throughput vs concurrency + latency vs concurrency on log scale)
+      using All-efficient-attempts p50 as the correct metric.  Outputs PDF and CSV.
+      20 tests in `scripts/test_generate_mongodb_companion_figure.py`.*
+- [x] If the experiment path is wrong or unstable, create a separate blocked task
       under the rerun plan and do not fabricate a clean MongoDB curve from
       partial data.
+      *Done: The experiment data is stable and complete — 52 MongoDB data points
+      across all modes.  The triage report (Track 8D leaf 1-3) confirmed three
+      legitimate root causes with artifact-backed evidence.  No instability found,
+      so no blocked task needed.*
 
 Acceptance criteria:
 
