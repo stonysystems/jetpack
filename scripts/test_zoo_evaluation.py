@@ -742,6 +742,27 @@ class TestFailureRecoveryScript(unittest.TestCase):
             self.assertIn(proto, self.src,
                           f"Missing protocol: {proto}")
 
+    def test_nfs_sync_before_scp(self):
+        """Script must flush NFS cache before pulling CSV files."""
+        sync_pos = self.src.find('"sync"')
+        scp_pos = self.src.find("scp ")
+        self.assertGreater(sync_pos, -1, "Missing NFS sync command")
+        self.assertGreater(scp_pos, sync_pos,
+                           "NFS sync must come before scp")
+
+    def test_kill_delay_exceeds_client_init(self):
+        """Kill delay must be >= 30s to allow client communicator init."""
+        import re
+        m = re.search(r'KILL_DELAY=(\d+)', self.src)
+        self.assertIsNotNone(m, "KILL_DELAY not found")
+        self.assertGreaterEqual(int(m.group(1)), 30,
+                                "KILL_DELAY must be >= 30s for client init")
+
+    def test_tail_based_throughput_check(self):
+        """Throughput check must use tail for large .res files."""
+        self.assertIn('tail -c 102400', self.src,
+                      "Must use tail-based check for potentially large .res files")
+
 
 class TestZooRecoveryPDFCell(unittest.TestCase):
     """Verify the Zoo per-protocol failure recovery PDF cell."""

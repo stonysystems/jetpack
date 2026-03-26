@@ -18,7 +18,7 @@ source "${SCRIPT_DIR}/experiment_defs.sh"
 
 DRY_RUN=false
 EXP_DIR=""
-KILL_DELAY=20    # seconds into run before killing leader
+KILL_DELAY=40    # seconds into run before killing leader (must exceed client init time ~25s)
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -66,7 +66,7 @@ fi
 mkdir -p "$EXP_DIR/failure_recovery"
 
 TIMEOUT_SEC=300  # 5 minutes for failure recovery (longer duration=70s + recovery time)
-DURATION=70
+DURATION=90
 
 echo "=== Zoo Failure Recovery Experiments ==="
 echo "Protocols: ${FR_PROTOCOLS[*]}"
@@ -170,6 +170,13 @@ EVIDENCE
     done
     sleep 1
 
+    # Flush NFS write-behind cache before pulling CSV files
+    for ip in "${servers[@]}"; do
+        ssh "${SERVER_USERNAME}@${ip}" "sync" &>/dev/null &
+    done
+    wait
+    sleep 3  # NFS attribute cache propagation
+
     # Pull CSV files
     scp "${SERVER_USERNAME}@${servers[0]}:${repo_dir}/results/recent_csv/${exp_name}-*" "${fr_dir}/" 2>/dev/null || true
     scp "${SERVER_USERNAME}@${servers[0]}:${repo_dir}/results/recent_csv/tdigest_${exp_name}-*" "${fr_dir}/" 2>/dev/null || true
@@ -178,7 +185,7 @@ EVIDENCE
     success_count=0
     for i in "${!servers[@]}"; do
         res_file="${fr_dir}/${exp_name}-${replicanames[$i]}.res"
-        if [ -f "$res_file" ] && grep -q "Mid throughput is" "$res_file"; then
+        if [ -f "$res_file" ] && tail -c 102400 "$res_file" | grep -q "Mid throughput is"; then
             success_count=$((success_count + 1))
         fi
     done
@@ -227,7 +234,7 @@ for idx in "${!FR_PROTOCOLS[@]}"; do
     for i in 1 2 3 4; do
         res_file="${EXP_DIR}/failure_recovery/${exp_name}-${replicanames[$i]}.res"
         if [ -f "$res_file" ]; then
-            tp=$(grep -m1 "Mid throughput is" "$res_file" | awk '{print $NF}' 2>/dev/null || echo "N/A")
+            tp=$(tail -c 102400 "$res_file" | grep -m1 "Mid throughput is" | awk '{print $NF}' 2>/dev/null || echo "N/A")
             echo "- ${replicanames[$i]} throughput: ${tp}" >> "$EXP_DIR/failure_recovery/RECOVERY_SUMMARY.md"
         fi
     done
