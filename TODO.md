@@ -1054,9 +1054,14 @@ Acceptance criteria:
       *Done: `fixed_conc_selection.md` now shows summary table with baseline p50,
       selected p50, threshold; per-protocol tables show every concurrency with
       throughput, p50, and in-envelope flag.*
-- [ ] After the rerun, derive `fixed_conc.json` again from the new experiment-0
+- [x] After the rerun, derive `fixed_conc.json` again from the new experiment-0
       results using the latency-envelope rule above. Do not carry forward fixed
       concurrencies from the 2026-03-23 baseline if the sweep range changed.
+      *Done 2026-03-25.  `derive_fixed_conc.py` ran against rerun experiment-0
+      data.  New fixed concurrencies (5 protocols, Mencius excluded):
+      Raft=concurrent_100, Copilot=concurrent_40, MongoDB=concurrent_100,
+      etcd=concurrent_120, ZooKeeper=concurrent_160.  Selection doc:
+      `results/2026-03-25-12:47:26-zoo-5machines-rerun/fixed_conc_selection.md`.*
 
 Acceptance criteria:
 
