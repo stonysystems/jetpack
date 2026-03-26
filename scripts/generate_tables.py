@@ -26,17 +26,13 @@ SERVERS = [f"zoo{i}" for i in range(5)]
 MODE_LABELS = {"0": "original", "1": "jetpack_100pct", "100": "jetpack_0pct", "101": "adaptive"}
 
 
-MAX_RES_FILE_SIZE = 1_000_000  # 1 MB — skip runaway/corrupt files
+from res_file_utils import read_res_tail
 
 
 def parse_res_file(path):
     """Extract throughput and latency from a .res file."""
     metrics = {}
-    try:
-        if os.path.getsize(path) > MAX_RES_FILE_SIZE:
-            return metrics
-        with open(path) as f:
-            for line in f:
+    for line in read_res_tail(path):
                 if "Mid throughput is" in line:
                     m = re.search(r"Mid throughput is ([\d.]+)", line)
                     if m:
@@ -69,8 +65,6 @@ def parse_res_file(path):
                         metrics["fp_p90"] = float(m.group(4))
                         metrics["fp_p99"] = float(m.group(5))
                         metrics["fp_ave"] = float(m.group(6))
-    except (OSError, IOError):
-        pass
     return metrics
 
 

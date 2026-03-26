@@ -1336,7 +1336,18 @@ Acceptance criteria:
       glibc 2.35 binary on glibc 2.41 host exposing latent memory-safety bug
       in Mencius protocol).  5 of 6 protocols proceed.  See
       `scripts/experiment_defs.sh` for exclusion comment.*
-- [ ] Preferred operator sequence:
+- [x] Preferred operator sequence:
+      *Steps 1–2 done 2026-03-26.  Result root:
+      `results/2026-03-25-12:47:26-zoo-5machines-rerun`.
+      Experiment 0: 416 configs × 5 servers = 2,080 res files.
+      Fixed concurrencies derived (5 protocols, Mencius excluded):
+      Raft=concurrent_100, Copilot=concurrent_40, MongoDB=concurrent_100,
+      etcd=concurrent_120, ZooKeeper=concurrent_160.
+      CRITICAL FIX: new build produces 6–120 MB .res files (verbose logging),
+      which broke all 8 parsing scripts that had MAX_RES_FILE_SIZE=1MB.
+      Created `scripts/res_file_utils.py` with tail-read optimization (reads
+      last 100 KB instead of full file).  All 8 scripts updated.
+      174 tests pass.  Steps 3–5 (exp 1,2 + recovery + evaluation) pending.*
 
 ```bash
 NEW_RUN_DIR="results/$(date +%Y-%m-%d-%H:%M:%S)-zoo-5machines-rerun"

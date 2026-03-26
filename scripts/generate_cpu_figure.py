@@ -25,22 +25,16 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 
-MAX_RES_FILE_SIZE = 1_000_000
+from res_file_utils import read_res_tail
 
 
 def parse_cpu_median(filepath):
     """Extract 'server median' CPU usage (%) from a .res file."""
-    try:
-        if os.path.getsize(filepath) > MAX_RES_FILE_SIZE:
-            return None
-        with open(filepath, 'r') as f:
-            for line in f:
-                m = re.search(r'server median\s*:\s*([\d.]+)', line)
-                if m:
-                    val = float(m.group(1))
-                    return val if val >= 0 else None
-    except (FileNotFoundError, IOError):
-        pass
+    for line in read_res_tail(filepath):
+        m = re.search(r'server median\s*:\s*([\d.]+)', line)
+        if m:
+            val = float(m.group(1))
+            return val if val >= 0 else None
     return None
 
 

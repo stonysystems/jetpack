@@ -64,7 +64,17 @@ MODE_RULE_100 = "1"      # Jetpack 100% fast-path
 MODE_ADAPTIVE = "101"    # Jetpack adaptive
 
 
-MAX_RES_FILE_SIZE = 1_000_000  # 1 MB — normal .res files are ~35 KB
+from res_file_utils import read_res_tail
+
+
+def _check_wan_delay(filepath):
+    """Check if WAN delay is enabled by reading the first few KB."""
+    try:
+        with open(filepath, 'r') as f:
+            head = f.read(8192)
+        return 'WAN delay enabled' in head or 'WAN_DELAY_MS' in head
+    except (FileNotFoundError, IOError, OSError):
+        return False
 
 
 def parse_res_file(filepath):
@@ -75,16 +85,8 @@ def parse_res_file(filepath):
         "original_path": None,
         "fast_path": None,
         "efficient_path": None,
-        "wan_delay_detected": False,
+        "wan_delay_detected": _check_wan_delay(filepath),
     }
-
-    # Skip runaway/corrupt files (e.g. 1.5 GB debug dumps from crashed runs)
-    try:
-        file_size = os.path.getsize(filepath)
-        if file_size > MAX_RES_FILE_SIZE:
-            return result
-    except OSError:
-        return result
 
     stat_pattern = re.compile(
         r'(All-(?:original|fast|efficient)-path-attempts|All-efficient-attempts)\s+'
@@ -97,44 +99,35 @@ def parse_res_file(filepath):
         r'ave\s+([\d.-]+)'
     )
 
-    try:
-        with open(filepath, 'r') as f:
-            for line in f:
-                # Check for WAN delay
-                if 'WAN delay enabled' in line or 'WAN_DELAY_MS' in line:
-                    result["wan_delay_detected"] = True
+    for line in read_res_tail(filepath):
+        # Mid throughput
+        m = re.search(r'Mid throughput is ([\d.]+)', line)
+        if m:
+            result["mid_throughput"] = float(m.group(1))
 
-                # Mid throughput
-                m = re.search(r'Mid throughput is ([\d.]+)', line)
-                if m:
-                    result["mid_throughput"] = float(m.group(1))
+        # Total throughput
+        m = re.search(r'Total throughtput is ([\d.]+)', line)
+        if m:
+            result["total_throughput"] = float(m.group(1))
 
-                # Total throughput
-                m = re.search(r'Total throughtput is ([\d.]+)', line)
-                if m:
-                    result["total_throughput"] = float(m.group(1))
-
-                # Latency stats
-                m = stat_pattern.search(line)
-                if m:
-                    stat_name = m.group(1)
-                    stats = {
-                        "count": int(m.group(2)),
-                        "0pct": float(m.group(3)),
-                        "50pct": float(m.group(4)),
-                        "90pct": float(m.group(5)),
-                        "99pct": float(m.group(6)),
-                        "ave": float(m.group(7)),
-                    }
-                    if "original" in stat_name:
-                        result["original_path"] = stats
-                    elif "fast" in stat_name:
-                        result["fast_path"] = stats
-                    elif "efficient" in stat_name:
-                        result["efficient_path"] = stats
-
-    except (FileNotFoundError, IOError):
-        pass
+        # Latency stats
+        m = stat_pattern.search(line)
+        if m:
+            stat_name = m.group(1)
+            stats = {
+                "count": int(m.group(2)),
+                "0pct": float(m.group(3)),
+                "50pct": float(m.group(4)),
+                "90pct": float(m.group(5)),
+                "99pct": float(m.group(6)),
+                "ave": float(m.group(7)),
+            }
+            if "original" in stat_name:
+                result["original_path"] = stats
+            elif "fast" in stat_name:
+                result["fast_path"] = stats
+            elif "efficient" in stat_name:
+                result["efficient_path"] = stats
 
     return result
 

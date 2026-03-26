@@ -21,7 +21,7 @@ import sys
 from collections import defaultdict
 
 
-MAX_RES_FILE_SIZE = 1_000_000
+from res_file_utils import read_res_tail
 
 
 def parse_res_metrics(filepath):
@@ -36,11 +36,7 @@ def parse_res_metrics(filepath):
     All values are float or None.
     """
     result = {}
-    try:
-        if os.path.getsize(filepath) > MAX_RES_FILE_SIZE:
-            return result
-        with open(filepath, 'r') as f:
-            for line in f:
+    for line in read_res_tail(filepath):
                 # Throughput
                 m = re.search(r'Mid throughput is ([\d.]+)', line)
                 if m:
@@ -90,8 +86,6 @@ def parse_res_metrics(filepath):
                 if m:
                     result['cpu_median'] = float(m.group(1))
 
-    except (FileNotFoundError, IOError):
-        pass
     return result
 
 

@@ -28,7 +28,7 @@ from datetime import datetime
 
 SITE = "30c1s5r5p-zoo"
 SERVERS = [f"zoo{i}" for i in range(5)]
-MAX_RES_FILE_SIZE = 1_000_000  # 1 MB — skip runaway/corrupt files
+from res_file_utils import read_res_tail
 ZOO_HOSTS = [
     "130.245.173.101",
     "130.245.173.102",
@@ -78,21 +78,15 @@ def parse_mid_throughput(filepath):
     """
     mid_tp = None
     total_tp = None
-    try:
-        if os.path.getsize(filepath) > MAX_RES_FILE_SIZE:
-            return None
-        with open(filepath, 'r') as f:
-            for line in f:
-                if mid_tp is None:
-                    m = re.search(r'Mid throughput is ([\d.]+)', line)
-                    if m:
-                        mid_tp = float(m.group(1))
-                if total_tp is None:
-                    m2 = re.search(r'Total throughtput is ([\d.]+)', line)
-                    if m2:
-                        total_tp = float(m2.group(1))
-    except (FileNotFoundError, IOError):
-        pass
+    for line in read_res_tail(filepath):
+        if mid_tp is None:
+            m = re.search(r'Mid throughput is ([\d.]+)', line)
+            if m:
+                mid_tp = float(m.group(1))
+        if total_tp is None:
+            m2 = re.search(r'Total throughtput is ([\d.]+)', line)
+            if m2:
+                total_tp = float(m2.group(1))
     return mid_tp if mid_tp is not None else total_tp
 
 
