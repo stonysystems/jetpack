@@ -1360,11 +1360,20 @@ bash scripts/run_failure_recovery.sh --exp-dir "$NEW_RUN_DIR"
 bash scripts/run_evaluation.sh "$NEW_RUN_DIR"
 ```
 
-- [ ] Save the exact commands actually used in the new run folder, including any
+- [x] Save the exact commands actually used in the new run folder, including any
       timeout override or rerun-only experiment subset.
-- [ ] If Claude must do a limited preflight before the full batch, record those
+      *Done 2026-03-26.  Created `commands_used.txt` in the rerun result root
+      documenting all 5 steps (exp 0, derive fixed conc, exp 1+2, recovery,
+      evaluation) with exact commands, timestamps, and results.
+      Also fixed oversized-file handling in both `10-run_all.sh` and
+      `run_spot_check.sh`: large .res files (60MB-1GB from verbose logging)
+      now use tail-based success check instead of hard-failing.
+      Experiments 1+2 launched (260 configs, ~6h estimated).*
+- [x] If Claude must do a limited preflight before the full batch, record those
       spot-check commands separately and do not confuse them with the accepted
       full rerun.
+      *Done 2026-03-26.  Created `spot_check_commands.txt` in the rerun result
+      root documenting the Mencius spot-check and Raft smoke test with results.*
 
 Acceptance criteria:
 

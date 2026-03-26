@@ -84,10 +84,35 @@ check_success() {
 
     local file_size
     file_size=$(stat -c%s "$to_check_file" 2>/dev/null || echo 0)
-    local MAX_RES_SIZE_BYTES=$((50 * 1024 * 1024))
+    local MAX_RES_SIZE_BYTES=$((200 * 1024 * 1024))
+
+    # For large files, use tail-based check (matches 10-run_all.sh logic)
     if [[ "$file_size" -gt "$MAX_RES_SIZE_BYTES" ]]; then
-        echo "oversized file"
-        return 1
+        local tail_chunk
+        tail_chunk=$(tail -c 102400 "$to_check_file" 2>/dev/null)
+        if echo "$tail_chunk" | grep -q "Mid throughput is" && \
+           echo "$tail_chunk" | grep -q "Dumped to" && \
+           ! echo "$tail_chunk" | grep -q "generic server error"; then
+            local mid_tp
+            mid_tp=$(echo "$tail_chunk" | grep -m1 "Mid throughput is" | awk '{print $NF}' || echo 0)
+            mid_tp=${mid_tp:-0}
+            if [[ "$workload" == "rw_1000000" ]]; then
+                if [[ "$(printf '%.0f' "${mid_tp}" 2>/dev/null || echo 0)" -lt 1 ]]; then
+                    echo "low throughput (${mid_tp})"
+                    return 1
+                fi
+            fi
+            local csv_file="${exp_dir}/${exp_name}-${replica}.csv"
+            if [[ ! -f "$csv_file" ]]; then
+                echo "csv_missing_after_scp"
+                return 1
+            fi
+        else
+            echo "missing success markers (large file)"
+            return 1
+        fi
+        echo "success"
+        return 0
     fi
 
     if grep -q "Mid throughput is" "$to_check_file" && \
@@ -253,6 +278,64 @@ if grep -A3 'ssh.*"sync"' "$SCRIPT_DIR/10-run_all.sh" | grep -qE 'sleep [3-9]'; 
     assert_eq "sleep >=3 in 10-run_all.sh" "found" "found"
 else
     assert_eq "sleep >=3 in 10-run_all.sh" "found" "missing"
+fi
+
+# ===================================================================
+# Test 13: Large file with valid markers uses tail-based check
+# ===================================================================
+echo ""
+echo "=== Test 13: Large file with valid markers ==="
+if grep -q 'tail -c 102400' "$SCRIPT_DIR/10-run_all.sh"; then
+    assert_eq "tail-based check in 10-run_all.sh" "found" "found"
+else
+    assert_eq "tail-based check in 10-run_all.sh" "found" "missing"
+fi
+
+# ===================================================================
+# Test 14: Large file tail-based check in run_spot_check.sh
+# ===================================================================
+echo ""
+echo "=== Test 14: Large file tail-based check in run_spot_check.sh ==="
+if grep -q 'tail -c 102400' "$SCRIPT_DIR/run_spot_check.sh"; then
+    assert_eq "tail-based check in run_spot_check.sh" "found" "found"
+else
+    assert_eq "tail-based check in run_spot_check.sh" "found" "missing"
+fi
+
+# ===================================================================
+# Test 15: 10-run_all.sh no longer hard-fails on oversized files
+# ===================================================================
+echo ""
+echo "=== Test 15: No hard fail on oversized files ==="
+# The script should NOT have a bare 'fail_reason="oversized file"' without
+# a continuation to tail-based check
+if grep -q 'fail_reason="oversized file"' "$SCRIPT_DIR/10-run_all.sh"; then
+    assert_eq "no bare oversized fail in 10-run_all.sh" "absent" "present"
+else
+    assert_eq "no bare oversized fail in 10-run_all.sh" "absent" "absent"
+fi
+
+# ===================================================================
+# Test 16: run_spot_check.sh no longer hard-fails on oversized files
+# ===================================================================
+echo ""
+echo "=== Test 16: No hard fail on oversized files in spot_check ==="
+if grep -q 'fail_reason="oversized file"' "$SCRIPT_DIR/run_spot_check.sh"; then
+    assert_eq "no bare oversized fail in run_spot_check.sh" "absent" "present"
+else
+    assert_eq "no bare oversized fail in run_spot_check.sh" "absent" "absent"
+fi
+
+# ===================================================================
+# Test 17: MAX_RES_SIZE_BYTES is at least 200MB
+# ===================================================================
+echo ""
+echo "=== Test 17: MAX_RES_SIZE_BYTES >= 200MB ==="
+max_size=$(grep 'MAX_RES_SIZE_BYTES=' "$SCRIPT_DIR/10-run_all.sh" | head -1 | grep -oP '^\w+=\$\(\(\K\d+')
+if [[ "$max_size" -ge 200 ]]; then
+    assert_eq "MAX_RES >= 200MB in 10-run_all.sh" "true" "true"
+else
+    assert_eq "MAX_RES >= 200MB in 10-run_all.sh" "true" "false (${max_size}MB)"
 fi
 
 # ===================================================================

@@ -85,7 +85,7 @@ for i in $(seq 0 $((N_SERVER - 1))); do
     replicanames+=("${name_var}")
 done
 
-MAX_RES_SIZE_BYTES=$((50 * 1024 * 1024))  # res files usually should be ~10MB
+MAX_RES_SIZE_BYTES=$((200 * 1024 * 1024))  # raised from 50MB: verbose logging produces 60-120MB files
 
 # Source centralized experiment definitions
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -260,10 +260,29 @@ execute_command() {
         fi
 
         file_size=$(stat -c%s "${to_check_file}" 2>/dev/null || echo 0)
+
+        # For large files (verbose logging produces 60MB-1GB), use tail to
+        # check success markers instead of grep on the full file.
         if [ "${file_size}" -gt "${MAX_RES_SIZE_BYTES}" ]; then
-            echo "Oversized res file (>50MB): ${to_check_file}"
-            status=1
-            fail_reason="oversized file"
+            tail_chunk=$(tail -c 102400 "${to_check_file}" 2>/dev/null)
+            if echo "$tail_chunk" | grep -q "Mid throughput is" && echo "$tail_chunk" | grep -q "Dumped to" && ! echo "$tail_chunk" | grep -q "generic server error"; then
+                mid_tp=$(echo "$tail_chunk" | grep -m1 "Mid throughput is" | awk '{print $NF}' || echo 0)
+                mid_tp=${mid_tp:-0}
+                if [[ "$workload" == "rw_1000000" ]]; then
+                    if [ "$(printf '%.0f' "${mid_tp}" 2>/dev/null || echo 0)" -lt 1 ]; then
+                        status=1
+                        fail_reason="low throughput (${mid_tp})"
+                    fi
+                fi
+                csv_file="${exp_dir}/${exp_name}-${replicanames[$i]}.csv"
+                if [ ! -f "${csv_file}" ]; then
+                    status=1
+                    fail_reason="csv_missing_after_scp"
+                fi
+            else
+                status=1
+                fail_reason="missing success markers (large file, ${file_size} bytes)"
+            fi
             continue
         fi
 
