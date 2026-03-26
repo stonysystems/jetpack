@@ -1384,7 +1384,17 @@ Acceptance criteria:
       which broke all 8 parsing scripts that had MAX_RES_FILE_SIZE=1MB.
       Created `scripts/res_file_utils.py` with tail-read optimization (reads
       last 100 KB instead of full file).  All 8 scripts updated.
-      174 tests pass.  Steps 3–5 (exp 1,2 + recovery + evaluation) pending.*
+      174 tests pass.
+      Steps 3–5 completed 2026-03-26:
+      - Experiments 1+2: 260 configs completed (3,280 total .res files).
+      - Failure recovery: 4 protocols run (rule_raft SUCCESS, rule_mongodb/
+        etcd/zookeeper BLOCKED — backend failover does not complete).
+      - Evaluation: 25 PDF figures, 6 CSV tables, SUMMARY.md,
+        EXPERIMENT_REPORT.md generated.
+      ADDITIONAL FIX: evaluation notebook `read_files()` crashed on verbose
+      .res files (debug log lines matched "median :" pattern).  Replaced all
+      full-file reads in Cell 3 with `res_file_utils.read_res_tail()` to
+      read only the last 100 KB where summary stats live.*
 
 ```bash
 NEW_RUN_DIR="results/$(date +%Y-%m-%d-%H:%M:%S)-zoo-5machines-rerun"

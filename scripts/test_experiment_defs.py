@@ -64,13 +64,15 @@ class TestSyntax:
 # ---------------------------------------------------------------------------
 
 class TestProtocolArrays:
-    def test_zoo_jetpack_has_6_protocols(self):
+    def test_zoo_jetpack_has_5_protocols(self):
+        # Mencius excluded due to heap corruption (glibc 2.35 binary on 2.41 host)
         vals = bash_array("ZOO_JETPACK_PROTOCOLS")
-        assert len(vals) == 6
+        assert len(vals) == 5
 
-    def test_zoo_origin_has_6_protocols(self):
+    def test_zoo_origin_has_5_protocols(self):
+        # Mencius excluded due to heap corruption (glibc 2.35 binary on 2.41 host)
         vals = bash_array("ZOO_ORIGIN_PROTOCOLS")
-        assert len(vals) == 6
+        assert len(vals) == 5
 
     def test_zoo_jetpack_uses_rule_raft_not_fpga(self):
         vals = bash_array("ZOO_JETPACK_PROTOCOLS")
@@ -87,14 +89,16 @@ class TestProtocolArrays:
             assert j == f"rule_{family}", f"{o} should pair with rule_{family}, got {j}"
 
     def test_zoo_origin_protocols_expected(self):
+        # Mencius excluded due to heap corruption
         vals = bash_array("ZOO_ORIGIN_PROTOCOLS")
-        expected = {"none_raft", "none_copilot", "none_mencius",
+        expected = {"none_raft", "none_copilot",
                     "none_mongodb", "none_etcd", "none_zookeeper"}
         assert set(vals) == expected
 
     def test_zoo_jetpack_protocols_expected(self):
+        # Mencius excluded due to heap corruption
         vals = bash_array("ZOO_JETPACK_PROTOCOLS")
-        expected = {"rule_raft", "rule_copilot", "rule_mencius",
+        expected = {"rule_raft", "rule_copilot",
                     "rule_mongodb", "rule_etcd", "rule_zookeeper"}
         assert set(vals) == expected
 
@@ -106,9 +110,10 @@ class TestProtocolArrays:
         vals = bash_array("LEGACY_ORIGIN_PROTOCOLS")
         assert len(vals) == 4
 
-    def test_zoo_concs_arrays_has_6_entries(self):
+    def test_zoo_concs_arrays_has_5_entries(self):
+        # Mencius excluded due to heap corruption
         vals = bash_array("ZOO_CONCS_ARRAYS")
-        assert len(vals) == 6
+        assert len(vals) == 5
 
 
 # ---------------------------------------------------------------------------
@@ -286,9 +291,9 @@ class TestZooMatrixGeneration:
         )
         assert rc == 0
         count = int(stdout)
-        # Raft: 4*24=96, Copilot: 4*22=88, Mencius: 4*15=60,
+        # Raft: 4*24=96, Copilot: 4*22=88, (Mencius excluded: heap corruption)
         # MongoDB: 4*14=56, etcd: 4*22=88, ZK: 4*22=88
-        assert count == 476, f"Expected 476 experiments, got {count}"
+        assert count == 416, f"Expected 416 experiments, got {count}"
 
     def test_concurrency_sweep_format(self):
         """Each config line should have the right comma-separated format."""
@@ -313,8 +318,9 @@ class TestZooMatrixGeneration:
         for line in lines:
             parts = line.split(",")
             protocols_seen.add(parts[1])
+        # Mencius excluded due to heap corruption
         expected = {"none_raft", "rule_raft", "none_copilot", "rule_copilot",
-                    "none_mencius", "rule_mencius", "none_mongodb", "rule_mongodb",
+                    "none_mongodb", "rule_mongodb",
                     "none_etcd", "rule_etcd", "none_zookeeper", "rule_zookeeper"}
         assert protocols_seen == expected
 
@@ -344,11 +350,12 @@ class TestZooMatrixGeneration:
         )
         assert rc == 0, f"stderr: {stderr}"
         count = int(stdout)
-        assert count == 144, f"Expected 144, got {count}"
+        # 5 families (Mencius excluded) * 6 zipf * 4 modes = 120
+        assert count == 120, f"Expected 120, got {count}"
 
     def test_keyrange_sweep_with_fixed_concs(self):
         """Keyrange sweep with mock fixed concs should produce expected count."""
-        # 6 families * 7 key_range workloads * 4 modes = 168
+        # 5 families (Mencius excluded) * 7 key_range workloads * 4 modes = 140
         stdout, stderr, rc = bash_eval(
             'ZOO_FIXED_CONCS=("concurrent_400" "concurrent_160" "concurrent_30" '
             '"concurrent_60" "concurrent_50" "concurrent_50") && '
@@ -357,7 +364,7 @@ class TestZooMatrixGeneration:
         )
         assert rc == 0, f"stderr: {stderr}"
         count = int(stdout)
-        assert count == 168, f"Expected 168, got {count}"
+        assert count == 140, f"Expected 140, got {count}"
 
 
 # ---------------------------------------------------------------------------
@@ -384,7 +391,8 @@ class TestLoadZooFixedConcs:
         )
         assert rc == 0
         lines = stdout.split("\n")
-        assert lines[0] == "6"
+        # 5 protocols (Mencius excluded)
+        assert lines[0] == "5"
         assert "concurrent_400" in lines  # raft
         assert "concurrent_160" in lines  # copilot
 
@@ -408,7 +416,8 @@ class TestLoadZooFixedConcs:
         )
         assert rc == 0
         lines = stdout.split("\n")
-        assert lines[0] == "6"
+        # 5 protocols (Mencius excluded)
+        assert lines[0] == "5"
         # raft should be concurrent_400, others concurrent_50 (default)
         assert lines[1] == "concurrent_400"
         assert "WARNING" in stderr

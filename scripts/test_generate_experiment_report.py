@@ -100,7 +100,7 @@ class TestCollectData(unittest.TestCase):
     def test_collect_single_protocol(self):
         self._write_res_files("none_raft", "concurrent_10", "0",
                               [100, 100, 100, 100, 100])
-        data = ger.collect_data(self.tmpdir)
+        data, _ = ger.collect_data(self.tmpdir)
         self.assertIn("none_raft", data)
         self.assertIn("0", data["none_raft"])
         self.assertAlmostEqual(
@@ -112,7 +112,7 @@ class TestCollectData(unittest.TestCase):
                 (50, 70, 90, 60), (50, 70, 90, 60)]
         self._write_res_files("none_raft", "concurrent_10", "0",
                               [100] * 5, lats)
-        data = ger.collect_data(self.tmpdir)
+        data, _ = ger.collect_data(self.tmpdir)
         metrics = data["none_raft"]["0"]["concurrent_10"]
         self.assertAlmostEqual(metrics["p50"], 50.0)  # avg of 40,50,60,50,50
         self.assertAlmostEqual(metrics["p90"], 70.0)  # avg of 60,70,80,70,70
@@ -124,7 +124,7 @@ class TestCollectData(unittest.TestCase):
             path = os.path.join(self.tmpdir, fname)
             with open(path, "w") as f:
                 f.write("I | Mid throughput is 100\n")
-        data = ger.collect_data(self.tmpdir)
+        data, _ = ger.collect_data(self.tmpdir)
         # Should not have aggregated data
         self.assertNotIn("concurrent_10", data.get("none_raft", {}).get("0", {}))
 
@@ -133,7 +133,7 @@ class TestCollectData(unittest.TestCase):
                               [100] * 5)
         self._write_res_files("none_raft", "concurrent_10", "101",
                               [90] * 5)
-        data = ger.collect_data(self.tmpdir)
+        data, _ = ger.collect_data(self.tmpdir)
         self.assertAlmostEqual(
             data["none_raft"]["0"]["concurrent_10"]["throughput"], 500.0
         )
@@ -144,7 +144,7 @@ class TestCollectData(unittest.TestCase):
     def test_collect_multiple_concurrencies(self):
         self._write_res_files("none_raft", "concurrent_10", "0", [100] * 5)
         self._write_res_files("none_raft", "concurrent_20", "0", [200] * 5)
-        data = ger.collect_data(self.tmpdir)
+        data, _ = ger.collect_data(self.tmpdir)
         self.assertAlmostEqual(
             data["none_raft"]["0"]["concurrent_10"]["throughput"], 500.0
         )
@@ -153,7 +153,7 @@ class TestCollectData(unittest.TestCase):
         )
 
     def test_collect_empty_dir(self):
-        data = ger.collect_data(self.tmpdir)
+        data, _ = ger.collect_data(self.tmpdir)
         self.assertEqual(data, {})
 
 
@@ -323,7 +323,7 @@ class TestWithRealData(unittest.TestCase):
     def test_real_data_collection(self):
         if not os.path.isdir(self.RESULT_DIR):
             self.skipTest("Zoo result directory not available")
-        data = ger.collect_data(self.RESULT_DIR)
+        data, _ = ger.collect_data(self.RESULT_DIR)
         self.assertIn("none_raft", data)
         # Should have mode 0 data
         self.assertIn("0", data["none_raft"])
@@ -331,7 +331,7 @@ class TestWithRealData(unittest.TestCase):
     def test_real_latency_nonzero(self):
         if not os.path.isdir(self.RESULT_DIR):
             self.skipTest("Zoo result directory not available")
-        data = ger.collect_data(self.RESULT_DIR)
+        data, _ = ger.collect_data(self.RESULT_DIR)
         # At least one concurrency should have nonzero p50
         for conc, metrics in data.get("none_raft", {}).get("0", {}).items():
             if metrics["p50"] > 0:
