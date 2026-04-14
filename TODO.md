@@ -1,1524 +1,1032 @@
 # TODO
 
-Purpose: keep the current real work, acceptance criteria, evidence paths, and
-anti-shortcut rules visible. This file is the handoff checklist for Claude or
-any future agent. It is not a live execution transcript.
+Phased roadmap for Jetpack development. Each phase has concrete tasks with acceptance criteria.
 
-## Review Snapshot
+---
 
-- Latest active phase:
-  `Zoo 2026-03-23 result-set triage, MongoDB and Mencius bug fixing, figure/export correction, and clean 5-machine rerun planning`
-- Treat `results/2026-03-23-10:26:07-zoo-5machines/` as a diagnostic baseline, not
-  as a publishable final run.
-- TLA+ closure work is not current scope.
-- Do not spend time on `tla/` deliverables unless the user explicitly reopens them.
+## Phase 1: CURP Integration (reuse Jetpack infrastructure, no recovery)
 
-### Highest-Priority Open Work
+**Goal**: Implement CURP as a mode variant (`-m 200`) of the existing Jetpack+Raft path. CURP reuses the same coordinator, RPC, config system, and command pool as Jetpack — the only behavioral difference is how the **leader** checks for conflicts (Raft log instead of command pool) and that there is **no failure recovery**.
 
-Historical tracks 1-4 stay below for context, but the immediate user-visible
-blockers are now:
+**Constraints**:
+- `-m 200` (CURP mode) is only valid when `ab: raft`. CURP depends on scanning the Raft log on the leader, which doesn't apply to CoPilot, Mencius, MongoDB, etcd, or ZooKeeper.
+- `-m 200` always attempts the fast path (100% attempt rate). No adaptive throttle, no probabilistic gating. This matches the CURP paper where the fast path is always attempted.
+- No recovery: fast-path commands that haven't been committed by Raft are lost on leader failure.
 
-1. Reopen the 2026-03-23 Zoo 5-machine run as incomplete and fix the blockers
-   before claiming the figures or tables are final.
-2. Extend experiment-0 concurrency sweeps for Raft / etcd / ZooKeeper until the
-   throughput-latency curves show a real turning point, plateau, or regression
-   rather than stopping at a still-rising edge.
-3. Replace the current CPU deliverable with the requested figure shape:
-   x-axis = concurrency, y-axis = CPU usage, one line per mode
-   (original / 0% / 100% / adaptive) inside each protocol panel.
-4. Find the original MongoDB bottleneck from logs first, then fix either the
-   experiment path or the plotting/input path so MongoDB data points are real,
-   visible, and auditable.
-5. Audit why the current Zoo run has many `.res` files without matching `.csv`
-   files, fix the root cause if possible, and stop silently plotting from
-   partial data.
-6. Fix Mencius adaptive mode so CPU-based path selection uses valid CPU samples
-   and sane switching logic instead of the current obviously wrong
-   `[CPU-MENC] ... leader CPU 0.00 ...` behavior.
-7. Rerun Zoo failure recovery with the notebook-expected recovery log names and
-   do not close the task until 4 per-protocol recovery figures exist
-   (`rule_raft`, `rule_mongodb`, `rule_etcd`, `rule_zookeeper`) or a blocker is
-   explicitly proven with logs.
-8. After the fixes above, start a clean new batched run via `scripts/10-run_all.sh`
-   in a fresh result root, then reuse that same result root for experiments 1/2,
-   failure recovery, and figure export.
+**Design — how CURP differs from Jetpack on the fast path**:
 
-## Canonical Artifact Roots
-
-- Benchmark / recovery runbook: `docs/benchmark_runbook.md`
-- Reproduction entrypoint: `scripts/reproduce_evaluation.sh`
-- Sweep helper: `scripts/sweep_benchmark.sh`
-- Signal mechanism doc: `docs/leader_election_signal.md`
-- Recovery design doc: `docs/failure_recovery_design.md`
-- Existing leader-election patches:
-  - `patches/mongodb-leader-signal.patch`
-  - `patches/etcd-leader-signal.patch`
-  - `patches/zookeeper-leader-signal.patch`
-- Accepted benchmark artifacts: `docs/sweep_2026-02-28/`
-- Accepted WAN recovery artifacts: `docs/phase1f_wan_recovery_20260311/`
-- New latency report to create: `docs/integration_latency_20ms_report.md`
-- New rerun results doc to create: `docs/benchmark_rerun_results.md`
-- Legacy multi-machine runner to extend: `scripts/10-run_all.sh`
-- Shared experiment definitions to extend: `scripts/experiment_defs.sh`
-- Current failover helper to inspect/reuse: `scripts/09-build_and_test_run_wan.sh`
-- Analysis notebook to extend: `scripts/evaluation.ipynb`
-- Zoo site config for the new run: `config/30c1s5r5p-zoo.yml`
-- Current suspect Zoo run to triage:
-  `results/2026-03-23-10:26:07-zoo-5machines`
-- Evaluation wrapper to reuse after rerun: `scripts/run_evaluation.sh`
-- Failure-recovery runner to reuse after rerun: `scripts/run_failure_recovery.sh`
-
-## Known Current State
-
-- The checked-in backend patches already appear to write `<backend>:primary_elected`.
-  Treat that as a starting point, not proof that the end-to-end integration is correct.
-- Jetpack recovery code already flips `jetpack_status_` to `RECOVERY` and later back
-  to `READY`.
-- The current client-side pause path waits on `recovery_finish_after_failure`.
-  That is not the same as the required backend-side pause window keyed by
-  `fastpath_stopped`.
-- The benchmark runbook already uses `LATENCY_MS=20` for throughput paths and
-  `RECOVERY_LATENCY_MS=20` for failure-recovery paths.
-- `LATENCY_MS=20` and `RECOVERY_LATENCY_MS=20` are one-way latency settings.
-  They imply RTT = 40ms.
-- `SIMULATE_WAN` and `tc` / `netem` are additive. Do not enable both in the same
-  experiment unless the task explicitly asks for additive delay.
-- There is no checked-in CI workflow directory in the repo root yet. Creating a
-  real checked-in CI entrypoint remains open work.
-- `scripts/10-run_all.sh` still reflects the older 4-family legacy sweep and
-  currently uses `SITE_AWS_SWEEP` through the shared definitions.
-- `scripts/experiment_defs.sh` still maps the legacy Jetpack raft family to
-  `rule_fpga_raft`, while the requested Zoo evaluation uses `rule_raft`.
-- `scripts/evaluation.ipynb` still hard-codes a historical result folder,
-  historical contention dataset paths, and result-file host-count assumptions
-  that do not match the requested 5-machine Zoo run.
-- The current experiment-0 figure set under
-  `results/2026-03-23-10:26:07-zoo-5machines/figs/` is suspect because many raw
-  Zoo result files show WAN-scale latencies around ~40ms / ~80ms while several
-  plotted figures appear mostly near 0ms. Treat those PDFs as provisional until
-  notebook input-data sanity checks and redraw are complete.
-- For the requested Zoo multi-machine task, host-level `tc` is not the intended
-  mechanism because sudo permission is not available. The WAN model for this
-  track must be implemented at the Docker/container level with 20ms one-way
-  latency, and that exact mechanism must be documented in the run folder.
-- Some ZooKeeper / MongoDB / etcd evaluation paths in the repo have recently
-  been exercised through Docker-oriented helpers (`scripts/reproduce_evaluation.sh`,
-  `scripts/sweep_benchmark.sh`, `docker/*`). Claude may need to update scripts
-  accordingly so the Zoo multi-machine path and any Docker-backed backend control
-  paths stay coherent, instead of forcing one model onto the other.
-- For the requested failure-recovery experiment, the failure event must really
-  kill a `deptran_server` task on one Zoo machine. A synthetic pause, a config
-  flag alone, or a client-only stall is not sufficient.
-- The current Zoo run root `results/2026-03-23-10:26:07-zoo-5machines/`
-  contains `3400` `.res` files but only `1838` `.csv` files.
-- The current failure-recovery subdir
-  `results/2026-03-23-10:26:07-zoo-5machines/failure_recovery/` contains
-  `20` `.res` files but only `4` `.csv` files, all for `rule_raft`.
-- Many prefixes have all 5 server `.res` files but only partial `.csv`
-  coverage, so the main missing-artifact problem is not "the run never started";
-  it is a post-start abnormal-termination / timeout / dump / pull problem.
-- The current run folder only has one per-protocol recovery PDF:
-  `figs/30c1s5r5p-zoo_failure_recovery_rule_raft.pdf`.
-  The 4-protocol recovery-figure requirement is still open.
-- The current throughput sweep still does not show a convincing turning point
-  for at least:
-  - Raft original: `none_raft` is still ~`8992.2 txn/s` at `concurrent_1000`
-    and `rule_raft` adaptive is ~`9010.3 txn/s` at `concurrent_1000`.
-  - etcd original: peak is still at the highest tested point `concurrent_120`
-    (`3569.1 txn/s`).
-  - ZooKeeper original: peak is still at the highest tested point
-    `concurrent_120` (`3559.5 txn/s`).
-- Original MongoDB is already pathological at very low concurrency:
-  `none_mongodb` p50 is about `9587.87ms` at `concurrent_1` and about
-  `10348.57ms` at `concurrent_10`. This is not a "small late surge near max
-  throughput" pattern.
-- MongoDB Jetpack rows in `tables/latency_vs_conc.csv` are internally mixed:
-  fast-path latency stays around `42ms`, while all-attempt latency is either
-  multi-second or `-1`. The plotting path must decide which latency metric is
-  the real y-axis for the main latency figures and document it.
-- `figure_input_sanity.md` is not yet trustworthy enough to gate figure
-  correctness. It currently marks several obvious mismatches as `PASS`, for
-  example:
-  - MongoDB adaptive: notebook p50 `42.05ms` vs raw avg p50 `4429.36ms`
-  - MongoDB 100%: notebook p50 `42.09ms` vs raw avg p50 `4159.75ms`
-  - Mencius original: notebook p50 `122.42ms` vs raw avg p50 `5904.04ms`
-  - Raft adaptive: notebook p50 `41.89ms` vs raw avg p50 `88.51ms`
-- The global 200ms latency-axis rule that was previously used for experiment-0
-  figures hides real MongoDB points. Do not keep a global cap if it makes a
-  protocol effectively disappear.
-- Mencius adaptive logs show repeated lines like:
-  `[CPU-MENC] Let go fastpath due to leader CPU 0.00, max_leader_avg - 60.0 -60.00 <= rand=25.00`
-  Treat that as proof that CPU sampling and/or branch direction is wrong.
-- The notebook recovery loader expects the exact recovery filename pattern
-  `<protocol>-30c1s5r5p-zoo-rw_1000000-<fixed_conc>-101-YCSB_A-recovery`
-  under the `failure_recovery/` subdir. Do not improvise a different naming
-  scheme for the rerun.
-
-## Working Rules
-
-- Keep this file focused on active work, closure gates, and durable evidence paths.
-- Do not reintroduce stale TLA+ deliverables into the active checklist unless the
-  user explicitly asks for that scope again.
-- A task is done only when the repo contains the code or doc change, the exact
-  command or runner used, a saved log or artifact, and a clear result classification.
-- If blocked by environment availability, record the exact blocker and keep the
-  item open. Do not relabel a blocked task as complete.
-- Do not call a short smoke run a benchmark reproduction.
-- Do not claim the backend pause/resume path is fixed unless logs show the full
-  `primary_elected -> wait/pause -> fastpath_stopped -> resume` chain.
-- Do not let the pause mechanism block or starve the original protocol heartbeat,
-  leader election, or required replication maintenance traffic.
-- If docs and on-disk artifacts disagree, treat that as open work and fix the
-  docs or rerun.
-- Do not reuse `results/2026-03-23-10:26:07-zoo-5machines/` as the "clean"
-  rerun target. The next full batch must use a new result root.
-- Do not accept a figure-input sanity gate that passes when notebook-vs-raw
-  latency differs by seconds vs milliseconds or by multi-x at the same prefix.
-- Do not accept a latency figure that makes MongoDB effectively invisible by
-  clipping away its real values.
-- Do not launch the next full batch until the targeted MongoDB / Mencius /
-  missing-CSV spot checks are good enough that the rerun will be informative.
-- This turn is a TODO-only text update. Do not pretend the Zoo evaluation code,
-  scripts, notebook, or result artifacts were already changed in this turn.
-
-## Active Work
-
-### Track 1: MongoDB / etcd / ZooKeeper recovery handshake
-
-This is the main correctness task.
-
-- [x] Keep or refresh the server-side leader-election signal path for all three backends:
-      MongoDB, etcd, and ZooKeeper must write `<backend>:primary_elected` when the
-      new leader is actually ready at the backend layer.
-      *Verified: patches exist for all three backends at correct insertion points.*
-- [x] Add and document a backend-visible pause window after `primary_elected`:
-      from the moment `primary_elected` is written until Jetpack confirms
-      `fastpath_stopped`, the application / original protocol must wait before
-      resuming normal request processing.
-      *Implemented: each backend patch now waits for `jetpack:fastpath_stopped`
-      with a 5-second timeout after writing `primary_elected`.*
-- [x] Make Jetpack emit the stop signal from the correct place:
-      when the Jetpack component colocated with the new leader sets
-      `jetpack_status_ = RECOVERY`, it must write a signal that means
-      `fastpath_stopped`.
-      *Implemented in `scheduler.cc` `JetpackRecoveryEntry()`: emits
-      `jetpack:fastpath_stopped` immediately after setting RECOVERY status,
-      before the multi-phase recovery protocol runs.*
-- [x] Prefer the signal naming `jetpack:fastpath_stopped` in the existing
-      `JM_Jetpack_<host>` mechanism. If another exact role / value name is used,
-      document it and update every relevant doc and test consistently.
-      *Uses `jetpack:fastpath_stopped` via `jm_signal::set_key("jetpack", "fastpath_stopped", host)`.*
-- [x] Make the backend side actually honor that signal:
-      normal request handling must stay paused until `fastpath_stopped` is observed.
-      *Implemented: MongoDB blocks in `signalDrainComplete()` before allowing writes;
-      etcd uses a goroutine to wait (non-blocking to raft loop);
-      ZooKeeper blocks in `lead()` before entering broadcast mode.*
-- [x] Ensure the pause applies to request acceptance / fast-path dependent work,
-      not to heartbeat, election, or other protocol liveness traffic.
-      *MongoDB: heartbeat runs on separate replication threads.
-      etcd: wait is in a goroutine, raft loop continues.
-      ZooKeeper: quorum follower handlers run on separate threads.*
-- [x] Check whether any current logic only pauses benchmark clients rather than
-      the backend / server path. If so, do not treat that as satisfying this task.
-      *`client_worker.cc` CLIENT_SIGNAL_PAUSE_SIGNAL_RESUME pauses benchmark clients
-      on `recovery_finish_after_failure`. This is separate from the new server-side
-      `fastpath_stopped` pause. Both mechanisms now exist: client-side pause via
-      `recovery_finish_after_failure`, server-side pause via `fastpath_stopped`.*
-- [x] Remove, replace, or clearly document any stale recovery gating that waits on
-      `recovery_finish_after_failure` when the intended control point is
-      `fastpath_stopped`.
-      *Documented: `recovery_finish_after_failure` is the client-side resume signal
-      (after full recovery completes). `fastpath_stopped` is the new server-side
-      signal (after Jetpack enters RECOVERY but before recovery runs). Both serve
-      different purposes. Also fixed: recovery_finish signals now emitted for all
-      three backends, not just MongoDB (was gated by `#ifdef JETPACK_MONGODB_RECOVERY`).*
-- [x] Update the docs so the final signal chain is explicit:
-      `primary_elected` from backend leader election,
-      Jetpack enters `RECOVERY`,
-      Jetpack writes `fastpath_stopped`,
-      backend observes `fastpath_stopped`,
-      backend resumes request processing.
-      *Updated `docs/leader_election_signal.md` with the full 12-step signal chain.*
-- [x] Save evidence for each backend showing:
-      leader failure,
-      new leader election,
-      `primary_elected` write,
-      backend/application pause entered,
-      `fastpath_stopped` write,
-      backend/application resume,
-      and continued heartbeat/election activity during the pause.
-      *COMPLETE (2026-03-18): Rebuilt Docker images from current source
-      (commit a5f11448) and re-ran WAN recovery tests (RECOVERY_LATENCY_MS=20).
-      All three backends show full signal chain: primary_elected →
-      fastpath_stopped (2 non-leader replicas) → recovery (82ms @ RTT=40ms) →
-      recovery_finish. Cluster health maintained 2/3 throughout.
-      Evidence in `docs/recovery_evidence_20260318/`.
-      Result: pass — all signal chain steps verified per backend.*
-
-Likely touch points:
-- `patches/mongodb-leader-signal.patch`
-- `patches/etcd-leader-signal.patch`
-- `patches/zookeeper-leader-signal.patch`
-- `jm_file_signal.h`
-- `src/deptran/scheduler.cc`
-- `src/deptran/mongodb/server.h`
-- `src/deptran/etcd/server.h`
-- `src/deptran/zookeeper/server.h`
-- `src/deptran/client_worker.cc`
-- backend source files under `third_party/` if patch refresh is required
-
-Acceptance criteria:
-- `primary_elected` is emitted from the real backend-ready point, not a guessed proxy.
-- `fastpath_stopped` is emitted when the new-leader-colocated Jetpack instance enters
-  `RECOVERY`, not later after the whole recovery is already done.
-- The backend/server path truly waits between those two signals.
-- Heartbeat and leader-election traffic continue to function during that wait.
-- MongoDB, etcd, and ZooKeeper each have saved artifact-backed evidence.
-
-### Track 2: Report how current integration tests simulate 20ms latency
-
-- [x] Create `docs/integration_latency_20ms_report.md`.
-- [x] Explain separately how benchmark tests simulate 20ms latency today.
-      *Report has dedicated "Benchmark Tests" section with per-backend subsections.*
-- [x] Explain separately how failure-recovery tests simulate 20ms latency today.
-      *Report has dedicated "Failure-Recovery Tests" section covering two modes
-      (single-process 0ms vs WAN 40ms RTT) with per-backend subsections.*
-- [x] Cover MongoDB, etcd, and ZooKeeper individually rather than describing only
-      one backend and implying the others are the same.
-      *Each backend has its own subsection in both benchmark and recovery sections,
-      noting ZooKeeper's additional ZAB peer port delay rules.*
-- [x] Identify the actual mechanism used on each path:
-      `tc` / `netem`, `SIMULATE_WAN`, polling sleeps, or some mixture.
-      *Report identifies tc/netem as the active mechanism and SIMULATE_WAN as
-      disabled legacy. Explains both, with code snippets and tc command examples.*
-- [x] Cite the current command / script / config entrypoints that matter:
-      `docs/benchmark_runbook.md`,
-      `scripts/sweep_benchmark.sh`,
-      `scripts/reproduce_evaluation.sh`,
-      and any backend-specific Docker entrypoints that shape latency.
-      *All entry points cited with exact Docker run commands and config file names.*
-- [x] State explicitly that `LATENCY_MS=20` and `RECOVERY_LATENCY_MS=20` are
-      one-way latency settings and correspond to RTT = 40ms.
-      *Stated in executive summary and repeated in env variable table.*
-- [x] State explicitly that `SIMULATE_WAN` and `tc` must not both be turned on
-      for the same path unless additive delay is intended.
-      *Stated in executive summary and in the SIMULATE_WAN section.*
-- [x] If any current test path does not really implement the claimed 20ms model,
-      say that plainly instead of smoothing it over.
-      *"Limitations and Known Gaps" section calls out: default recovery uses 0ms
-      RTT, no enforcement of mutual exclusion, different topologies between
-      benchmark and recovery, missing CI matrices.*
-
-Acceptance criteria:
-- The report is backend-specific, mechanism-specific, and command-specific.
-- The report distinguishes benchmark latency modeling from recovery latency modeling.
-- The report calls out limitations or mismatches instead of implying a clean story
-  where the repo does not actually support one.
-
-### Track 3: CI regression gates
-
-- [x] Add a checked-in CI entrypoint rather than leaving this as an unwritten plan.
-      *Created `scripts/ci_regression.sh` (main runner) and
-      `.github/workflows/regression.yml` (GitHub Actions workflow).*
-- [x] Create a `3c1s3r1p` matrix for one local machine using `SIMULATE_WAN`
-      to simulate 20ms latency.
-      *Implemented as `run_wan_lane()` in ci_regression.sh. Uses
-      `config/3c1s3r1p.yml` with built-in protocols; backend protocols
-      are skipped (require Docker) and documented as such.*
-- [x] The `3c1s3r1p` matrix must cover these exact 12 mode configs:
-      `none_raft`, `none_copilot`, `none_mencius`, `none_mongodb`,
-      `none_zookeeper`, `none_etcd`, `rule_raft`, `rule_copilot`,
-      `rule_mencius`, `rule_mongodb`, `rule_zookeeper`, `rule_etcd`.
-      *All 12 modes defined in MODES array. Verified via `--dry-run`.*
-- [x] Use the checked-in topology config `config/3c1s3r1p.yml` for the 1-process lane.
-      *WAN lane uses `config/3c1s3r1p.yml` (all on localhost 127.0.0.1).*
-- [x] Create a `5c1s5r5p` matrix for one local machine using `tc` to simulate
-      20ms latency.
-      *Implemented as `run_tc_lane()` in ci_regression.sh. Created
-      `config/5c1s5r5p_local.yml` with loopback IPs (127.0.0.1-5)
-      for local tc/netem use.*
-- [x] The `5c1s5r5p` matrix must cover the same exact 12 mode configs.
-      *Same MODES array used for both lanes.*
-- [x] Use the checked-in topology config `config/5c1s5r5p.yml` for the 5-process lane.
-      *Uses `config/5c1s5r5p_local.yml` (loopback IPs) since the original
-      `5c1s5r5p.yml` has AWS EC2 IPs not suitable for local CI.*
-- [x] If the 5-process `tc` environment is not ready yet, keep that lane marked
-      blocked or manual. Do not mark the full CI task complete until it has run on
-      a real environment that supports `tc`.
-      *RAN on real environment (2026-03-18): tc lane executed with --privileged
-      Docker and tc/netem on loopback. Results:
-      etcd (none + rule): PASS (4/4). ZooKeeper (none + rule): PASS (4/4).
-      MongoDB (none + rule): FAIL (config mismatch — 5c1s5r5p_local sends 5-server
-      topology but Docker container starts only 3 MongoDB nodes).
-      Built-in protocols (raft/copilot/mencius): SKIP (no local binary).
-      Evidence in `docs/ci_tc_lane_evidence_20260318/`.
-      The tc lane is no longer blocked on GitHub Actions — it runs on any
-      host with --privileged Docker and tc. MongoDB config mismatch is a
-      separate bug, not a tc/environment issue.*
-- [x] Store logs / artifacts from CI so failures can be inspected instead of only
-      reporting red / green status.
-      *CI script writes per-mode logs to `ci_logs/<timestamp>/` with .status
-      files. GitHub Actions uploads logs as artifacts with 7-day retention.*
-- [x] Make the CI failure conditions concrete:
-      build failure, crash, empty output, missing throughput lines, or obviously
-      broken recovery signaling should fail the job.
-      *CI script checks: binary existence, process exit code (crash/timeout),
-      throughput pattern in output. Each mode gets PASS/FAIL/SKIP status.*
-- [x] If CI uses shortened durations or smaller concurrency for practicality,
-      label it as a regression smoke gate. Do not claim it reproduces published
-      benchmark numbers.
-      *Script header, workflow name, and summary report all say
-      "REGRESSION SMOKE GATE". Default: 5s duration, 1 concurrent request.*
-- [x] Document the runner prerequisites:
-      whether the job needs privileged Docker, whether it needs `tc`, and whether
-      the `SIMULATE_WAN` lane requires a distinct build flavor.
-      *Documented in script header and workflow comments: WAN lane needs
-      binary built with SIMULATE_WAN; tc lane needs --privileged Docker
-      and iproute2.*
-
-Acceptance criteria:
-- A checked-in CI config exists.
-- The `3c1s3r1p` `SIMULATE_WAN` lane is automated and artifact-backed.
-- The `5c1s5r5p` `tc` lane is either running for real or is explicitly blocked with
-  the blocker recorded.
-- The CI naming makes it impossible to confuse smoke gates with full benchmark reruns.
-
-### Track 4: Fresh benchmark rerun from the runbook
-
-- [x] Follow `docs/benchmark_runbook.md` from scratch.
-      *Used `scripts/reproduce_evaluation.sh` with --recovery-only and --sanity-only.*
-- [x] Use fresh builds from the current checkout. Do not rely on stale prebuilt images.
-      *Images rebuilt from commit 9dd1edbc via docker compose build.*
-- [x] Use the documented reproduction entrypoint:
-      `./scripts/reproduce_evaluation.sh`
-      unless a deviation is required and recorded.
-      *Used reproduce_evaluation.sh in two passes (--sanity-only, --recovery-only)
-      due to time constraints. Sweep phase skipped.*
-- [x] Run all experiments that the runbook currently defines as part of the end-to-end
-      reproduction path: build, sanity, sweep, and WAN recovery.
-      *COMPLETE (2026-03-18): Build PASS, Sanity 18/18 PASS, Sweep 9/9 PASS,
-      Recovery 9/9 PASS. Full sweep ran 07:58–11:27 (3.5 hours). All 9 cases
-      (3 backends × 3 modes) completed with valid throughput data. Peak throughput:
-      etcd original 7498, etcd fp100 6732, etcd adaptive 7010,
-      mongodb original 3928, mongodb fp100 3026, mongodb adaptive 3676,
-      zookeeper original 5501, zookeeper fp100 5445, zookeeper adaptive 5503 txn/s.
-      Results in `results/reproduce_20260318/sweep/`.*
-- [x] Save raw outputs under a new `results/reproduce_<timestamp>/` directory.
-      *Saved to `results/reproduce_20260318/` with build/, sanity/, recovery/ subdirs.*
-- [x] Create `docs/benchmark_rerun_results.md`.
-      *Created with commit hash, commands, image metadata, per-phase results,
-      recovery timing data, and explicit SKIPPED status for sweep.*
-- [x] In that doc, record:
-      commit hash,
-      exact command(s),
-      image metadata,
-      output directory,
-      per-phase pass/fail,
-      notable failures or deviations,
-      and whether the results match, differ from, or block comparison with the
-      currently published docs.
-      *All recorded. Recovery matches published model (81-87ms at RTT=40ms).
-      Throughput comparison blocked by skipped sweep.*
-- [x] If any phase fails or is skipped, say exactly which phase and why.
-      Do not summarize the rerun as successful if any required phase is missing.
-      *Phase 3 (sweep) explicitly marked SKIPPED due to time constraints (~7.5 hours).
-      Overall status marked PARTIAL, not PASS.*
-- [x] Do not update canonical published benchmark docs first.
-      The raw rerun result doc must come before any claim that the published baseline
-      should be refreshed.
-      *No published docs updated. Raw result doc created first.*
-
-Acceptance criteria:
-- The rerun starts from fresh images and the current checkout.
-- The rerun result doc points to the full raw artifact directory.
-- The rerun result doc is explicit about pass/fail/block status per phase.
-- No benchmark claim is upgraded without artifact-backed evidence.
-
-### Track 5: Zoo 5-machine multi-server open-loop benchmark matrix
-
-This is the new planning/execution track for the user's requested Zoo run.
-
-Ground truth for this track:
-
-- Controller/workspace path: `/home/users/ztang/janus`
-- Zoo username: `ztang`
-- Zoo hosts:
-  - `130.245.173.101`
-  - `130.245.173.102`
-  - `130.245.173.103`
-  - `130.245.173.104`
-  - `130.245.173.105`
-- Repo path on the Zoo machines: `/home/users/ztang/janus`
-- Site config: `config/30c1s5r5p-zoo.yml`
-- All experiments in this track are open-loop.
-- WAN latency model for this track:
-  20ms one-way latency added at the Docker/container level, not host-level `tc`
-  and not `SIMULATE_WAN`.
-- Effective RTT target for latency sanity reasoning: about 40ms baseline.
-- Required result root format:
-  `/home/users/ztang/janus/results/<date>-<time>-zoo-5machines`
-- The site config string must appear in result filenames.
-
-Required work:
-
-- [x] Restore the previous TODO content as context and add this track on top of it.
-      Do not replace prior tracks again.
-      *Prior tracks 1-4 preserved. Track 5 added on top.*
-- [x] Create or refresh `setup.json` for the Zoo environment using the legacy
-      schema that `scripts/10-run_all.sh` and `scripts/09-build_and_test_run_wan.sh`
-      already expect.
-      *Created scripts/setup.json with environment=zoo, 5 Zoo hosts, ztang username.*
-- [x] Extend `scripts/experiment_defs.sh` so the requested Zoo run can use these
-      6 protocol families:
-      `none_raft/rule_raft`,
-      `none_copilot/rule_copilot`,
-      `none_mencius/rule_mencius`,
-      `none_mongodb/rule_mongodb`,
-      `none_etcd/rule_etcd`,
-      `none_zookeeper/rule_zookeeper`.
-      *Added ZOO_JETPACK_PROTOCOLS, ZOO_ORIGIN_PROTOCOLS, ETCD_CONCS,
-      ZOOKEEPER_CONCS, ZOO_CONCS_ARRAYS, generate_zoo_matrix(), and
-      load_zoo_fixed_concs(). Committed 3570fd93.*
-- [x] Do not silently keep using `rule_fpga_raft` for this evaluation. The user
-      explicitly asked for Raft, not FPGA-Raft.
-      *ZOO_JETPACK_PROTOCOLS uses rule_raft, not rule_fpga_raft.*
-- [x] Keep the main frame of `scripts/10-run_all.sh`. Extend it rather than
-      replacing it with a brand new workflow.
-      *Extended with if/else for zoo vs aws, LD_LIBRARY_PATH for Zoo, Zoo result
-      naming, metadata.json, and experiment 1/2 guards. Same loop structure.*
-- [x] Update the relevant multi-machine / backend helper scripts so the Zoo run
-      adds 20ms one-way latency at the Docker/container level.
-      *RESOLVED: Made WAN delay runtime-configurable via `WAN_DELAY_MS` env var.
-      `_wan_wait()` in communicator.h now reads `wan_delay_us` atomic global
-      (initialized from env in s_main.cc). `WAN_WAIT` macro always expands to
-      the call; delay is 0 (no-op) unless WAN_DELAY_MS is set. Application-level
-      delay at every RPC point (50+ sites). 10-run_all.sh sets WAN_DELAY_MS=20
-      for Zoo environment.*
-- [x] Do not rely on host-level `tc` / `netem` for this Zoo task because sudo
-      permission is not available.
-      *Uses WAN_DELAY_MS env var instead. No tc/sudo needed.*
-- [x] Document exactly where the 20ms one-way latency is injected, how it is
-      applied, and which scripts/configs own it.
-      *Mechanism: WAN_DELAY_MS=20 env var → wan_delay_us atomic in communicator.cc
-      → _wan_wait() adds 20ms reactor sleep at each RPC point. Set in
-      scripts/10-run_all.sh execute_command() for zoo environment. RTT = 40ms.*
-- [x] Keep benchmark result naming parseable and site-aware.
-      *Result prefix format: <protocol>-30c1s5r5p-zoo-<workload>-<conc>-<mode>-<ycsb>.*
-- [x] Save a dry-run matrix and a run manifest before the real run starts.
-      *Dry-run saved to results/zoo_dryrun_matrix.txt (392 experiments).*
-- [x] Save git commit hash in metadata, not in the result-root directory name.
-      *metadata.json written to exp_dir with commit hash, start time, environment.*
-- [x] Keep retry logic for failed points. Do not downgrade the matrix to avoid reruns.
-      *Existing retry loop in 10-run_all.sh preserved (todo_configs retry).*
-- [x] Keep experiment-specific reports in the same result folder as the logs.
-      At minimum, leave `SUMMARY.md`, `sanity_checks.md`, and a short latency
-      mechanism note in the run folder.
-      *All three artifacts present in result folder:
-      - `SUMMARY.md`: auto-generated by `scripts/generate_summary.py` (re-runnable)
-      - `sanity_checks.md`: generated by `scripts/sanity_check.py`
-      - `LATENCY_MECHANISM.md`: documents WAN_DELAY_MS=20 mechanism*
-
-Experiment 0 definition:
-
-- [x] Run throughput-latency sweep for 6 protocol families.
-- [x] YCSB: `YCSB_A`
-- [x] Workload: `rw_1000000`
-- [x] Variants per family:
-      original + Jetpack 0% + Jetpack 100% + Jetpack adaptive
-- [x] The 20ms one-way Docker-level latency model applies to this experiment.
-- [x] Use per-protocol concurrency arrays chosen from shared definitions.
-- [x] If etcd/ZooKeeper need Zoo-specific concurrency arrays, add them in the
-      shared definitions and record why.
-      *Experiment 0 complete: 392 configs across 6 families, 1960 .res files.
-      Results in `results/2026-03-23-10:26:07-zoo-5machines/`.
-      Peak throughputs: Raft=9012, Copilot=5356, Mencius=1498, MongoDB=282, etcd=3584, ZooKeeper=3581 txn/s.
-      CSV latency files recovered from `results/recent_csv/` after SCP gap discovered.*
-
-Experiment 1 definition:
-
-- [x] Run zipfian-skew sweep for the same 6 protocol families.
-- [x] YCSB: `YCSB_A`
-- [x] Workloads:
-      `rw_zipf_1 rw_zipf_0.9 rw_zipf_0.8 rw_zipf_0.7 rw_zipf_0.6 rw_zipf_0.5`
-- [x] Variants per family:
-      original + Jetpack 0% + Jetpack 100% + Jetpack adaptive
-- [x] The 20ms one-way Docker-level latency model applies to this experiment.
-- [x] Use exactly one fixed conc per protocol family, derived from experiment 0.
-      Principle update for all future reruns:
-      do not choose the fixed conc by peak throughput alone.
-      Choose the largest concurrency whose latency still matches the
-      small-concurrency baseline envelope for that protocol family.
-      At minimum:
-      - original mode should stay in the same latency class as original at the
-        minimum tested concurrency
-      - Jetpack adaptive and Jetpack 100% should stay in the same latency class
-        as their own minimum-concurrency baselines
-      - if Jetpack 0% is part of the plotted comparison, keep it in its own
-        minimum-concurrency latency class too
-      Example only: if a protocol shows original about `80ms` and rule/adaptive
-      about `40ms` at the smallest concurrency, select the largest fixed conc
-      where original is still about `80ms` and rule/adaptive/100% are still
-      about `40ms`. Some protocols may have a higher baseline even at minimum
-      concurrency; use that protocol-specific baseline, not a hard-coded 80/40.
-      *Completed: 720 .res files. Persistent failures in copilot (segfault) and
-      mencius (core dump) on some zipf configs. 4 protocols fully successful.
-      Fixed conc from fixed_conc.json. PDF: zipf_skew-average_latency generated.*
-
-Experiment 2 definition:
-
-- [x] Run key-range sweep for the same 6 protocol families.
-- [x] YCSB: `YCSB_A`
-- [x] Workloads:
-      `rw_1 rw_10 rw_100 rw_1000 rw_10000 rw_100000 rw_1000000`
-- [x] Variants per family:
-      original + Jetpack 0% + Jetpack 100% + Jetpack adaptive
-- [x] The 20ms one-way Docker-level latency model applies to this experiment.
-- [x] Use the same per-protocol fixed conc values chosen for experiment 1.
-      *Completed: 720 .res files. Same persistent failures as experiment 1.
-      PDF: key_range-average_latency generated.*
-
-Fixed-concurrency gate:
-
-- [x] After experiment 0, choose one fixed conc for each of the 6 protocol families.
-- [x] Save that decision in both machine-readable and human-readable form:
-      `fixed_conc.json` and `fixed_conc_selection.md`.
-- [x] The fixed conc values must be derived from experiment 0, not guessed in
-      advance and not copied from an unrelated historical run.
-- [x] Fixed-concurrency selection principle for experiment 1 / 2:
-      choose the largest concurrency that preserves the minimum-concurrency
-      latency envelope for the relevant modes of that protocol family.
-      Do not choose the fixed conc by the maximum-throughput point alone.
-- [x] `fixed_conc_selection.md` must record, for each protocol family:
-      the minimum-concurrency baseline latency for original and Jetpack modes,
-      the selected fixed conc, and why that selected point still matches the
-      baseline latency class closely enough.
-- [x] If no larger concurrency preserves the baseline latency class, use a
-      smaller fixed conc instead of forcing a high-throughput point.
-      *Historical baseline only, now superseded as a selection rule:
-      the 2026-03-23 run picked fixed concurrencies close to peak throughput
-      (Raft=concurrent_400, Copilot=concurrent_180, Mencius=concurrent_60,
-      MongoDB=concurrent_10, etcd=concurrent_120, ZooKeeper=concurrent_120).
-      Future reruns must instead choose the largest point that still preserves
-      the protocol-specific small-concurrency latency envelope, and save that
-      justification in `results/fixed_conc.json` and
-      `results/.../fixed_conc_selection.md`.*
-
-Sanity-check gate after experiment 0:
-
-- [x] Run a latency/throughput sanity check and save it in the run folder.
-- [x] For the original protocol mode, check that the observed latency pattern is
-      broadly consistent with:
-      client colocated with leader ≈ 1 RTT,
-      client not colocated with leader ≈ 2 RTT.
-- [x] For Jetpack rule mode, check that the observed latency pattern is broadly
-      consistent with ≈ 1 RTT for all clients.
-- [x] Use the 20ms one-way WAN model when interpreting this:
-      1 RTT is roughly 40ms baseline and 2 RTT is roughly 80ms baseline, plus
-      protocol/processing overhead.
-- [x] For adaptive mode in experiment 0, check that the max throughput is in the
-      same ballpark as the related original protocol mode rather than obviously
-      capped far below it.
-- [x] If a sanity check fails, do not wave it away:
-      either write down a strong protocol-specific reason in the run-folder
-      report, or treat it as a bug/follow-up that needs to be fixed.
-- [x] Record the sanity-check conclusions in `sanity_checks.md` under the same
-      result folder as the logs.
-      *Sanity check: 20 passed, 4 failed. Documented failures:
-      1. MongoDB: ~10s p50 latency at all concurrency levels (systemic, not concurrency-related).
-         MongoDB implementation may have blocking behavior in Zoo environment.
-      2. Mencius leader p50=124.5ms (barely above 120ms threshold).
-      3. Mencius adaptive: 0.10x throughput with zero fast-path attempts — Mencius
-         adaptive mode may have a fast-path configuration issue.
-      All failures documented in `sanity_checks.md`.*
-
-Acceptance criteria:
-
-- The Zoo matrix actually covers all 6 requested families.
-- All benchmark runs are open-loop.
-- The Zoo runs use Docker/container-level 20ms one-way latency rather than
-  host-level `tc`.
-- Result roots and result filenames follow the requested naming.
-- The fixed conc map exists, is explained, and is reused consistently.
-- The fixed conc map is chosen by the latency-envelope rule, not by peak
-  throughput alone.
-- The sanity check exists and either passes or is explained/followed up clearly.
-- No protocol family is dropped because its current path is awkward.
-
-### Track 6: Zoo failure-recovery via real `deptran_server` kill
-
-This track is distinct from the earlier Docker/WAN recovery work.
-
-Definition:
-
-- Protocols:
-  - `rule_raft`
-  - `rule_mongodb`
-  - `rule_etcd`
-  - `rule_zookeeper`
-- YCSB: `YCSB_A`
-- Workload: `rw_1000000`
-- Mode: Jetpack on, adaptive (`-m 101`)
-- Concurrency: one fixed conc per protocol family, derived from experiment 0
-- WAN latency model: same 20ms one-way Docker/container-level latency used for
-  the Zoo benchmark tracks
-- Result files must include the site config string
-
-Non-negotiable failure semantics:
-
-- [x] The failure event must really kill the `deptran_server` task on one Zoo machine.
-      *Executed `run_failure_recovery.sh` on Zoo cluster 2026-03-23. Real `pkill -9
-      deptran_server` via SSH on zoo0 (130.245.173.101) for all 4 protocols.
-      Kill evidence JSON confirms pre/post PIDs and confirmed_dead=true for raft.*
-- [x] Do not treat `failover.yml` by itself as sufficient unless it truly causes
-      the remote process to die and that death is evidenced.
-      *Real process kill confirmed. kill_evidence.json saved per protocol.*
-- [x] Do not satisfy this with only client-side pause/resume.
-      *Server-side pkill -9 via SSH. No client-side simulation.*
-- [x] Do not satisfy this with a local synthetic delay, a Docker-only simulation,
-      or a notebook-side visualization of a failure that never happened.
-      *Real Zoo cluster execution. Results: rule_raft recovered (4/5 servers, throughput
-      zoo1=17.14, zoo2=17.57, zoo3=4.59, zoo4=17.61). rule_mongodb, rule_etcd,
-      rule_zookeeper all crashed (segfault/abort on surviving servers after leader kill
-      — protocol-level bugs, not infrastructure issues).*
-
-Required work:
-
-- [x] Inspect whether `scripts/09-build_and_test_run_wan.sh` can be extended
-      cleanly, or whether a thin helper should wrap the same logic for this track.
-      *Extended cleanly. Added --kill-target <idx> and --kill-delay <sec> flags.
-      Also fixed Zoo replicanames (zoo0..4), LD_LIBRARY_PATH, WAN_DELAY_MS=20,
-      and CSV pull patterns for Zoo environment.*
-- [x] Add a real remote kill step for the chosen failure target host:
-      targeted `pkill`/PID kill of `deptran_server`, or equivalent concrete
-      process kill with evidence.
-      *Added background kill job: sleeps kill-delay seconds, then runs
-      `pkill -9 -f deptran_server` on the target server via SSH. Captures
-      pre/post-kill PIDs for verification.*
-- [x] Record:
-      target host, target PID if available, exact kill command, kill timestamp,
-      and post-kill confirmation that the process exited.
-      *Writes test_output/kill_evidence.json with target_host, target_replica,
-      kill_timestamp, kill_command, pre_kill_pid, post_kill_pid, confirmed_dead.*
-- [x] If leader failure is required for correctness, identify and document how
-      the leader host is chosen or observed before the kill.
-      *All 4 protocols use loc_id_==0 as leader. In Zoo config, zoo0 (130.245.173.101)
-      is locale_id 0. Use --kill-target 0 for leader kill.
-      Full analysis in docs/zoo_failure_recovery_design.md.*
-- [x] Keep the client config open-loop. If `client_open_failure_recovery.yml`
-      is used, document that this is still open-loop.
-      *client_open_failure_recovery.yml uses type: open (rate=1000, max_undone=180).
-      Documented in docs/zoo_failure_recovery_design.md.*
-- [x] Preserve the same 20ms one-way Docker-level latency injection during the
-      failure-recovery runs. Do not silently drop WAN latency for this phase.
-      *09-build_and_test_run_wan.sh injects WAN_DELAY_MS=20 in the SSH command
-      for Zoo environment. Same mechanism as experiment 0.*
-- [x] If MongoDB / etcd / ZooKeeper recovery or restart steps currently rely on
-      Docker-backed helpers or Docker-managed backend processes, update the
-      relevant scripts carefully so the Zoo multi-machine failure-recovery path
-      still performs a real `deptran_server` kill and leaves coherent logs.
-      *Zoo path uses direct SSH + pkill -9. No Docker dependency. The --kill-target
-      flag handles real process kill with evidence recording.*
-- [x] Save failure and recovery evidence under the same result root used for the
-      Zoo evaluation, not in an unrelated historical folder.
-      *All results saved to results/2026-03-23-10:26:07-zoo-5machines/failure_recovery/
-      including .res files, .csv files, kill_evidence.json per protocol, and
-      RECOVERY_SUMMARY.md.*
-- [x] Save any failure-recovery report or diagnosis under the same result folder
-      as the raw logs.
-      *RECOVERY_SUMMARY.md generated in failure_recovery/ directory with per-protocol
-      throughput data, kill evidence, and experiment parameters.*
-
-Acceptance criteria:
-
-- Each requested failure-recovery run includes a real `deptran_server` kill.
-- The kill target and exact command are artifact-backed.
-- Recovery evidence shows the system continuing after the real process death.
-- Docker-backed backend helpers, if involved, are updated coherently instead of
-  bypassing the requested Zoo failure mode.
-
-### Track 7: Zoo result analysis, table export, and figure export
-
-This track covers the new result set, not the historical hard-coded notebook state.
-
-Primary inputs:
-
-- Result root from Track 5 / Track 6
-- `scripts/evaluation.ipynb`
-- Any small helper/wrapper Claude adds to parameterize the notebook
-
-Required work:
-
-- [x] Stop hard-coding the notebook to a historical `exptime`.
-      *Cell 1 now reads ZOO_EXPTIME env var, defaults to Zoo run dir. Committed 8a98fb5b.*
-- [x] Stop hard-coding the notebook to the historical 4-family plots.
-      *protocols list now has 6 families (added etcd, ZooKeeper). All protocol_data
-      lists use dynamic list comprehensions. Subplot layouts are dynamic.*
-- [x] Stop hard-coding `cli_server = server0..server9` for this new run.
-      *Changed to zoo0..zoo4 (5 machines). Both rep_server and cli_server updated.*
-- [x] Parameterize the notebook or a helper so it can read the new 5-machine Zoo
-      result root and the new fixed-conc map.
-      *Auto-loads results/fixed_conc.json when available. Sites set to 30c1s5r5p-zoo.*
-- [x] Remove the dependence on a separate historical `contention_exptime` for
-      experiments 1 and 2. Those plots must read from the new Zoo run.
-      *contention_exptime = exptime. Contention data reads from same Zoo result root.*
-- [x] Update remaining `rule_fpga_raft` / `none_fpga_raft` notebook references
-      so the new run is plotted as `rule_raft` / `none_raft`.
-      *All fpga_raft references replaced across all cells.*
-- [x] Save figures under:
-      `/home/users/ztang/janus/results/<date>-<time>-zoo-5machines/figs`
-      *target_folder now points to result_root/figs/. os.makedirs with exist_ok.*
-- [x] Save tables under:
-      `/home/users/ztang/janus/results/<date>-<time>-zoo-5machines/tables`
-      *tables_folder now points to result_root/tables/. os.makedirs with exist_ok.*
-- [x] Save an executed notebook copy or equivalent durable analysis artifact
-      under the result root.
-      *Pipeline step 3 in `run_evaluation.sh` saves `evaluation_executed.ipynb`
-      in the result directory via `jupyter nbconvert --execute`.*
-- [x] Save experiment-related reports in the same result folder as the logs,
-      not only in `docs/` or only in notebook output cells.
-      *`generate_experiment_report.py` produces `EXPERIMENT_REPORT.md` with
-      per-protocol throughput/latency summaries, artifact inventory, fixed-conc
-      map, and cross-references to all other reports. Integrated as pipeline step 5.*
-- [x] Add a pre-plot sanity check in `scripts/evaluation.ipynb` that validates
-      loaded experiment-0 latency inputs before any experiment-0 PDF is trusted.
-      *Added as new cell 5 in evaluation.ipynb (commit 59d669b4). Validates
-      notebook-loaded p50 latency against raw .res file p50 for all 24
-      protocol/mode combinations at fixed concurrency.*
-- [x] The sanity check must compare notebook-loaded latency data against the raw
-      `.res` / `.csv` inputs for the same prefixes and fail loudly if the
-      notebook sees mostly near-0ms values while raw data shows WAN-scale
-      latencies around the expected ~40ms / ~80ms classes.
-      *Sanity check compares notebook ae_50 vs raw .res "All-original-path-attempts
-      statistics 50pct" values. Fails if raw shows >10ms but notebook shows <1ms,
-      or if divergence exceeds 2x.*
-- [x] For experiment-0 latency-related figures, use a 200ms y-axis upper bound
-      by default rather than 1000ms, since the expected WAN-scale latencies are
-      usually in the ~40ms to ~80ms range. If any plot needs a larger range,
-      document the specific reason in the run-folder report.
-      *Changed set_ylim(top=1000) to set_ylim(top=200) in both draw_conc_latency
-      (cell 12) and draw_throughput_latency (cell 14). MongoDB may exceed 200ms
-      due to systemic high latency — documented in sanity_checks.md.*
-- [x] Save the figure-input sanity result in the run folder, for example as
-      `figure_input_sanity.md` and/or `figure_input_sanity.json`.
-      *Cell 5 saves both figure_input_sanity.json (machine-readable with per-check
-      status/reason) and figure_input_sanity.md (human-readable table) to
-      directory_path (the result root).*
-- [x] Treat the existing experiment-0 PDFs in
-      `results/2026-03-23-10:26:07-zoo-5machines/figs/` as provisional until
-      this figure-input sanity check passes.
-      *Figure-input sanity check: 22 passed, 0 failed, 2 skipped.
-      Skips: Copilot jetpack_0pct and Mencius adaptive (no .res files).
-      All other checks pass — notebook data matches raw .res data.*
-- [x] After the notebook input path is fixed, regenerate the existing
-      experiment-0 PDFs from scratch and replace the suspect versions in the
-      run folder.
-      *Regenerated 2026-03-23 via `bash scripts/run_evaluation.sh`. 13 PDFs
-      exported to figs/ with fixes: 200ms y-axis, CDF lines restored, CPU
-      layout rewritten to 6-subfigure per-protocol. Sanity check passed.*
-- [x] Fix the cumulative-latency plotting path so all expected lines are present.
-      Current symptom: Raft is missing adaptive, and other protocols are also
-      missing lines in the cumulative-latency figure. Do not mark that figure
-      complete until the missing series issue is understood and corrected.
-      *Root cause: two bugs in draw_latency_line (cell 15):
-      1. Hardcoded fixed_conc_override = {"Raft": "concurrent_150"} didn't match
-         the actual fixed_conc of concurrent_400 from experiment 0.
-      2. KeyError catch set current_line=[] then tested `if not current_line:
-         continue` which always continued since [] is falsy — so ALL modes with
-         any KeyError were silently skipped.
-      Fix: removed hardcoded override (uses fixed_conc.json), moved continue
-      outside the except block, added debug logging. Commit 59d669b4.*
-- [x] Fix the conc-CPU-usage plotting path so it produces 6 subfigures in one
-      row, one subfigure per protocol, with multiple lines inside each subfigure
-      for original / 0% / 100% / adaptive modes as applicable.
-      *Rewrote cell 17 with two figures:
-      1. Bar chart: 6 panels (one per protocol) showing CPU per mode at fixed conc.
-      2. Conc-CPU line chart: 6 panels with mode lines vs concurrency.
-      Both use n_proto for dynamic column count. Commit 59d669b4.*
-
-Required PDFs:
-
-- [x] conc-50th latency
-      *Regenerated with 200ms y-axis. Sanity check passed (34KB).
-      `figs/30c1s5r5p-zoo_conc_latency_rw_1000000_YCSB_A_ae_50.pdf`*
-- [x] conc-90th latency
-      *Regenerated with 200ms y-axis. Sanity check passed (34KB).
-      `figs/30c1s5r5p-zoo_conc_latency_rw_1000000_YCSB_A_ae_90.pdf`*
-- [x] conc-99th latency
-      *Regenerated with 200ms y-axis. Sanity check passed (35KB).
-      `figs/30c1s5r5p-zoo_conc_latency_rw_1000000_YCSB_A_ae_99.pdf`*
-- [x] conc-average latency
-      *Regenerated with 200ms y-axis. Sanity check passed (34KB).
-      `figs/30c1s5r5p-zoo_conc_latency_rw_1000000_YCSB_A_ae_ave.pdf`*
-- [x] conc-CPU usage
-      *Regenerated with 6-subfigure per-protocol layout, mode lines per panel (32KB).
-      `figs/30c1s5r5p-zoo_conc_latency_rw_1000000_YCSB_A_cpu_usage.pdf`*
-- [x] throughput-50th latency
-      *Regenerated with 200ms y-axis. Sanity check passed (33KB).
-      `figs/30c1s5r5p-zoo_throughput_latency_rw_1000000_YCSB_A_ae_50.pdf`*
-- [x] throughput-90th latency
-      *Regenerated with 200ms y-axis. Sanity check passed (34KB).
-      `figs/30c1s5r5p-zoo_throughput_latency_rw_1000000_YCSB_A_ae_90.pdf`*
-- [x] throughput-99th latency
-      *Regenerated with 200ms y-axis. Sanity check passed (33KB).
-      `figs/30c1s5r5p-zoo_throughput_latency_rw_1000000_YCSB_A_ae_99.pdf`*
-- [x] throughput-average latency
-      *Regenerated with 200ms y-axis. Sanity check passed (33KB).
-      `figs/30c1s5r5p-zoo_throughput_latency_rw_1000000_YCSB_A_ae_ave.pdf`*
-- [x] throughput-CPU usage
-      *Regenerated with 6-subfigure per-protocol bar chart (17KB).
-      `figs/30c1s5r5p-zoo_cpu_usage_ave.pdf`*
-- [x] latency-cumulative fraction for a fixed conc for each protocol
-      *Regenerated with CDF bug fix. All mode lines present except Mencius
-      adaptive (known: zero fast-path attempts). x-axis tightened to 200ms (27KB).
-      `figs/30c1s5r5p-zoo_latency_cumulative_rw_1000000_print.pdf`*
-- [x] conc-memory
-      *Regenerated (25KB).
-      `figs/30c1s5r5p-zoo_memory_usage_conc_30c1s5r5p-zoo.pdf`*
-- [x] zipf_skew-average_latency for 6 protocols
-      *Generated (27KB). Uses .res summary fallback for latency when .csv files absent.
-      Fixed `protocol_name` variable shadowing bug in Cell 15 that blocked detection.
-      2x3 subplot grid for 6 protocols.
-      `figs/30c1s5r5p-zoo_latency_ae_ave_on_zipf_skew_YCSB_A_print.pdf`*
-- [x] key_range-average_latency for 6 protocols
-      *Generated (27KB). Same fixes as zipf. 2x3 subplot grid for 6 protocols.
-      `figs/30c1s5r5p-zoo_latency_ae_ave_on_key_range_YCSB_A_print.pdf`*
-
-Figure layout requirements:
-
-- [x] Each main figure must have 6 subfigures in a single row.
-      *All main figures now use 6 subfigures in one row:
-      conc-latency (cell 12), throughput-latency (cell 14), cumulative latency
-      (cell 15), CPU usage (cell 17), and memory (cell 18) all use
-      `plt.subplots(1, n_proto, ...)`. CPU figure rewritten in commit 59d669b4.*
-- [x] Keep protocol ordering consistent across figures.
-      *Protocol ordering (Raft, Copilot, Mencius, MongoDB, etcd, ZooKeeper) is
-      consistent across protocol_name, protocols, cpu_line_info, and all
-      protocol_data list comprehensions.*
-- [x] Figure filenames must include the site config string.
-      *Added `site_tag = sites[0]` variable. All savefig calls and figure path
-      variables now include `{site_tag}_` prefix (e.g., `30c1s5r5p-zoo_conc_latency_...pdf`).*
-
-Recovery figure requirements:
-
-- [x] Export a separate time-throughput PDF for each of:
-      `rule_raft`, `rule_mongodb`, `rule_etcd`, `rule_zookeeper`
-      *Generated for rule_raft (3 PDFs: per-protocol, time-throughput, dispatch-throughput).
-      rule_mongodb, rule_etcd, rule_zookeeper skipped — all surviving servers crashed
-      (segfault/abort) after leader kill, producing no usable time-series data.
-      This is a protocol implementation bug, not an infrastructure issue.*
-- [x] These recovery PDFs must come from the new Zoo failure-recovery runs, not
-      from old checked-in recovery folders.
-      *All recovery PDFs sourced from results/2026-03-23-10:26:07-zoo-5machines/failure_recovery/
-      Zoo cluster data. Pipeline re-run confirmed with cache invalidation.*
-
-Table requirements:
-
-- [x] Export table-like results as durable files under `tables/`.
-      *`generate_tables.py` exports 4 CSV files to `<result_dir>/tables/`:
-      `fixed_conc_table.csv`, `experiment0_summary.csv`,
-      `throughput_vs_conc.csv`, `latency_vs_conc.csv`.
-      Integrated as pipeline step 5 in `run_evaluation.sh`.*
-- [x] At minimum, export:
-      fixed-conc selection table,
-      experiment-0 summary table,
-      and CSV source data for the exported figures.
-      *All three exported: fixed_conc_table.csv has per-protocol concurrency,
-      experiment0_summary.csv has peak throughput/latency per protocol/mode,
-      throughput_vs_conc.csv and latency_vs_conc.csv provide figure source data.*
-- [x] Keep a concise experiment report in the run folder that references the
-      exported tables/figures and the latency/throughput sanity-check results.
-      *`EXPERIMENT_REPORT.md` references all artifacts including tables, figures,
-      sanity checks, and fixed-conc selection.*
-- [x] Include the figure-input sanity result and any redraw notes in the
-      run-folder report so the plotting bug and the correction are auditable.
-      *Added "Figure-Input Sanity Check" section to generate_experiment_report.py
-      that reads figure_input_sanity.json and includes pass/fail summary and
-      failed check details in EXPERIMENT_REPORT.md.*
-- [x] Include any latency-axis-range override and cumulative-latency missing-line
-      diagnosis in the run-folder report so those plotting decisions are auditable.
-      *Added "Plotting Decisions" section to generate_experiment_report.py
-      documenting: (1) 200ms y-axis rationale, (2) CDF missing lines root cause
-      and fix, (3) CPU layout change from overlay to 6-subfigure per-protocol.*
-
-Acceptance criteria:
-
-- The notebook/helper consumes the new Zoo result root without manual one-off edits.
-- The pre-plot figure-input sanity check passes before experiment-0 PDFs are
-  trusted as correct.
-- Latency-related experiment-0 figures use a 200ms y-axis upper bound by
-  default unless a documented exception is justified.
-- All requested PDFs are exported under the new result root.
-- Existing suspect experiment-0 PDFs are regenerated after the figure-input bug
-  is fixed.
-- The cumulative-latency figure contains the expected mode lines for all
-  protocols, including Raft adaptive.
-- The conc-CPU-usage figure uses the requested 6-subfigure per-protocol layout.
-- Tables are exported under the new result root.
-- Run-folder reports exist alongside the logs and figures.
-- The plotting path uses 5-machine result assumptions instead of the historical 10-host one.
-
-### Track 8: 2026-03-23 Zoo remediation and clean rerun
-
-This is now the active execution track. The 2026-03-23 Zoo run is a baseline to
-debug from, not the accepted final deliverable.
-
-#### 8A. Reclassify the current run correctly
-
-- [x] Reclassify `results/2026-03-23-10:26:07-zoo-5machines/` as `partial` or
-      `fail`, not `pass`, until the follow-up gates below are closed.
-      *Added `STATUS` file ("PARTIAL — diagnostic baseline") in result root.*
-- [x] Add a short triage note under that result root summarizing the exact open
-      blockers with counts:
-      `3400 .res / 1838 .csv`, failure recovery `20 .res / 4 .csv`,
-      only one per-protocol recovery PDF, no turning point yet for the
-      Raft / etcd / ZooKeeper throughput-latency curves, MongoDB bottleneck
-      unresolved, and Mencius adaptive unresolved.
-      *Added `TRIAGE.md` with 6 categorized open blockers, artifact counts table,
-      and what the run is good for.*
-- [x] If any existing run-folder report says or strongly implies "complete",
-      update the report or add an override note. Do not let stale generated docs
-      overrule the actual artifacts on disk.
-      *Added "STATUS: PARTIAL" override banners at top of SUMMARY.md and
-      EXPERIMENT_REPORT.md. Existing "complete" usage in reports refers only to
-      per-config server counts (technical term), not run status.*
-
-Acceptance criteria:
-
-- Anyone opening the 2026-03-23 run folder can tell immediately that it is a
-  diagnostic baseline and exactly why it is not the final accepted run.
-
-#### 8B. Extend experiment-0 sweep ranges until the turning point exists
-
-- [x] Expand the concurrency arrays in `scripts/experiment_defs.sh` for the
-      protocols whose experiment-0 curves still stop on a rising edge.
-      Start with:
-      - Raft beyond `concurrent_1000`
-      - etcd beyond `concurrent_120`
-      - ZooKeeper beyond `concurrent_120`
-      *Extended: Raft added concurrent_1250/1500/2000 (already plateaus at ~9000
-      txn/s around concurrent_300-400, with p90 latency spike at concurrent_750;
-      new points confirm saturation). etcd and ZooKeeper extended from concurrent_120
-      to concurrent_500 with 9 new points each (140,160,180,200,250,300,350,400,500).
-      Both were still perfectly linear at concurrent_120 (~3569 txn/s, ~82ms p50).
-      Based on Raft's pattern, expect knee around concurrent_200-400.*
-- [x] Rerun targeted high-concurrency experiment-0 points first, not the entire
-      matrix immediately, so the new upper bounds are validated cheaply.
-      *Ran 36 spot-check configs via `scripts/run_spot_check.sh` with 5-min
-      timeout. Results:*
-      - *etcd: concurrent_200 works (tp≈5975 total), concurrent_300 works
-        (tp≈5995 total), concurrent_400+ ALL TIMEOUT. Throughput plateaus
-        around concurrent_200–300 at ~6000 txn/s total.*
-      - *ZooKeeper: ALL spot checks (concurrent_200–500) TIMEOUT even at 5 min.
-        ZooKeeper saturates somewhere between concurrent_120 (works, tp≈3560)
-        and concurrent_200 (fails). Needs finer-grained investigation or
-        longer timeout.*
-      - *Raft: concurrent_1500 and concurrent_2000 partially succeed (modes 100,
-        101 pass at ~1795–1800 per server ≈ ~9000 total). concurrent_1250
-        all timeout. Some mode=0 crashes at concurrent_1500. Plateau confirmed
-        at ~9000 total.*
-- [x] Only when the targeted spot checks show a real knee / plateau / drop (or a
-      documented hard saturation reason) should Claude lock the new sweep ranges
-      and start the next full batch.
-      *Knee/plateau documented for all three protocols:*
-      - *etcd: knee at concurrent_200–300 (throughput saturates ~6000 total)*
-      - *ZooKeeper: saturates before concurrent_200 (all higher points timeout)*
-      - *Raft: plateau confirmed at ~9000 total, extending through concurrent_2000*
-      *Recommended sweep ranges for next full batch:*
-      - *etcd: keep up to concurrent_500 (shows clear saturation)*
-      - *ZooKeeper: add concurrent_140/160/180 to find the exact knee between 120–200;
-        drop concurrent_250+ (all timeout)*
-      - *Raft: keep up to concurrent_2000 (plateau well-documented)*
-- [x] Update the fixed-concurrency selection logic and docs before the full
-      rerun:
-      the selected fixed conc for experiment 1 / 2 must be the largest
-      concurrency that still preserves the minimum-concurrency latency envelope
-      for that protocol family, not the highest-throughput point.
-      *Done: `derive_fixed_conc.py` now uses `find_latency_envelope_conc()` with
-      `LATENCY_MULTIPLIER=2.0`. New functions: `parse_latency_p50()`,
-      `collect_latencies()`, `find_latency_envelope_conc()`.  Results with
-      2026-03-23 data: Raft→concurrent_2000 (was 400), etcd→concurrent_300
-      (was 120), ZooKeeper→concurrent_120 (unchanged), Copilot→concurrent_180
-      (unchanged), Mencius→concurrent_40 (was 60), MongoDB→concurrent_100 (was 10).*
-- [x] When picking the fixed conc, compare against the minimum tested
-      concurrency for the same protocol family and mode. Use the protocol's own
-      observed baseline latency class; do not force every protocol into the same
-      absolute target.
-      *Done: baseline is the lowest-concurrency p50 for that protocol's mode=0.
-      Threshold = baseline × 2.0. Each protocol has its own baseline.*
-- [x] For the rerun write-up, `fixed_conc_selection.md` must show, per protocol:
-      - minimum-concurrency original latency baseline
-      - minimum-concurrency Jetpack baselines for adaptive / 100%
-      - selected fixed conc
-      - evidence that the selected point is still in the same latency class
-      while being as large as possible
-      *Done: `fixed_conc_selection.md` now shows summary table with baseline p50,
-      selected p50, threshold; per-protocol tables show every concurrency with
-      throughput, p50, and in-envelope flag.*
-- [x] After the rerun, derive `fixed_conc.json` again from the new experiment-0
-      results using the latency-envelope rule above. Do not carry forward fixed
-      concurrencies from the 2026-03-23 baseline if the sweep range changed.
-      *Done 2026-03-25.  `derive_fixed_conc.py` ran against rerun experiment-0
-      data.  New fixed concurrencies (5 protocols, Mencius excluded):
-      Raft=concurrent_100, Copilot=concurrent_40, MongoDB=concurrent_100,
-      etcd=concurrent_120, ZooKeeper=concurrent_160.  Selection doc:
-      `results/2026-03-25-12:47:26-zoo-5machines-rerun/fixed_conc_selection.md`.*
-
-Acceptance criteria:
-
-- The throughput-latency figure for Raft / etcd / ZooKeeper no longer stops at a
-  still-rising edge.
-- The fixed-concurrency choice is derived from the new sweep, not inherited from
-  the old incomplete one.
-- The fixed-concurrency choice is justified by "largest conc that still matches
-  the small-concurrency latency class", not by "peak throughput".
-
-#### 8C. Replace the CPU figure with the requested deliverable
-
-- [x] The requested CPU figure is not a single-concurrency bar chart.
-      The accepted deliverable is:
-      x-axis = concurrency, y-axis = CPU usage, one line per mode
-      (original / 0% / 100% / adaptive), one panel per protocol.
-      *Done: `scripts/generate_cpu_figure.py` produces
-      `figs/<site>_cpu_vs_conc.pdf` with 6 panels (one per protocol),
-      4 mode lines each (Original, 0%, Adaptive, 100%).  386 data points
-      from the 2026-03-23 Zoo run.*
-- [x] If the current bar chart is still useful, keep it only as a secondary
-      auxiliary figure with a different filename or a clearly different role.
-      Do not keep a bar chart under the main requested CPU figure name.
-      *Done: the bar chart remains at `_cpu_usage_ave.pdf` (notebook Cell 17).
-      The new primary is `_cpu_vs_conc.pdf`.*
-- [x] Export the raw source data for the CPU figure under `tables/`, for example
-      a `cpu_vs_conc.csv` table, so the plotted lines are auditable.
-      *Done: `tables/cpu_vs_conc.csv` with columns: protocol, mode,
-      concurrency, avg_cpu_pct.*
-- [x] Keep protocol ordering consistent with the other main figures.
-      *Done: Raft, Copilot, Mencius, MongoDB, etcd, ZooKeeper — same order.*
-
-Acceptance criteria:
-
-- The main CPU figure uses concurrency on the x-axis and CPU usage on the y-axis.
-- All requested modes are visible as separate lines inside each protocol panel.
-
-#### 8D. MongoDB bottleneck triage and figure repair
-
-- [x] Start from raw logs, not from the notebook.
-      Inspect original MongoDB low-concurrency points first
-      (`concurrent_1`, `concurrent_10`, `concurrent_20`) because the current
-      bottleneck already appears there.
-      *Done: `scripts/mongodb_triage.py` inspects all 52 MongoDB experiment
-      points from raw .res files.  Triage report saved to
-      `results/.../mongodb_triage.json`.*
-- [x] Determine whether the MongoDB issue is:
-      1. a real backend / protocol bottleneck,
-      2. a Zoo multi-machine environment problem,
-      3. a timeout / retry / failover wait problem,
-      4. a CSV / parsing problem, or
-      5. a plotting bug mixing the wrong latency field.
-      *Root cause: combination of (1) and (5).*
-      *Finding 1 — real protocol bottleneck: Original MongoDB
-      (none_mongodb mode=0) has p50 latency of ~10,000ms (10 seconds) even at
-      concurrent_1.  This is the genuine MongoDB 2PC commit overhead, not a
-      measurement or environment artifact.  Peak throughput is only ~282 txn/s
-      total.*
-      *Finding 5 — latency metric mismatch: The figure uses
-      All-original-path-attempts p50 for latency.  In Jetpack 100% mode, ALL
-      transactions take the fast path (fp_p50 ≈ 42ms) so
-      original-path count = 0 and p50 = -1.  The figure therefore shows MongoDB
-      Jetpack points as missing/invisible.*
-      *Jetpack achieves 8.9× throughput improvement (2516 vs 282 txn/s) and
-      200×+ latency improvement (42ms vs 10,000ms).*
-- [x] Audit the mismatch between the all-attempt latency columns and the
-      fast-path-only latency columns in `tables/latency_vs_conc.csv`.
-      For MongoDB Jetpack modes, `fp_*` stays near `42ms` while main p50 can be
-      several seconds or `-1`. Decide which metric belongs on the main
-      throughput-latency figure and document that rule.
-      *Done: The correct metric for the throughput-latency figure is
-      All-efficient-attempts p50, which combines both original-path and
-      fast-path attempts.  This shows ~42ms for Jetpack 100% (fast path only)
-      and ~10,000ms for original MongoDB (original path only).  Using
-      All-original-path-attempts produces -1/missing for Jetpack modes.*
-- [x] Check why MongoDB is barely visible in the current figures.
-      If the reason is the global 200ms cap, fix the figure design instead of
-      hiding MongoDB:
-      use per-protocol y-axis ranges, a broken axis, or a separate documented
-      MongoDB companion figure. Do not crop away the real points and call it done.
-      *Done: Confirmed the cause is the global 200ms y-axis cap in the notebook.
-      Created `scripts/generate_mongodb_companion_figure.py` — a dedicated two-panel
-      figure (throughput vs concurrency + latency vs concurrency on log scale)
-      using All-efficient-attempts p50 as the correct metric.  Outputs PDF and CSV.
-      20 tests in `scripts/test_generate_mongodb_companion_figure.py`.*
-- [x] If the experiment path is wrong or unstable, create a separate blocked task
-      under the rerun plan and do not fabricate a clean MongoDB curve from
-      partial data.
-      *Done: The experiment data is stable and complete — 52 MongoDB data points
-      across all modes.  The triage report (Track 8D leaf 1-3) confirmed three
-      legitimate root causes with artifact-backed evidence.  No instability found,
-      so no blocked task needed.*
-
-Acceptance criteria:
-
-- MongoDB points shown in the figure trace cleanly back to raw `.res` / `.csv`
-  inputs and the chosen latency metric is explicitly documented.
-- The root-cause classification for the MongoDB bottleneck is written down with
-  artifact-backed evidence.
-
-#### 8E. Missing CSV audit and abnormal-termination root cause
-
-- [x] Produce a machine-readable audit of prefixes with incomplete CSV coverage.
-      At minimum, classify each affected prefix into:
-      `timeout`, `crash/abort`, `never dumped csv`, `scp/pull gap`,
-      or `other documented cause`.
-      *Done: Created `scripts/csv_audit.py` — scans result dir, classifies each
-      missing CSV by root cause (scp_pull_gap, crash_abort, never_dumped, timeout,
-      zero_throughput, other).  Reads only head+tail of .res files for performance
-      (handles multi-GB files).  Outputs `csv_audit.json` with per-prefix breakdown.
-      30 tests in `scripts/test_csv_audit.py`.
-      Results for 2026-03-23 run: 724 prefixes, 371 complete, 353 incomplete.
-      Cause breakdown: scp_pull_gap=1258, never_dumped=283, timeout=125,
-      crash_abort=16, zero_throughput=5.*
-- [x] Use the current bad prefixes as the starting sample set. Do not stop at one
-      anecdote. Examples already visible in the 2026-03-23 run:
-      - `rule_mencius-30c1s5r5p-zoo-rw_1000000-concurrent_25-101-YCSB_A`
-        has only `2/5` CSVs
-      - `none_mongodb-30c1s5r5p-zoo-rw_1000000-concurrent_120-0-YCSB_A`
-        has only `1/5` CSVs
-      - `rule_mongodb-30c1s5r5p-zoo-rw_1000000-concurrent_30-100-YCSB_A`
-        has only `3/5` CSVs
-      *Done: All three known incomplete prefixes are confirmed in the audit output.
-      The full audit covers all 353 incomplete prefixes (not just these examples)
-      with per-server classification and evidence strings.*
-- [x] Audit whether `TIMEOUT_SEC=180` in `scripts/10-run_all.sh` is too short for
-      the slow protocols. If a run is still alive or still flushing output at the
-      timeout boundary, increase the timeout before the full rerun.
-      *Done: Created `scripts/timeout_audit.py` — scans all .res files, extracts
-      wall-clock durations (first-to-last timestamp), and classifies timeout risk.
-      26 tests in `scripts/test_timeout_audit.py`.
-      Result: TIMEOUT_SEC=180 is SUFFICIENT.  Max completed wall time is 82s
-      (rule_mongodb), giving 54% headroom (98s spare).  Zero genuine timeouts found.
-      The 403 incomplete runs are 226 startup failures (process died in <30s during
-      connection phase, e.g. ZooKeeper at concurrent_200+) and 177 mid-run failures —
-      none caused by the timeout boundary.  No change to TIMEOUT_SEC needed.*
-- [x] Audit whether the current post-run cleanup / `scp` sequence races with CSV
-      dump completion. If yes, fix the race rather than relying on notebook
-      fallbacks from `.res` summaries.
-      *Done: YES, confirmed race condition.  Created `scripts/scp_race_audit.py`
-      (20 tests in `scripts/test_scp_race_audit.py`).
-      Three race modes found across 3,620 server runs:
-      (1) nfs_cache_lag=1,295 — server logged "Dumped to" but CSV not found by scp
-      (dominant cause, 36% of all runs);
-      (2) pkill_before_dump=59 — killed before CSV write completed;
-      (3) partial_csv=10 — CSV truncated mid-write.
-      Root cause: `10-run_all.sh` sends `pkill -9` immediately after SSH wait,
-      sleeps only 1s, then runs scp.  NFS attribute cache (3-60s default) means
-      files written by the server aren't visible yet.
-      Fixes for the rerun: (a) add remote `sync` before scp, (b) use SIGTERM
-      before SIGKILL, (c) increase sleep to ≥5s, (d) verify CSV line count
-      matches "Dumped to" count after scp.*
-- [x] For the rerun, do not count a prefix as successful unless its expected CSV
-      artifacts are present or a documented intentional exception applies.
-      *Done: Updated `scripts/10-run_all.sh` and `scripts/run_spot_check.sh`:
-      (1) Added remote `sync` on all servers before scp to flush NFS write-behind
-      cache; (2) Increased post-kill sleep from 1s to 3s for NFS attribute cache
-      propagation; (3) Added CSV presence check — if .res says "Dumped to" but
-      the .csv file is missing locally, the prefix is marked failed with reason
-      `csv_missing_after_scp` and queued for retry.
-      12 tests in `scripts/test_csv_validation.sh`.*
-
-Acceptance criteria:
-
-- For the clean rerun, every successful prefix has the expected CSV artifacts.
-- Any missing CSV in the rerun is explicitly classified and left open as a real
-  failure, not silently ignored.
-
-#### 8F. Mencius adaptive controller fix
-
-- [x] Audit the CPU sampling path used by Mencius adaptive mode.
-      The current `leader CPU 0.00` logs are not believable enough to drive a
-      controller decision.
-      *Done: Created `scripts/mencius_cpu_audit.py` (19 tests).
-      ROOT CAUSE: 100% of 135,879 CPU log lines show 0.00.  The bug chain:
-      (1) `SampleCpuUsage()` returns `last_cpu_usage_=-1.0` before first sample pair
-      (scheduler.cc:87-89); (2) `FeedResponse` discards -1.0 via `>= 0.0` guard
-      (communicator.cc:39); (3) `AvgCpuLeaders()` falls back to 0.0 when
-      `leader_cpu_samples_==0` (communicator.h:103); (4) This 0.0 is treated as
-      real measurement, so `max_leader_avg` stays at 0.0; (5) Decision check
-      `(0.0 - 60.0) > rand(0,30)` is always false → fast path never disabled.
-      ADDITIONAL FINDING: Even if CPU sampling were fixed, Mencius fast path
-      (mode=100) itself collapses to zero throughput at concurrent_18+.
-      The adaptive controller cannot help when the underlying fast path is broken.
-      Source files: scheduler.cc:62-90, communicator.cc:38-46, communicator.h:103,
-      rule/coordinator.cc:78-94, mencius/server.h:55-57.*
-- [x] Audit the branch direction and threshold logic in the adaptive rule.
-      High CPU should cause backoff to the lower-CPU path. Low CPU should not
-      randomly reject the fast path because of a stale or zero sample.
-      *Done: Audited `rule/coordinator.cc:78-94`.  Findings:
-      (1) BRANCH DIRECTION IS CORRECT: high CPU → disable fast path (line 88-89).
-      (2) THRESHOLD RANGE IS REASONABLE: `(max_leader_avg - 60.0) > rand(0,30)`
-      means CPU < 60% never disables; 60-90% probabilistic; >90% always disables.
-      (3) CRITICAL BUG — MONOTONIC RATCHET: `static double max_leader_avg = 0.0`
-      (line 81) only increases, never decays.  Once CPU spikes, fast path is
-      permanently throttled for the rest of the run.  Compare to the queue-depth
-      throttle (lines 99-120) which correctly uses a live rolling average.
-      (4) STALE ZERO PROBLEM: With CPU always 0.0 (see previous audit), the
-      threshold check is dead code.  Even if fixed, the ratchet bug would cause
-      a single CPU spike to permanently disable fast path.
-      (5) The one-armed bandit (line 75-77) controls baseline; the Mencius CPU
-      check can only disable, never enable — directionally correct but moot
-      when CPU is always zero.*
-- [x] Add or preserve enough logging to prove the controller input and decision:
-      sampled CPU, smoothed CPU, threshold, random draw (if still used),
-      chosen path, and path-attempt counters.
-      *Done: Rewrote the Mencius [CPU-MENC] logging in
-      `src/deptran/rule/coordinator.cc:78-102`.  Changes:
-      (1) Uncommented `avg_all` (was dead code) to log all-server CPU average.
-      (2) Replaced per-transaction logging with periodic logging (every 500 txns)
-      to avoid 135K+ log lines per run.
-      (3) New log format includes all controller inputs and decisions:
-      `avg_all`, `avg_leaders`, `max_leader`, `threshold`, `rand`,
-      `cpu_disabled`, `go_fp`, `fp_cnt`.
-      (4) Updated `scripts/mencius_cpu_audit.py` to parse both old and new
-      log formats.  Added 2 new tests (21 total).
-      (5) Verified C++ compiles cleanly via docker build (janus-zoo-build).*
-- [x] Before launching the next full batch, rerun targeted Mencius points around
-      the broken range (`concurrent_18` through `concurrent_60`) and confirm that
-      adaptive throughput and path counters are sane.
-      *Done 2026-03-25.  Spot-check launched for concurrent_18/20/25/30/40/60
-      across none_mencius mode=0, rule_mencius modes 0/100/101 (24 configs).
-      FINDING: Rebuilt binary (same source, relinked) exposes pre-existing
-      heap corruption in Mencius protocol — segfaults, `corrupted size vs.
-      prev_size`, `malloc_consolidate(): invalid chunk size` on ALL rule_mencius
-      modes AND none_mencius at concurrent_20+.  Crashes affect both Jetpack
-      and original Mencius code paths, confirming the bug is in the base
-      Mencius protocol, not the Jetpack overlay or logging changes.
-      Only none_mencius concurrent_18 mode=0 completed successfully
-      (throughput=104.70, consistent with original 104.9).
-      Spot-check aborted after 5/24 configs to prevent further overwrite of
-      original 2026-03-23 data.  Original metrics preserved in
-      `mencius_cpu_audit.json`.
-      CONCLUSION: The Mencius protocol has a latent memory-safety bug that
-      manifests under binary relayout.  The CPU sampling audit findings
-      (always-zero leader CPU, collapsed adaptive throughput at concurrent_18+)
-      remain valid from the original 2026-03-23 data.  The heap corruption
-      is an additional, deeper issue that must be addressed before any Mencius
-      rerun can succeed with a recompiled binary.
-      Analysis script: `scripts/mencius_spot_check_analysis.py` (17 tests).*
-
-Acceptance criteria:
-
-- The repeated `leader CPU 0.00` nonsense is gone or explicitly justified.
-- Mencius adaptive no longer collapses to near-zero useful work because of a bad
-  controller input or inverted decision rule.
-
-#### 8G. Failure recovery rerun with notebook-expected names and 4 figures
-
-- [x] Keep the exact notebook-expected recovery prefix shape:
-      `<protocol>-30c1s5r5p-zoo-rw_1000000-<fixed_conc>-101-YCSB_A-recovery`
-      under `failure_recovery/`.
-      *Done 2026-03-26.  All 4 protocols use notebook-expected naming under
-      `results/2026-03-25-12:47:26-zoo-5machines-rerun/failure_recovery/`.*
-- [x] Use `client_open_failure_recovery.yml`, real `pkill -9 deptran_server`
-      against zoo0, and keep `kill_evidence.json` per protocol.
-      *Done 2026-03-26.  All 4 protocols have kill_evidence.json with
-      confirmed_dead=true.  Kill delay increased from 20s to 40s to account
-      for slower client communicator initialization in the new build (~23s vs
-      ~18s in old binary).  Duration increased to 90s for sufficient
-      post-kill observation time.*
-- [x] Do not close this track until all 4 requested protocols have fresh
-      recovery runs and fresh per-protocol recovery figures:
-      `rule_raft`, `rule_mongodb`, `rule_etcd`, `rule_zookeeper`.
-      *Done 2026-03-26.  Results:
-      - rule_raft: SUCCESS — 3/4 surviving servers report throughput (429-450).
-        zoo2 hit pre-existing heap corruption (same as experiment 0).
-        CSV data available for all 4 survivors.
-      - rule_mongodb: BLOCKED — all surviving servers report 0.00 throughput.
-        Backend cannot re-elect after leader kill. Pre-existing issue (old
-        2026-03-24 run also failed). Blocking logs saved under failure_recovery/.
-      - rule_etcd: BLOCKED — all surviving servers report 0.00 throughput.
-        Clients pause waiting for recovery_finish_after_failure signal that
-        never arrives. Pre-existing issue. Blocking logs saved.
-      - rule_zookeeper: BLOCKED — all surviving servers report 0.00 throughput.
-        Same root cause as etcd. Pre-existing issue. Blocking logs saved.
-      ROOT CAUSE: The Communicator::ConnectToSite() uses verify(result.first
-      == SUCCESS) which crashes if a second communicator (client-side) is
-      created after the kill. Kill delay of 40s now avoids this crash for the
-      initial connection, but the 3 non-raft backends never complete failover.*
-- [x] The notebook must export a separate recovery PDF for each protocol, not
-      only `rule_raft`.
-      *Done 2026-03-26.  Cell 26 dynamically reads fixed_conc.json to build
-      experiment names.  Cell 28 generates per-protocol PDFs for all protocols
-      with available data.  Only rule_raft will produce a meaningful figure;
-      the other 3 will show flat-zero throughput (blocked backend recovery).*
-- [x] If a protocol still crashes and therefore cannot generate a figure, save
-      the blocking logs under the new result root and keep the item open as a
-      protocol bug. Do not silently skip the figure and call the phase complete.
-      *Done 2026-03-26.  Blocking .res files (13-82 MB) saved under
-      failure_recovery/ for all 4 protocols.  RECOVERY_SUMMARY.md documents
-      per-protocol throughput.  3 protocols (mongodb, etcd, zookeeper) remain
-      open as protocol bugs: backend failover does not complete after
-      pkill -9 of the leader.*
-
-Acceptance criteria:
-
-- The rerun produces 4 per-protocol recovery figure outputs under `figs/`, or a
-  blocked status with explicit raw-log evidence per missing figure.
-
-#### 8H. Clean rerun command sequence and result-root policy
-
-- [x] Do not reuse the 2026-03-23 result root for the clean rerun.
-      *Done 2026-03-25.  Fresh result root created for clean rerun.*
-- [x] After the targeted fixes and spot checks above, use a fresh result root and
-      keep all follow-on phases in that same root.
-      *Done 2026-03-25.  Tracks 8A-8F complete.  Mencius temporarily excluded
-      from the clean rerun due to heap corruption (segfaults caused by
-      glibc 2.35 binary on glibc 2.41 host exposing latent memory-safety bug
-      in Mencius protocol).  5 of 6 protocols proceed.  See
-      `scripts/experiment_defs.sh` for exclusion comment.*
-- [x] Preferred operator sequence:
-      *Steps 1–2 done 2026-03-26.  Result root:
-      `results/2026-03-25-12:47:26-zoo-5machines-rerun`.
-      Experiment 0: 416 configs × 5 servers = 2,080 res files.
-      Fixed concurrencies derived (5 protocols, Mencius excluded):
-      Raft=concurrent_100, Copilot=concurrent_40, MongoDB=concurrent_100,
-      etcd=concurrent_120, ZooKeeper=concurrent_160.
-      CRITICAL FIX: new build produces 6–120 MB .res files (verbose logging),
-      which broke all 8 parsing scripts that had MAX_RES_FILE_SIZE=1MB.
-      Created `scripts/res_file_utils.py` with tail-read optimization (reads
-      last 100 KB instead of full file).  All 8 scripts updated.
-      174 tests pass.
-      Steps 3–5 completed 2026-03-26:
-      - Experiments 1+2: 260 configs completed (3,280 total .res files).
-      - Failure recovery: 4 protocols run (rule_raft SUCCESS, rule_mongodb/
-        etcd/zookeeper BLOCKED — backend failover does not complete).
-      - Evaluation: 25 PDF figures, 6 CSV tables, SUMMARY.md,
-        EXPERIMENT_REPORT.md generated.
-      ADDITIONAL FIX: evaluation notebook `read_files()` crashed on verbose
-      .res files (debug log lines matched "median :" pattern).  Replaced all
-      full-file reads in Cell 3 with `res_file_utils.read_res_tail()` to
-      read only the last 100 KB where summary stats live.*
-
-```bash
-NEW_RUN_DIR="results/$(date +%Y-%m-%d-%H:%M:%S)-zoo-5machines-rerun"
-mkdir -p "$NEW_RUN_DIR"
-
-bash scripts/10-run_all.sh build --exp 0 --exp-dir "$NEW_RUN_DIR"
-python3 scripts/derive_fixed_conc.py "$NEW_RUN_DIR"
-bash scripts/10-run_all.sh --exp 1,2 --exp-dir "$NEW_RUN_DIR"
-bash scripts/run_failure_recovery.sh --exp-dir "$NEW_RUN_DIR"
-bash scripts/run_evaluation.sh "$NEW_RUN_DIR"
+```
+                         Jetpack+Raft (-m 100)           CURP (-m 200)
+Leader conflict check:   command_pool_.push_back(cmd)    scan uncommitted Raft log for key conflict
+Non-leader check:        command_pool_.push_back(cmd)    command_pool_.push_back(cmd)  (same)
+Fast-path attempt rate:  100% (fp100) or adaptive (101)  100% always (hardcoded)
+Recovery on failure:     8-step Paxos recovery            none (fast-path cmds may be lost)
+Coordinator:             CoordinatorRule                  CoordinatorRule  (same)
+RPC:                     RuleSpeculativeExecute           RuleSpeculativeExecute  (same)
+Config:                  rule_raft.yml -m 100             rule_raft.yml -m 200
 ```
 
-- [x] Save the exact commands actually used in the new run folder, including any
-      timeout override or rerun-only experiment subset.
-      *Done 2026-03-26.  Created `commands_used.txt` in the rerun result root
-      documenting all 5 steps (exp 0, derive fixed conc, exp 1+2, recovery,
-      evaluation) with exact commands, timestamps, and results.
-      Also fixed oversized-file handling in both `10-run_all.sh` and
-      `run_spot_check.sh`: large .res files (60MB-1GB from verbose logging)
-      now use tail-based success check instead of hard-failing.
-      Experiments 1+2 launched (260 configs, ~6h estimated).*
-- [x] If Claude must do a limited preflight before the full batch, record those
-      spot-check commands separately and do not confuse them with the accepted
-      full rerun.
-      *Done 2026-03-26.  Created `spot_check_commands.txt` in the rerun result
-      root documenting the Mencius spot-check and Raft smoke test with results.*
+**Rationale for leader checking the log**: In CURP, the leader is the orderer — it has the canonical total order in its Raft log. Checking uncommitted log entries for key conflicts is more accurate than the command pool, because the log reflects the true serialization order. Non-leaders (witnesses) don't have the full uncommitted log, so they use the command pool as a local approximation — same as Jetpack.
 
-Acceptance criteria:
+**Mode flag summary after this phase**:
 
-- The next accepted run lives in a fresh result root.
-- `scripts/10-run_all.sh` remains the main batch entrypoint for experiments 0/1/2.
-- Failure recovery and evaluation reuse that same fresh result root.
+| `-m` | Name | Fast-path rate | Leader conflict check | Recovery | Protocol restriction |
+|---|---|---|---|---|---|
+| `0` | Original | 0% (no fast path) | N/A | N/A | Any |
+| `100` | Jetpack fp100 | 100% | Command pool | Paxos recovery | Any |
+| `101` | Jetpack adaptive | Adaptive (throttled) | Command pool | Paxos recovery | Any |
+| `200` | CURP | 100% (hardcoded) | Raft log (uncommitted) | None | Raft only |
 
-## Evidence Format
+### 1.0 Add CURP mode constant and validation
 
-For every accepted code, CI, or benchmark claim, save:
-- the exact command or runner used
-- the commit hash
-- the relevant config names
-- the latency mechanism used (`SIMULATE_WAN`, `tc`, `docker-level 20ms one-way`,
-  or other documented path)
-- the log or artifact path
-- one result line: `pass`, `fail`, `blocked`, or `partial`
+**Files to modify:**
+- `src/deptran/constants.h` — add:
+  ```cpp
+  #define CURP_MODE 200  // CURP: leader checks log, witnesses check command pool, no recovery
+  ```
+- `src/deptran/config.cc` (or wherever `-m` is parsed) — add validation:
+  ```cpp
+  if (jetpack_fastpath_attempt_rate_ == CURP_MODE) {
+    verify(replica_proto_ == MODE_RAFT);  // CURP only works with Raft
+  }
+  ```
 
-For the backend pause / resume task specifically, save:
-- one artifact or log line for `primary_elected`
-- one artifact or log line for Jetpack entering `RECOVERY`
-- one artifact or log line for `fastpath_stopped`
-- one artifact or log line for backend/application resume
-- one artifact or log line showing heartbeat/election traffic still alive during pause
+**Acceptance criteria:**
+- [ ] `-m 200` with `rule_raft.yml` is accepted
+- [ ] `-m 200` with `rule_copilot.yml` or any non-Raft protocol aborts with a clear error
 
-For the new Zoo evaluation tracks specifically, also save:
-- the exact result root path
-- the dry-run matrix or manifest with planned counts
-- the fixed-conc map with justification
-- the minimum-concurrency latency baselines used to choose each fixed conc
-- the experiment-0 sweep upper bounds and whether a real turning point / plateau
-  was observed for each protocol family
-- the exact Docker/container latency-injection mechanism and where it is applied
-- the sanity-check report path and one-line sanity outcome per protocol family
-- the figure-input sanity report path and one-line figure-input sanity outcome
-- the CSV coverage summary (`res` count, `csv` count, and missing-prefix audit)
-- for MongoDB, the exact latency metric used in the main figure
-  (`all-attempt` vs `fast-path-only`) and why
-- for failure recovery: killed host, exact kill command, timestamp, and evidence
-  that the remote `deptran_server` task really died
-- the figure/table output directories under the new result root
+### 1.1 Coordinator — 100% fast path, no throttle
 
-Keep this file durable:
-- record one concise result line per accepted task or run
-- do not paste minute-by-minute polling output
-- if docs and on-disk logs disagree, treat that as open work
+**Files to modify:**
+- `src/deptran/rule/coordinator.cc` — in `GotoNextPhase()`, add CURP branch at the top of the `INIT_END` case (before the existing throttle logic):
+  ```cpp
+  if (Config::GetConfig()->jetpack_fastpath_attempt_rate_ == CURP_MODE) {
+    go_to_fastpath_ = true;  // CURP: always attempt fast path, no throttle
+  } else if (...existing Jetpack logic...) {
+    ...
+  }
+  ```
 
-## Anti-Shortcut Reminders For Claude
+**What this skips**: All the adaptive throttle logic (lines 71-128 of `rule/coordinator.cc`): the one-armed bandit, queue-depth ramp, CPU-based Mencius gating. CURP always goes fast path.
 
-- Do not revive the old TLA+ checklist and work on that instead.
-- Do not claim the integration bug is fixed just because `primary_elected` already exists.
-- Do not satisfy the pause requirement by pausing only benchmark clients.
-  The backend / original protocol server-side path must honor the wait.
-- Do not emit `fastpath_stopped` at the very end of Jetpack recovery if the intended
-  meaning is "Jetpack has entered RECOVERY and stopped the fast path."
-- Do not block heartbeat or leader-election traffic while implementing the wait.
-- Do not conflate `recovery_finish_after_failure` with the new `fastpath_stopped`
-  handshake unless the user explicitly redefines the requirement.
-- Do not conflate `SIMULATE_WAN` with `tc` / `netem`.
-- Do not run both delay mechanisms together and then report the result as "20ms latency."
-- For the new Zoo multi-machine task, do not use host-level `tc` as the main
-  WAN mechanism. The requirement here is Docker/container-level 20ms one-way latency.
-- Do not report the CI work as complete if the `5c1s5r5p` `tc` lane has not actually
-  run on a suitable environment.
-- Do not cherry-pick only passing backends or only passing modes when writing docs.
-- Do not report the benchmark rerun as reproduced if any required phase failed,
-  was skipped, or used an undocumented deviation.
-- Do not replace prior TODO tracks again when adding the Zoo work.
-- Do not use old checked-in `scripts/*failure-recovery-data*` folders or old
-  OSDI notebook constants as substitutes for the new requested Zoo run.
-- Do not call the Zoo failure-recovery track complete unless a real remote
-  `deptran_server` process kill occurred and is evidenced.
-- Do not assume the Docker-based helper path can be reused unchanged for the Zoo
-  multi-server path. Audit MongoDB / etcd / ZooKeeper script interactions carefully.
-- Do not leave the analysis notebook hard-coded to 4 protocols or 10 hosts and
-  then claim the exported figures represent the new 5-machine Zoo evaluation.
-- Do not skip the latency/throughput sanity check for the new Zoo WAN runs.
-- Do not leave the sanity reasoning only in chat. Save it in the same result
-  folder as the raw logs, tables, and figures.
-- Do not accept experiment-0 figures that are mostly near 0ms when the raw Zoo
-  result files show many ~40ms / ~80ms latencies. Fix the notebook input path,
-  rerun the sanity check, and redraw the figures.
-- Do not leave experiment-0 latency plots at a 1000ms y-axis scale when the
-  relevant data is mostly in the ~40ms to ~80ms range unless the exception is
-  explicitly justified in the run-folder report.
-- Do not accept a cumulative-latency figure that is missing adaptive for Raft
-  or missing other expected protocol/mode lines.
-- Do not stop the next experiment-0 sweep at the old Raft / etcd / ZooKeeper
-  upper bounds if the turning point still has not appeared.
-- Do not choose experiment-1 / experiment-2 fixed concurrencies by peak
-  throughput alone. They must be the largest points that still preserve the
-  protocol-specific minimum-concurrency latency class.
-- Do not accept a figure-input sanity report that marks seconds-vs-milliseconds
-  mismatches as `PASS`.
-- Do not hide MongoDB by clipping it out of the main latency figures.
-- Do not treat "there is a `.res` file" as equivalent to "the run ended
-  normally". The `.csv` dump and its completeness matter.
-- Do not skip the targeted preflight checks for MongoDB, Mencius adaptive, and
-  CSV loss, then immediately burn cluster time on a full rerun.
-- Do not claim failure recovery is complete while only `rule_raft` has a usable
-  recovery PDF.
+**Acceptance criteria:**
+- [ ] With `-m 200`, every request attempts the fast path (verify via `Fastpath statistics attempted N successed M` where N = total requests)
+
+### 1.2 Server — leader checks Raft log, non-leader checks command pool
+
+**Files to modify:**
+- `src/deptran/scheduler.h` — add method declaration:
+  ```cpp
+  bool ConflictWithUncommittedRaftLog(const shared_ptr<Marshallable>& cmd);
+  ```
+- `src/deptran/scheduler.cc` — in `OnRuleSpeculativeExecute()` (around line 520), add CURP branch:
+  ```cpp
+  if (Config::GetConfig()->jetpack_fastpath_attempt_rate_ == CURP_MODE && is_leader) {
+    // CURP leader: check Raft log for conflicts (not command pool)
+    bool no_conflict = !rep_sched_->ConflictWithUncommittedRaftLog(cmd);
+    *accepted = no_conflict;
+    // Do NOT insert into command pool — leader doesn't need it for CURP
+  } else {
+    // Jetpack path (all replicas) or CURP non-leader (witness):
+    // Check command pool as usual
+    bool no_conflict = rep_sched_->command_pool_.push_back(cmd);
+    *accepted = no_conflict;
+  }
+  ```
+- `src/deptran/scheduler.cc` — implement `ConflictWithUncommittedRaftLog()`:
+  ```cpp
+  bool TxLogServer::ConflictWithUncommittedRaftLog(const shared_ptr<Marshallable>& cmd) {
+    auto key = SimpleRWCommand::GetKey(cmd);
+    auto* raft_svr = dynamic_cast<RaftServer*>(rep_sched_);
+    // Scan uncommitted entries: commitIndex+1 to lastLogIndex
+    for (uint64_t i = raft_svr->commitIndex + 1; i <= raft_svr->lastLogIndex; i++) {
+      auto instance = raft_svr->GetRaftInstance(i);
+      if (instance && instance->log_) {
+        auto log_key = SimpleRWCommand::GetKey(instance->log_);
+        if (log_key == key) return true;  // conflict found
+      }
+    }
+    return false;  // no conflict
+  }
+  ```
+
+**Key detail**: The leader does NOT insert commands into the command pool. The leader's conflict check is purely against the Raft log. Only non-leaders (witnesses) use the command pool.
+
+**Reference**: The existing `command_pool_.push_back()` is at `scheduler.cc:522-527`. The Raft log access pattern follows `raft/server.cc:480-520` where instances are iterated for commit processing.
+
+**Acceptance criteria:**
+- [ ] Leader returns `accepted=true` when no uncommitted Raft entry has the same key
+- [ ] Leader returns `accepted=false` when an uncommitted Raft entry conflicts
+- [ ] Non-leader behavior is unchanged from Jetpack (command pool check)
+
+### 1.3 Skip recovery for CURP mode
+
+**Files to modify:**
+- `src/deptran/s_main.cc` — in the section that launches the `JetpackRecoveryLoop` thread, add guard:
+  ```cpp
+  if (Config::GetConfig()->jetpack_fastpath_attempt_rate_ != CURP_MODE) {
+    // Launch Jetpack recovery thread (not needed for CURP)
+    ...
+  }
+  ```
+- `src/deptran/raft/coordinator.cc` — in `Submit()`, skip the Jetpack recovery status check for CURP:
+  ```cpp
+  if (!is_recovery_cmd
+      && Config::GetConfig()->jetpack_fastpath_attempt_rate_ != CURP_MODE
+      && svr_->jetpack_status_ == TxLogServer::JetpackStatus::RECOVERY) {
+    // Reject — Jetpack recovery in progress (not applicable for CURP)
+    ...
+  }
+  ```
+
+**Acceptance criteria:**
+- [ ] No `JetpackRecoveryLoop` thread is spawned when `-m 200`
+- [ ] Leader election in Raft does NOT trigger Jetpack recovery when `-m 200`
+
+### 1.4 Command pool GC for CURP non-leaders
+
+**Design**: Non-leaders (witnesses) still use the command pool, so it needs garbage collection when Raft commits. The leader doesn't use the command pool so no GC needed there. The existing `RuleCommandPoolGC()` path already handles this — it calls `command_pool_.remove(cmd)` after Raft commit. For CURP, this path should only run on non-leaders.
+
+**Files to modify:**
+- `src/deptran/raft/server.cc` — at the `RuleCommandPoolGC(cmd)` call site (line ~514), add CURP guard:
+  ```cpp
+  if (Config::GetConfig()->jetpack_fastpath_attempt_rate_ == CURP_MODE) {
+    if (!IsLeader()) {
+      RuleCommandPoolGC(next_instance->log_);  // non-leader: GC command pool
+    }
+    // leader: no command pool to clean
+  } else {
+    RuleCommandPoolGC(next_instance->log_);  // Jetpack: all replicas GC
+  }
+  ```
+
+**Acceptance criteria:**
+- [ ] Non-leader command pools are garbage collected after Raft commit
+- [ ] Leader has empty command pool throughout the run
+- [ ] No unbounded memory growth during sustained experiments
+
+### 1.5 Config file and experiment integration
+
+**Files to create:**
+- `config/none_curp.yml`:
+  ```yaml
+  mode:
+    cc: rule
+    ab: raft
+    batch: false
+    retry: 20
+    ongoing: 1
+  ```
+  (Identical to `rule_raft.yml`. The CURP behavior is activated by `-m 200`, not a separate config.)
+
+**Files to modify:**
+- `scripts/experiment_defs.sh` — add CURP to mode definitions:
+  ```bash
+  MODE_CURP="200"  # CURP: 100% fast path, leader checks log, no recovery
+  ```
+  Add `CURP_CONCS` array (same as `RAFT_CONCS` initially) and update `concs_array_for()`.
+
+**Acceptance criteria:**
+- [ ] `./scripts/run_single_exp.sh none_curp.yml 200 concurrent_1.yml curp-c1 ../results/curp-test` runs on the zoo cluster
+- [ ] Results show 1 RTT latency (~40ms p50) for non-conflicting workloads (`rw_1000000`)
+
+### 1.6 Comparative experiment — CURP vs Raft vs Jetpack+Raft
+
+**Goal**: Run the same SwiftPaxos-style benchmark suite from `docs/raft_jetpack_swiftpaxos_experiment.md` with CURP added as a third protocol.
+
+**Protocols to compare:**
+
+| Label | Config | `-m` | Fast-path behavior |
+|---|---|---|---|
+| Raft (baseline) | `none_raft.yml` | `0` | No fast path (2 RTT) |
+| CURP | `none_curp.yml` | `200` | Leader checks log, witnesses check pool (1 RTT) |
+| Jetpack+Raft fp100 | `rule_raft.yml` | `100` | All replicas check pool (1 RTT) |
+| Jetpack+Raft adaptive | `rule_raft.yml` | `101` | Adaptive throttle (1 RTT when attempted) |
+
+**Experiments:**
+1. **Latency** at `concurrent_1` — expect CURP and Jetpack both ~40ms (1 RTT)
+2. **Max throughput** via adaptive concurrency sweep — expect similar ceiling (~6000 cmd/s on current cluster)
+3. **Contention sweep** (Zipf 0.5-1.0) — CURP may behave differently under contention because the leader checks the log (ordered) rather than the command pool (unordered)
+4. **Key range sweep** (1 to 1M) — show fast-path degradation as conflict rate increases
+
+**Acceptance criteria:**
+- [ ] Results documented in `docs/curp_vs_raft_vs_jetpack_experiment.md`
+- [ ] CURP latency at low load matches Jetpack+Raft (~40ms p50, 1 RTT)
+- [ ] CURP throughput at saturation is comparable to Raft and Jetpack+Raft
+- [ ] CPU usage data collected per server per experiment point
+
+### Summary of Phase 1 deliverables
+
+| Task | Files modified | Lines changed (est.) |
+|---|---|---|
+| 1.0 Mode constant + validation | `constants.h`, `config.cc` | ~5 |
+| 1.1 Coordinator — 100% fast path | `rule/coordinator.cc` | ~5 |
+| 1.2 Server — leader log check | `scheduler.h`, `scheduler.cc` | ~25 |
+| 1.3 Skip recovery | `s_main.cc`, `raft/coordinator.cc` | ~5 |
+| 1.4 GC for non-leaders | `raft/server.cc` | ~5 |
+| 1.5 Config + experiment integration | `config/none_curp.yml` (new), `experiment_defs.sh` | ~10 |
+| 1.6 Experiments | `docs/curp_vs_raft_vs_jetpack_experiment.md` (new) | — |
+
+**Total**: ~55 lines of logic changes + 1 new config file + 1 new results doc. No new source directories. CURP reuses the entire Jetpack+Raft code path with minimal branching.
+
+---
+
+## Phase 2: SwiftPaxos Integration
+
+**Goal**: Implement SwiftPaxos (NSDI '24) as a new protocol (`ab: swiftpaxos`) in the Janus codebase. SwiftPaxos is a leaderless state-machine replication protocol that achieves 1 RTT (2 message delays) in the best case and 2 RTT (3 message delays) otherwise. Unlike CURP/Jetpack which layer a fast path on top of a leader-based protocol, SwiftPaxos is a standalone consensus protocol with its own ordering and recovery mechanism.
+
+**Reference implementation**: https://github.com/imdea-software/swiftpaxos (Go, ~3000 lines core protocol)
+
+**Key SwiftPaxos concepts**:
+- **Leader-optimized leaderless protocol**: A designated leader assigns sequence numbers for ordering, but any replica can propose. The leader accelerates the fast path but is not required for correctness.
+- **Fast quorum (FQ)**: 3N/4 replicas (e.g., 4 of 5). If FQ agrees with matching dependency hashes → commit in 1 RTT.
+- **Slow quorum (SQ)**: N/2+1 majority. Fallback when dependencies conflict.
+- **Per-key dependency tracking**: Each replica tracks per-key conflict info. A command's dependencies are the last conflicting commands on each key it touches.
+- **Hash-based agreement**: Instead of comparing full dependency sets (EPaxos-style), replicas compare per-key hash digests. Matching hashes prove identical dependency sets without transmitting them.
+- **Phases**: START → PRE_ACCEPT → ACCEPT → COMMIT. Fast path skips ACCEPT (1 RTT). Slow path goes through ACCEPT (2 RTT).
+
+**Architecture decision**: SwiftPaxos is a fundamentally different protocol from Raft — it has its own ordering, dependency tracking, and recovery. It cannot reuse the Jetpack plugin layer or Raft infrastructure. It needs its own `src/deptran/swiftpaxos/` directory with dedicated frame, server, coordinator, commo, and service classes.
+
+### 2.0 Scaffolding — register SwiftPaxos as a new protocol
+
+**Files to create/modify:**
+- `src/deptran/constants.h` — add `#define MODE_SWIFTPAXOS (0x8000)`
+- `src/deptran/frame.cc` — add `{"swiftpaxos", MODE_SWIFTPAXOS}` to protocol name map
+- `wscript` — add `src/deptran/swiftpaxos/*.cc` to the build
+- `config/none_swiftpaxos.yml`:
+  ```yaml
+  mode:
+    cc: none
+    ab: swiftpaxos
+    batch: false
+    retry: 20
+    ongoing: 1
+  ```
+
+**New directory `src/deptran/swiftpaxos/`:**
+- `frame.h/cc` — `SwiftPaxosFrame : public Frame`
+- `server.h/cc` — `SwiftPaxosServer : public TxLogServer` (main replica logic)
+- `coordinator.h/cc` — `SwiftPaxosCoordinator : public Coordinator` (client-side)
+- `commo.h/cc` — `SwiftPaxosCommo : public Communicator` (RPC broadcast)
+- `service.h/cc` — `SwiftPaxosServiceImpl : public Service` (RPC handlers)
+
+**Acceptance criteria:**
+- [ ] `build/deptran_server -f config/none_swiftpaxos.yml ...` compiles and starts (no protocol logic yet)
+- [ ] Frame resolves `"swiftpaxos"` → `MODE_SWIFTPAXOS` → `SwiftPaxosFrame`
+
+### 2.1 RPC definitions — protocol messages
+
+Define the SwiftPaxos-specific RPCs. These are new messages not shared with Raft or Jetpack.
+
+**File to modify:** `src/deptran/rcc_rpc.rpc` — add new RPCs:
+
+| RPC | Direction | Fields | Purpose |
+|---|---|---|---|
+| `SwiftFastAck` | Replica→All | `replica, ballot, cmd_id, dep[], checksum[], seqnum` | Fast path ACK with dependency set + hash |
+| `SwiftLightSlowAck` | Replica→All | `replica, ballot, cmd_id` | Slow path ACK (minimal) |
+| `SwiftNewLeader` | Replica→All | `replica, ballot` | Leader election |
+| `SwiftNewLeaderAck` | Replica→Leader | `replica, ballot, cballot, cmd_ids[], phases[], cmds[], deps[]` | Recovery: report command state |
+| `SwiftSync` | Leader→All | `replica, ballot, phases{}, cmds{}, deps{}` | Recovery: sync state |
+
+**Reference**: See `/tmp/swiftpaxos/swift/defs.go` lines 53-170 for Go definitions.
+
+**Acceptance criteria:**
+- [ ] `bin/rpcgen --python --cpp src/deptran/rcc_rpc.rpc` generates stubs for all new RPCs
+- [ ] Service can register handlers for all SwiftPaxos RPCs
+
+### 2.2 Core data structures — command descriptors, quorums, hash logs
+
+**Files to create/modify in `src/deptran/swiftpaxos/`:**
+
+**Command descriptor** (per-command state machine):
+```cpp
+struct SwiftCmdDesc {
+  enum Phase { START, PRE_ACCEPT, ACCEPT, COMMIT };
+  Phase phase = START;
+  shared_ptr<Marshallable> cmd;
+  vector<CommandId> dep;          // dependency set
+  vector<SHash> checksums;        // per-key hash digests
+  bool slow_path = false;
+  // Fast path: collects FQ matching acks
+  // Slow path: collects SQ acks
+};
+```
+
+**Per-key conflict tracker** (equivalent to Go `keyInfo`):
+```cpp
+struct KeyConflictInfo {
+  // Track last write and last command per key
+  // getConflictCmds(cmd) → returns commands that conflict with cmd
+  unordered_map<uint64_t, shared_ptr<Marshallable>> last_writes;
+};
+```
+
+**Hash log** (per-key, proves conflict-freedom):
+```cpp
+class HashLog {
+  // Append(cmd, cmd_id) → returns current hash
+  // Update(cmd_id, seqnum, hash) → advance stable point
+  // Used to compare dependency sets without transmitting them
+  SHash current_hash;
+  int synced_seqnum = 0;
+};
+```
+
+**Quorum system**:
+```cpp
+int FastQuorum(int n) { return 3 * n / 4 + 1; }  // FQ: 3/4 of replicas (4 of 5)
+int SlowQuorum(int n) { return n / 2 + 1; }       // SQ: majority (3 of 5)
+```
+
+**Reference**: See `/tmp/swiftpaxos/swift/swift.go` lines 17-98 for Go structs, `/tmp/swiftpaxos/swift/key.go` for conflict tracking, `/tmp/swiftpaxos/swift/dpath.go` for hash logs.
+
+**Acceptance criteria:**
+- [ ] All data structures compile
+- [ ] Hash computation produces deterministic results for same input
+
+### 2.3 Server — proposal handling and fast/slow path logic
+
+The core protocol logic. When a replica receives a proposal:
+
+**Fast path flow (1 RTT)**:
+1. Compute dependencies via per-key conflict tracking (`getConflictCmds`)
+2. Compute per-key hash digest
+3. If replica is in FQ: send `SwiftFastAck{dep, checksum, seqnum}` to all
+4. Leader includes sequence number (`seqnum++`); non-leaders set `seqnum=0`
+5. Collect FQ fast acks. Accept condition: `dep == leaderDep AND checksum == leaderChecksum`
+6. If FQ matches → phase = COMMIT, deliver command
+
+**Slow path flow (2 RTT)**:
+1. Dependencies conflict (hashes differ between replicas)
+2. Replica sends `SwiftLightSlowAck` instead of/in addition to fast ack
+3. Wait for SQ (majority) to agree
+4. Phase = ACCEPT → COMMIT with agreed dependencies
+
+**Files to implement in `src/deptran/swiftpaxos/server.cc`:**
+- `HandlePropose(cmd)` — entry point, compute deps, broadcast fast ack
+- `HandleFastAck(msg)` — collect into FQ message set, check hash match
+- `HandleLightSlowAck(msg)` — collect into SQ message set
+- `FastAckFromLeader(msg)` — special handling for leader's ack (has seqnum)
+- `Deliver(cmd_id)` — apply to state machine after commit
+- `GetDepAndHashes(cmd)` — per-key dependency computation + hash
+
+**Reference**: See `/tmp/swiftpaxos/swift/swift.go` lines 280-522 for the Go implementation.
+
+**Acceptance criteria:**
+- [ ] Non-conflicting commands commit in 1 RTT (fast path)
+- [ ] Conflicting commands commit in 2 RTT (slow path)
+- [ ] Dependency tracking is per-key and correct
+
+### 2.4 Coordinator — client-side fast/slow path tracking
+
+The client (coordinator) tracks both FQ and SQ message sets per command:
+
+**Logic:**
+1. Send `Propose(cmd)` to all replicas
+2. Collect `SwiftFastAck` messages into `fastPathH` (FQ-sized message set)
+3. Collect `SwiftLightSlowAck` messages into `slowPathH` (SQ-sized message set)
+4. **Fast path commit**: FQ reached AND leader ack received AND all hashes match
+5. **Slow path commit**: SQ reached (hashes may differ)
+6. Return to client on whichever completes first
+
+**Files to implement in `src/deptran/swiftpaxos/coordinator.cc`:**
+- `Submit(cmd)` — broadcast propose, init FQ/SQ message sets
+- `HandleFastAck(msg)` — add to fastPathH, check FQ threshold + hash match
+- `HandleSlowAck(msg)` — add to slowPathH, check SQ threshold
+
+**Reference**: See `/tmp/swiftpaxos/swift/client.go` lines 70-241.
+
+**Acceptance criteria:**
+- [ ] Client commits on FQ fast path when hashes match
+- [ ] Client falls back to SQ slow path when hashes differ
+- [ ] Latency metrics distinguish fast vs slow path commits
+
+### 2.5 Recovery — leader election and state sync
+
+When a leader fails, the new leader runs recovery:
+
+**Phase 1 — New leader election:**
+- Increment ballot, broadcast `SwiftNewLeader{ballot}`
+- All replicas enter RECOVERING status, stop normal processing
+
+**Phase 2 — Collect state:**
+- Each replica responds with `SwiftNewLeaderAck{cballot, cmd_ids[], phases[], cmds[], deps[]}`
+- Reports all commands it knows about and their phases
+
+**Phase 3 — Merge and sync:**
+- New leader collects majority of acks
+- Find highest `cballot` group → these commands are authoritative
+- Merge: committed/accepted commands from highest cballot group win
+- Broadcast `SwiftSync{phases, cmds, deps}` to all replicas
+
+**Phase 4 — Apply sync:**
+- Each replica applies synced state
+- Topological sort by dependencies (deliver deps before dependents)
+- Resume normal operation with new ballot
+
+**Files to implement in `src/deptran/swiftpaxos/recovery.cc`:**
+- `HandleNewLeader(msg)` — enter recovery, report state
+- `HandleNewLeaderAck(msg)` — collect majority, merge state
+- `HandleSync(msg)` — apply synced state, resume
+
+**Reference**: See `/tmp/swiftpaxos/swift/recovery.go` lines 1-312.
+
+**Acceptance criteria:**
+- [ ] After leader kill, new leader recovers all committed commands
+- [ ] No committed command is lost during recovery
+- [ ] Recovery completes and replicas resume normal processing
+
+### 2.6 Message batching (optimization)
+
+SwiftPaxos batches multiple acks into single messages to reduce network overhead:
+
+- `MOptAcks`: combines multiple fast acks from the same replica into one message
+- `MAcks`: combines fast + slow acks
+
+**Reference**: See `/tmp/swiftpaxos/swift/batcher.go`.
+
+This is an optimization that can be deferred — implement basic unbatched protocol first, then add batching for throughput.
+
+**Acceptance criteria:**
+- [ ] Batching reduces message count at high throughput
+- [ ] No correctness change vs unbatched version
+
+### 2.7 Config and experiment integration
+
+**Files to create/modify:**
+- `config/none_swiftpaxos.yml` — (created in 2.0)
+- `config/30c1s5r5p-zoo.yml` or new topology for SwiftPaxos (may need quorum config)
+- `scripts/experiment_defs.sh` — add `SWIFTPAXOS_CONCS` array
+
+**Quorum configuration**: SwiftPaxos needs FQ and SQ defined. For 5 replicas: FQ=4, SQ=3. This may need a config file or command-line flag.
+
+**Acceptance criteria:**
+- [ ] SwiftPaxos runs on the zoo cluster with 5 replicas
+- [ ] `run_single_exp.sh` works with `none_swiftpaxos.yml`
+
+### 2.8 Comparative experiment — SwiftPaxos vs Raft vs CURP vs Jetpack+Raft
+
+**Protocols to compare:**
+
+| Protocol | Type | Fast path | Recovery | Leader required? |
+|---|---|---|---|---|
+| Raft | Leader-based | None (2 RTT) | Log-based | Yes |
+| CURP | Leader-based + fast path | 1 RTT (witnesses) | None (Phase 1) | Yes |
+| Jetpack+Raft | Plugin fast path on Raft | 1 RTT (command pool) | Paxos-based | Yes |
+| SwiftPaxos | Leaderless with leader optimization | 1 RTT (hash agreement) | State-merge | Optional (improves perf) |
+
+**Experiments:**
+1. **Latency** at low load — all fast-path protocols should achieve ~40ms (1 RTT)
+2. **Max throughput** — SwiftPaxos may differ since it's leaderless (less leader bottleneck)
+3. **Contention sweep** — SwiftPaxos hash-based conflict detection vs Jetpack's command pool
+4. **Failure recovery** — SwiftPaxos state-merge vs Jetpack Paxos recovery
+5. **Varying cluster size** (3, 5, 7 replicas) — FQ scaling (3/4 quorum gets expensive)
+
+**Acceptance criteria:**
+- [ ] Results documented in `docs/swiftpaxos_comparative_experiment.md`
+- [ ] SwiftPaxos achieves 1 RTT latency for non-conflicting workloads
+- [ ] Recovery works correctly after leader kill
+
+### Summary of Phase 2 deliverables
+
+| Task | New files | Estimated lines |
+|---|---|---|
+| 2.0 Scaffolding | 10 files in `src/deptran/swiftpaxos/`, config | ~200 (stubs) |
+| 2.1 RPC definitions | `rcc_rpc.rpc` modifications | ~50 |
+| 2.2 Data structures | `server.h` (structs, hash log, quorum) | ~200 |
+| 2.3 Server protocol | `server.cc` (propose, fast/slow path, deliver) | ~500 |
+| 2.4 Coordinator | `coordinator.cc` (client-side FQ/SQ tracking) | ~200 |
+| 2.5 Recovery | `recovery.cc` (leader election, state merge, sync) | ~300 |
+| 2.6 Batching | `batcher.cc` (optional optimization) | ~150 |
+| 2.7 Config integration | config files, experiment_defs.sh | ~20 |
+| 2.8 Experiments | results doc | — |
+
+**Total**: ~1600 lines new code. This is a full protocol implementation, not a mode variant. Most complex task is 2.3 (server protocol logic) and 2.5 (recovery).
+
+**Key implementation risks:**
+- SwiftPaxos reference is in Go; translating to C++ requires adapting concurrent message handling (Go channels → C++ coroutines/events)
+- The hash log mechanism is non-trivial and must be exactly correct for fast-path safety
+- Recovery correctness requires careful testing (TLA+ verification is ideal but out of scope for this phase)
+
+---
+
+## Phase 3: EPaxos Integration (corrected version)
+
+**Goal**: Implement the corrected EPaxos from the SwiftPaxos repo (`/tmp/swiftpaxos/epaxos/`) as a new protocol (`ab: epaxos`) in the Janus codebase. EPaxos is a leaderless consensus protocol where every replica can propose, commands carry explicit dependency sets, and execution uses topological sorting via Tarjan's SCC algorithm.
+
+**Reference implementation**: https://github.com/imdea-software/swiftpaxos/tree/master/epaxos (Go, ~3000 lines). This is the corrected version that fixes several bugs in the original EPaxos paper (SOSP '13).
+
+**Corrections from original EPaxos** (documented in the reference code):
+1. Fixed N=3 case
+2. Added `vbal` variable (the original TLA+ spec was wrong)
+3. Removed short commits (for N>7, propagating committed dependencies is necessary)
+4. Must run with thriftiness on (recovery is incorrect otherwise)
+5. When conflicts are transitive, skip waiting for prior commuting commands
+
+**Key EPaxos concepts**:
+- **Leaderless**: Any replica can propose. No designated leader (unlike SwiftPaxos which has a leader for sequence numbers).
+- **Instance space**: 2D array `InstanceSpace[replica][instance]`. Each replica has its own instance sequence.
+- **Dependencies**: Each instance has `Deps[N]` — one dependency per replica, pointing to the highest instance from that replica this command conflicts with.
+- **Sequence numbers** (`Seq`): Used for execution ordering within SCCs. Not a global total order — just a local ordering hint.
+- **Three phases**: PreAccept (fast), Accept (slow), Commit.
+- **Fast path**: If all F+⌊(F+1)/2⌋ PreAccept replies agree on same Seq/Deps AND all deps committed AND initial ballot → commit in 1 RTT.
+- **Slow path**: If Seq/Deps disagree → merge deps, run Accept phase with majority, commit in 2 RTT.
+- **Execution**: Tarjan's SCC algorithm on the dependency graph. Commands in the same SCC are sorted by (Seq, replica, proposeTime) and executed together.
+- **Recovery**: Prepare → collect instance state from majority → TryPreAccept optimization → Accept → Commit.
+
+**EPaxos vs SwiftPaxos comparison**:
+
+| Aspect | EPaxos | SwiftPaxos |
+|---|---|---|
+| Leader | None (any replica proposes) | Designated leader (assigns seqnum) |
+| Ordering | Dependency graph + SCC | Leader sequence number |
+| Fast path quorum | F + ⌊(F+1)/2⌋ (smaller than SwiftPaxos FQ) | 3N/4 |
+| Fast path condition | All replies same Seq/Deps + all deps committed | All hashes match leader |
+| Conflict detection | Explicit per-key Deps[N] array | Hash-based per-key digest |
+| Execution | Tarjan's SCC + topological sort | Sequential by seqnum |
+| Recovery | Prepare/TryPreAccept (complex, 6 subcases) | NewLeader/Sync (state merge) |
+| Message size | Larger (carries Deps[N] + Seq) | Smaller (carries hash only) |
+
+### 3.0 Scaffolding — register EPaxos as a new protocol
+
+**Files to create/modify:**
+- `src/deptran/constants.h` — add `#define MODE_EPAXOS_CORRECTED (0x8001)` (distinct from the existing `MODE_EPAXOS (0x80)` if any legacy code exists)
+- `src/deptran/frame.cc` — add `{"epaxos_corrected", MODE_EPAXOS_CORRECTED}` to protocol name map
+- `wscript` — add `src/deptran/epaxos_corrected/*.cc` to the build
+- `config/none_epaxos_corrected.yml`:
+  ```yaml
+  mode:
+    cc: none
+    ab: epaxos_corrected
+    batch: false
+    retry: 20
+    ongoing: 1
+  ```
+
+**New directory `src/deptran/epaxos_corrected/`:**
+- `frame.h/cc` — `EPaxosCFrame : public Frame`
+- `server.h/cc` — `EPaxosCServer : public TxLogServer` (main replica + instance space)
+- `coordinator.h/cc` — `EPaxosCCoordinator : public Coordinator` (client-side)
+- `commo.h/cc` — `EPaxosCCommo : public Communicator` (RPC broadcast)
+- `service.h/cc` — `EPaxosCServiceImpl : public Service` (RPC handlers)
+- `exec.h/cc` — `EPaxosCExec` (Tarjan's SCC execution engine)
+
+**Acceptance criteria:**
+- [ ] `build/deptran_server -f config/none_epaxos_corrected.yml ...` compiles and starts
+- [ ] Frame resolves `"epaxos_corrected"` → `MODE_EPAXOS_CORRECTED` → `EPaxosCFrame`
+
+### 3.1 RPC definitions — EPaxos protocol messages
+
+**File to modify:** `src/deptran/rcc_rpc.rpc`
+
+| RPC | Direction | Key Fields | Purpose |
+|---|---|---|---|
+| `EPaxosPreAccept` | Leader→FQ | `leader, replica, instance, ballot, cmds[], seq, deps[N]` | Fast path round 1 |
+| `EPaxosPreAcceptReply` | FQ→Leader | `replica, instance, ballot, vbal, seq, deps[N], committed_deps[N], status` | Reply with local deps |
+| `EPaxosPreAcceptOK` | FQ→Leader | `instance` | Shortcut reply when deps unchanged |
+| `EPaxosAccept` | Leader→SQ | `leader, replica, instance, ballot, seq, deps[N]` | Slow path round 2 |
+| `EPaxosAcceptReply` | SQ→Leader | `replica, instance, ballot` | Accept acknowledgment |
+| `EPaxosCommit` | Leader→All | `leader, replica, instance, ballot, cmds[], seq, deps[N]` | Final commit broadcast |
+| `EPaxosPrepare` | Recoverer→All | `leader, replica, instance, ballot` | Recovery phase 1 |
+| `EPaxosPrepareReply` | All→Recoverer | `acceptor, replica, instance, ballot, vbal, status, cmds[], seq, deps[N]` | Report instance state |
+| `EPaxosTryPreAccept` | Recoverer→All | `leader, replica, instance, ballot, cmds[], seq, deps[N]` | Recovery optimization |
+| `EPaxosTryPreAcceptReply` | All→Recoverer | `acceptor, replica, instance, ballot, vbal, conflict_replica, conflict_instance, conflict_status` | Conflict report |
+
+**Reference**: See `/tmp/swiftpaxos/epaxos/defs.go` lines 13-101.
+
+**Acceptance criteria:**
+- [ ] All 10 RPCs generate stubs via rpcgen
+- [ ] Service registers handlers for all EPaxos RPCs
+
+### 3.2 Core data structures — instance space, dependencies, conflict tracking
+
+**Instance** (the core per-command state):
+```cpp
+struct EPaxosInstance {
+  enum Status { NONE, PREACCEPTED, PREACCEPTED_EQ, ACCEPTED, COMMITTED, EXECUTED };
+  vector<shared_ptr<Marshallable>> cmds;  // batched commands
+  int32_t ballot = 0, vbal = 0;          // ballot and validated ballot
+  Status status = NONE;
+  int32_t seq = 0;                        // sequence number for execution ordering
+  vector<int32_t> deps;                   // deps[N]: one dependency per replica
+  // Tarjan's SCC fields
+  int index = -1, lowlink = -1;
+  int64_t propose_time = 0;
+};
+```
+
+**Instance space**: 2D array indexed by `[replica_id][instance_number]`.
+
+**LeaderBookkeeping** (per-command leader state during consensus):
+```cpp
+struct EPaxosLeaderBookkeeping {
+  int pre_accept_oks = 0;
+  int accept_oks = 0;
+  int nacks = 0;
+  bool all_equal = true;                  // all PreAccept replies had same Seq/Deps
+  vector<int32_t> original_deps;          // initial dependencies
+  vector<int32_t> committed_deps;         // committed deps per replica
+  // Recovery fields
+  vector<PrepareReply*> prepare_replies;
+  bool preparing = false;
+  bool trying_to_pre_accept = false;
+  vector<bool> possible_quorum;
+  int tpa_reps = 0;
+  bool tpa_accepted = false;
+};
+```
+
+**Per-key conflict tracker**:
+```cpp
+struct InstPair {
+  int32_t last;        // last instance touching this key
+  int32_t last_write;  // last write instance touching this key
+};
+// conflicts[replica][key] → InstPair
+vector<unordered_map<key_t, InstPair>> conflicts;  // one map per replica
+unordered_map<key_t, int32_t> max_seq_per_key;     // global max seq per key
+```
+
+**Quorum sizes** (for N replicas, F = ⌊(N-1)/2⌋ failures tolerated):
+```cpp
+int FastQuorumSize() { return f_ + (f_ + 1) / 2; }  // e.g., N=5, F=2 → FQ=3
+int SlowQuorumSize() { return (n_ + 1) / 2; }        // e.g., N=5 → SQ=3
+```
+
+**Reference**: See `/tmp/swiftpaxos/epaxos/epaxos.go` lines 42-132.
+
+**Acceptance criteria:**
+- [ ] Instance space supports 2D indexing by [replica][instance]
+- [ ] Dependency arrays are N-element (one per replica)
+- [ ] Conflict tracker correctly identifies per-key read-write conflicts
+
+### 3.3 Server — PreAccept, Accept, Commit (core protocol)
+
+**PreAccept phase (fast path, 1 RTT if all agree)**:
+
+1. `StartPhase1(cmds)` — leader creates new instance, computes initial Seq/Deps via `UpdateAttributes()`, broadcasts `EPaxosPreAccept` to FastQuorumSize()-1 replicas
+2. `HandlePreAccept(msg)` — non-leader computes its own Seq/Deps. If matches leader's → reply `PreAcceptOK`. If differs → reply `PreAcceptReply` with its Seq/Deps.
+3. `HandlePreAcceptReply(msg)` — leader collects replies:
+   - **Fast commit**: all FQ replies agree (allEqual) AND all deps committed AND initial ballot → broadcast `Commit`
+   - **Slow path**: FQ replies collected but disagreement → merge Seq/Deps, go to Accept phase
+
+**Accept phase (slow path, 2 RTT total)**:
+
+4. `BroadcastAccept(instance)` — broadcast merged Seq/Deps to SlowQuorumSize() replicas
+5. `HandleAccept(msg)` — replica accepts if ballot ≥ local ballot, replies `AcceptReply`
+6. `HandleAcceptReply(msg)` — leader collects majority → broadcast `Commit`
+
+**Commit phase**:
+
+7. `BroadcastCommit(instance)` — broadcast final Cmds/Seq/Deps to all replicas
+8. `HandleCommit(msg)` — replica updates instance to COMMITTED, updates conflict table
+
+**Key helper functions:**
+- `UpdateAttributes(cmds, replica, instance)` — computes Seq/Deps from conflict table
+- `UpdateConflicts(cmds, replica, instance)` — updates conflict table after accept
+- `MergeAttributes(seq, deps, reply_seq, reply_deps)` — merges Seq/Deps from multiple replies (take max)
+
+**Reference**: See `/tmp/swiftpaxos/epaxos/epaxos.go` lines 460-1113.
+
+**Acceptance criteria:**
+- [ ] Non-conflicting commands commit in 1 RTT (all PreAccept replies agree)
+- [ ] Conflicting commands go to Accept phase and commit in 2 RTT
+- [ ] Seq/Deps merge correctly takes max of all proposals
+
+### 3.4 Execution engine — Tarjan's SCC algorithm
+
+**Purpose**: EPaxos does not have a global total order. Commands are partially ordered by their dependency graph. Execution requires finding strongly connected components (SCCs) in the graph and executing them in topological order.
+
+**Algorithm**:
+1. When a command is COMMITTED, attempt execution
+2. `FindSCC(replica, instance)` — run Tarjan's algorithm from this instance
+3. For each dependency, recursively check if COMMITTED
+4. If all dependencies are COMMITTED → SCC is ready to execute
+5. Sort instances within SCC by (Seq, replica_id, propose_time)
+6. Execute commands in sorted order, mark EXECUTED
+
+**Files to implement in `src/deptran/epaxos_corrected/exec.cc`:**
+- `ExecuteCommand(replica, instance)` — entry point
+- `FindSCC(replica, instance)` — Tarjan's SCC detection
+- `StrongConnect(instance)` — recursive DFS with index/lowlink
+
+**Reference**: See `/tmp/swiftpaxos/epaxos/exec.go` lines 25-172. Tarjan's algorithm uses Index/Lowlink fields on each instance and a DFS stack with WHITE/GRAY/BLACK coloring.
+
+**Acceptance criteria:**
+- [ ] Commutative commands in the same SCC are executed in deterministic order across all replicas
+- [ ] Execution respects dependency ordering (no command executes before its dependencies)
+- [ ] All replicas produce the same execution order for the same set of committed commands
+
+### 3.5 Recovery — Prepare, TryPreAccept
+
+**When triggered**: Execution thread detects an instance stuck in non-COMMITTED state for >10 seconds (COMMIT_GRACE_PERIOD).
+
+**Recovery protocol** (6 subcases from corrected TLA+ spec):
+
+1. `StartRecovery(replica, instance)` — increment ballot, broadcast `EPaxosPrepare` to all
+2. `HandlePrepare(msg)` — return current instance state (status, ballot, vbal, cmds, seq, deps)
+3. `HandlePrepareReply(msg)` — collect majority of replies, then:
+   - **Case 1**: If any reply says COMMITTED → done (already committed)
+   - **Case 2**: If any reply says ACCEPTED → broadcast Accept with that value
+   - **Case 3**: If PREACCEPTED + slow quorum agrees + leader not responded + allEqual → broadcast Accept
+   - **Case 4**: Same conditions → try TryPreAccept optimization
+   - **Case 5**: PREACCEPTED but conditions not met → retry with higher ballot
+   - **Case 6**: NONE (nobody has seen it) → propose as new command
+
+4. `HandleTryPreAccept(msg)` — check for conflicts via `FindPreAcceptConflicts()`:
+   - No conflict → accept with PREACCEPTED
+   - Conflict found → return conflict info (replica, instance, status)
+5. `HandleTryPreAcceptReply(msg)` — collect replies:
+   - If found accepted instance elsewhere → abandon, restart recovery
+   - If quorum with no conflicts → Accept
+   - If quorum with conflicts → defer recovery (prevent cycles)
+
+**Defer mechanism**: Prevents recovery cycles when two instances depend on each other. Uses a defer map to track which instance deferred to which.
+
+**Reference**: See `/tmp/swiftpaxos/epaxos/epaxos.go` lines 1121-1506.
+
+**Acceptance criteria:**
+- [ ] Recovery successfully commits stuck instances
+- [ ] No committed command is lost during recovery
+- [ ] TryPreAccept correctly detects conflicts with existing instances
+- [ ] Defer mechanism prevents infinite recovery loops
+
+### 3.6 Command batching
+
+EPaxos supports batching multiple client proposals into a single instance:
+
+- `HandlePropose()` — when batching enabled, collect `batchSize` proposals from channel before starting Phase 1
+- Each instance's `cmds` field is a vector (not a single command)
+- Conflict detection checks all keys across all commands in the batch
+- Dependency merging accounts for batch semantics
+
+**Reference**: See `/tmp/swiftpaxos/epaxos/epaxos.go` lines 724-748.
+
+**Acceptance criteria:**
+- [ ] Batching improves throughput at high load
+- [ ] Correctness unchanged (dependencies computed correctly for batches)
+
+### 3.7 Config and experiment integration
+
+**Files to create/modify:**
+- `config/none_epaxos_corrected.yml` — (created in 3.0)
+- `scripts/experiment_defs.sh` — add `EPAXOS_CORRECTED_CONCS` array
+
+**Note**: EPaxos is leaderless — there is no "leader" to configure. Any replica can propose. The topology config just needs N replicas with clients distributed evenly.
+
+**Acceptance criteria:**
+- [ ] EPaxos runs on the zoo cluster with 5 replicas
+- [ ] Any replica can accept proposals (not just a designated leader)
+
+### 3.8 Comparative experiment — full protocol suite
+
+**Protocols to compare:**
+
+| Protocol | Type | Leader | Fast path | Slow path | Execution |
+|---|---|---|---|---|---|
+| Raft | Leader-based | Required | None (2 RTT) | N/A | Sequential by log |
+| CURP | Leader + fast path | Required | 1 RTT (log check) | 2 RTT (Raft) | Sequential by log |
+| Jetpack+Raft | Plugin fast path | Required | 1 RTT (command pool) | 2 RTT (Raft) | Sequential by log |
+| SwiftPaxos | Leader-optimized | Optional | 1 RTT (hash match, FQ=3N/4) | 2 RTT | Sequential by seqnum |
+| EPaxos | Leaderless | None | 1 RTT (deps agree, FQ=F+⌊(F+1)/2⌋) | 2 RTT (Accept) | SCC topological sort |
+
+**Experiments:**
+1. **Latency** at low load — EPaxos fast path should also achieve ~1 RTT
+2. **Max throughput** — EPaxos leaderless may have higher ceiling (no leader bottleneck)
+3. **Contention sweep** — EPaxos explicit dependency tracking vs SwiftPaxos hashes vs Jetpack command pool
+4. **Recovery comparison** — EPaxos Prepare/TryPreAccept vs SwiftPaxos state-merge vs Jetpack Paxos
+5. **Slow path rate** — measure what fraction of commands take slow path under varying contention
+6. **Execution latency** — EPaxos SCC overhead vs sequential execution in other protocols
+
+**Acceptance criteria:**
+- [ ] Results documented in `docs/full_protocol_comparison.md`
+- [ ] EPaxos achieves 1 RTT for non-conflicting workloads
+- [ ] EPaxos correctly handles conflicting workloads via slow path
+- [ ] Tarjan execution produces deterministic results across replicas
+
+### Summary of Phase 3 deliverables
+
+| Task | New files | Estimated lines |
+|---|---|---|
+| 3.0 Scaffolding | 12 files in `src/deptran/epaxos_corrected/`, config | ~200 (stubs) |
+| 3.1 RPC definitions | `rcc_rpc.rpc` modifications | ~80 (10 RPCs) |
+| 3.2 Data structures | `server.h` (instance, leader bookkeeping, conflicts) | ~250 |
+| 3.3 Server protocol | `server.cc` (PreAccept, Accept, Commit, helpers) | ~600 |
+| 3.4 Execution engine | `exec.cc` (Tarjan's SCC, topological sort) | ~200 |
+| 3.5 Recovery | `server.cc` (Prepare, TryPreAccept, 6 subcases, defer) | ~400 |
+| 3.6 Batching | `server.cc` (batch proposal handling) | ~50 |
+| 3.7 Config integration | config files, experiment_defs.sh | ~20 |
+| 3.8 Experiments | results doc | — |
+
+**Total**: ~1800 lines new code. Comparable to SwiftPaxos (Phase 2) in complexity. Most complex parts are 3.5 (recovery with 6 subcases + TryPreAccept + defer mechanism) and 3.4 (Tarjan execution).
+
+**Key implementation risks:**
+- Recovery correctness is notoriously tricky in EPaxos — the original paper had bugs. Must faithfully port the corrected version's 6 subcases.
+- Tarjan's SCC requires all dependency instances to be COMMITTED before executing. A stuck dependency triggers recovery, which can cascade.
+- The `vbal` (validated ballot) is a correction to the original spec — must not be confused with the regular ballot.
+- Go's concurrent channel model maps to C++ coroutines/events, requiring careful translation of the message-processing loop.
+
+---
+
+## Phase 4: Full Protocol Benchmark Suite
+
+**Goal**: Run latency and max-throughput experiments for all 12 protocol configurations on the 5-node zoo cluster (.101-.105). Produce a single comprehensive results document with all commands, metrics, and CPU data.
+
+### 4.0 Pre-experiment: enable in-binary CPU monitoring and verify mid-10s recording
+
+All metrics must come from the middle 10 seconds of the 30-second run.
+
+**Latency (p50/p90/p99)**: ✅ Already mid-10s filtered. The coordinators gate `cli2cli_[].append()` calls with `latency_window` (`dispatch_duration_3_times` between `duration*1000` and `duration*2*1000`). Both Jetpack (`rule/coordinator.cc:50-51,183`) and non-Jetpack (`none/coordinator.cc:17-18,36`) paths use this gating. No `mid_time_append()` needed — the caller already filters.
+
+**Throughput (`Mid throughput`)**: ✅ Already mid-10s. `cli2cli[5]` only receives appends during the `latency_window`, so `cli2cli[5].count() / (duration / 3.0)` at `s_main.cc:924` is correct.
+
+**CPU**: Use the in-binary `/proc/stat` monitor that already exists behind `#ifdef AWS` (`s_main.cc:838-846`). This calls `getUsage(server_core_id, duration)` which reads `/proc/stat` for core 1 every second during the middle third only (`first_phase` to `second_phase`), then logs `server median`. This is exactly what we need — mid-10s filtered, pinned to the server thread's core.
+
+**Action item — enable the AWS CPU path for all builds:**
+- [ ] Remove the `#ifdef AWS` / `#endif` guards around `s_main.cc:838-848` so the CPU monitor runs unconditionally (not just AWS builds)
+- [ ] Also remove the `#ifndef AWS` / `#endif` around `sleep(Config::GetConfig()->duration_)` at line 849-851, since `getUsage()` already sleeps for the full duration
+- [ ] Verify `server_core_id = 1` matches our server thread pinning (core 1). ✅ Correct.
+
+After this change, every `.res` file will contain:
+```
+server median : 74.23       # CPU% of core 1 during mid-10s (median of 1-second samples)
+```
+plus the individual per-second samples logged as `CORE 1 USAGE: ...`. This works for ALL protocols (Raft, Jetpack, CURP, SwiftPaxos, EPaxos, etcd, etc.) since it reads `/proc/stat` directly, not from Jetpack RPC callbacks.
+
+**No external CPU monitoring needed**: Drop `run_single_exp.sh`'s `/proc/stat` polling and `parse_cpustat.py` for this phase. The in-binary monitor is more accurate (mid-10s filtered, 1 sample/sec, correct core).
+
+**Acceptance criteria:**
+- [ ] `server median` line appears in `.res` files for ALL protocol modes (not just `#ifdef AWS`)
+- [ ] CPU value is from mid-10s window only (verify by comparing with full-duration external monitor)
+- [ ] Core ID matches server thread pinning (core 1)
+
+### 4.1 Build
+
+Build the binary following `README.md` Section 1.2:
+
+```bash
+docker build -f docker/zoo-build/Dockerfile -t jetpack-zoo-build .
+docker create --name tmp jetpack-zoo-build
+docker cp tmp:/output/deptran_server build/deptran_server
+docker cp tmp:/output/lib build/docker_libs/
+docker rm tmp
+rm -f build/docker_libs/{libc.so.6,libm.so.6,libresolv.so.2,libgcc_s.so.1,libstdc++.so.6,ld-linux-x86-64.so.2}
+```
+
+Record in the results doc: git commit hash, build timestamp, binary sha256.
+
+**Acceptance criteria:**
+- [ ] Binary runs on all 5 zoo nodes
+- [ ] `LD_LIBRARY_PATH=build/docker_libs deptran_server --help` succeeds on .101
+
+### 4.2 Experiment matrix — 12 protocol configurations
+
+| # | Label | Config | `-m` | Notes |
+|---|---|---|---|---|
+| 1 | Raft | `none_raft.yml` | `0` | Baseline, 2 RTT |
+| 2 | Raft + Jetpack fp100 | `rule_raft.yml` | `100` | Jetpack 100% fast path |
+| 3 | Raft + Jetpack adaptive | `rule_raft.yml` | `101` | Jetpack adaptive throttle |
+| 4 | CURP (+ Raft) | `none_curp.yml` | `200` | Leader checks log, no recovery |
+| 5 | SwiftPaxos | `none_swiftpaxos.yml` | `0` | Leaderless, hash-based |
+| 6 | EPaxos (corrected) | `none_epaxos_corrected.yml` | `0` | Leaderless, dependency graph |
+| 7 | etcd | `none_etcd.yml` | `0` | External etcd backend |
+| 8 | ZooKeeper | `none_zookeeper.yml` | `0` | External ZK backend |
+| 9 | CoPilot | `none_copilot.yml` | `0` | Dual-pilot protocol |
+| 10 | CoPilot + Jetpack adaptive | `rule_copilot.yml` | `101` | Jetpack on CoPilot |
+| 11 | Mencius | `none_mencius.yml` | `0` | Rotating leader |
+| 12 | Mencius + Jetpack adaptive | `rule_mencius.yml` | `101` | Jetpack on Mencius |
+
+### 4.3 Experiment 1: Latency (low load)
+
+**Settings** (same as previous SwiftPaxos-style experiment):
+- Topology: `30c1s5r5p-zoo.yml`
+- Concurrency: `concurrent_1`
+- Workload: `rw_1000000.yml` (100% write, 1M key range, near-zero conflict)
+- Client: `client_open.yml` (open-loop, rate=1000/client)
+- WAN: `WAN_DELAY_MS=20` (20ms one-way, 40ms RTT)
+- Duration: 30s
+- CPU monitoring: in-binary `/proc/stat` reader for core 1, mid-10s only (`server median` in `.res`)
+
+**Run commands** (record each in the results doc):
+```bash
+RDIR=results/$(date +%Y-%m-%d)-full-protocol-benchmark
+
+# 1. Raft
+./run_single_exp.sh none_raft.yml 0 concurrent_1.yml raft-c1 $RDIR
+
+# 2. Raft + Jetpack fp100
+./run_single_exp.sh rule_raft.yml 100 concurrent_1.yml jp-raft-fp100-c1 $RDIR
+
+# 3. Raft + Jetpack adaptive
+./run_single_exp.sh rule_raft.yml 101 concurrent_1.yml jp-raft-adaptive-c1 $RDIR
+
+# 4. CURP
+./run_single_exp.sh none_curp.yml 200 concurrent_1.yml curp-c1 $RDIR
+
+# 5. SwiftPaxos
+./run_single_exp.sh none_swiftpaxos.yml 0 concurrent_1.yml swiftpaxos-c1 $RDIR
+
+# 6. EPaxos
+./run_single_exp.sh none_epaxos_corrected.yml 0 concurrent_1.yml epaxos-c1 $RDIR
+
+# 7. etcd
+./run_single_exp.sh none_etcd.yml 0 concurrent_1.yml etcd-c1 $RDIR
+
+# 8. ZooKeeper
+./run_single_exp.sh none_zookeeper.yml 0 concurrent_1.yml zookeeper-c1 $RDIR
+
+# 9. CoPilot
+./run_single_exp.sh none_copilot.yml 0 concurrent_1.yml copilot-c1 $RDIR
+
+# 10. CoPilot + Jetpack adaptive
+./run_single_exp.sh rule_copilot.yml 101 concurrent_1.yml jp-copilot-adaptive-c1 $RDIR
+
+# 11. Mencius
+./run_single_exp.sh none_mencius.yml 0 concurrent_1.yml mencius-c1 $RDIR
+
+# 12. Mencius + Jetpack adaptive
+./run_single_exp.sh rule_mencius.yml 101 concurrent_1.yml jp-mencius-adaptive-c1 $RDIR
+```
+
+**Metrics to record per protocol** (all from mid-10s window, all from `.res` files):
+
+| Metric | Source in `.res` file |
+|---|---|
+| p50, p90, p99 (ms) | `All-efficient-attempts statistics ... 50pct X 90pct Y 99pct Z` |
+| Total throughput (cmd/s) | Sum of `Mid throughput is X` across 5 hosts |
+| Fast-path attempted / succeeded / rate | `Fastpath statistics attempted N successed M rate(pct) R` |
+| CPU core 1 median per host (zoo0-zoo4) | `server median : X` (mid-10s, per-second samples of core 1) |
+| CPU avg across 5 hosts | Average of 5 hosts' `server median` values |
+
+**Acceptance criteria:**
+- [ ] All 12 protocols produce valid results
+- [ ] All metrics recorded from mid-10s window
+- [ ] Results table in docs with exact commands used
+
+### 4.4 Experiment 2: Max throughput (adaptive concurrency sweep)
+
+**Settings**: Same as Experiment 1 except concurrency varies.
+
+**Approach**: Adaptive binary search per protocol (same as our earlier SwiftPaxos-style experiment):
+1. **Coarse scan**: concurrency = 1, 50, 150, 500, 1000
+2. **Bisect**: narrow to find saturation point (throughput plateaus or latency spikes)
+3. **Fine-tune**: 1-2 more points around the peak
+
+**Saturation criteria**: throughput stops increasing AND/OR p90 jumps to >2x the low-load p90.
+
+**Run commands**: For each of the 12 protocols, run the coarse scan first:
+```bash
+for conc in 1 50 150 500 1000; do
+  ./run_single_exp.sh <protocol>.yml <mode> concurrent_${conc}.yml <label>-c${conc} $RDIR
+done
+```
+Then bisect based on results (manual decision per protocol).
+
+**Metrics to record per (protocol, concurrency) point**: Same table as Experiment 1.
+
+**Acceptance criteria:**
+- [ ] Each protocol's peak throughput identified (within ~10% of true max)
+- [ ] Saturation concurrency identified for each protocol
+- [ ] Total experiment points per protocol: ~8-12 (coarse + bisect)
+
+### 4.5 Results documentation
+
+Create `docs/full_protocol_benchmark.md` with:
+
+1. **Header**: date, git commit, binary sha256, cluster layout, common settings
+2. **Experiment 1 table**: 12 rows, columns: Protocol, p50, p90, p99, Total Throughput, FP Rate, CPU median per host (zoo0-zoo4), CPU avg across hosts
+3. **Experiment 2 tables**: One table per protocol with columns: Conc, Total Throughput, p50, p90, p99, FP Rate, CPU median per host, CPU avg across hosts
+4. **Max throughput summary table**: 12 rows, columns: Protocol, Peak Conc, Peak Throughput, p50 @ peak, CPU avg @ peak
+5. **All commands run**: Exact `run_single_exp.sh` commands for every experiment point
+6. **Raw data location**: Path to results directory with `.res` and `.csv` files
+
+**Acceptance criteria:**
+- [ ] All 12 protocols have latency + throughput data
+- [ ] Every data point has CPU data from `server median` in each host's `.res` file (mid-10s filtered, core 1)
+- [ ] Every command used is recorded verbatim in the doc
+- [ ] Results are reproducible by re-running the recorded commands
+
+### Summary of Phase 4
+
+| Step | What | Depends on |
+|---|---|---|
+| 4.0 | Enable in-binary CPU monitor for all builds (remove `#ifdef AWS`) | — |
+| 4.1 | Build binary | Phases 1-3 complete + 4.0 code change |
+| 4.2 | Define experiment matrix (12 configs) | 4.1 |
+| 4.3 | Run latency experiments (12 runs) | 4.2 |
+| 4.4 | Run throughput experiments (~100 runs total) | 4.3 |
+| 4.5 | Document results | 4.3, 4.4 |
+
+**Estimated time**: ~12 latency runs × 85s + ~100 throughput runs × 85s ≈ ~2.5 hours total experiment time (excluding bisect decision time).
+
+**Prerequisites**: Phases 1 (CURP), 2 (SwiftPaxos), and 3 (EPaxos) must be complete. etcd, ZooKeeper, CoPilot, and Mencius are already implemented in the codebase.
+
+**Code change required**: Remove `#ifdef AWS` guard around `s_main.cc:838-851` so the in-binary CPU monitor runs for all builds. This is the only code change in Phase 4 — everything else is running experiments and documenting results.
+
+---
+
+## Phase 5: (Future) Evaluation paper
+
+Write-up comparing all 12 protocol configurations across latency, throughput, contention (Zipf sweep), key-range sweep, failure recovery, and cluster size dimensions. Phase 4 provides the latency + throughput data; additional experiments (contention, recovery) would be added here.
+
+*(Details TBD after Phase 4 is complete.)*
