@@ -1,6 +1,6 @@
 % Jetpack Optimized Algorithm Pseudocode
 % Documents the implemented (optimized) recovery algorithm:
-%   - Normal path: single-round witness conflict check
+%   - Normal path: single-round command pool conflict check
 %   - Recovery: 2 parallel-broadcast rounds (not N+1 per-key rounds)
 \documentclass[twocolumn]{article}
 
@@ -33,13 +33,13 @@
 \maketitle
 
 \paragraph{Overview}
-Jetpack is a plugin layer that adds a speculative fast path to an underlying consensus protocol (e.g., Raft, CoPilot, MongoDB replication). Each replica maintains a \emph{witness} — a per-key candidate set of unexecuted commands. During normal operation (fast path), the client broadcasts a \texttt{Dispatch} RPC; each replica's witness checks for key conflicts and speculatively installs the command. During failure recovery, the new coordinator runs a two-round protocol to atomically collect, agree upon, and resubmit all commands that succeeded on the fast path.
+Jetpack is a plugin layer that adds a speculative fast path to an underlying consensus protocol (e.g., Raft, CoPilot, MongoDB replication). Each replica maintains a \emph{command pool} — a per-key candidate set of unexecuted commands. During normal operation (fast path), the client broadcasts a \texttt{Dispatch} RPC; each replica's command pool checks for key conflicts and speculatively installs the command. During failure recovery, the new coordinator runs a two-round protocol to atomically collect, agree upon, and resubmit all commands that succeeded on the fast path.
 
 \paragraph{Key Optimizations over the Reference Algorithm}
 The optimized implementation (documented here) differs from the non-optimized reference in two ways:
 \begin{itemize}
   \setlength{\itemsep}{0pt}
-  \item \textbf{Round 1}: Instead of $N+1$ sequential \texttt{Prepare} broadcasts (one for pool key-ids, then one per key), the coordinator issues \texttt{PullRecovery} and \texttt{Prepare} \emph{in parallel} in a single round. \texttt{PullRecovery} updates views and collects witness candidates; \texttt{Prepare} negotiates the Paxos ballot.
+  \item \textbf{Round 1}: Instead of $N+1$ sequential \texttt{Prepare} broadcasts (one for pool key-ids, then one per key), the coordinator issues \texttt{PullRecovery} and \texttt{Prepare} \emph{in parallel} in a single round. \texttt{PullRecovery} updates views and collects command pool candidates; \texttt{Prepare} negotiates the Paxos ballot.
   \item \textbf{Round 2}: Instead of one \texttt{Accept} and one \texttt{Commit} per command, a single \texttt{Accept(sid)} and \texttt{Commit(sid)} cover the entire recovered command set identified by $sid$. A parallel \texttt{RecordCmd} broadcast distributes the committed key-id set and retrieves any missing commands.
 \end{itemize}
 
@@ -48,7 +48,7 @@ Each replica $R$ maintains:
 $R.jepoch$ (Jetpack epoch), $R.oepoch$ (original protocol epoch),
 $R.old\_view$ / $R.new\_view$ (views from original protocol),
 $R.status \in \{RDY, REC\}$ (fast path enabled or blocked),
-$R.witness$ (per-key candidate set with $max\_seen\_ballot$, $max\_accepted\_ballot$, $sid$),
+$R.command_pool$ (per-key candidate set with $max\_seen\_ballot$, $max\_accepted\_ballot$, $sid$),
 $R.rec\_set$ (map from $sid$ to committed key-id set).
 
 
@@ -78,12 +78,12 @@ broadcast $Dispatch(C.jepoch, cmd)$ to all replicas in $C.view$\\
 \end{algorithm}
 
 \paragraph{Fast Path Success Condition}
-Line~\ref{line:fastpathcond} requires a \emph{supermajority} that includes every proposing replica in the current view. This ensures that any command that succeeds on the fast path is witnessed by a sufficient majority that a subsequent Paxos-based recovery can reconstruct it. To verify the view, the client must collect agreement on the same view from a quorum of responders.
+Line~\ref{line:fastpathcond} requires a \emph{supermajority} that includes every proposing replica in the current view. This ensures that any command that succeeds on the fast path is received by a sufficient majority that a subsequent Paxos-based recovery can reconstruct it. To verify the view, the client must collect agreement on the same view from a quorum of responders.
 
 
 \begin{algorithm}
 \caption{Server -- Witness Conflict Check (on $Dispatch$)}
-\label{alg:witness_check}
+\label{alg:command_pool_check}
 \setcounter{AlgoLine}{10}
 
 \underline{Replica $R$, on receiving $Dispatch(jepoch, cmd)$ from client}\\
@@ -92,14 +92,14 @@ Line~\ref{line:fastpathcond} requires a \emph{supermajority} that includes every
     \KwRet\\
 }
 $(key, cmd\_id) \gets$ parse $cmd$\\
-\eIf{$R.witness.candidates[key]$ has no conflicting write\label{line:conflictcheck}}{
-    $R.witness.candidates[key].insert(cmd\_id, cmd)$\\
+\eIf{$R.command_pool.candidates[key]$ has no conflicting write\label{line:conflictcheck}}{
+    $R.command_pool.candidates[key].insert(cmd\_id, cmd)$\\
     \If{$R$ is proposing replica}{
         $result \gets speculative\_install(cmd)$\label{line:speculativeinstall}\\
     }
     reply $DispatchAck(accepted{=}true, result)$\label{line:acceptok}\\
 }{
-    $R.witness.candidates[key].insert(cmd\_id, cmd)$\tcp*{track even on reject\label{line:insertanyway}}
+    $R.command_pool.candidates[key].insert(cmd\_id, cmd)$\tcp*{track even on reject\label{line:insertanyway}}
     reply $DispatchAck(accepted{=}false, R.jepoch, R.new\_view)$\\
 }
 \If{$R$ is proposing replica}{
@@ -108,10 +108,10 @@ $(key, cmd\_id) \gets$ parse $cmd$\\
 \end{algorithm}
 
 \paragraph{Insert on Conflict}
-Commands are inserted into the witness even when a conflict is detected (line~\ref{line:insertanyway}). This ensures that later-arriving commands that conflict with a rejected command still see the rejection in the witness and cannot incorrectly succeed on the fast path. The boolean \emph{preaccept} flag (implicit in the reply) distinguishes commands where a fast-path promise was made from those merely tracked.
+Commands are inserted into the command pool even when a conflict is detected (line~\ref{line:insertanyway}). This ensures that later-arriving commands that conflict with a rejected command still see the rejection in the command pool and cannot incorrectly succeed on the fast path. The boolean \emph{preaccept} flag (implicit in the reply) distinguishes commands where a fast-path promise was made from those merely tracked.
 
 \paragraph{Status Guard}
-Line~\ref{line:epochstatuscheck} blocks fast-path acceptance whenever recovery is in progress ($R.status = REC$). This is set by \texttt{PullRecovery} and cleared only after \texttt{FinishRecovery}, ensuring that no new command enters the witness between the start and end of recovery.
+Line~\ref{line:epochstatuscheck} blocks fast-path acceptance whenever recovery is in progress ($R.status = REC$). This is set by \texttt{PullRecovery} and cleared only after \texttt{FinishRecovery}, ensuring that no new command enters the command pool between the start and end of recovery.
 
 
 \begin{algorithm}
@@ -124,11 +124,11 @@ Line~\ref{line:epochstatuscheck} blocks fast-path acceptance whenever recovery i
     $OriginalProtocolExecute(cmd)$\\
     $R.executed.insert(cmd)$\tcp*{deduplication}
 }
-$R.witness.remove(cmd)$\label{line:gc}\tcp*{garbage collection}
+$R.command_pool.remove(cmd)$\label{line:gc}\tcp*{garbage collection}
 \end{algorithm}
 
 \paragraph{Garbage Collection}
-Line~\ref{line:gc} removes the executed command from the witness. This is triggered by the original protocol's execution notification (e.g., commit acknowledgment from Raft or MongoDB) and is non-intrusive: it does not block the original protocol.
+Line~\ref{line:gc} removes the executed command from the command pool. This is triggered by the original protocol's execution notification (e.g., commit acknowledgment from Raft or MongoDB) and is non-intrusive: it does not block the original protocol.
 
 
 %% ============================================================
@@ -136,7 +136,7 @@ Line~\ref{line:gc} removes the executed command from the witness. This is trigge
 %% ============================================================
 
 \paragraph{Recovery Entry}
-When the original protocol elects a new leader or proposer, it calls into Jetpack before beginning to accept new requests. Jetpack sets $R.status \gets REC$ on all replicas (via \texttt{PullRecovery}) to prevent new fast-path commands from entering the witness during recovery.
+When the original protocol elects a new leader or proposer, it calls into Jetpack before beginning to accept new requests. Jetpack sets $R.status \gets REC$ on all replicas (via \texttt{PullRecovery}) to prevent new fast-path commands from entering the command pool during recovery.
 
 
 \begin{algorithm}
@@ -148,9 +148,9 @@ When the original protocol elects a new leader or proposer, it calls into Jetpac
 $R.status \gets REC$\\
 
 \BlankLine
-\tcc{Round 1 (parallel, 1 RTT): collect witnesses + ballot negotiate}
+\tcc{Round 1 (parallel, 1 RTT): collect command pooles + ballot negotiate}
 $recovery\_e \gets$ broadcast $PullRecovery(R.old\_view, R.new\_view, R.jepoch, R.oepoch)$\\
-$prepare\_e \gets$ broadcast $Prepare(R.jepoch, R.oepoch, R.witness.max\_seen\_ballot)$\\
+$prepare\_e \gets$ broadcast $Prepare(R.jepoch, R.oepoch, R.command_pool.max\_seen\_ballot)$\\
 wait for $recovery\_e$ and $prepare\_e$\label{line:waitround1}\\
 \If{\textbf{not} $recovery\_e.Yes()$\label{line:pullcheck}}{
     update $R.jepoch, R.oepoch$ from $recovery\_e$ if larger\\
@@ -159,23 +159,23 @@ wait for $recovery\_e$ and $prepare\_e$\label{line:waitround1}\\
 $recovered\_key\_ids \gets recovery\_e.GetRecoveredKeyIds()$\\
 $sid \gets$ fresh global unique set id\\
 $R.rec\_set[sid] \gets recovered\_key\_ids$\\
-$missing\_ids \gets \{(k, id) \in recovered\_key\_ids \mid id \notin R.witness.candidates[k]\}$\label{line:missing}\\
+$missing\_ids \gets \{(k, id) \in recovered\_key\_ids \mid id \notin R.command_pool.candidates[k]\}$\label{line:missing}\\
 
 \BlankLine
 \tcc{Round 2 (parallel, 1 RTT): record set + Paxos accept}
 $record\_e \gets$ broadcast $RecordCmd(R.jepoch, R.oepoch, sid, recovered\_key\_ids, missing\_ids)$\\
 \If{$prepare\_e.Yes()$\label{line:preparecheck}}{
-    $R.witness.max\_seen\_ballot \mathrel{+}= 1$\\
+    $R.command_pool.max\_seen\_ballot \mathrel{+}= 1$\\
     \eIf{$prepare\_e.HasValue()$}{
         $propose\_sid \gets prepare\_e.GetSid()$\tcp*{re-use previous accept}
     }{
         $propose\_sid \gets sid$\\
     }
-    $accept\_e \gets$ broadcast $Accept(R.jepoch, R.oepoch, R.witness.max\_seen\_ballot, propose\_sid)$\\
+    $accept\_e \gets$ broadcast $Accept(R.jepoch, R.oepoch, R.command_pool.max\_seen\_ballot, propose\_sid)$\\
 }
 wait for $record\_e$ \textbf{and} $accept\_e$\label{line:waitround2}\\
 \If{\textbf{not} $prepare\_e.Yes()$ \textbf{or not} $accept\_e.Yes()$}{
-    update $R.jepoch, R.oepoch, R.witness.max\_seen\_ballot$ from responses if larger\\
+    update $R.jepoch, R.oepoch, R.command_pool.max\_seen\_ballot$ from responses if larger\\
     \KwRet\tcp*{retry on next recovery trigger}
 }
 \If{$record\_e.Yes()$}{
@@ -189,10 +189,10 @@ $JetpackResubmit(propose\_sid)$\label{line:resubmit}\\
 \end{algorithm}
 
 \paragraph{Round 1: PullRecovery $\|$ Prepare}
-\texttt{PullRecovery} serves two purposes simultaneously: it propagates the new view to all replicas (causing them to set $status = REC$) and it collects each replica's witness candidates — the $(key, cmd\_id)$ pairs for commands that succeeded the fast-path conflict check on that replica. The coordinator takes the union across $f+1$ responses to determine the set that must be recovered. In parallel, \texttt{Prepare} negotiates the Paxos ballot without waiting for \texttt{PullRecovery} to complete.
+\texttt{PullRecovery} serves two purposes simultaneously: it propagates the new view to all replicas (causing them to set $status = REC$) and it collects each replica's command pool candidates — the $(key, cmd\_id)$ pairs for commands that succeeded the fast-path conflict check on that replica. The coordinator takes the union across $f+1$ responses to determine the set that must be recovered. In parallel, \texttt{Prepare} negotiates the Paxos ballot without waiting for \texttt{PullRecovery} to complete.
 
 \paragraph{Round 2: RecordCmd $\|$ Accept}
-\texttt{RecordCmd} records the committed key-id set $sid$ on each replica and returns any commands that the coordinator is missing (line~\ref{line:missing}) — commands that appeared in the recovered set but are absent from the coordinator's local witness. In parallel, \texttt{Accept} commits the set identifier $sid$ via Paxos. If \texttt{Prepare} returned a previously accepted value, that value's $sid$ is reused (line~\ref{line:preparecheck}), ensuring Paxos safety.
+\texttt{RecordCmd} records the committed key-id set $sid$ on each replica and returns any commands that the coordinator is missing (line~\ref{line:missing}) — commands that appeared in the recovered set but are absent from the coordinator's local command pool. In parallel, \texttt{Accept} commits the set identifier $sid$ via Paxos. If \texttt{Prepare} returned a previously accepted value, that value's $sid$ is reused (line~\ref{line:preparecheck}), ensuring Paxos safety.
 
 \paragraph{Commit is Fire-and-Forget}
 After a successful \texttt{Accept} quorum, the commit is durable. The coordinator broadcasts \texttt{Commit} (line~\ref{line:commit}) without waiting — it immediately proceeds to resubmit. Replicas that miss the \texttt{Commit} message will learn the committed value when they receive subsequent \texttt{FinishRecovery} or via the next recovery attempt.
@@ -205,8 +205,8 @@ After a successful \texttt{Accept} quorum, the commit is durable. The coordinato
 
 \underline{Coordinator $R$, after successful accept of $sid$}\\
 \For{each $(key, cmd\_id)$ in $R.rec\_set[sid]$\label{line:resubmitloop}}{
-    \eIf{$R.witness.candidates[key]$ has cmd with id $cmd\_id$}{
-        $cmd \gets R.witness.candidates[key].get(cmd\_id)$\\
+    \eIf{$R.command_pool.candidates[key]$ has cmd with id $cmd\_id$}{
+        $cmd \gets R.command_pool.candidates[key].get(cmd\_id)$\\
     }{
         $cmd \gets R.rec\_set.missed[sid][key]$\tcp*{fetched via RecordCmd}
     }
@@ -217,7 +217,7 @@ broadcast $FinishRecovery(R.oepoch)$\label{line:finishrecovery}\tcp*{fire-and-fo
 \end{algorithm}
 
 \paragraph{Resubmit}
-Each recovered command is resubmitted through the original protocol's normal request path (\texttt{BroadcastDispatch}), using the new epoch $R.oepoch$. The coordinator has all commands either from its local witness or from the \texttt{RecordCmd} responses collected in Round 2 — no additional round trips are needed. After resubmitting all commands, \texttt{FinishRecovery} is broadcast to re-enable the fast path.
+Each recovered command is resubmitted through the original protocol's normal request path (\texttt{BroadcastDispatch}), using the new epoch $R.oepoch$. The coordinator has all commands either from its local command pool or from the \texttt{RecordCmd} responses collected in Round 2 — no additional round trips are needed. After resubmitting all commands, \texttt{FinishRecovery} is broadcast to re-enable the fast path.
 
 
 %% ============================================================
@@ -235,8 +235,8 @@ $R.old\_view \gets old\_view$; \; $R.new\_view \gets new\_view$\label{line:updat
 $R.status \gets REC$\label{line:setrec}\\
 \eIf{$jepoch \ge R.jepoch$ \textbf{and} $oepoch \ge R.oepoch$}{
     $batch \gets \emptyset$\\
-    \For{each $key$ in $R.witness.candidates$\label{line:collectcandidates}}{
-        \If{$R.witness$ has a recoverable cmd for $key$}{
+    \For{each $key$ in $R.command_pool.candidates$\label{line:collectcandidates}}{
+        \If{$R.command_pool$ has a recoverable cmd for $key$}{
             $batch.add(key,\ cmd\_id\_to\_recover(key))$\\
         }
     }
@@ -256,15 +256,15 @@ Line~\ref{line:collectcandidates} returns the \emph{recoverable} command for eac
 \setcounter{AlgoLine}{88}
 
 \underline{Replica $R$, on receiving $Prepare(jepoch, oepoch, ballot)$}\\
-\If{$ballot > R.witness.max\_seen\_ballot$}{
-    $R.witness.max\_seen\_ballot \gets ballot$\\
+\If{$ballot > R.command_pool.max\_seen\_ballot$}{
+    $R.command_pool.max\_seen\_ballot \gets ballot$\\
 }
 \eIf{$jepoch \ge R.jepoch$ \textbf{and} $oepoch \ge R.oepoch$
-      \textbf{and} $ballot \ge R.witness.max\_seen\_ballot$}{
+      \textbf{and} $ballot \ge R.command_pool.max\_seen\_ballot$}{
     reply $PrepareAck(ok{=}true, R.jepoch, R.oepoch,$\\
-    \hspace{4em} $R.witness.max\_accepted\_ballot, R.witness.sid)$\\
+    \hspace{4em} $R.command_pool.max\_accepted\_ballot, R.command_pool.sid)$\\
 }{
-    reply $PrepareAck(ok{=}false, R.jepoch, R.oepoch, R.witness.max\_seen\_ballot)$\\
+    reply $PrepareAck(ok{=}false, R.jepoch, R.oepoch, R.command_pool.max\_seen\_ballot)$\\
 }
 \end{algorithm}
 
@@ -279,8 +279,8 @@ Line~\ref{line:collectcandidates} returns the \emph{recoverable} command for eac
     $R.rec\_set[sid] \gets record\_batch$\tcp*{store committed key-id set}
     $cmd\_batch \gets \emptyset$\\
     \For{each $(key, cmd\_id)$ in $missing\_batch$\label{line:servermissing}}{
-        \If{$R.witness.candidates[key]$ has cmd with id $cmd\_id$}{
-            $cmd\_batch.add(key,\ R.witness.candidates[key].get(cmd\_id))$\\
+        \If{$R.command_pool.candidates[key]$ has cmd with id $cmd\_id$}{
+            $cmd\_batch.add(key,\ R.command_pool.candidates[key].get(cmd\_id))$\\
         }
     }
     reply $RecordCmdAck(ok{=}true, cmd\_batch)$\\
@@ -288,7 +288,7 @@ Line~\ref{line:collectcandidates} returns the \emph{recoverable} command for eac
 \end{algorithm}
 
 \paragraph{Missing Command Retrieval}
-Line~\ref{line:servermissing} fills in commands that the coordinator was missing from its local witness. Any replica in the quorum that witnessed the command and still holds it in its candidate set will return it. Since the coordinator required $f+1$ responses for \texttt{PullRecovery} (which chose commands seen on a majority), at least one responding replica must have the missing command.
+Line~\ref{line:servermissing} fills in commands that the coordinator was missing from its local command pool. Any replica in the quorum that received the command on the fast path and still holds it in its candidate set will return it. Since the coordinator required $f+1$ responses for \texttt{PullRecovery} (which chose commands seen on a majority), at least one responding replica must have the missing command.
 
 
 \begin{algorithm}
@@ -297,16 +297,16 @@ Line~\ref{line:servermissing} fills in commands that the coordinator was missing
 \setcounter{AlgoLine}{109}
 
 \underline{Replica $R$, on receiving $Accept(jepoch, oepoch, ballot, sid)$}\\
-\If{$ballot > R.witness.max\_seen\_ballot$}{
-    $R.witness.max\_seen\_ballot \gets ballot$\\
+\If{$ballot > R.command_pool.max\_seen\_ballot$}{
+    $R.command_pool.max\_seen\_ballot \gets ballot$\\
 }
 \eIf{$jepoch \ge R.jepoch$ \textbf{and} $oepoch \ge R.oepoch$
-     \textbf{and} $ballot \ge R.witness.max\_seen\_ballot$}{
-    $R.witness.max\_accepted\_ballot \gets ballot$\\
-    $R.witness.sid \gets sid$\\
+     \textbf{and} $ballot \ge R.command_pool.max\_seen\_ballot$}{
+    $R.command_pool.max\_accepted\_ballot \gets ballot$\\
+    $R.command_pool.sid \gets sid$\\
     reply $AcceptAck(ok{=}true, R.jepoch, R.oepoch)$\\
 }{
-    reply $AcceptAck(ok{=}false, R.jepoch, R.oepoch, R.witness.max\_seen\_ballot)$\\
+    reply $AcceptAck(ok{=}false, R.jepoch, R.oepoch, R.command_pool.max\_seen\_ballot)$\\
 }
 \end{algorithm}
 
@@ -318,8 +318,8 @@ Line~\ref{line:servermissing} fills in commands that the coordinator was missing
 
 \underline{Replica $R$, on receiving $Commit(jepoch, oepoch, sid)$}\\
 \If{$jepoch \ge R.jepoch$ \textbf{and} $oepoch \ge R.oepoch$}{
-    $R.witness.sid \gets sid$\\
-    $R.witness.committed \gets true$\\
+    $R.command_pool.sid \gets sid$\\
+    $R.command_pool.committed \gets true$\\
 }
 
 \vskip 6pt
@@ -328,13 +328,13 @@ Line~\ref{line:servermissing} fills in commands that the coordinator was missing
 \If{$oepoch \ge R.oepoch$}{
     $R.jepoch \gets oepoch$\\
     $R.oepoch \gets oepoch$\label{line:epochbump}\\
-    $R.witness.reset()$\label{line:witnessreset}\tcp*{clear candidate set}
+    $R.command_pool.reset()$\label{line:poolreset}\tcp*{clear candidate set}
     $R.status \gets RDY$\label{line:setrdy}\tcp*{re-enable fast path}
 }
 \end{algorithm}
 
 \paragraph{Epoch Bump and Witness Reset}
-At line~\ref{line:epochbump}, both $jepoch$ and $oepoch$ are set to the new epoch, making the previous epoch's commands visible only through the original protocol (which has already agreed on them via resubmit). Line~\ref{line:witnessreset} clears the per-key candidate sets accumulated during the old epoch. Line~\ref{line:setrdy} re-enables the fast path: subsequent \texttt{Dispatch} RPCs from clients with the new $jepoch$ will be accepted again.
+At line~\ref{line:epochbump}, both $jepoch$ and $oepoch$ are set to the new epoch, making the previous epoch's commands visible only through the original protocol (which has already agreed on them via resubmit). Line~\ref{line:poolreset} clears the per-key candidate sets accumulated during the old epoch. Line~\ref{line:setrdy} re-enables the fast path: subsequent \texttt{Dispatch} RPCs from clients with the new $jepoch$ will be accepted again.
 
 
 \paragraph{RTT Analysis}

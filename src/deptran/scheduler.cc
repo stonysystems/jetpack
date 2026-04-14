@@ -262,7 +262,7 @@ void TxLogServer::get_prepare_log(i64 txn_id,
 }
 
 TxLogServer::TxLogServer() : mtx_() {
-  witness_.set_owner(this);
+  command_pool_.set_owner(this);
   mdb_txn_mgr_ = make_shared<mdb::TxnMgrUnsafe>();
   if (Config::GetConfig()->do_logging()) {
     auto path = Config::GetConfig()->log_path();
@@ -326,12 +326,12 @@ TxLogServer::~TxLogServer() {
   }
 #endif
   cpu_monitor_stop_ = true;
-  std::vector<double> witness_size_distribution = witness_.witness_size_distribution();
-  Log_info("loc_id=%d witness size distribution 50pct %.2f 90pct %.2f 99pct %.2f ave %.2f",
-    loc_id_, witness_size_distribution[0], witness_size_distribution[1], witness_size_distribution[2], witness_size_distribution[3]);
-#ifdef WITNESS_LOG_DEBUG
+  std::vector<double> pool_size_distribution = command_pool_.pool_size_distribution();
+  Log_info("loc_id=%d command pool size distribution 50pct %.2f 90pct %.2f 99pct %.2f ave %.2f",
+    loc_id_, pool_size_distribution[0], pool_size_distribution[1], pool_size_distribution[2], pool_size_distribution[3]);
+#ifdef COMMAND_POOL_LOG_DEBUG
   if (loc_id_ == 0 || loc_id_ == 1)
-    witness_.print_log();
+    command_pool_.print_log();
 #endif
 
 }
@@ -519,18 +519,18 @@ void TxLogServer::OnRuleSpeculativeExecute(const shared_ptr<Marshallable>& cmd,
 #ifdef ZERO_OVERHEAD
   // if (rep_sched_->ConflictWithOriginalUnexecutedLog(cmd))
   //   Log_info("Conflict!");
-  if (rep_sched_->witness_.push_back(cmd) && !rep_sched_->ConflictWithOriginalUnexecutedLog(cmd)) {
+  if (rep_sched_->command_pool_.push_back(cmd) && !rep_sched_->ConflictWithOriginalUnexecutedLog(cmd)) {
 #else
 #ifdef JETPACK_RECOVERY_DEBUG
   Log_info("[JETPACK-DEBUG] OnRuleSpeculativeExecute about to push_back loc_id %d ", loc_id_);
 #endif
-  if (rep_sched_->witness_.push_back(cmd)) {
+  if (rep_sched_->command_pool_.push_back(cmd)) {
 #endif
     // SimpleRWCommand parsed_cmd = SimpleRWCommand(cmd);
     // Log_info("Server %d OnRuleSpeculativeExecute <%d, %d> key %d", rep_sched_->loc_id_, parsed_cmd.cmd_id_.first, parsed_cmd.cmd_id_.second, parsed_cmd.key_);
-    // Log_info("witness_.push_back server %d push cmd_id <%d, %d> %lld key %d success 1", loc_id_, parsed_cmd.cmd_id_.first, parsed_cmd.cmd_id_.second,
+    // Log_info("command_pool_.push_back server %d push cmd_id <%d, %d> %lld key %d success 1", loc_id_, parsed_cmd.cmd_id_.first, parsed_cmd.cmd_id_.second,
       // (long long)SimpleRWCommand::CombineInt32(parsed_cmd.cmd_id_.first, parsed_cmd.cmd_id_.second), parsed_cmd.key_);
-    // verify(witness_.remove(cmd));
+    // verify(command_pool_.remove(cmd));
     *accepted = true;
     // [RULE] TODO: return speculative result
     *result = 0;
@@ -549,20 +549,20 @@ void TxLogServer::OnRuleSpeculativeExecute(const shared_ptr<Marshallable>& cmd,
 
 void TxLogServer::OriginalPathUnexecutedCmdConflictPlaceHolder(const shared_ptr<Marshallable>& cmd) {
   if (Config::GetConfig()->tx_proto_ == MODE_RULE && SimpleRWCommand::NeedRecordConflictInOriginalPath(cmd)) {
-    // Log_info("[JETPACK-Witness] loc_id %d about to push_back", loc_id_);
-    rep_sched_->witness_.push_back(cmd);
+    // Log_info("[JETPACK-CommandPool] loc_id %d about to push_back", loc_id_);
+    rep_sched_->command_pool_.push_back(cmd);
   }
 }
 
-void TxLogServer::RuleWitnessGC(const shared_ptr<Marshallable>& cmd) {
+void TxLogServer::RuleCommandPoolGC(const shared_ptr<Marshallable>& cmd) {
   if (Config::GetConfig()->tx_proto_ == MODE_RULE)
-    witness_.remove(cmd);
+    command_pool_.remove(cmd);
   // SimpleRWCommand parsed_cmd = SimpleRWCommand(cmd);
   // uint64_t cmd_id = SimpleRWCommand::CombineInt32(parsed_cmd.cmd_id_.first, parsed_cmd.cmd_id_.second);
-  // Log_info("witness_.remove server %d remove cmd_id <%d, %d> %lld key %d success %d", loc_id_, parsed_cmd.cmd_id_.first, parsed_cmd.cmd_id_.second,
-  //     (long long)SimpleRWCommand::CombineInt32(parsed_cmd.cmd_id_.first, parsed_cmd.cmd_id_.second), parsed_cmd.key_, witness_.remove(cmd));
-  // Log_info("witness_.remove(cmd) %d", witness_.remove(cmd));
-  // witness_.remove(cmd);
+  // Log_info("command_pool_.remove server %d remove cmd_id <%d, %d> %lld key %d success %d", loc_id_, parsed_cmd.cmd_id_.first, parsed_cmd.cmd_id_.second,
+  //     (long long)SimpleRWCommand::CombineInt32(parsed_cmd.cmd_id_.first, parsed_cmd.cmd_id_.second), parsed_cmd.key_, command_pool_.remove(cmd));
+  // Log_info("command_pool_.remove(cmd) %d", command_pool_.remove(cmd));
+  // command_pool_.remove(cmd);
 }
 
 
@@ -571,7 +571,7 @@ void RevoveryCandidates::push_back(uint64_t cmd_id, shared_ptr<Marshallable> cmd
   if (total_write_ == 0 && is_write) {
     verify(to_recover_id_ == (uint64_t)(-1));
     to_recover_id_ = cmd_id;
-    // Log_info("[JETPACK-Witness] Set to_recover_id_ = %lu (first write)", cmd_id);
+    // Log_info("[JETPACK-CommandPool] Set to_recover_id_ = %lu (first write)", cmd_id);
   }
   total_write_ += is_write;
 #ifdef JETPACK_DEDUPLICATE_OPTIMIZATION
@@ -632,7 +632,7 @@ shared_ptr<Marshallable> RevoveryCandidates::get_cmd(uint64_t cmd_id) const {
 }
 
 #ifdef COMMAND_POOL_ON_DISK
-void Witness::OpenCommandPoolFile() {
+void JetpackCommandPool::OpenCommandPoolFile() {
   if (command_pool_file_.is_open()) {
     return;
   }
@@ -648,13 +648,13 @@ void Witness::OpenCommandPoolFile() {
   }
 }
 
-void Witness::CloseCommandPoolFile() {
+void JetpackCommandPool::CloseCommandPoolFile() {
   if (command_pool_file_.is_open()) {
     command_pool_file_.close();
   }
 }
 
-void Witness::WriteCommandToDisk(const SimpleRWCommand& cmd) {
+void JetpackCommandPool::WriteCommandToDisk(const SimpleRWCommand& cmd) {
   if (!command_pool_file_.is_open()) {
     OpenCommandPoolFile();
   }
@@ -664,16 +664,16 @@ void Witness::WriteCommandToDisk(const SimpleRWCommand& cmd) {
 }
 #endif
 
-Witness::~Witness() {
+JetpackCommandPool::~JetpackCommandPool() {
 #ifdef COMMAND_POOL_ON_DISK
   CloseCommandPoolFile();
 #endif
 }
 
-bool Witness::push_back(const shared_ptr<Marshallable>& cmd) {
+bool JetpackCommandPool::push_back(const shared_ptr<Marshallable>& cmd) {
   if (owner_ && owner_->jetpack_status_ == TxLogServer::JetpackStatus::RECOVERY) {
 #ifdef JETPACK_RECOVERY_DEBUG
-    Log_info("[JETPACK-DEBUG] Witness::push_back rejected because Jetpack is recovering");
+    Log_info("[JETPACK-DEBUG] JetpackCommandPool::push_back rejected because Jetpack is recovering");
 #endif
     return false;
   }
@@ -684,7 +684,7 @@ bool Witness::push_back(const shared_ptr<Marshallable>& cmd) {
   bool was_empty = bucket.size() == 0;
   
 #ifdef JETPACK_RECOVERY_DEBUG
-  Log_info("[JETPACK-DEBUG] Witness::push_back called for key=%d, cmd_id=%lu", key, cmd_id);
+  Log_info("[JETPACK-DEBUG] JetpackCommandPool::push_back called for key=%d, cmd_id=%lu", key, cmd_id);
 #endif
 
 #ifdef READ_NOT_CONFLICT_OPTIMIZATION
@@ -694,53 +694,53 @@ bool Witness::push_back(const shared_ptr<Marshallable>& cmd) {
   if (bucket.size() == 0) {
 #endif
     // not exist conflict
-    // Log_info("[JETPACK-Witness] candidates_[%d].push_back %lu", key, cmd_id);
+    // Log_info("[JETPACK-CommandPool] candidates_[%d].push_back %lu", key, cmd_id);
     bucket.push_back(cmd_id, cmd, parsed_cmd.IsWrite());
 #ifdef JETPACK_RECOVERY_DEBUG
     Log_info("[JETPACK-DEBUG] Added cmd to candidates[%d], no conflict", key);
 #endif
-#ifdef WITNESS_LOG_DEBUG
-    witness_log_.push_back(WitnessLog(0, cmd, 1, witness_size_));
+#ifdef COMMAND_POOL_LOG_DEBUG
+    pool_log_.push_back(CommandPoolLog(0, cmd, 1, pool_size_));
 #endif
 #ifdef COMMAND_POOL_ON_DISK
     WriteCommandToDisk(parsed_cmd);
 #endif
-    witness_cmd_count_++;
+    pool_cmd_count_++;
     if (was_empty) {
-      witness_size_distribution_.mid_time_append(++witness_size_);
+      pool_size_distribution_.mid_time_append(++pool_size_);
     }
     return true;
   } else {
     // exist conflict, candidates_[key].size() >= 1
-    // Log_info("[JETPACK-Witness] candidates_[%d].push_back %lu", key, cmd_id);
+    // Log_info("[JETPACK-CommandPool] candidates_[%d].push_back %lu", key, cmd_id);
     bucket.push_back(cmd_id, cmd, parsed_cmd.IsWrite());
 #ifdef JETPACK_RECOVERY_DEBUG
     Log_info("[JETPACK-DEBUG] Added cmd to candidates[%d], WITH conflict (size now=%zu)", 
              key, bucket.size());
 #endif
-#ifdef WITNESS_LOG_DEBUG
-    witness_log_.push_back(WitnessLog(0, cmd, 0, witness_size_));
+#ifdef COMMAND_POOL_LOG_DEBUG
+    pool_log_.push_back(CommandPoolLog(0, cmd, 0, pool_size_));
 #endif
-    witness_cmd_count_++;
+    pool_cmd_count_++;
     return false;
   }
 }
 
-int Witness::remove(const shared_ptr<Marshallable>& cmd) {
+int JetpackCommandPool::remove(const shared_ptr<Marshallable>& cmd) {
   if (cmd->kind_ != MarshallDeputy::CMD_TPC_BATCH) {
     SimpleRWCommand parsed_cmd = SimpleRWCommand(cmd);
     auto& bucket = candidates_[parsed_cmd.key_];
     size_t before_size = bucket.size();
     bool removed = bucket.remove(SimpleRWCommand::CombineInt32(parsed_cmd.cmd_id_.first, parsed_cmd.cmd_id_.second));
     if (removed) {
-      witness_cmd_count_--;
+      pool_cmd_count_--;
       if (before_size == 1) {
-        witness_size_distribution_.mid_time_append(--witness_size_);
+        pool_size_distribution_.mid_time_append(--pool_size_);
         // if (bucket.size() == 0) candidates_.erase(parsed_cmd.key_);
       }
     }
-#ifdef WITNESS_LOG_DEBUG
-    witness_log_.push_back(WitnessLog(1, cmd, removed, witness_size_));
+#ifdef COMMAND_POOL_LOG_DEBUG
+    pool_log_.push_back(CommandPoolLog(1, cmd, removed, pool_size_));
 #endif
     return removed;
   } else {
@@ -752,22 +752,22 @@ int Witness::remove(const shared_ptr<Marshallable>& cmd) {
       size_t before_size = bucket.size();
       bool removed = bucket.remove(SimpleRWCommand::CombineInt32(parsed_cmd.cmd_id_.first, parsed_cmd.cmd_id_.second));
       if (removed) {
-        witness_cmd_count_--;
+        pool_cmd_count_--;
         if (before_size == 1) {
-          witness_size_distribution_.mid_time_append(--witness_size_);
+          pool_size_distribution_.mid_time_append(--pool_size_);
           // if (bucket.size() == 0) candidates_.erase(parsed_cmd.key_);
         }
         total_removed++;
       }
-#ifdef WITNESS_LOG_DEBUG
-      witness_log_.push_back(WitnessLog(1, c, removed, witness_size_));
+#ifdef COMMAND_POOL_LOG_DEBUG
+      pool_log_.push_back(CommandPoolLog(1, c, removed, pool_size_));
 #endif
     }
     return total_removed;
   }
 }
 
-bool Witness::has_appeared(const shared_ptr<Marshallable>& cmd) {
+bool JetpackCommandPool::has_appeared(const shared_ptr<Marshallable>& cmd) {
   // For a batched command, return whether all of them have appeared
   if (cmd->kind_ != MarshallDeputy::CMD_TPC_BATCH) {
     SimpleRWCommand parsed_cmd = SimpleRWCommand(cmd);
@@ -788,29 +788,29 @@ bool Witness::has_appeared(const shared_ptr<Marshallable>& cmd) {
   }
 }
 
-void Witness::set_owner(TxLogServer* owner) {
+void JetpackCommandPool::set_owner(TxLogServer* owner) {
   owner_ = owner;
 }
 
-void Witness::set_belongs_to_leader(bool belongs_to_leader) {
+void JetpackCommandPool::set_belongs_to_leader(bool belongs_to_leader) {
   belongs_to_leader_ = belongs_to_leader;
 }
 
-std::vector<double> Witness::witness_size_distribution() {
-  // Log_info("witness 50pct %d %.2f" , witness_size_distribution_.count(), witness_size_distribution_.pct50());
-  // Log_info("witness 90pct %d %.2f" , witness_size_distribution_.count(), witness_size_distribution_.pct90());
-  // Log_info("witness 99pct %d %.2f" , witness_size_distribution_.count(), witness_size_distribution_.pct99());
-  // Log_info("witness ave %d %.2f" , witness_size_distribution_.count(), witness_size_distribution_.ave());
+std::vector<double> JetpackCommandPool::pool_size_distribution() {
+  // Log_info("pool 50pct %d %.2f" , pool_size_distribution_.count(), pool_size_distribution_.pct50());
+  // Log_info("pool 90pct %d %.2f" , pool_size_distribution_.count(), pool_size_distribution_.pct90());
+  // Log_info("pool 99pct %d %.2f" , pool_size_distribution_.count(), pool_size_distribution_.pct99());
+  // Log_info("pool ave %d %.2f" , pool_size_distribution_.count(), pool_size_distribution_.ave());
   std::vector<double> ret;
-  ret.push_back(witness_size_distribution_.pct50());
-  ret.push_back(witness_size_distribution_.pct90());
-  ret.push_back(witness_size_distribution_.pct99());
-  ret.push_back(witness_size_distribution_.ave());
-  // Log_info("witness ret %.2f %.2f %.2f %.2f", ret[0], ret[1], ret[2], ret[3]);
+  ret.push_back(pool_size_distribution_.pct50());
+  ret.push_back(pool_size_distribution_.pct90());
+  ret.push_back(pool_size_distribution_.pct99());
+  ret.push_back(pool_size_distribution_.ave());
+  // Log_info("pool ret %.2f %.2f %.2f %.2f", ret[0], ret[1], ret[2], ret[3]);
   return ret;
 }
 
-shared_ptr<VecRecData> Witness::id_set() {
+shared_ptr<VecRecData> JetpackCommandPool::id_set() {
   auto result = std::make_shared<VecRecData>();
   result->key_data_ = std::make_shared<vector<key_t>>();
   
@@ -822,17 +822,17 @@ shared_ptr<VecRecData> Witness::id_set() {
   }
   
 #ifdef JETPACK_RECOVERY_DEBUG
-  Log_info("[JETPACK-RECOVERY-Witness] id_set size %d", result->key_data_->size());
+  Log_info("[JETPACK-RECOVERY-CommandPool] id_set size %d", result->key_data_->size());
 #endif
 
   return result;
 }
 
-void Witness::reset() {
+void JetpackCommandPool::reset() {
   candidates_.clear();
-  witness_size_ = 0;
-  witness_cmd_count_ = 0;
-  witness_size_distribution_ = Distribution();
+  pool_size_ = 0;
+  pool_cmd_count_ = 0;
+  pool_size_distribution_ = Distribution();
   
   // Reset recovery related fields
   max_seen_ballot_ = -1;
@@ -842,12 +842,12 @@ void Witness::reset() {
 }
 
 
-#ifdef WITNESS_LOG_DEBUG
-void Witness::print_log() {
-  if (witness_log_.size() == 0)
+#ifdef COMMAND_POOL_LOG_DEBUG
+void JetpackCommandPool::print_log() {
+  if (pool_log_.size() == 0)
     return;
-  for (int i = 0; i < witness_log_.size(); i++) {
-    witness_log_[i].print(witness_log_[0].time_);
+  for (int i = 0; i < pool_log_.size(); i++) {
+    pool_log_[i].print(pool_log_[0].time_);
   }
 }
 #endif
@@ -923,7 +923,7 @@ void TxLogServer::JetpackRecovery() {
 
   const auto prepare_start = std::chrono::steady_clock::now();
   auto prepare_e = commo()->JetpackBroadcastPrepare(
-      partition_id_, site_id_, jepoch_, oepoch_, witness_.max_seen_ballot_);
+      partition_id_, site_id_, jepoch_, oepoch_, command_pool_.max_seen_ballot_);
 
   // Round 1: PullRecovery and Prepare in parallel.
   prepare_e->Wait();
@@ -942,7 +942,7 @@ void TxLogServer::JetpackRecovery() {
       Log_info("[JETPACK-RECOVERY] Updating jepoch from %d to %d", jepoch_, recovery_e->max_jepoch_);
 #endif
       jepoch_ = recovery_e->max_jepoch_;
-      witness_.reset();
+      command_pool_.reset();
     }
     if (recovery_e->max_oepoch_ > oepoch_) {
 #ifdef JETPACK_RECOVERY_DEBUG
@@ -969,13 +969,13 @@ void TxLogServer::JetpackRecovery() {
 
   // Record id set into local rec_set_
   rec_set_.set_rec_set(sid, recovered_key_ids);
-  // Build missing list where local witness lacks matching cmd id
+  // Build missing list where local command pool lacks matching cmd id
   std::vector<std::pair<key_t, uint64_t>> missing_ids;
   for (const auto& entry : recovered_key_ids) {
     key_t key = entry.first;
     uint64_t cmd_id = entry.second;
-    auto it = witness_.candidates_.find(key);
-    auto has_local = it != witness_.candidates_.end() && it->second.get_cmd(cmd_id);
+    auto it = command_pool_.candidates_.find(key);
+    auto has_local = it != command_pool_.candidates_.end() && it->second.get_cmd(cmd_id);
     if (!has_local) {
       missing_ids.push_back(entry);
     }
@@ -1012,14 +1012,14 @@ void TxLogServer::JetpackRecovery() {
   std::chrono::steady_clock::time_point accept_start;
   if (prepare_ok) {
     Log_info("[JETPACK-RECOVERY] Step 2: Starting Paxos Accept phase");
-    witness_.max_seen_ballot_++;
+    command_pool_.max_seen_ballot_++;
 #ifdef JETPACK_RECOVERY_DEBUG
     Log_info("[JETPACK-RECOVERY] Accept: proposing sid=%d, ballot=%lld",
-             propose_sid, witness_.max_seen_ballot_);
+             propose_sid, command_pool_.max_seen_ballot_);
 #endif
     accept_start = std::chrono::steady_clock::now();
     accept_e = commo()->JetpackBroadcastAccept(
-        partition_id_, site_id_, jepoch_, oepoch_, witness_.max_seen_ballot_, propose_sid);
+        partition_id_, site_id_, jepoch_, oepoch_, command_pool_.max_seen_ballot_, propose_sid);
   }
 
   long long accept_wait_ms = 0;
@@ -1063,7 +1063,7 @@ void TxLogServer::JetpackRecovery() {
       Log_info("[JETPACK-RECOVERY] Updating jepoch from %d to %d", jepoch_, prepare_e->max_jepoch_);
 #endif
       jepoch_ = prepare_e->max_jepoch_;
-      witness_.reset();
+      command_pool_.reset();
     }
     if (prepare_e->max_oepoch_ > oepoch_) {
 #ifdef JETPACK_RECOVERY_DEBUG
@@ -1071,12 +1071,12 @@ void TxLogServer::JetpackRecovery() {
 #endif
       oepoch_ = prepare_e->max_oepoch_;
     }
-    if (prepare_e->max_seen_ballot_ > witness_.max_seen_ballot_) {
+    if (prepare_e->max_seen_ballot_ > command_pool_.max_seen_ballot_) {
 #ifdef JETPACK_RECOVERY_DEBUG
       Log_info("[JETPACK-RECOVERY] Updating ballot from %lld to %lld",
-               witness_.max_seen_ballot_, prepare_e->max_seen_ballot_);
+               command_pool_.max_seen_ballot_, prepare_e->max_seen_ballot_);
 #endif
-      witness_.max_seen_ballot_ = prepare_e->max_seen_ballot_;
+      command_pool_.max_seen_ballot_ = prepare_e->max_seen_ballot_;
     }
     auto step2_end = std::chrono::steady_clock::now();
     auto handle_round2_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -1096,7 +1096,7 @@ void TxLogServer::JetpackRecovery() {
       Log_info("[JETPACK-RECOVERY] Updating jepoch from %d to %d", jepoch_, accept_e->max_jepoch_);
 #endif
       jepoch_ = accept_e->max_jepoch_;
-      witness_.reset();
+      command_pool_.reset();
     }
     if (accept_e->max_oepoch_ > oepoch_) {
 #ifdef JETPACK_RECOVERY_DEBUG
@@ -1104,12 +1104,12 @@ void TxLogServer::JetpackRecovery() {
 #endif
       oepoch_ = accept_e->max_oepoch_;
     }
-    if (accept_e->max_seen_ballot_ > witness_.max_seen_ballot_) {
+    if (accept_e->max_seen_ballot_ > command_pool_.max_seen_ballot_) {
 #ifdef JETPACK_RECOVERY_DEBUG
       Log_info("[JETPACK-RECOVERY] Updating ballot from %lld to %lld",
-               witness_.max_seen_ballot_, accept_e->max_seen_ballot_);
+               command_pool_.max_seen_ballot_, accept_e->max_seen_ballot_);
 #endif
-      witness_.max_seen_ballot_ = accept_e->max_seen_ballot_;
+      command_pool_.max_seen_ballot_ = accept_e->max_seen_ballot_;
     }
     auto step2_end = std::chrono::steady_clock::now();
     auto handle_round2_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -1176,8 +1176,8 @@ void TxLogServer::JetpackResubmit(int sid) {
       key_t key = entry.first;
       uint64_t cmd_id = entry.second;
       shared_ptr<Marshallable> cmd = nullptr;
-      auto wit_it = witness_.candidates_.find(key);
-      if (wit_it != witness_.candidates_.end()) {
+      auto wit_it = command_pool_.candidates_.find(key);
+      if (wit_it != command_pool_.candidates_.end()) {
         cmd = wit_it->second.get_cmd(cmd_id);
       }
       if (!cmd) {
@@ -1425,12 +1425,12 @@ void TxLogServer::OnJetpackPullRecovery(const MarshallDeputy& old_view,
     *ok = 1;
     *reply_jepoch = rep_sched_->jepoch_;
     *reply_oepoch = rep_sched_->oepoch_;
-    Log_info("[JETPACK-RECOVERY] PullRecovery witness candidates size=%zu witness_size=%d",
-             rep_sched_->witness_.candidates_.size(), rep_sched_->witness_.size());
-    for (const auto& kv : rep_sched_->witness_.candidates_) {
+    Log_info("[JETPACK-RECOVERY] PullRecovery command pool candidates size=%zu pool_size=%d",
+             rep_sched_->command_pool_.candidates_.size(), rep_sched_->command_pool_.size());
+    for (const auto& kv : rep_sched_->command_pool_.candidates_) {
       key_t key = kv.first;
-      if (rep_sched_->witness_.has_cmd_to_recover(key)) {
-        auto cmd = rep_sched_->witness_.cmd_to_recover(key);
+      if (rep_sched_->command_pool_.has_cmd_to_recover(key)) {
+        auto cmd = rep_sched_->command_pool_.cmd_to_recover(key);
         if (cmd) {
           uint64_t cmd_id = SimpleRWCommand::GetCombinedCmdID(cmd);
           batch->AddEntry(key, cmd_id);
@@ -1535,24 +1535,24 @@ void TxLogServer::OnJetpackPullIdSet(const epoch_t& jepoch,
                                      shared_ptr<VecRecData> id_set) {
   
   
-  // Debug print witness candidates
+  // Debug print command pool candidates
 #ifdef JETPACK_RECOVERY_DEBUG
   if (rep_sched_) {
 
-    Log_info("[JETPACK-DEBUG] Witness candidates size: %zu", rep_sched_->witness_.candidates_.size());
+    Log_info("[JETPACK-DEBUG] Command pool candidates size: %zu", rep_sched_->command_pool_.candidates_.size());
     
-    // Print all keys in witness candidates
-    std::stringstream witness_keys;
+    // Print all keys in command pool candidates
+    std::stringstream pool_keys;
     int count = 0;
-    for (const auto& kv : rep_sched_->witness_.candidates_) {
+    for (const auto& kv : rep_sched_->command_pool_.candidates_) {
       if (count++ < 20) {
-        witness_keys << kv.first << "(" << kv.second.size() << " cmds) ";
+        pool_keys << kv.first << "(" << kv.second.size() << " cmds) ";
       }
     }
-    if (rep_sched_->witness_.candidates_.size() > 20) {
-      witness_keys << "... (and " << (rep_sched_->witness_.candidates_.size() - 20) << " more)";
+    if (rep_sched_->command_pool_.candidates_.size() > 20) {
+      pool_keys << "... (and " << (rep_sched_->command_pool_.candidates_.size() - 20) << " more)";
     }
-    Log_info("[JETPACK-DEBUG] Witness candidate keys: %s", witness_keys.str().c_str());
+    Log_info("[JETPACK-DEBUG] Command pool candidate keys: %s", pool_keys.str().c_str());
 
   }
 #endif
@@ -1566,9 +1566,9 @@ void TxLogServer::OnJetpackPullIdSet(const epoch_t& jepoch,
     *ok = 1;
     *reply_jepoch = rep_sched_->jepoch_;
     *reply_oepoch = rep_sched_->oepoch_;
-    // Copy data from witness id_set to the response parameter
-    auto witness_id_set = rep_sched_->witness_.id_set();
-    id_set->key_data_ = witness_id_set->key_data_;
+    // Copy data from command pool id_set to the response parameter
+    auto pool_id_set = rep_sched_->command_pool_.id_set();
+    id_set->key_data_ = pool_id_set->key_data_;
     
   } else {
     *ok = 0;
@@ -1610,12 +1610,12 @@ void TxLogServer::OnJetpackPullCmd(const epoch_t& jepoch,
 #ifdef JETPACK_RECOVERY_DEBUG
       Log_info("[JETPACK-SCHED-DEBUG] Processing batched key %d for PullCmd", key);
 #endif
-      auto& candidates = rep_sched_->witness_.candidates_;
+      auto& candidates = rep_sched_->command_pool_.candidates_;
       if (candidates.find(key) == candidates.end()) {
         continue;
       }
-      if (rep_sched_->witness_.has_cmd_to_recover(key)) {
-        auto cmd = rep_sched_->witness_.cmd_to_recover(key);
+      if (rep_sched_->command_pool_.has_cmd_to_recover(key)) {
+        auto cmd = rep_sched_->command_pool_.cmd_to_recover(key);
         if (cmd) {
           batch->AddEntry(key, cmd);
         }
@@ -1652,7 +1652,7 @@ void TxLogServer::OnJetpackRecordCmd(const epoch_t& jepoch,
       for (size_t idx = 0; idx < missing_batch->Size(); idx++) {
         key_t key = missing_batch->GetKey(idx);
         uint64_t cmd_id = missing_batch->GetCmdId(idx);
-        auto& candidates = rep_sched_->witness_.candidates_;
+        auto& candidates = rep_sched_->command_pool_.candidates_;
         auto it = candidates.find(key);
         if (it != candidates.end()) {
           auto cmd = it->second.get_cmd(cmd_id);
@@ -1680,16 +1680,16 @@ void TxLogServer::OnJetpackPrepare(const epoch_t& jepoch,
   reply_old_view->SetMarshallable(std::make_shared<ViewData>(rep_sched_->old_view_));
   reply_new_view->SetMarshallable(std::make_shared<ViewData>(rep_sched_->new_view_));
   
-  if (max_seen_ballot > rep_sched_->witness_.max_seen_ballot_) {
-    rep_sched_->witness_.max_seen_ballot_ = max_seen_ballot;
+  if (max_seen_ballot > rep_sched_->command_pool_.max_seen_ballot_) {
+    rep_sched_->command_pool_.max_seen_ballot_ = max_seen_ballot;
   }
-  *reply_max_seen_ballot = rep_sched_->witness_.max_seen_ballot_;
-  if (jepoch >= rep_sched_->jepoch_ && oepoch >= rep_sched_->oepoch_ && max_seen_ballot >= rep_sched_->witness_.max_seen_ballot_) {
+  *reply_max_seen_ballot = rep_sched_->command_pool_.max_seen_ballot_;
+  if (jepoch >= rep_sched_->jepoch_ && oepoch >= rep_sched_->oepoch_ && max_seen_ballot >= rep_sched_->command_pool_.max_seen_ballot_) {
     *ok = 1;
     *reply_jepoch = rep_sched_->jepoch_;
     *reply_oepoch = rep_sched_->oepoch_;
-    *accepted_ballot = rep_sched_->witness_.max_accepted_ballot_;
-    *replied_sid = rep_sched_->witness_.sid_;
+    *accepted_ballot = rep_sched_->command_pool_.max_accepted_ballot_;
+    *replied_sid = rep_sched_->command_pool_.sid_;
   } else {
     *ok = 0;
     *reply_jepoch = rep_sched_->jepoch_;
@@ -1711,16 +1711,16 @@ void TxLogServer::OnJetpackAccept(const epoch_t& jepoch,
   reply_old_view->SetMarshallable(std::make_shared<ViewData>(rep_sched_->old_view_));
   reply_new_view->SetMarshallable(std::make_shared<ViewData>(rep_sched_->new_view_));
   
-  if (max_seen_ballot > rep_sched_->witness_.max_seen_ballot_) {
-    rep_sched_->witness_.max_seen_ballot_ = max_seen_ballot;
+  if (max_seen_ballot > rep_sched_->command_pool_.max_seen_ballot_) {
+    rep_sched_->command_pool_.max_seen_ballot_ = max_seen_ballot;
   }
-  *reply_max_seen_ballot = rep_sched_->witness_.max_seen_ballot_;
-  if (jepoch >= rep_sched_->jepoch_ && oepoch >= rep_sched_->oepoch_ && max_seen_ballot >= rep_sched_->witness_.max_seen_ballot_) {
+  *reply_max_seen_ballot = rep_sched_->command_pool_.max_seen_ballot_;
+  if (jepoch >= rep_sched_->jepoch_ && oepoch >= rep_sched_->oepoch_ && max_seen_ballot >= rep_sched_->command_pool_.max_seen_ballot_) {
     *ok = 1;
     *reply_jepoch = rep_sched_->jepoch_;
     *reply_oepoch = rep_sched_->oepoch_;
-    rep_sched_->witness_.max_accepted_ballot_ = max_seen_ballot;
-    rep_sched_->witness_.sid_ = sid;
+    rep_sched_->command_pool_.max_accepted_ballot_ = max_seen_ballot;
+    rep_sched_->command_pool_.sid_ = sid;
   } else {
     *ok = 0;
     *reply_jepoch = rep_sched_->jepoch_;
@@ -1732,8 +1732,8 @@ void TxLogServer::OnJetpackCommit(const epoch_t& jepoch,
                                   const epoch_t& oepoch, 
                                   const int32_t& sid) {
   if (jepoch >= rep_sched_->jepoch_ && oepoch >= rep_sched_->oepoch_) {
-    rep_sched_->witness_.sid_ = sid;
-    rep_sched_->witness_.committed_ = true;
+    rep_sched_->command_pool_.sid_ = sid;
+    rep_sched_->command_pool_.committed_ = true;
   }
 }
 
@@ -1741,7 +1741,7 @@ void TxLogServer::OnJetpackFinishRecovery(const epoch_t& oepoch) {
   if (oepoch >= rep_sched_->oepoch_) {
     rep_sched_->jepoch_ = oepoch;
     rep_sched_->oepoch_ = oepoch;
-    rep_sched_->witness_.reset();
+    rep_sched_->command_pool_.reset();
     rep_sched_->jetpack_status_ = TxLogServer::JetpackStatus::READY;
   }
   // Finally, broadcast FinishRecovery to update jepoch and make fast path available

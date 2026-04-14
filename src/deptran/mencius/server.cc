@@ -99,7 +99,7 @@ void MenciusServer::OnCommit(const slotid_t slot_id,
   // deduplicate optimization: Accepted duplicated cmd can be ignored
   for (slotid_t id = max_committed_slot_; id < max_active_slot_; id++) {
     auto next_instance = GetInstance(id);
-    if (next_instance->cmd_ && witness_.has_appeared(next_instance->cmd_)) {
+    if (next_instance->cmd_ && command_pool_.has_appeared(next_instance->cmd_)) {
       max_committed_slot_++;
     }
   }
@@ -110,7 +110,7 @@ void MenciusServer::OnCommit(const slotid_t slot_id,
     auto next_instance = GetInstance(id);
     if (next_instance->committed_cmd_) {
       if (!next_instance->executed_){
-        RuleWitnessGC(next_instance->committed_cmd_);
+        RuleCommandPoolGC(next_instance->committed_cmd_);
         app_next_(*next_instance->committed_cmd_);
         next_instance->executed_ = true;
 
@@ -135,7 +135,7 @@ void MenciusServer::OnCommit(const slotid_t slot_id,
     if (next_instance->committed_cmd_) {
       SimpleRWCommand parsed_cmd = SimpleRWCommand(next_instance->committed_cmd_);
       if ((!next_instance->executed_) && (unexecuted_keys_[parsed_cmd.key_]==1)){
-        RuleWitnessGC(next_instance->committed_cmd_);
+        RuleCommandPoolGC(next_instance->committed_cmd_);
         app_next_(*next_instance->committed_cmd_);
         next_instance->executed_ = true;
         

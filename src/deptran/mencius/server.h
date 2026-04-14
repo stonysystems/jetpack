@@ -45,7 +45,7 @@ class MenciusServer : public TxLogServer {
   bool in_applying_logs_{false};
 
   MenciusServer() {
-    witness_.set_belongs_to_leader(true);
+    command_pool_.set_belongs_to_leader(true);
   }
 
   ~MenciusServer() {

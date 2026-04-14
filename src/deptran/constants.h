@@ -159,7 +159,7 @@ namespace janus {
 
 // #define CPU_PROFILE_MAIN
 // #define CPU_PROFILE_SEVER
-// #define WITNESS_LOG_DEBUG
+// #define COMMAND_POOL_LOG_DEBUG
 #define FAILOVER_DEBUG
 // #define JETPACK_WRONG_LEADER_DEBUG
 // #define RAFT_LEADER_ELECTION_LOGIC

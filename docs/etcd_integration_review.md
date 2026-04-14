@@ -31,7 +31,7 @@ EtcdKVTableHandler
     |-- Key prefix: "JetPack/KVTable/"
     v
 Post-completion (back in EtcdServer::Submit)
-    |-- RuleWitnessGC(cmd)
+    |-- RuleCommandPoolGC(cmd)
     |-- app_next_(*cmd) -- downstream processing
     |
     v
@@ -39,7 +39,7 @@ EtcdCommo::BroadcastCommit(par_id, cmd)
     |-- RPC to all replicas via EtcdProxy::async_Commit()
     v
 EtcdServiceImpl::Commit() (on replicas)
-    |-- RuleWitnessGC on received command
+    |-- RuleCommandPoolGC on received command
     |-- Immediate reply (fire-and-forget)
 ```
 

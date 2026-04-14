@@ -38,9 +38,9 @@ class MongodbServer : public TxLogServer {
           Log_info("Exit ExecutionHandler for nullptr");
           break;
         }
-        svr->RuleWitnessGC(cmd);
+        svr->RuleCommandPoolGC(cmd);
 #ifdef MONGODB_DEBUG
-        Log_info("%.2f After RuleWitnessGC <%d, %d>", SimpleRWCommand::GetMsTimeElaps(), SimpleRWCommand::GetCmdID(cmd).first, SimpleRWCommand::GetCmdID(cmd).second);
+        Log_info("%.2f After RuleCommandPoolGC <%d, %d>", SimpleRWCommand::GetMsTimeElaps(), SimpleRWCommand::GetCmdID(cmd).first, SimpleRWCommand::GetCmdID(cmd).second);
 #endif
         svr->app_next_(*cmd);
 #ifdef MONGODB_DEBUG
@@ -182,11 +182,11 @@ class MongodbServer : public TxLogServer {
 #endif
     WAN_WAIT
 #ifdef MONGODB_DEBUG
-    Log_info("%.2f Before RuleWitnessGC <%d, %d>", SimpleRWCommand::GetMsTimeElaps(), SimpleRWCommand::GetCmdID(cmd).first, SimpleRWCommand::GetCmdID(cmd).second);
+    Log_info("%.2f Before RuleCommandPoolGC <%d, %d>", SimpleRWCommand::GetMsTimeElaps(), SimpleRWCommand::GetCmdID(cmd).first, SimpleRWCommand::GetCmdID(cmd).second);
 #endif
-    RuleWitnessGC(cmd);
+    RuleCommandPoolGC(cmd);
 #ifdef MONGODB_DEBUG
-    Log_info("%.2f After RuleWitnessGC <%d, %d>", SimpleRWCommand::GetMsTimeElaps(), SimpleRWCommand::GetCmdID(cmd).first, SimpleRWCommand::GetCmdID(cmd).second);
+    Log_info("%.2f After RuleCommandPoolGC <%d, %d>", SimpleRWCommand::GetMsTimeElaps(), SimpleRWCommand::GetCmdID(cmd).first, SimpleRWCommand::GetCmdID(cmd).second);
 #endif
     app_next_(*cmd);
 #ifdef MONGODB_DEBUG

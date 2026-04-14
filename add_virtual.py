@@ -4,7 +4,7 @@ keywords = [
     "FpgaRaftPlusService",
     "MenciusPlusService",
     "CopilotPlusService",
-    "CurpService",
+    "JetpackService",
 ]
 
 lines = []

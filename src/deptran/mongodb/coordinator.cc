@@ -26,7 +26,7 @@ void CoordinatorMongodb::Submit(shared_ptr<Marshallable>& cmd,
   // } else {
   //   verify(0);
   // }
-  // commo_->rep_sched_->RuleWitnessGC(cmd);
+  // commo_->rep_sched_->RuleCommandPoolGC(cmd);
   // commo_->rep_sched_->app_next_(*cmd);
 }
 

@@ -22,7 +22,7 @@ CopilotServer::CopilotServer(Frame* frame) : log_infos_(2) {
   id_ = frame->site_info_->id;
   setIsPilot(frame_->site_info_->locale_id == 0);
   setIsCopilot(frame_->site_info_->locale_id == 1);
-  witness_.set_belongs_to_leader(frame_->site_info_->locale_id == 0 || frame_->site_info_->locale_id == 1);
+  command_pool_.set_belongs_to_leader(frame_->site_info_->locale_id == 0 || frame_->site_info_->locale_id == 1);
   Setup();
 }
 
@@ -617,7 +617,7 @@ bool CopilotServer::executeCmd(shared_ptr<CopilotData>& ins) {
     if (likely(ins->cmd->kind_ != MarshallDeputy::CMD_NOOP)) {
       // WAN_WAIT
       // Log_info("loc_id %d execute cmd <%d, %d>", loc_id_, SimpleRWCommand::GetCmdID(ins->cmd).first, SimpleRWCommand::GetCmdID(ins->cmd).second);
-      RuleWitnessGC(ins->cmd);
+      RuleCommandPoolGC(ins->cmd);
       app_next_(*ins->cmd);
     }
     ins->status = Status::EXECUTED;

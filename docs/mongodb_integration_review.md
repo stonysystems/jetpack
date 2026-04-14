@@ -18,7 +18,7 @@ and supporting headers `src/deptran/mongodb_*.h`.
 | `commo.h` | 16 | `MongodbCommo` declaration |
 | `commo.cc` | 23 | `BroadcastCommit()` — fire-and-forget async RPC to replicas |
 | `service.h` | 17 | `MongodbServiceImpl` declaration |
-| `service.cc` | 16 | Commit handler — calls `RuleWitnessGC()` only (no execution) |
+| `service.cc` | 16 | Commit handler — calls `RuleCommandPoolGC()` only (no execution) |
 
 ### Supporting headers (`src/deptran/`)
 
@@ -41,7 +41,7 @@ Client → CoordinatorMongodb::Submit()
     │   │   └─ Worker thread: parse SimpleRWCommand → mongocxx Write/Read
     │   │       └─ Set mongodb_finished event
     │   ├─ mongodb_finished->Wait()  [BLOCKING]
-    │   ├─ RuleWitnessGC(cmd)
+    │   ├─ RuleCommandPoolGC(cmd)
     │   └─ app_next_(*cmd)
     ├─ MongodbCommo::BroadcastCommit()  [fire-and-forget]
     └─ Callbacks
@@ -114,9 +114,9 @@ Identical pattern to etcd integration:
 
 ## 6. Replica Behavior
 
-**Important**: `MongodbServiceImpl::Commit()` only calls `RuleWitnessGC()` — it does
+**Important**: `MongodbServiceImpl::Commit()` only calls `RuleCommandPoolGC()` — it does
 **not** execute the transaction on replicas. Only the leader writes to MongoDB.
-Replicas receive the commit RPC for witness garbage collection only.
+Replicas receive the commit RPC for command pool garbage collection only.
 
 This means MongoDB acts as a **single-writer** system in the Jetpack integration.
 Replicas do not maintain independent MongoDB state.

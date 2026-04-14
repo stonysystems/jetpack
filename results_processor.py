@@ -128,7 +128,7 @@ fields = ["latency", "site", "mode", "workload", "fastpath_rate", "duration", "c
 
 import csv 
     
-filename = os.path.join("results", "curp_results-" + exptime + ".csv")
+filename = os.path.join("results", "jetpack_results-" + exptime + ".csv")
     
 # writing to csv file 
 with open(filename, 'w') as csvfile: 

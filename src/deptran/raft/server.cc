@@ -511,7 +511,7 @@ void RaftServer::applyLogs() {
   for (slotid_t id = executeIndex + 1; id <= commitIndex; id++) {
     auto next_instance = GetRaftInstance(id);
     if (next_instance && next_instance->log_) {
-      RuleWitnessGC(next_instance->log_);
+      RuleCommandPoolGC(next_instance->log_);
       app_next_(*next_instance->log_);
       executeIndex = id;
     } else {

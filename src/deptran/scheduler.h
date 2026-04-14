@@ -174,15 +174,15 @@ class RevoveryCandidates {
   shared_ptr<Marshallable> get_cmd(uint64_t cmd_id) const;
 };
 
-class Witness {
-  class WitnessLog {
+class JetpackCommandPool {
+  class CommandPoolLog {
    public:
     double time_;
     int operation_; // 0: push_back; 1: remove
     shared_ptr<Marshallable> cmd_;
     bool success_;
     int size_;
-    WitnessLog(int operation, shared_ptr<Marshallable> cmd, bool success, int size):
+    CommandPoolLog(int operation, shared_ptr<Marshallable> cmd, bool success, int size):
       operation_(operation), cmd_(cmd), success_(success), size_(size) {
       time_ = SimpleRWCommand::GetCurrentMsTime();
     }
@@ -200,9 +200,9 @@ class Witness {
   };
   bool belongs_to_leader_{false}; // i.e. This server can propose value // discard
   TxLogServer* owner_{nullptr};
-  int witness_size_ = 0; // number of keys tracked in candidates_
-  int witness_cmd_count_ = 0; // total number of commands tracked
-  Distribution witness_size_distribution_;
+  int pool_size_ = 0; // number of keys tracked in candidates_
+  int pool_cmd_count_ = 0; // total number of commands tracked
+  Distribution pool_size_distribution_;
 #ifdef COMMAND_POOL_ON_DISK
   std::ofstream command_pool_file_;
   locid_t command_pool_loc_id_{std::numeric_limits<locid_t>::max()};
@@ -210,8 +210,8 @@ class Witness {
   void CloseCommandPoolFile();
 #endif
 
-#ifdef WITNESS_LOG_DEBUG
-  vector<WitnessLog> witness_log_;
+#ifdef COMMAND_POOL_LOG_DEBUG
+  vector<CommandPoolLog> pool_log_;
 #endif
  public:
   unordered_map<key_t, RevoveryCandidates> candidates_;
@@ -221,8 +221,8 @@ class Witness {
   bool committed_ = false;
   /* Recover related end */
 
-  Witness() {};
-  ~Witness();
+  JetpackCommandPool() {};
+  ~JetpackCommandPool();
   // return whether meet conflict, but not whether push_back success
   bool push_back(const shared_ptr<Marshallable>& cmd);
   // return how many cmd have been removed (cmd may be CMD_TPC_BATCH)
@@ -231,10 +231,10 @@ class Witness {
   bool has_appeared(const shared_ptr<Marshallable>& cmd);
   void set_owner(TxLogServer* owner);
   void set_belongs_to_leader(bool belongs_to_leader); // discard
-  // return 50pct, 90pct, 99pct, ave of the witness_size_distribution_
-  std::vector<double> witness_size_distribution();
-  int size() const { return witness_size_; }
-  int cmd_size() const { return witness_cmd_count_; }
+  // return 50pct, 90pct, 99pct, ave of the pool_size_distribution_
+  std::vector<double> pool_size_distribution();
+  int size() const { return pool_size_; }
+  int cmd_size() const { return pool_cmd_count_; }
   /* Recover related begin */
   bool has_cmd_to_recover(key_t key) {
     return candidates_[key].has_cmd_to_recover();
@@ -245,7 +245,7 @@ class Witness {
   shared_ptr<VecRecData> id_set();
   void reset();
   /* Recover related end */
-#ifdef WITNESS_LOG_DEBUG
+#ifdef COMMAND_POOL_LOG_DEBUG
   void print_log();
 #endif
 #ifdef COMMAND_POOL_ON_DISK
@@ -609,7 +609,7 @@ class TxLogServer {
   // below are about rule
 
   double GetQueueDepthForRule();
-  Witness witness_;
+  JetpackCommandPool command_pool_;
 
   // For Rule usage
   void OnRuleSpeculativeExecute(const shared_ptr<Marshallable>& cmd,
@@ -621,7 +621,7 @@ class TxLogServer {
 
   void OriginalPathUnexecutedCmdConflictPlaceHolder(const shared_ptr<Marshallable>& cmd);
 
-  void RuleWitnessGC(const shared_ptr<Marshallable>& cmd);
+  void RuleCommandPoolGC(const shared_ptr<Marshallable>& cmd);
 
 #ifdef ZERO_OVERHEAD
   virtual bool ConflictWithOriginalUnexecutedLog(const shared_ptr<Marshallable>& cmd) {

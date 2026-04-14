@@ -124,7 +124,7 @@ class ZookeeperServer : public TxLogServer {
     request_queues_depth_.append(static_cast<double>(depth));
     cmd_content->zookeeper_finished->Wait();
     WAN_WAIT
-    RuleWitnessGC(cmd);
+    RuleCommandPoolGC(cmd);
     app_next_(*cmd);
   }
 

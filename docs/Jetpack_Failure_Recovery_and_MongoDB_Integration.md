@@ -74,7 +74,7 @@ The recovery protocol consists of **8 steps** using a Paxos-like consensus:
 │                                                              │
 │  Step 2: PullRecovery                                        │
 │    ├─ Pull uncommitted commands from replicas                │
-│    ├─ Collect witness candidate commands                     │
+│    ├─ Collect command pool candidate commands                     │
 │    └─ Aggregate all commands needing recovery                │
 │                                                              │
 │  Step 3: RecordCmd                                           │
@@ -143,14 +143,14 @@ auto record_e = commo()->JetpackBroadcastRecordCmd(
 ```cpp
 // Prepare phase
 auto e = commo()->JetpackBroadcastPrepare(
-  partition_id_, site_id_, jepoch_, oepoch_, witness_.max_seen_ballot_);
+  partition_id_, site_id_, jepoch_, oepoch_, command_pool_.max_seen_ballot_);
 
 // Accept phase
-witness_.max_seen_ballot_++;
+command_pool_.max_seen_ballot_++;
 
 auto e = commo()->JetpackBroadcastAccept(
   partition_id_, site_id_, jepoch_, oepoch_,
-  witness_.max_seen_ballot_, propose_sid, propose_set_size);
+  command_pool_.max_seen_ballot_, propose_sid, propose_set_size);
 ```
 - Uses classic Paxos 2-phase commit
 - Consensus on (sid, set_size) pair that defines which commands to recover
@@ -253,9 +253,9 @@ void RaftServer::setIsLeader(bool isLeader) {
 
 ### Key Data Structures
 
-**Witness** ([scheduler.h:164-230](src/deptran/scheduler.h#L164-L230))
+**JetpackCommandPool** ([scheduler.h:164-230](src/deptran/scheduler.h#L164-L230))
 ```cpp
-class Witness {
+class JetpackCommandPool {
   int64_t max_seen_ballot_;      // Highest ballot seen (Paxos)
   int64_t max_accepted_ballot_;  // Highest ballot accepted
   int sid_;                      // Server ID for recovery set
@@ -400,7 +400,7 @@ When a client submits a command:
 │                                                      │                   │
 │  5. MongodbServer::Submit() resumes  ◀──────────────┘                    │
 │     │                                                                    │
-│     ├─ RuleWitnessGC(cmd)   // Clean up witness info                     │
+│     ├─ RuleCommandPoolGC(cmd)   // Clean up command pool info                     │
 │     │                                                                    │
 │     └─ app_next_(*cmd)      // Application callback                      │
 │                                                                          │
@@ -425,7 +425,7 @@ void Submit(const shared_ptr<Marshallable>& cmd) {
   cmd_content->mongodb_finished->Wait();
 
   // 5. Cleanup and callback
-  RuleWitnessGC(cmd);
+  RuleCommandPoolGC(cmd);
   app_next_(*cmd);
 }
 ```
@@ -592,7 +592,7 @@ ab: mongodb    # Atomic broadcast: mongodb, raft, etc.
 | **Communicator** | [mongodb/commo.cc](src/deptran/mongodb/commo.cc) | `BroadcastCommit()` |
 | **Frame Factory** | [mongodb/frame.cc](src/deptran/mongodb/frame.cc) | Component factory |
 | **View Management** | [view.h](src/deptran/view.h) | `View` class for leader tracking |
-| **Witness Tracking** | [scheduler.h:164-230](src/deptran/scheduler.h#L164-L230) | `Witness` class |
+| **JetpackCommandPool Tracking** | [scheduler.h:164-230](src/deptran/scheduler.h#L164-L230) | `JetpackCommandPool` class |
 | **MongoDB Elections** | [Mongodb_Leader_election.md](Mongodb_Leader_election.md) | MongoDB leader election protocol |
 
 ---

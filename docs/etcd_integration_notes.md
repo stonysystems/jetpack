@@ -12,7 +12,7 @@ discarded. The actual state machine lives entirely within Jetpack.
 
 This design separates two concerns:
 - **Command ordering** (etcd's Raft consensus guarantees total order)
-- **State machine replication** (Jetpack's own KV store and witness)
+- **State machine replication** (Jetpack's own KV store and command pool)
 
 Implication: etcd functions as a consensus oracle. The key prefix
 `JetPack/KVTable/{key}` namespaces Jetpack's command log within etcd's keyspace,
@@ -97,7 +97,7 @@ When a non-leader detects `etcd:primary_elected`, it triggers
 
 **Phase 1 (parallel):**
 - `PullRecovery`: Query all replicas for their command history
-- `Prepare`: Paxos Phase 1 — establish witness ballot, check for prior accepts
+- `Prepare`: Paxos Phase 1 — establish command pool ballot, check for prior accepts
 
 **Phase 2 (conditional parallel):**
 - `RecordCmd`: Replicas acknowledge recovered command set
