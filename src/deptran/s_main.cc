@@ -289,7 +289,10 @@ void client_launch_workers(vector<Config::SiteInfo> &client_sites) {
       Log_info("start a client thread on core %d, client-id:%d", core_id, client_id);
     }
     core_id ++;
-
+    // Skip core 1 (server thread) and core 4 (occupied by another process)
+    while (core_id == 1 || core_id == 4) {
+      core_id++;
+    }
 #endif
     client_threads_g.push_back(std::move(th_));
     client_workers_g.push_back(std::unique_ptr<ClientWorker>(worker));

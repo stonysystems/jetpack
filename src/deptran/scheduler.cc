@@ -516,16 +516,25 @@ void TxLogServer::OnRuleSpeculativeExecute(const shared_ptr<Marshallable>& cmd,
     if (queue_depth) *queue_depth = -1.0;
     return;
   }
+  // CURP mode: leader checks Raft log for conflicts, non-leader checks command pool
+  bool curp_mode = Config::GetConfig()->jetpack_fastpath_attempt_rate_ == CURP_MODE;
+  bool no_conflict;
+  if (curp_mode && IsLeader()) {
+    // CURP leader: check uncommitted Raft log entries for key conflicts
+    no_conflict = !ConflictWithUncommittedRaftLog(cmd);
+    // Leader does NOT insert into command pool — it uses the log as source of truth
+  } else {
+    // Jetpack path (all replicas) or CURP non-leader (witness): check command pool
 #ifdef ZERO_OVERHEAD
-  // if (rep_sched_->ConflictWithOriginalUnexecutedLog(cmd))
-  //   Log_info("Conflict!");
-  if (rep_sched_->command_pool_.push_back(cmd) && !rep_sched_->ConflictWithOriginalUnexecutedLog(cmd)) {
+    no_conflict = rep_sched_->command_pool_.push_back(cmd) && !rep_sched_->ConflictWithOriginalUnexecutedLog(cmd);
 #else
 #ifdef JETPACK_RECOVERY_DEBUG
-  Log_info("[JETPACK-DEBUG] OnRuleSpeculativeExecute about to push_back loc_id %d ", loc_id_);
+    Log_info("[JETPACK-DEBUG] OnRuleSpeculativeExecute about to push_back loc_id %d ", loc_id_);
 #endif
-  if (rep_sched_->command_pool_.push_back(cmd)) {
+    no_conflict = rep_sched_->command_pool_.push_back(cmd);
 #endif
+  }
+  if (no_conflict) {
     // SimpleRWCommand parsed_cmd = SimpleRWCommand(cmd);
     // Log_info("Server %d OnRuleSpeculativeExecute <%d, %d> key %d", rep_sched_->loc_id_, parsed_cmd.cmd_id_.first, parsed_cmd.cmd_id_.second, parsed_cmd.key_);
     // Log_info("command_pool_.push_back server %d push cmd_id <%d, %d> %lld key %d success 1", loc_id_, parsed_cmd.cmd_id_.first, parsed_cmd.cmd_id_.second,
@@ -565,6 +574,22 @@ void TxLogServer::RuleCommandPoolGC(const shared_ptr<Marshallable>& cmd) {
   // command_pool_.remove(cmd);
 }
 
+
+bool TxLogServer::ConflictWithUncommittedRaftLog(const shared_ptr<Marshallable>& cmd) {
+  auto key = SimpleRWCommand::GetKey(cmd);
+  auto* raft_svr = dynamic_cast<RaftServer*>(rep_sched_);
+  if (!raft_svr) return false;  // safety: should not happen in CURP mode
+
+  // Scan uncommitted entries: commitIndex+1 to lastLogIndex
+  for (uint64_t i = raft_svr->commitIndex + 1; i <= raft_svr->lastLogIndex; i++) {
+    auto& sp_instance = raft_svr->raft_logs_[i];
+    if (sp_instance && sp_instance->log_) {
+      auto log_key = SimpleRWCommand::GetKey(sp_instance->log_);
+      if (log_key == key) return true;  // conflict: same key in uncommitted log
+    }
+  }
+  return false;  // no conflict
+}
 
 void RevoveryCandidates::push_back(uint64_t cmd_id, shared_ptr<Marshallable> cmd, bool is_write) {
   candidates_[cmd_id] = cmd;

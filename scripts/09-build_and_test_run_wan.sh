@@ -154,7 +154,7 @@ fi
 # Uses derive_client_config() from experiment_defs.sh for AWS client config derivation.
 if [ "$experiment_env" == "zoo" ]; then
     # Zoo-specific command with LD_LIBRARY_PATH and WAN_DELAY_MS
-    server_command="export LD_LIBRARY_PATH=\${HOME}/local/lib:\${LD_LIBRARY_PATH}; export WAN_DELAY_MS=20; cd $repo_directory && build/deptran_server -f config/$CONFIG_FILE_1 -f config/$CONFIG_FILE_2 -f config/$CONFIG_FILE_3 -f config/$CONFIG_FILE_4 -f config/$CONFIG_FILE_5 -m $CONFIG_MODE -d $CONFIG_DURATION"
+    server_command="export LD_LIBRARY_PATH=${repo_directory}/build/docker_libs:\${HOME}/local/lib:\${LD_LIBRARY_PATH}; export WAN_DELAY_MS=20; cd $repo_directory && build/deptran_server -f config/$CONFIG_FILE_1 -f config/$CONFIG_FILE_2 -f config/$CONFIG_FILE_3 -f config/$CONFIG_FILE_4 -f config/$CONFIG_FILE_5 -m $CONFIG_MODE -d $CONFIG_DURATION"
     if [ "$FAILOVER_TEST" = true ]; then
         server_command+=" -f config/failover.yml"
     fi

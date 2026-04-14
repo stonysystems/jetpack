@@ -222,6 +222,18 @@ int Config::CreateConfig(int argc, char **argv) {
   config_s->exp_setting_name_ = exp_setting_name;
   config_s->config_paths_ = config_paths;
   config_s->Load();
+
+  // Validate CURP mode: only valid with Raft
+  if (config_s->jetpack_fastpath_attempt_rate_ == CURP_MODE) {
+    if (config_s->replica_proto_ != MODE_RAFT) {
+      Log_fatal("CURP mode (-m 200) is only valid with Raft (ab: raft). "
+                "Current protocol: 0x%x", config_s->replica_proto_);
+      return FAILURE;
+    }
+    Log_info("CURP mode enabled: leader checks Raft log, "
+             "witnesses check command pool, no recovery");
+  }
+
   return SUCCESS;
 }
 

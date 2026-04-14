@@ -623,6 +623,9 @@ class TxLogServer {
 
   void RuleCommandPoolGC(const shared_ptr<Marshallable>& cmd);
 
+  // CURP: check if cmd conflicts with any uncommitted Raft log entry (leader only)
+  bool ConflictWithUncommittedRaftLog(const shared_ptr<Marshallable>& cmd);
+
 #ifdef ZERO_OVERHEAD
   virtual bool ConflictWithOriginalUnexecutedLog(const shared_ptr<Marshallable>& cmd) {
     // This function should be overrided by the deriviated class (replica server)

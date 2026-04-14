@@ -1,0 +1,6 @@
+mode:
+  cc: rule # concurrency control (rule = Jetpack fast-path infrastructure)
+  ab: raft # atomic broadcast (CURP uses Raft as base; -m 200 activates CURP behavior)
+  batch: false
+  retry: 20
+  ongoing: 1 # per client

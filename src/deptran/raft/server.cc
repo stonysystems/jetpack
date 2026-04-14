@@ -4,6 +4,7 @@
 #include "frame.h"
 #include "coordinator.h"
 #include "../classic/tpc_command.h"
+#include "../config.h"
 #ifdef RAFT_ELECTION_ONLY_INIT_AND_POST_FAILURE_ONCE_PATCH
 #include <exception>
 #include "../../../jm_file_signal.h"
@@ -511,7 +512,10 @@ void RaftServer::applyLogs() {
   for (slotid_t id = executeIndex + 1; id <= commitIndex; id++) {
     auto next_instance = GetRaftInstance(id);
     if (next_instance && next_instance->log_) {
-      RuleCommandPoolGC(next_instance->log_);
+      // CURP leader doesn't use command pool, so skip GC for it
+      if (Config::GetConfig()->jetpack_fastpath_attempt_rate_ != CURP_MODE || !IsLeader()) {
+        RuleCommandPoolGC(next_instance->log_);
+      }
       app_next_(*next_instance->log_);
       executeIndex = id;
     } else {

@@ -1,0 +1,201 @@
+#!/bin/bash
+# run_single_exp.sh — Run a single experiment point with /proc/stat CPU monitoring.
+#
+# Usage: ./run_single_exp.sh <protocol_cfg> <mode> <concurrent_cfg> <label> <result_dir>
+# Example: ./run_single_exp.sh none_raft.yml 0 concurrent_1.yml raft-c1 results/2026-04-14-raft-jetpack-swiftpaxos-style
+
+set -euo pipefail
+
+PROTOCOL_CFG="$1"    # e.g. none_raft.yml
+MODE="$2"            # e.g. 0, 100, 101
+CONC_CFG="$3"        # e.g. concurrent_1.yml
+LABEL="$4"           # e.g. raft-c1
+RESULT_DIR="$5"      # e.g. results/2026-04-14-raft-jetpack-swiftpaxos-style
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+# Read setup.json
+SERVER_USERNAME=$(jq -r '.server_username' "$SCRIPT_DIR/setup.json")
+N_SERVER=$(jq -r '.n_server' "$SCRIPT_DIR/setup.json")
+ZOO_DIR=$(jq -r '.zoo_directory' "$SCRIPT_DIR/setup.json")
+
+declare -a servers replicanames
+for i in $(seq 0 $((N_SERVER - 1))); do
+    ip=$(jq -r ".servers[$i].server_${i}_ip" "$SCRIPT_DIR/setup.json")
+    servers+=("$ip")
+    replicanames+=("zoo${i}")
+done
+
+DURATION=30
+TIMEOUT_SEC=180
+
+mkdir -p "$RESULT_DIR"
+
+# Kill leftover deptran_server processes
+echo "[$LABEL] Cleaning up old processes..."
+for ip in "${servers[@]}"; do
+    ssh "$SERVER_USERNAME@$ip" "pkill -9 deptran_server 2>/dev/null; rm -f /tmp/JM_*" &>/dev/null &
+done
+wait
+sleep 2
+
+# Clean recent_csv
+ssh "$SERVER_USERNAME@${servers[0]}" "mkdir -p $ZOO_DIR/results/recent_csv && rm -f $ZOO_DIR/results/recent_csv/*" 2>/dev/null
+
+# Start /proc/stat CPU monitor on each server (background)
+# Samples per-core and overall CPU every 1s, writes to a file
+echo "[$LABEL] Starting CPU monitors on all hosts..."
+CPU_MONITOR_DURATION=$((DURATION + 15))
+CPU_MONITOR_SCRIPT='
+DURATION='"$CPU_MONITOR_DURATION"'
+for t in $(seq 1 $DURATION); do
+    ts=$(date +%s)
+    echo "T=$ts"
+    head -66 /proc/stat | grep -E "^cpu"
+    sleep 1
+done
+'
+for i in "${!servers[@]}"; do
+    ssh "$SERVER_USERNAME@${servers[$i]}" "$CPU_MONITOR_SCRIPT" \
+        > "$RESULT_DIR/${LABEL}-${replicanames[$i]}-cpustat.txt" 2>&1 &
+done
+
+sleep 1  # let monitors start
+
+# Build server command
+SERVER_CMD="export LD_LIBRARY_PATH=${ZOO_DIR}/build/docker_libs:\${HOME}/local/lib:\${LD_LIBRARY_PATH}; export WAN_DELAY_MS=20; cd $ZOO_DIR && build/deptran_server -f config/${PROTOCOL_CFG} -f config/client_open.yml -f config/30c1s5r5p-zoo.yml -f config/rw_1000000.yml -f config/${CONC_CFG} -m ${MODE} -d ${DURATION}"
+
+echo "[$LABEL] Command: $SERVER_CMD"
+echo "[$LABEL] Starting experiment..."
+
+declare -a jobs
+for i in "${!servers[@]}"; do
+    output_file="$RESULT_DIR/${LABEL}-${replicanames[$i]}.res"
+    run_name="${LABEL}-${replicanames[$i]}"
+    timeout "${TIMEOUT_SEC}s" \
+        ssh "$SERVER_USERNAME@${servers[$i]}" \
+            "${SERVER_CMD} -P ${replicanames[$i]} -N ${run_name}" \
+        > "$output_file" 2>&1 &
+    jobs[$i]=$!
+done
+
+# Wait for all experiment processes
+for i in "${!jobs[@]}"; do
+    pid=${jobs[$i]}
+    if wait "$pid"; then
+        echo "[$LABEL] ${replicanames[$i]} completed."
+    else
+        status=$?
+        if [[ $status -eq 124 ]]; then
+            echo "[$LABEL] ${replicanames[$i]} TIMED OUT."
+        else
+            echo "[$LABEL] ${replicanames[$i]} exit code $status."
+        fi
+    fi
+done
+
+# Kill any lingering processes
+for ip in "${servers[@]}"; do
+    ssh "$SERVER_USERNAME@$ip" "pkill -9 deptran_server" &>/dev/null &
+done
+wait
+sleep 2
+
+# Flush NFS
+for ip in "${servers[@]}"; do
+    ssh "$SERVER_USERNAME@$ip" "sync" &>/dev/null &
+done
+wait
+sleep 3
+
+# Pull CSV results
+scp "$SERVER_USERNAME@${servers[0]}:$ZOO_DIR/results/recent_csv/${LABEL}-*" "$RESULT_DIR/" 2>/dev/null || true
+scp "$SERVER_USERNAME@${servers[0]}:$ZOO_DIR/results/recent_csv/tdigest_${LABEL}-*" "$RESULT_DIR/" 2>/dev/null || true
+
+# Check success
+SUCCESS=true
+for i in "${!servers[@]}"; do
+    resfile="$RESULT_DIR/${LABEL}-${replicanames[$i]}.res"
+    if [ -f "$resfile" ] && tail -c 102400 "$resfile" | grep -q "Mid throughput is"; then
+        echo "[$LABEL] ${replicanames[$i]}: OK"
+    else
+        echo "[$LABEL] ${replicanames[$i]}: FAILED"
+        SUCCESS=false
+    fi
+done
+
+# Parse and display results summary
+echo ""
+echo "=== [$LABEL] Results Summary ==="
+TOTAL_TPUT=0
+for i in "${!servers[@]}"; do
+    resfile="$RESULT_DIR/${LABEL}-${replicanames[$i]}.res"
+    if [ -f "$resfile" ]; then
+        tp=$(tail -c 102400 "$resfile" | grep -m1 "Mid throughput is" | awk '{print $NF}' 2>/dev/null || echo "0")
+        TOTAL_TPUT=$(echo "$TOTAL_TPUT + $tp" | bc 2>/dev/null || echo "$TOTAL_TPUT")
+        echo "  ${replicanames[$i]}: throughput=$tp"
+    fi
+done
+echo "  Total throughput: $TOTAL_TPUT"
+
+# Extract latency from zoo0 (any replica reports it)
+RESFILE0="$RESULT_DIR/${LABEL}-zoo0.res"
+if [ -f "$RESFILE0" ]; then
+    echo ""
+    tail -c 102400 "$RESFILE0" | grep -E "All-efficient-attempts|Fastpath statistics|Cpu-usage-leaders|server median" || true
+fi
+
+# Parse /proc/stat CPU data: compute per-core and host-level CPU usage
+echo ""
+echo "=== [$LABEL] CPU Usage (core 1 = server thread) ==="
+
+parse_cpu_usage() {
+    local cpustat_file="$1"
+    local core_name="$2"  # e.g. "cpu1" for core 1, "cpu " for aggregate
+
+    # Extract all lines matching core_name, compute usage between consecutive samples
+    local prev_total=0 prev_idle=0 first=1
+    local usages=()
+
+    while IFS= read -r line; do
+        # Format: cpuN user nice system idle iowait irq softirq steal
+        read -r _ user nice system idle iowait irq softirq steal <<< "$line"
+        total=$((user + nice + system + idle + iowait + irq + softirq + steal))
+
+        if [ $first -eq 1 ]; then
+            first=0
+        else
+            dtotal=$((total - prev_total))
+            didle=$((idle + iowait - prev_idle))
+            if [ $dtotal -gt 0 ]; then
+                usage=$(echo "scale=1; 100 * (1 - $didle / $dtotal)" | bc 2>/dev/null)
+                usages+=("$usage")
+            fi
+        fi
+        prev_total=$total
+        prev_idle=$((idle + iowait))
+    done < <(grep "^${core_name}" "$cpustat_file" 2>/dev/null)
+
+    if [ ${#usages[@]} -gt 0 ]; then
+        avg=$(printf '%s\n' "${usages[@]}" | awk '{s+=$1; n++} END {if(n>0) printf "%.1f", s/n; else print "N/A"}')
+        max=$(printf '%s\n' "${usages[@]}" | sort -n | tail -1)
+        echo "${avg} ${max}"
+    else
+        echo "N/A N/A"
+    fi
+}
+
+for i in "${!servers[@]}"; do
+    cpufile="$RESULT_DIR/${LABEL}-${replicanames[$i]}-cpustat.txt"
+    if [ -f "$cpufile" ] && [ -s "$cpufile" ]; then
+        read -r c1_avg c1_max <<< "$(parse_cpu_usage "$cpufile" "cpu1 ")"
+        read -r host_avg host_max <<< "$(parse_cpu_usage "$cpufile" "cpu ")"
+        echo "  ${replicanames[$i]}: core1 avg=${c1_avg}% max=${c1_max}%  |  host avg=${host_avg}% max=${host_max}%"
+    else
+        echo "  ${replicanames[$i]}: no CPU data"
+    fi
+done
+
+echo ""
+echo "=== [$LABEL] Done ==="

@@ -68,7 +68,9 @@ void CoordinatorRule::GotoNextPhase() {
           cmd_is_write_ = SimpleRWCommand(cmds[0]).IsWrite();
       }
 
-      if (0 <= Config::GetConfig()->jetpack_fastpath_attempt_rate_ && Config::GetConfig()->jetpack_fastpath_attempt_rate_ <= 100) {
+      if (Config::GetConfig()->jetpack_fastpath_attempt_rate_ == CURP_MODE) {
+        go_to_fastpath_ = true;  // CURP: always attempt fast path, no throttle
+      } else if (0 <= Config::GetConfig()->jetpack_fastpath_attempt_rate_ && Config::GetConfig()->jetpack_fastpath_attempt_rate_ <= 100) {
         // fixed percentage
         go_to_fastpath_ = RandomGenerator::rand(0, 99) < Config::GetConfig()->jetpack_fastpath_attempt_rate_;
       } else if (Config::GetConfig()->jetpack_fastpath_attempt_rate_ == 101) {

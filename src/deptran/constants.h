@@ -109,6 +109,10 @@ namespace janus {
 #define MODE_ZOOKEEPER (0x9002)
 #define MODE_NOT_READY     (0x00)
 
+// CURP mode flag for -m parameter (not a protocol mode constant)
+// Used with rule_raft.yml -m 200: leader checks Raft log, witnesses check command pool, no recovery
+#define CURP_MODE 200
+
 #define OP_IR   (0x1)
 #define OP_DR   (0x2)
 #define OP_R    (0x3)
