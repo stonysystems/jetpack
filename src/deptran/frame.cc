@@ -501,6 +501,7 @@ map<string, int> &Frame::FrameNameToMode() {
       {"mongodb",       MODE_MONGODB},
       {"etcd",          MODE_ETCD},
       {"zookeeper",     MODE_ZOOKEEPER},
+      {"swiftpaxos",    MODE_SWIFTPAXOS},
   };
   return frame_name_mode_s;
 }

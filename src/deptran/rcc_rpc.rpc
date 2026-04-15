@@ -422,6 +422,41 @@ abstract service Classic {
   defer JetpackFinishRecovery(epoch_t oepoch);
 }
 
+abstract service SwiftPaxosService {
+  // Normal path: client proposes, replicas respond with fast/slow acks
+  defer SwiftPropose(MarshallDeputy cmd |
+                     i32 res);
+
+  defer SwiftFastAck(siteid_t replica,
+                     ballot_t ballot,
+                     i64 cmd_id,
+                     MarshallDeputy dep,
+                     MarshallDeputy checksum,
+                     i64 seqnum |
+                     i32 res);
+
+  defer SwiftSlowAck(siteid_t replica,
+                     ballot_t ballot,
+                     i64 cmd_id |
+                     i32 res);
+
+  // Recovery: leader election and state sync
+  defer SwiftNewLeader(siteid_t replica,
+                       ballot_t ballot |
+                       i32 res);
+
+  defer SwiftNewLeaderAck(siteid_t replica,
+                          ballot_t ballot,
+                          ballot_t cballot,
+                          MarshallDeputy cmd_states |
+                          i32 res);
+
+  defer SwiftSync(siteid_t replica,
+                  ballot_t ballot,
+                  MarshallDeputy cmd_states |
+                  i32 res);
+}
+
 // Below is for statistics
 
 struct ValueTimesPair {

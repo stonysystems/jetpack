@@ -107,6 +107,7 @@ namespace janus {
 #define MODE_MONGODB (0x9000)
 #define MODE_ETCD (0x9001)
 #define MODE_ZOOKEEPER (0x9002)
+#define MODE_SWIFTPAXOS (0x8000)
 #define MODE_NOT_READY     (0x00)
 
 // CURP mode flag for -m parameter (not a protocol mode constant)
