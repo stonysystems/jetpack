@@ -61,6 +61,7 @@ CURRENT_DOCKER_IMAGES=("jetpack-etcd" "jetpack-mongodb" "jetpack-zookeeper")
 MODE_ORIGINAL="0"       # Original protocol, no Jetpack fast-path
 MODE_FASTPATH100="100"  # Force 100% fast-path attempts
 MODE_ADAPTIVE="101"     # Adaptive fast-path throttle (sentinel value)
+MODE_CURP="200"         # CURP: leader checks Raft log, witnesses check command pool, no recovery (Raft only)
 
 ALL_FASTPATH_MODES=("$MODE_ORIGINAL" "$MODE_FASTPATH100" "$MODE_ADAPTIVE")
 
@@ -71,6 +72,7 @@ mode_flag_for() {
         none|original)     echo "$MODE_ORIGINAL" ;;
         rule100|fp100)     echo "$MODE_FASTPATH100" ;;
         rule101|adaptive)  echo "$MODE_ADAPTIVE" ;;
+        curp)              echo "$MODE_CURP" ;;
         *)                 echo "$mode_name" ;;  # pass through numeric values
     esac
 }

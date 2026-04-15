@@ -577,6 +577,7 @@ void TxLogServer::RuleCommandPoolGC(const shared_ptr<Marshallable>& cmd) {
 
 bool TxLogServer::ConflictWithUncommittedRaftLog(const shared_ptr<Marshallable>& cmd) {
   auto key = SimpleRWCommand::GetKey(cmd);
+  auto cmd_id = SimpleRWCommand::GetCombinedCmdID(cmd);
   auto* raft_svr = dynamic_cast<RaftServer*>(rep_sched_);
   if (!raft_svr) return false;  // safety: should not happen in CURP mode
 
@@ -584,8 +585,11 @@ bool TxLogServer::ConflictWithUncommittedRaftLog(const shared_ptr<Marshallable>&
   for (uint64_t i = raft_svr->commitIndex + 1; i <= raft_svr->lastLogIndex; i++) {
     auto& sp_instance = raft_svr->raft_logs_[i];
     if (sp_instance && sp_instance->log_) {
+      // Skip the command itself (it may already be in the log from the Raft Submit path)
+      auto log_cmd_id = SimpleRWCommand::GetCombinedCmdID(sp_instance->log_);
+      if (log_cmd_id == cmd_id) continue;
       auto log_key = SimpleRWCommand::GetKey(sp_instance->log_);
-      if (log_key == key) return true;  // conflict: same key in uncommitted log
+      if (log_key == key) return true;  // conflict: different command on same key
     }
   }
   return false;  // no conflict

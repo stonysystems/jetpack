@@ -255,6 +255,12 @@ void RaftServer::StartJetpackRecoveryLoop() {
 
 void RaftServer::TriggerJetpackRecovery(const char* reason) {
 #ifndef RAFT_TEST_CORO
+	// CURP mode: no Jetpack recovery (fast-path commands may be lost on leader change)
+	if (Config::GetConfig()->jetpack_fastpath_attempt_rate_ == CURP_MODE) {
+		Log_info("[CURP] Skipping Jetpack recovery trigger (%s) — CURP has no recovery",
+						 reason ? reason : "unspecified");
+		return;
+	}
 	StartJetpackRecoveryLoop();
 	const char* why = reason ? reason : "unspecified";
 	std::shared_ptr<IntEvent> ev;
