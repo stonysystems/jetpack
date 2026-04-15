@@ -12,6 +12,7 @@ class SwiftPaxosCoordinator : public Coordinator {
  public:
   SwiftPaxosServer* svr_ = nullptr;
   uint32_t n_replica_ = 0;
+  bool committed_ = false;
 
   SwiftPaxosCoordinator(uint32_t coo_id,
                         int32_t benchmark,
@@ -26,8 +27,6 @@ class SwiftPaxosCoordinator : public Coordinator {
 
   void Reset() override {}
   void Restart() override { verify(0); }
-
-  void GotoNextPhase();
 };
 
 } // namespace janus

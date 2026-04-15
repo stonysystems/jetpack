@@ -3,6 +3,7 @@
 #include "../__dep__.h"
 #include "../constants.h"
 #include "../rcc_rpc.h"
+#include "../RW_command.h"
 #include "server.h"
 
 namespace janus {
@@ -17,8 +18,12 @@ class SwiftPaxosServiceImplC : public SwiftPaxosServiceService {
                     rrr::i32* res,
                     rrr::DeferredReply* defer) override {
     Coroutine::CreateRun([this, &cmd, res, defer]() {
-      svr_->OnPropose(const_cast<MarshallDeputy&>(cmd).sp_data_);
-      *res = 0;
+      auto sp_cmd = const_cast<MarshallDeputy&>(cmd).sp_data_;
+      auto cmd_id = SimpleRWCommand::GetCombinedCmdID(sp_cmd);
+      auto key = SimpleRWCommand::GetKey(sp_cmd);
+      bool has_conflict = svr_->HasConflict(key, cmd_id);
+      svr_->OnPropose(sp_cmd, nullptr);
+      *res = has_conflict ? 1 : 0;  // 0=fast ack, 1=slow ack
       defer->reply();
     });
   }
@@ -31,7 +36,13 @@ class SwiftPaxosServiceImplC : public SwiftPaxosServiceService {
                     const rrr::i64& seqnum,
                     rrr::i32* res,
                     rrr::DeferredReply* defer) override {
-    // TODO: deserialize dep, forward to server (Phase 2.3)
+    SwiftAck ack;
+    ack.replica = replica;
+    ack.ballot = ballot;
+    ack.cmd_id = cmd_id;
+    ack.seqnum = seqnum;
+    ack.is_slow = false;
+    svr_->OnFastAck(ack);
     *res = 0;
     defer->reply();
   }
@@ -41,7 +52,12 @@ class SwiftPaxosServiceImplC : public SwiftPaxosServiceService {
                      const rrr::i64& cmd_id,
                      rrr::i32* res,
                      rrr::DeferredReply* defer) override {
-    // TODO: forward to server (Phase 2.3)
+    SwiftAck ack;
+    ack.replica = replica;
+    ack.ballot = ballot;
+    ack.cmd_id = cmd_id;
+    ack.is_slow = true;
+    svr_->OnSlowAck(ack);
     *res = 0;
     defer->reply();
   }
@@ -50,7 +66,6 @@ class SwiftPaxosServiceImplC : public SwiftPaxosServiceService {
                       const ballot_t& ballot,
                       rrr::i32* res,
                       rrr::DeferredReply* defer) override {
-    // TODO: forward to server (Phase 2.5)
     *res = 0;
     defer->reply();
   }
@@ -61,7 +76,6 @@ class SwiftPaxosServiceImplC : public SwiftPaxosServiceService {
                          const MarshallDeputy& cmd_states,
                          rrr::i32* res,
                          rrr::DeferredReply* defer) override {
-    // TODO: forward to server (Phase 2.5)
     *res = 0;
     defer->reply();
   }
@@ -71,7 +85,6 @@ class SwiftPaxosServiceImplC : public SwiftPaxosServiceService {
                  const MarshallDeputy& cmd_states,
                  rrr::i32* res,
                  rrr::DeferredReply* defer) override {
-    // TODO: forward to server (Phase 2.5)
     *res = 0;
     defer->reply();
   }
