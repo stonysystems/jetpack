@@ -502,6 +502,7 @@ map<string, int> &Frame::FrameNameToMode() {
       {"etcd",          MODE_ETCD},
       {"zookeeper",     MODE_ZOOKEEPER},
       {"swiftpaxos",    MODE_SWIFTPAXOS},
+      {"epaxos_corrected", MODE_EPAXOS_CORRECTED},
   };
   return frame_name_mode_s;
 }

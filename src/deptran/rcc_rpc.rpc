@@ -457,6 +457,67 @@ abstract service SwiftPaxosService {
                   i32 res);
 }
 
+abstract service EPaxosCService {
+  // Phase 1: PreAccept (fast path)
+  defer EPaxosCPreAccept(siteid_t leader,
+                         siteid_t replica,
+                         i64 instance,
+                         ballot_t ballot,
+                         MarshallDeputy cmd,
+                         i32 seq,
+                         MarshallDeputy deps |
+                         i32 status,
+                         ballot_t reply_ballot,
+                         i32 reply_seq,
+                         MarshallDeputy reply_deps);
+
+  // Phase 2: Accept (slow path)
+  defer EPaxosCAccept(siteid_t leader,
+                      siteid_t replica,
+                      i64 instance,
+                      ballot_t ballot,
+                      i32 seq,
+                      MarshallDeputy deps |
+                      i32 status,
+                      ballot_t reply_ballot);
+
+  // Phase 3: Commit
+  defer EPaxosCCommit(siteid_t leader,
+                      siteid_t replica,
+                      i64 instance,
+                      ballot_t ballot,
+                      MarshallDeputy cmd,
+                      i32 seq,
+                      MarshallDeputy deps);
+
+  // Recovery: Prepare
+  defer EPaxosCPrepare(siteid_t leader,
+                       siteid_t replica,
+                       i64 instance,
+                       ballot_t ballot |
+                       i32 status,
+                       ballot_t reply_ballot,
+                       ballot_t reply_vbal,
+                       MarshallDeputy reply_cmd,
+                       i32 reply_seq,
+                       MarshallDeputy reply_deps);
+
+  // Recovery: TryPreAccept
+  defer EPaxosCTryPreAccept(siteid_t leader,
+                            siteid_t replica,
+                            i64 instance,
+                            ballot_t ballot,
+                            MarshallDeputy cmd,
+                            i32 seq,
+                            MarshallDeputy deps |
+                            i32 status,
+                            ballot_t reply_ballot,
+                            ballot_t reply_vbal,
+                            siteid_t conflict_replica,
+                            i64 conflict_instance,
+                            i32 conflict_status);
+}
+
 // Below is for statistics
 
 struct ValueTimesPair {
