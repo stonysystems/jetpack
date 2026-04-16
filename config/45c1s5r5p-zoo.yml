@@ -1,0 +1,67 @@
+
+
+site:
+  server: # each line is a partition, the first is the master site_name:port
+    - ["s101:38000", "s201:38001", "s301:38002", "s401:38003", "s501:38004"]
+  client: # each line is a partition
+    - ["c01", "c02", "c03", "c04", "c05", "c06", "c07", "c08", "c09", "c10", "c11", "c12", "c13", "c14", "c15", "c16", "c17", "c18", "c19", "c20", "c21", "c22", "c23", "c24", "c25", "c26", "c27", "c28", "c29", "c30", "c31", "c32", "c33", "c34", "c35", "c36", "c37", "c38", "c39", "c40", "c41", "c42", "c43", "c44", "c45"]
+
+
+process:
+  s101: zoo0
+  s201: zoo1
+  s301: zoo2
+  s401: zoo3
+  s501: zoo4
+  c01: zoo0
+  c02: zoo0
+  c03: zoo0
+  c04: zoo0
+  c05: zoo0
+  c06: zoo0
+  c07: zoo0
+  c08: zoo0
+  c09: zoo0
+  c10: zoo1
+  c11: zoo1
+  c12: zoo1
+  c13: zoo1
+  c14: zoo1
+  c15: zoo1
+  c16: zoo1
+  c17: zoo1
+  c18: zoo1
+  c19: zoo2
+  c20: zoo2
+  c21: zoo2
+  c22: zoo2
+  c23: zoo2
+  c24: zoo2
+  c25: zoo2
+  c26: zoo2
+  c27: zoo2
+  c28: zoo3
+  c29: zoo3
+  c30: zoo3
+  c31: zoo3
+  c32: zoo3
+  c33: zoo3
+  c34: zoo3
+  c35: zoo3
+  c36: zoo3
+  c37: zoo4
+  c38: zoo4
+  c39: zoo4
+  c40: zoo4
+  c41: zoo4
+  c42: zoo4
+  c43: zoo4
+  c44: zoo4
+  c45: zoo4
+
+host:
+  zoo0: 130.245.173.101
+  zoo1: 130.245.173.102
+  zoo2: 130.245.173.103
+  zoo3: 130.245.173.104
+  zoo4: 130.245.173.105

@@ -138,16 +138,34 @@ shared_ptr<RuleSpeculativeExecuteQuorumEvent>
 CommunicatorRule::BroadcastRuleSpeculativeExecute(shared_ptr<vector<shared_ptr<SimpleCommand>>> vec_piece_data) {
   verify(!vec_piece_data->empty());
   auto par_id = vec_piece_data->at(0)->PartitionId();
-  
+
   shared_ptr<VecPieceData> sp_vpd(new VecPieceData);
   sp_vpd->sp_vec_piece_data_ = vec_piece_data;
   MarshallDeputy md(sp_vpd);
 
-  int n = Config::GetConfig()->GetPartitionSize(par_id);
-  int n_leaders = Config::GetConfig()->get_num_leaders(par_id);
-  auto e = Reactor::CreateSpEvent<RuleSpeculativeExecuteQuorumEvent>(n, SimpleRWCommand::RuleSuperMajority(n), n_leaders);
+  int n_total = Config::GetConfig()->GetPartitionSize(par_id);
+  int n_leaders_total = Config::GetConfig()->get_num_leaders(par_id);
+
+  // In CURP mode the leader already replicates the command via the Raft
+  // slow-path dispatch, so the spec RPC to the leader is redundant and
+  // doubles its single-core load. Skip the leader from the spec broadcast
+  // and treat only the non-leader replicas as witnesses. This halves the
+  // per-request leader work, which is what limits throughput at c50+.
+  bool curp_mode = Config::GetConfig()->jetpack_fastpath_attempt_rate_ == CURP_MODE;
+  siteid_t skip_site_id = -1;
+  int n_rpc = n_total;
+  int n_leaders_rpc = n_leaders_total;
+  if (curp_mode) {
+    skip_site_id = Communicator::LeaderProxyForPartition(par_id).first;
+    n_rpc = n_total - 1;
+    n_leaders_rpc = 0;  // no leader is contacted, so leader-vote requirement drops
+  }
+
+  auto e = Reactor::CreateSpEvent<RuleSpeculativeExecuteQuorumEvent>(
+      n_rpc, SimpleRWCommand::RuleSuperMajority(n_rpc), n_leaders_rpc);
   WAN_WAIT;
   for (auto& pair : rpc_par_proxies_[par_id]) {
+    if (curp_mode && pair.first == skip_site_id) continue;
     rrr::FutureAttr fuattr;
     fuattr.callback =
         [e, this](Future* fu) {
@@ -163,18 +181,18 @@ CommunicatorRule::BroadcastRuleSpeculativeExecute(shared_ptr<vector<shared_ptr<S
           fu->get_reply() >> accepted >> result >> is_leader >> cpu_usage >> queue_depth;
           e->FeedResponse(accepted, result, is_leader, cpu_usage, queue_depth);
         };
-    
+
     DepId di;
     di.str = "dep";
     di.id = Communicator::global_id++;
-    
+
     auto proxy = pair.second;
 
     // Record Time
     struct timeval tp;
     gettimeofday(&tp, NULL);
     sp_vpd->time_sent_from_client_ = tp.tv_sec * 1000 + tp.tv_usec / 1000.0;
-    
+
     auto future = proxy->async_RuleSpeculativeExecute(md, fuattr);
     Future::safe_release(future);
   }

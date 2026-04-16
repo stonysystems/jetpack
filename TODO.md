@@ -31,6 +31,27 @@ Documentation produced:
 
 ## Open / Unsolved Items
 
+### Active tasks
+
+#### Task: Precise max-throughput bisection per protocol
+
+**Goal**: Find the exact client count at which each protocol hits its real bottleneck (server CPU ≈ 100% on some host, or p50 latency begins to climb). Current measurements jump from 30 → 60 clients, so the true saturation point is unknown — we only know that 30 is under-provisioned and 60 is (for some protocols) over-provisioned.
+
+**Why**: At 30 clients all protocols reported ~6000 cmd/s (client-side cap). At 60 clients, Jetpack+Raft adaptive hit 100% CPU (saturated) while EPaxos was only at 82.8% and Raft at 83.8% (headroom). Without finer granularity we cannot say *which* protocol has the highest real ceiling, only the coarse ordering.
+
+**Approach**:
+1. For each protocol (Raft, Jetpack+Raft fp100, Jetpack+Raft adaptive, SwiftPaxos, EPaxos), sweep client counts in finer steps: 30, 40, 45, 50, 55, 60, 70, 80, 100. Create configs as needed (e.g., `45c1s5r5p-zoo.yml`, `50c1s5r5p-zoo.yml`, …).
+2. Fix concurrent=500 (well above saturation) so the bottleneck is pure client throughput × protocol CPU.
+3. Stop per-protocol when either: (a) max server CPU ≥ 99% on any host, or (b) p50 latency rises > 100% above the 1-client baseline.
+4. Record per-protocol: saturation client count, peak throughput, max CPU host, avg CPU across 5 replicas, p50 at saturation.
+5. Write results to `docs/max_throughput_bisection_<date>.md` with a summary table ordered by peak throughput.
+
+**Acceptance**: For each of the 5 scalable protocols, we have a saturation client count accurate to ±5 clients, a peak throughput number, and the bottleneck attribution (which replica, what CPU%).
+
+**Notes**:
+- Client worker cap is ~200 cmd/s each, so 60 clients ≈ 12k cmd/s ceiling. If a protocol saturates below 12k we've found the real protocol cap; if it scales past 12k we need to push further (90, 100, 120 clients).
+- Reuse `run_single_exp.sh` with new `<N>c1s5r5p-zoo.yml` configs. Clients are distributed across the 5 zoo nodes (zoo0..zoo4), so prefer N divisible by 5 (30, 40, 45, 50, 55, 60, 75, 90, 100).
+
 ### Known bugs (not planned for fix, documented for transparency)
 1. **CURP throughput collapse at c50+** — at concurrent ≥ 50, CURP's p50 jumps to 1000+ms. Likely caused by Raft leader election timing or coroutine pile-up under load; works fine at c1 (40ms p50). The implementation is correct; the issue appears environmental/timing. Documented in `docs/curp_vs_raft_vs_jetpack_experiment.md`.
 2. **Jetpack+CoPilot adaptive fails at c150+** — pre-existing issue in the CoPilot codebase, not introduced by our changes.

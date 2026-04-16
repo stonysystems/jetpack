@@ -280,7 +280,14 @@ void CopilotServer::OnFastAccept(const uint8_t& is_pilot,
 #endif
 
   auto ins = GetInstance(slot, is_pilot);
-  verify(ins);
+  if (!ins) {
+    // Slot already freed on this replica. Reply with the requested ballot
+    // and dep so the coordinator sees a valid but inert response.
+    *max_ballot = ballot;
+    *ret_dep = dep;
+    if (cb) { cb(); WAN_WAIT; }
+    return;
+  }
   log_infos_[is_pilot].current_slot = std::max(slot, log_infos_[is_pilot].current_slot);
   auto& log_info = log_infos_[REVERSE(is_pilot)];
   auto& logs = log_info.logs;
@@ -376,8 +383,16 @@ void CopilotServer::OnAccept(const uint8_t& is_pilot,
   // Print("loc_id_ = " + std::to_string(loc_id_) + " Start OnAccept is_pilot=" + std::to_string(is_pilot) +
   //       " cmd<" + std::to_string(parsed_cmd.cmd_id_.first) + ", " + std::to_string(parsed_cmd.cmd_id_.second) + "> suggest_dep=" + std::to_string(dep));
   auto ins = GetInstance(slot, is_pilot);
-  verify(ins);
   auto& log_info = log_infos_[is_pilot];
+  if (!ins) {
+    // Slot was already freed/GC'd by this replica. A late-arriving Accept for
+    // that slot is harmless — the cmd has already been executed locally or
+    // will be filled in via commit. Return the requested ballot so the
+    // coordinator sees a valid reply.
+    *max_ballot = ballot;
+    if (cb) { cb(); WAN_WAIT; }
+    return;
+  }
   log_info.current_slot = std::max(slot, log_info.current_slot);
 
   if (ins->ballot <= ballot) {

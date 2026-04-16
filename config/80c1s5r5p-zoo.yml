@@ -1,0 +1,102 @@
+
+
+site:
+  server: # each line is a partition, the first is the master site_name:port
+    - ["s101:38000", "s201:38001", "s301:38002", "s401:38003", "s501:38004"]
+  client: # each line is a partition
+    - ["c01", "c02", "c03", "c04", "c05", "c06", "c07", "c08", "c09", "c10", "c11", "c12", "c13", "c14", "c15", "c16", "c17", "c18", "c19", "c20", "c21", "c22", "c23", "c24", "c25", "c26", "c27", "c28", "c29", "c30", "c31", "c32", "c33", "c34", "c35", "c36", "c37", "c38", "c39", "c40", "c41", "c42", "c43", "c44", "c45", "c46", "c47", "c48", "c49", "c50", "c51", "c52", "c53", "c54", "c55", "c56", "c57", "c58", "c59", "c60", "c61", "c62", "c63", "c64", "c65", "c66", "c67", "c68", "c69", "c70", "c71", "c72", "c73", "c74", "c75", "c76", "c77", "c78", "c79", "c80"]
+
+
+process:
+  s101: zoo0
+  s201: zoo1
+  s301: zoo2
+  s401: zoo3
+  s501: zoo4
+  c01: zoo0
+  c02: zoo0
+  c03: zoo0
+  c04: zoo0
+  c05: zoo0
+  c06: zoo0
+  c07: zoo0
+  c08: zoo0
+  c09: zoo0
+  c10: zoo0
+  c11: zoo0
+  c12: zoo0
+  c13: zoo0
+  c14: zoo0
+  c15: zoo0
+  c16: zoo0
+  c17: zoo1
+  c18: zoo1
+  c19: zoo1
+  c20: zoo1
+  c21: zoo1
+  c22: zoo1
+  c23: zoo1
+  c24: zoo1
+  c25: zoo1
+  c26: zoo1
+  c27: zoo1
+  c28: zoo1
+  c29: zoo1
+  c30: zoo1
+  c31: zoo1
+  c32: zoo1
+  c33: zoo2
+  c34: zoo2
+  c35: zoo2
+  c36: zoo2
+  c37: zoo2
+  c38: zoo2
+  c39: zoo2
+  c40: zoo2
+  c41: zoo2
+  c42: zoo2
+  c43: zoo2
+  c44: zoo2
+  c45: zoo2
+  c46: zoo2
+  c47: zoo2
+  c48: zoo2
+  c49: zoo3
+  c50: zoo3
+  c51: zoo3
+  c52: zoo3
+  c53: zoo3
+  c54: zoo3
+  c55: zoo3
+  c56: zoo3
+  c57: zoo3
+  c58: zoo3
+  c59: zoo3
+  c60: zoo3
+  c61: zoo3
+  c62: zoo3
+  c63: zoo3
+  c64: zoo3
+  c65: zoo4
+  c66: zoo4
+  c67: zoo4
+  c68: zoo4
+  c69: zoo4
+  c70: zoo4
+  c71: zoo4
+  c72: zoo4
+  c73: zoo4
+  c74: zoo4
+  c75: zoo4
+  c76: zoo4
+  c77: zoo4
+  c78: zoo4
+  c79: zoo4
+  c80: zoo4
+
+host:
+  zoo0: 130.245.173.101
+  zoo1: 130.245.173.102
+  zoo2: 130.245.173.103
+  zoo3: 130.245.173.104
+  zoo4: 130.245.173.105
