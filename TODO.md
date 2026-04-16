@@ -65,9 +65,20 @@ Documentation produced:
 | Mencius + Jetpack | fails at c50+ | — | — | — |
 | CURP | n/a | — | — | Known bug at c50+ |
 
-All 5 scalable protocols saturate at ~6000 cmd/s at c200 — indicating a single-core server bottleneck. Jetpack's fast-path benefit is maintained even at saturation (41ms vs Raft's 76ms).
+All 5 scalable protocols hit the same ~6000 cmd/s ceiling at c200. **This is likely an infrastructure bottleneck (client-side or RPC framework), not a protocol limit** — evidence:
 
-**CPU observations:** EPaxos (16.6%) and SwiftPaxos (31.4%) have the lowest CPU at peak because the current simplified implementations don't actively participate in consensus on non-proposing replicas. Jetpack-based protocols use 50-55% CPU because every replica participates in fast-path ack collection via RPC. CoPilot and Mencius hit CPU saturation, which is why they fail at higher concurrency. See `docs/full_protocol_throughput_2026-04-16.md` for per-host CPU breakdown.
+- Max server CPU: Raft=49%, SwiftPaxos=59%, EPaxos=76%, Jetpack=96% (only Jetpack's leader is near-saturated)
+- Per-host throughput is uniform (~1200 cmd/s each) across all protocols and concurrencies
+- Pattern suggests per-client rate limit (~200 cmd/s × 6 clients per host = ~1200 per host)
+
+**What this means:**
+- "Peak throughput" is a shared infrastructure ceiling, not a protocol ceiling
+- At this shared ceiling, CPU efficiency differs sharply between protocols:
+  - **Jetpack**: leader at 96% CPU — already CPU-bound on leader, little headroom
+  - **Raft**: leader at 49% CPU — could scale ~2x higher if infrastructure allowed
+  - **SwiftPaxos/EPaxos**: lower CPU because simplified impl only works the proposer
+
+Jetpack's fast-path benefit is preserved at the ceiling (41ms vs Raft's 76ms). See `docs/full_protocol_throughput_2026-04-16.md` for full analysis.
 
 **Known issues:**
 - CURP throughput collapses at conc >= 50 (p50 jumps to 1000+ms)

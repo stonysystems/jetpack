@@ -97,15 +97,55 @@
 | Mencius + Jetpack | fails at c50+ | — | — | — | — | — |
 | CURP | n/a | — | — | — | — | Known bug |
 
-**CPU observations:**
-- **EPaxos** achieves ~6000 cmd/s with only **16.6% avg CPU** — most CPU-efficient. Only zoo0 (the proposing replica) does significant work (75.8%); other replicas are nearly idle since the simplified implementation doesn't actively participate in consensus.
-- **SwiftPaxos** at 31% avg CPU — also very efficient.
-- **Raft** at 29% avg CPU — efficient but with 2 RTT latency cost.
-- **Jetpack fp100/adaptive** at 50-55% avg CPU — higher because the Jetpack fast path requires active work on all replicas (command pool tracking, speculative execute RPC).
-- **CoPilot at c150**: 85.7% avg CPU — approaching saturation, explaining the c500 failure.
-- **Mencius at c50**: 100% CPU on all hosts — completely saturated, which is why it fails at c150.
+## Is the ~6000 cmd/s ceiling really a protocol limit?
 
-**Why EPaxos/SwiftPaxos have lower CPU than Jetpack**: The current EPaxos/SwiftPaxos implementations use a "simplified" model where they assume all replicas agree (no active RPC broadcast for acks). This means only the proposing replica does work per command, while non-proposing replicas are idle. A full implementation with proper RPC broadcasts would likely have CPU usage closer to Jetpack's 50%.
+**Probably not.** Several observations suggest the 6000 cmd/s plateau is a **testbed infrastructure ceiling**, not a protocol ceiling:
+
+### Evidence of an external bottleneck
+
+| Observation | Implication |
+|---|---|
+| Max server CPU at peak: Raft=49%, SwiftPaxos=59%, EPaxos=76%, Jetpack=96% | Only Jetpack's leader is near CPU-bound; the others have headroom |
+| Per-host throughput is nearly identical across all 5 replicas (~1200 cmd/s each) | Suggests uniform per-host bottleneck, not a leader bottleneck |
+| All 5 scalable protocols hit the same ~6000 ceiling | Unlikely coincidence if different protocols had different bottlenecks |
+| Per-host pattern is 6 clients × ~200 cmd/s = ~1200 cmd/s | Possible per-client rate limit around 200 cmd/s |
+
+### Candidate bottlenecks (not investigated)
+
+1. **Client-side RPC framework**: rrr library may have per-client throughput caps
+2. **TCP connection throughput**: With 30 clients × 5 replicas = 150 TCP connections
+3. **Client coordinator coroutine scheduling**: Per-client dispatch rate may cap around 200 cmd/s
+4. **NFS or filesystem**: 5 processes writing .res files with verbose logging could throttle
+5. **Zoo cluster network**: Cross-host network between `.101-.105` may cap at a certain rate
+
+### What this means for interpretation
+
+- **"Peak throughput" in these tables is an infrastructure ceiling**, not a protocol ceiling
+- The differentiator between protocols at "peak" is **CPU efficiency at that rate**, not the rate itself
+- To find true protocol limits, would need to fix/bypass the client-side bottleneck first
+
+### CPU efficiency at the shared ceiling
+
+| Protocol | Peak Tput | Max CPU (1 host) | Avg CPU (5 hosts) | CPU cost per cmd (approx) |
+|---|---|---|---|---|
+| Raft | 5990 | 49% (zoo4) | 29.1% | low (no fast path) |
+| SwiftPaxos | 6012 | 59% (zoo0) | 31.4% | low (simplified, only proposer works) |
+| EPaxos | 5996 | 76% (zoo0) | 16.6% | very low (simplified, only proposer) |
+| Jetpack fp100 | 6004 | 96% (zoo3, leader) | 54.6% | high (active fast-path RPCs on all replicas) |
+| Jetpack adaptive | 6003 | 96% (zoo3) | 50.6% | high (same) |
+| CoPilot | 4464 | 98% (zoo0) | 85.7% | very high (dual-pilot coordination) |
+| Mencius | 217 | 100% (all) | 100% | saturated (pre-existing scalability issue) |
+
+### Why Jetpack's 96% leader CPU at shared 6000 ceiling is interesting
+
+Even though all protocols hit ~6000, **Jetpack's leader is at 96% CPU while Raft's leader is at 49%**. This means:
+- If we removed the infrastructure bottleneck, **Raft could scale ~2x higher** before its leader saturated
+- **Jetpack would not scale much further** — it's already CPU-bound on the leader
+- **The fast-path mechanism has real CPU cost** that shows up as reduced headroom even when it doesn't limit current throughput
+
+### Why EPaxos has such low CPU
+
+The current EPaxos implementation uses a "simplified fast-commit" that assumes all replicas agree (single-process execution model). This means only the proposing replica does work per command — non-proposing replicas are nearly idle. A full implementation with proper RPC broadcasts for PreAccept/Accept/Commit would distribute CPU across all replicas.
 
 ## Key Findings
 
