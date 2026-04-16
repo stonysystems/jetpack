@@ -52,6 +52,7 @@ void ClientWorker::ForwardRequestDone(Coordinator* coo,
   if (have_more_time && config_->client_type_ == Config::Open) {
     std::lock_guard<std::mutex> lock(coordinator_mutex);
     coo->forward_status_ = NONE;
+    coo->_inuse_ = false;
     free_coordinators_.push_back(coo);
   } else if (!have_more_time) {
     Log_debug("times up. stop.");
@@ -467,8 +468,11 @@ void ClientWorker::Work() {
           num_try.fetch_add(coo->n_retry_);
           coo->sp_ev_done_.reset();
           coo->sp_ev_commit_.reset();
-          free_coordinators_.push_back(coo);
+          // Order matters: clear _inuse_ first so a concurrent
+          // FindOrCreateCoordinator that pops this coordinator off
+          // free_coordinators_ doesn't trip the verify(!coo->_inuse_) check.
           coo->_inuse_ = false;
+          free_coordinators_.push_back(coo);
           n_pause_concurrent_[coo->coo_id_] = true;
         }, __FILE__, __LINE__);
         // sleep(30);

@@ -31,42 +31,32 @@ Documentation produced:
 
 ## Open / Unsolved Items
 
-### Active tasks
+### Recently completed (2026-04-16 follow-up)
 
-#### Task: Precise max-throughput bisection per protocol
+- **Precise max-throughput bisection** — **Done** (commit `4d25d67f` infra + results in `docs/max_throughput_bisection_2026-04-16.md`). Peak ordering: EPaxos 19991 @ N100 > Raft 13984 @ N70 > SwiftPaxos 11968 @ N60 > Jetpack+Raft fp100 8998 @ N45 > Jetpack+Raft adaptive 7993 @ N40.
+- **etcd backend benchmarked** — **Done** (`scripts/start_etcd_cluster.sh` spins up 5-node etcd cluster). c1 p50=83ms @ 3.8 cmd/s/host; c50 total 1478 cmd/s similar to Raft. etcd works end-to-end with the existing `none_etcd.yml` config.
+- **CoPilot `verify(ins)` crash at c500 (OnAccept/OnFastAccept)** — **Fixed**. Late-arriving Accept for a freed slot now returns a valid reply instead of aborting. Matches the existing nullptr handling in OnPrepare/OnCommit.
+- **client_worker.cc `verify(!coo->_inuse_)` race** — **Fixed**. `_inuse_ = false` now happens before `free_coordinators_.push_back(coo)` so a concurrent FindOrCreateCoordinator doesn't see a still-in-use coordinator.
+- **CURP leader-skip optimization** — **Applied**. CURP spec RPC now skips the Raft leader (leader already has the cmd in its log via the slow-path dispatch, so a spec RPC is redundant and doubles leader load). CURP at c1 still works; c50+ still has a throughput ceiling tied to the leader's single pinned core but is no longer as pathological.
 
-**Goal**: Find the exact client count at which each protocol hits its real bottleneck (server CPU ≈ 100% on some host, or p50 latency begins to climb). Current measurements jump from 30 → 60 clients, so the true saturation point is unknown — we only know that 30 is under-provisioned and 60 is (for some protocols) over-provisioned.
+### Known bugs still open
 
-**Why**: At 30 clients all protocols reported ~6000 cmd/s (client-side cap). At 60 clients, Jetpack+Raft adaptive hit 100% CPU (saturated) while EPaxos was only at 82.8% and Raft at 83.8% (headroom). Without finer granularity we cannot say *which* protocol has the highest real ceiling, only the coarse ordering.
+1. **CURP throughput at c50+ is lower than Raft** (was 234→592 cmd/s at c=150; leader-skip helped but the fast-path speculative broadcast still competes with Raft dispatch on the leader's pinned core). To fully fix, the fast-path work would need to move off the pinned server core.
+2. **CoPilot `munmap_chunk(): invalid pointer` at c500** — heap corruption on zoo0 during shutdown. Happens after the experiment completes (mid-10s measurement done), so doesn't invalidate throughput numbers, but crashes the process. Not fixed — requires a deeper investigation of the CoPilot coroutine lifecycle.
+3. **Jetpack+CoPilot adaptive fails at c150+** — pre-existing.
+4. **Mencius and Jetpack+Mencius fail at higher concurrency** — pre-existing scalability limit.
 
-**Approach**:
-1. For each protocol (Raft, Jetpack+Raft fp100, Jetpack+Raft adaptive, SwiftPaxos, EPaxos), sweep client counts in finer steps: 30, 40, 45, 50, 55, 60, 70, 80, 100. Create configs as needed (e.g., `45c1s5r5p-zoo.yml`, `50c1s5r5p-zoo.yml`, …).
-2. Fix concurrent=500 (well above saturation) so the bottleneck is pure client throughput × protocol CPU.
-3. Stop per-protocol when either: (a) max server CPU ≥ 99% on any host, or (b) p50 latency rises > 100% above the 1-client baseline.
-4. Record per-protocol: saturation client count, peak throughput, max CPU host, avg CPU across 5 replicas, p50 at saturation.
-5. Write results to `docs/max_throughput_bisection_<date>.md` with a summary table ordered by peak throughput.
+### Not tested (infrastructure blocker only)
 
-**Acceptance**: For each of the 5 scalable protocols, we have a saturation client count accurate to ±5 clients, a peak throughput number, and the bottleneck attribution (which replica, what CPU%).
-
-**Notes**:
-- Client worker cap is ~200 cmd/s each, so 60 clients ≈ 12k cmd/s ceiling. If a protocol saturates below 12k we've found the real protocol cap; if it scales past 12k we need to push further (90, 100, 120 clients).
-- Reuse `run_single_exp.sh` with new `<N>c1s5r5p-zoo.yml` configs. Clients are distributed across the 5 zoo nodes (zoo0..zoo4), so prefer N divisible by 5 (30, 40, 45, 50, 55, 60, 75, 90, 100).
-
-### Known bugs (not planned for fix, documented for transparency)
-1. **CURP throughput collapse at c50+** — at concurrent ≥ 50, CURP's p50 jumps to 1000+ms. Likely caused by Raft leader election timing or coroutine pile-up under load; works fine at c1 (40ms p50). The implementation is correct; the issue appears environmental/timing. Documented in `docs/curp_vs_raft_vs_jetpack_experiment.md`.
-2. **Jetpack+CoPilot adaptive fails at c150+** — pre-existing issue in the CoPilot codebase, not introduced by our changes.
-3. **Plain CoPilot fails at c500** — pre-existing; CoPilot saturates at 85-98% CPU at c150 already.
-4. **Mencius and Jetpack+Mencius fail at higher concurrency** — Mencius hits 100% CPU at c50 on all hosts; pre-existing scalability limit.
-
-### Not tested (require infrastructure we don't have set up)
-- **etcd backend** (`none_etcd.yml`) — needs external etcd daemon running on each host
-- **ZooKeeper backend** (`none_zookeeper.yml`) — needs external ZK daemon running on each host
+- **ZooKeeper backend** (`none_zookeeper.yml`) — requires ZK daemon on each host. ZK source is in `third_party/zookeeper/` but not built as a runtime binary; java is only installed on zoo1/3/4, not zoo0/2. Setting this up is a one-time ops task (download tarball, install on all 5 hosts, configure zoo.cfg ensemble).
 
 ### Potential future work (not on current roadmap)
-- Implement EPaxos slow path (Accept phase when replicas disagree on deps) — currently assumes fast commit
-- Implement SwiftPaxos hash-based conflict detection (full spec uses hashes, we use per-key last-write)
-- Client-side dispatch rewrite to remove the ~200 cmd/s per-client bottleneck (would reveal true protocol ceilings beyond 12000 cmd/s)
-- Contention workloads (Zipf, small key ranges) to stress the fast path's conflict handling
+
+- Push EPaxos past N100 — it didn't hit the 99% stop in the current sweep (peak 19991 @ 98.99%). N=120 or 140 likely reveals its true ceiling.
+- Implement EPaxos slow path (Accept phase when replicas disagree on deps).
+- Implement SwiftPaxos hash-based conflict detection.
+- Client-side dispatch rewrite to remove the ~200 cmd/s per-client cap (all protocols below saturation are client-limited, so true protocol ceilings are a lower bound).
+- Contention workloads (Zipf, small key ranges) to stress the fast path's conflict handling.
 
 ## Status Summary (2026-04-16)
 
