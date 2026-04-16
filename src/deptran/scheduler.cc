@@ -582,8 +582,11 @@ bool TxLogServer::ConflictWithUncommittedRaftLog(const shared_ptr<Marshallable>&
   if (!raft_svr) return false;  // safety: should not happen in CURP mode
 
   // Scan uncommitted entries: commitIndex+1 to lastLogIndex
+  // Use find() instead of operator[] to avoid creating spurious map entries.
   for (uint64_t i = raft_svr->commitIndex + 1; i <= raft_svr->lastLogIndex; i++) {
-    auto& sp_instance = raft_svr->raft_logs_[i];
+    auto it = raft_svr->raft_logs_.find(i);
+    if (it == raft_svr->raft_logs_.end()) continue;
+    auto& sp_instance = it->second;
     if (sp_instance && sp_instance->log_) {
       // Skip the command itself (it may already be in the log from the Raft Submit path)
       auto log_cmd_id = SimpleRWCommand::GetCombinedCmdID(sp_instance->log_);
