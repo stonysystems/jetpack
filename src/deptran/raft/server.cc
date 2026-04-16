@@ -1040,15 +1040,27 @@ void RaftServer::OnAppendEntries(const slotid_t slot_id,
           setIsLeader(false) ;
       }
       
-      // // Update follower's view to track the current leader
-      // if (!IsLeader() && leaderSiteId != INVALID_SITEID) {
-      //     int prev_leader = new_view_.GetLeader();
-      //     old_view_ = new_view_;
-      //     int n_replicas = Config::GetConfig()->GetPartitionSize(partition_id_);
-      //     new_view_ = View(n_replicas, leaderSiteId, leaderCurrentTerm);
-      //     Log_info("[RAFT_VIEW_FOLLOWER] Server %d observed leader change %d->%d term=%lu prev_term=%lu",
-      //              site_id_, prev_leader, leaderSiteId, leaderCurrentTerm, currentTerm);
-      // }
+      // CURP mode: update follower's view on AppendEntries so local clients'
+      // spec-broadcast leader-skip targets the real leader. JP mode updates
+      // every replica's view via OnJetpackBeginRecovery, but CURP skips that
+      // flow; without this block, followers keep the default view (leader=-1
+      // -> falls back to locale 0 = zoo0), causing CURP spec broadcasts on
+      // every host except the true leader's host to include the real leader
+      // as a "witness" that occasionally votes NO, blocking the fast path.
+      if (Config::GetConfig()->jetpack_fastpath_attempt_rate_ == CURP_MODE
+          && !IsLeader() && leaderSiteId != INVALID_SITEID
+          && new_view_.GetLeader() != leaderSiteId) {
+          int prev_leader = new_view_.GetLeader();
+          old_view_ = new_view_;
+          int n_replicas = Config::GetConfig()->GetPartitionSize(partition_id_);
+          new_view_ = View(n_replicas, leaderSiteId, leaderCurrentTerm);
+          Log_info("[RAFT_VIEW_FOLLOWER] site %d observed leader change %d->%d term=%lu",
+                   site_id_, prev_leader, leaderSiteId, leaderCurrentTerm);
+          if (commo_) {
+              auto view_data = std::make_shared<ViewData>(new_view_, partition_id_);
+              commo()->UpdatePartitionView(partition_id_, view_data);
+          }
+      }
 
       if (cmd != nullptr) {
 #ifndef RAFT_BATCH_OPTIMIZATION
