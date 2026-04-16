@@ -17,8 +17,8 @@ Phased roadmap for Jetpack development. Each phase has concrete tasks with accep
 | 3.5 EPaxos recovery | **Not started** | | Stubs exist |
 | 4.0 CPU monitor for all builds | **Done** | `dca242e4` | Removed `#ifdef AWS` guard |
 | 4.1-4.3 Latency experiment (8 protocols) | **Done** | `1449a7db` | Results in `docs/full_protocol_latency_2026-04-16.md` |
-| 4.4 Throughput sweep | **In progress** | | Coarse scan done for 7 protocols |
-| 4.5 Full benchmark document | **Pending** | | Need to consolidate all results |
+| 4.4 Throughput sweep | **Done** | `89d53a58` | Coarse + bisect complete for 5 scalable protocols |
+| 4.5 Full benchmark document | **Done** | `89d53a58` | See `docs/full_protocol_throughput_2026-04-16.md` |
 
 **Latency at c1 (zoo cluster):**
 
@@ -33,18 +33,20 @@ Phased roadmap for Jetpack development. Each phase has concrete tasks with accep
 | CoPilot | 102.18 | 2+ RTT |
 | CoPilot + Jetpack | 40.71 | 1 RTT ✓ |
 
-**Throughput at c500 (zoo cluster peak region):**
+**Peak throughput across all tested concurrencies (c50, c150, c200, c300, c500):**
 
-| Protocol | Throughput (cmd/s) | p50 (ms) |
-|---|---|---|
-| Raft | 5990 | 75.89 |
-| Jetpack fp100 | 5990 | 41.60 |
-| Jetpack adaptive | 5998 | 41.58 |
-| SwiftPaxos | 6012 | 41.39 |
-| EPaxos | 5982 | 41.37 |
-| CoPilot | failed (0 throughput) | — |
-| CoPilot + Jetpack | failed at c150+ | — |
-| CURP | failed at c50+ (known bug) | — |
+| Protocol | Peak (cmd/s) | @ conc | p50 at peak | Saturates at |
+|---|---|---|---|---|
+| Raft | 5989.6 | c500 | 75.89 | c200 |
+| Jetpack fp100 | 6004.3 | c300 | 42.03 | c200 |
+| Jetpack adaptive | 6002.6 | c300 | 41.96 | c200 |
+| SwiftPaxos | 6012.1 | c500 | 41.39 | c200 |
+| EPaxos | 5996.1 | c300 | 41.23 | c200 |
+| CoPilot | 4463.6 | c150 | 103.25 | fails at c500 |
+| CoPilot + Jetpack | 1480.7 | c50 | 41.56 | fails at c150 |
+| CURP | n/a | — | — | Known bug at c50+ |
+
+All 5 scalable protocols saturate at ~6000 cmd/s at c200 — indicating a single-core server bottleneck. Jetpack's fast-path benefit is maintained even at saturation (41ms vs Raft's 76ms).
 
 **Known issues:**
 - CURP throughput collapses at conc >= 50 (p50 jumps to 1000+ms)

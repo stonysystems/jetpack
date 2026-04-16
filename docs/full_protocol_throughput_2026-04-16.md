@@ -70,18 +70,30 @@
 | 150 | 1815.1 | 1024.03 | Massive latency spike — p50=1 sec |
 | 500 | 0 | — | Failed |
 
-## Summary Table — Peak Throughput
+## Bisect Results (c200, c300)
 
-| Protocol | Peak Throughput (cmd/s) | p50 at peak (ms) | Saturates at | Scales to c500 |
+| Protocol | c200 Tput | c200 p50 | c300 Tput | c300 p50 |
 |---|---|---|---|---|
-| Raft | ~5990 | 75.89 | c500 | ✓ |
-| Jetpack fp100 | ~5990 | 41.60 | c500 | ✓ |
-| Jetpack adaptive | ~5998 | 41.58 | c500 | ✓ |
-| **SwiftPaxos** | **~6012** | **41.39** | c500 | ✓ |
-| **EPaxos** | **~5982** | **41.37** | c500 | ✓ |
-| CoPilot | ~4464 (at c150) | 103.25 | fails at c500 | ✗ |
-| CoPilot + Jetpack | ~1481 (at c50) | 41.56 | fails at c150 | ✗ |
-| CURP | n/a | — | Known bug | ✗ |
+| Raft | 5946.1 | 78.07 | 5989.1 | 75.27 |
+| Jetpack fp100 | 5965.0 | 41.87 | 6004.3 | 42.03 |
+| Jetpack adaptive | 5958.4 | 41.98 | 6002.6 | 41.96 |
+| SwiftPaxos | 5968.8 | 41.29 | 5986.5 | 41.19 |
+| EPaxos | 5965.1 | 41.56 | 5996.1 | 41.23 |
+
+**All 5 scalable protocols saturate at c200** (~5960 cmd/s). Going from c200 → c500 barely increases throughput (~40 cmd/s improvement), confirming the bottleneck is CPU-bound on the server's pinned core.
+
+## Summary Table — Peak Throughput (across all concurrency points)
+
+| Protocol | Peak Throughput (cmd/s) | Peak Conc | p50 at peak | Saturates at | Scales to c500 |
+|---|---|---|---|---|---|
+| Raft | 5989.6 | c500 | 75.89 | c200 | ✓ |
+| Jetpack fp100 | 6004.3 | c300 | 42.03 | c200 | ✓ |
+| Jetpack adaptive | 6002.6 | c300 | 41.96 | c200 | ✓ |
+| **SwiftPaxos** | **6012.1** | **c500** | **41.39** | c200 | ✓ |
+| **EPaxos** | **5996.1** | **c300** | **41.23** | c200 | ✓ |
+| CoPilot | 4463.6 | c150 | 103.25 | fails at c500 | ✗ |
+| CoPilot + Jetpack | 1480.7 | c50 | 41.56 | fails at c150 | ✗ |
+| CURP | n/a | — | — | Known bug | ✗ |
 
 ## Key Findings
 
