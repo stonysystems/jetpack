@@ -127,15 +127,8 @@ void EPaxosCServer::OnPropose(const shared_ptr<Marshallable>& cmd,
     // Broadcast commit
     // TODO: broadcast Commit RPC
 
-    // Execute
-    if (inst.cmd) {
-      app_next_(*inst.cmd);
-    }
-    inst.status = EPaxosInstance::EXECUTED;
-
-    if (inst.commit_callback) {
-      inst.commit_callback();
-    }
+    // Execute via Tarjan SCC — respects dependency ordering
+    TryExecute(my_id, inst_id);
   }
 }
 
@@ -209,8 +202,114 @@ void EPaxosCServer::OnCommit(siteid_t leader, siteid_t replica, int64_t instance
   UpdateConflicts(cmd, replica, instance);
 }
 
+// Tarjan's SCC algorithm state for EPaxos execution
+// Based on /tmp/swiftpaxos/epaxos/exec.go (lines 46-172)
+
+namespace {
+struct InstanceKey {
+  int32_t replica;
+  int32_t instance;
+  bool operator==(const InstanceKey& o) const {
+    return replica == o.replica && instance == o.instance;
+  }
+};
+struct InstanceKeyHash {
+  size_t operator()(const InstanceKey& k) const {
+    return ((size_t)k.replica << 32) | (size_t)k.instance;
+  }
+};
+}
+
 void EPaxosCServer::TryExecute(int32_t replica, int32_t instance) {
-  // TODO: Tarjan SCC-based execution (Phase 3.4)
+  auto& inst = GetInstance(replica, instance);
+  if (inst.status != EPaxosInstance::COMMITTED) return;
+
+  // Simple Tarjan's SCC algorithm
+  // 1. Run DFS from (replica, instance), assigning index/lowlink to each node
+  // 2. When an SCC is found (lowlink == index), sort by (seq, replica, propose_time)
+  // 3. Execute commands in sorted order
+
+  // Stack for DFS
+  vector<InstanceKey> stack;
+  unordered_map<InstanceKey, int, InstanceKeyHash> on_stack;
+  unordered_map<InstanceKey, int, InstanceKeyHash> index_map;
+  unordered_map<InstanceKey, int, InstanceKeyHash> lowlink_map;
+  int next_index = 0;
+
+  // Recursive-style DFS implemented iteratively
+  std::function<bool(int32_t, int32_t)> strongconnect = [&](int32_t r, int32_t i) -> bool {
+    InstanceKey key{r, i};
+    index_map[key] = next_index;
+    lowlink_map[key] = next_index;
+    next_index++;
+    stack.push_back(key);
+    on_stack[key] = 1;
+
+    auto inst_it = instances_.find(r);
+    if (inst_it == instances_.end()) return false;
+    auto ins_it = inst_it->second.find(i);
+    if (ins_it == inst_it->second.end()) return false;
+    auto& cur = ins_it->second;
+
+    // If any dependency is not COMMITTED, we can't execute yet
+    for (int q = 0; q < n_replica_; q++) {
+      if (q == r) continue;
+      int32_t dep_inst = cur.deps[q];
+      if (dep_inst < 0) continue;
+      // Check the dependency instance's status
+      auto q_it = instances_.find(q);
+      if (q_it == instances_.end()) return false;  // dep not known
+      auto qi_it = q_it->second.find(dep_inst);
+      if (qi_it == q_it->second.end()) return false;
+      auto& dep_instance = qi_it->second;
+      if (dep_instance.status < EPaxosInstance::COMMITTED) return false;
+
+      InstanceKey dep_key{q, dep_inst};
+      if (index_map.find(dep_key) == index_map.end()) {
+        // Not yet visited — recurse
+        if (!strongconnect(q, dep_inst)) return false;
+        lowlink_map[key] = std::min(lowlink_map[key], lowlink_map[dep_key]);
+      } else if (on_stack.find(dep_key) != on_stack.end()) {
+        lowlink_map[key] = std::min(lowlink_map[key], index_map[dep_key]);
+      }
+    }
+
+    // If this is an SCC root, pop the SCC from the stack and execute
+    if (lowlink_map[key] == index_map[key]) {
+      vector<InstanceKey> scc;
+      while (!stack.empty()) {
+        InstanceKey top = stack.back();
+        stack.pop_back();
+        on_stack.erase(top);
+        scc.push_back(top);
+        if (top == key) break;
+      }
+      // Sort by (seq, replica, propose_time)
+      std::sort(scc.begin(), scc.end(), [this](const InstanceKey& a, const InstanceKey& b) {
+        auto& ia = instances_[a.replica][a.instance];
+        auto& ib = instances_[b.replica][b.instance];
+        if (ia.seq != ib.seq) return ia.seq < ib.seq;
+        if (a.replica != b.replica) return a.replica < b.replica;
+        return ia.propose_time < ib.propose_time;
+      });
+      // Execute each instance in order
+      for (auto& k : scc) {
+        auto& exec_inst = instances_[k.replica][k.instance];
+        if (exec_inst.status == EPaxosInstance::EXECUTED) continue;
+        if (exec_inst.cmd) {
+          app_next_(*exec_inst.cmd);
+        }
+        exec_inst.status = EPaxosInstance::EXECUTED;
+        if (exec_inst.commit_callback) {
+          exec_inst.commit_callback();
+          exec_inst.commit_callback = nullptr;  // one-shot
+        }
+      }
+    }
+    return true;
+  };
+
+  strongconnect(replica, instance);
 }
 
 // ============================================================
