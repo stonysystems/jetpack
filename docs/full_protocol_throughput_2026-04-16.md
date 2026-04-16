@@ -84,18 +84,28 @@
 
 ## Summary Table — Peak Throughput (across all concurrency points)
 
-| Protocol | Peak Throughput (cmd/s) | Peak Conc | p50 at peak | Saturates at | Scales to c500 |
-|---|---|---|---|---|---|
-| Raft | 5989.6 | c500 | 75.89 | c200 | ✓ |
-| Jetpack fp100 | 6004.3 | c300 | 42.03 | c200 | ✓ |
-| Jetpack adaptive | 6002.6 | c300 | 41.96 | c200 | ✓ |
-| **SwiftPaxos** | **6012.1** | **c500** | **41.39** | c200 | ✓ |
-| **EPaxos** | **5996.1** | **c300** | **41.23** | c200 | ✓ |
-| CoPilot | 4463.6 | c150 | 103.25 | fails at c500 | ✗ |
-| CoPilot + Jetpack | 1480.7 | c50 | 41.56 | fails at c150 | ✗ |
-| Mencius | 216.6 | c50 | — | fails at c150 | ✗ |
-| Mencius + Jetpack | fails at c50+ | — | — | — | ✗ |
-| CURP | n/a | — | — | Known bug | ✗ |
+| Protocol | Peak Throughput | Peak Conc | p50 at peak | Server CPU median per host (zoo0/1/2/3/4) | CPU avg | Saturates at |
+|---|---|---|---|---|---|---|
+| Raft | 5989.6 | c500 | 75.89 | 37.9 / 5.5 / 24.2 / 28.3 / 49.5 | 29.1% | c200 |
+| Jetpack fp100 | 6004.3 | c300 | 42.03 | 47.4 / 29.0 / 65.3 / 95.9 / 35.5 | 54.6% | c200 |
+| Jetpack adaptive | 6002.6 | c300 | 41.96 | 35.8 / 27.7 / 58.3 / 95.9 / 35.5 | 50.6% | c200 |
+| **SwiftPaxos** | **6012.1** | **c500** | **41.39** | 59.2 / 23.7 / 26.3 / 31.3 / 16.5 | **31.4%** | c200 |
+| **EPaxos** | **5996.1** | **c300** | **41.23** | 75.8 / 0.0 / 2.0 / 3.1 / 2.0 | **16.6%** | c200 |
+| CoPilot | 4463.6 | c150 | 103.25 | 98.0 / 93.0 / 89.0 / 93.8 / 54.7 | 85.7% | fails at c500 |
+| CoPilot + Jetpack | 1480.7 | c50 | 41.56 | 67.7 / 39.6 / 41.1 / 52.1 / 22.7 | 44.6% | fails at c150 |
+| Mencius | 216.6 | c50 | low | 100 / 100 / 100 / 100 / 100 | 100% | fails at c150 |
+| Mencius + Jetpack | fails at c50+ | — | — | — | — | — |
+| CURP | n/a | — | — | — | — | Known bug |
+
+**CPU observations:**
+- **EPaxos** achieves ~6000 cmd/s with only **16.6% avg CPU** — most CPU-efficient. Only zoo0 (the proposing replica) does significant work (75.8%); other replicas are nearly idle since the simplified implementation doesn't actively participate in consensus.
+- **SwiftPaxos** at 31% avg CPU — also very efficient.
+- **Raft** at 29% avg CPU — efficient but with 2 RTT latency cost.
+- **Jetpack fp100/adaptive** at 50-55% avg CPU — higher because the Jetpack fast path requires active work on all replicas (command pool tracking, speculative execute RPC).
+- **CoPilot at c150**: 85.7% avg CPU — approaching saturation, explaining the c500 failure.
+- **Mencius at c50**: 100% CPU on all hosts — completely saturated, which is why it fails at c150.
+
+**Why EPaxos/SwiftPaxos have lower CPU than Jetpack**: The current EPaxos/SwiftPaxos implementations use a "simplified" model where they assume all replicas agree (no active RPC broadcast for acks). This means only the proposing replica does work per command, while non-proposing replicas are idle. A full implementation with proper RPC broadcasts would likely have CPU usage closer to Jetpack's 50%.
 
 ## Key Findings
 

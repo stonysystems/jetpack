@@ -52,20 +52,22 @@ Documentation produced:
 
 **Peak throughput across all tested concurrencies (c50, c150, c200, c300, c500):**
 
-| Protocol | Peak (cmd/s) | @ conc | p50 at peak | Saturates at |
+| Protocol | Peak (cmd/s) | @ conc | p50 at peak | Server CPU avg across 5 hosts |
 |---|---|---|---|---|
-| Raft | 5989.6 | c500 | 75.89 | c200 |
-| Jetpack fp100 | 6004.3 | c300 | 42.03 | c200 |
-| Jetpack adaptive | 6002.6 | c300 | 41.96 | c200 |
-| SwiftPaxos | 6012.1 | c500 | 41.39 | c200 |
-| EPaxos | 5996.1 | c300 | 41.23 | c200 |
-| CoPilot | 4463.6 | c150 | 103.25 | fails at c500 |
-| CoPilot + Jetpack | 1480.7 | c50 | 41.56 | fails at c150 |
-| Mencius | 216.6 | c50 | low | fails at c150 |
+| Raft | 5989.6 | c500 | 75.89 | 29.1% |
+| Jetpack fp100 | 6004.3 | c300 | 42.03 | 54.6% |
+| Jetpack adaptive | 6002.6 | c300 | 41.96 | 50.6% |
+| SwiftPaxos | 6012.1 | c500 | 41.39 | 31.4% |
+| EPaxos | 5996.1 | c300 | 41.23 | 16.6% |
+| CoPilot | 4463.6 | c150 | 103.25 | 85.7% (fails at c500) |
+| CoPilot + Jetpack | 1480.7 | c50 | 41.56 | 44.6% (fails at c150) |
+| Mencius | 216.6 | c50 | low | 100% (fails at c150) |
 | Mencius + Jetpack | fails at c50+ | — | — | — |
 | CURP | n/a | — | — | Known bug at c50+ |
 
 All 5 scalable protocols saturate at ~6000 cmd/s at c200 — indicating a single-core server bottleneck. Jetpack's fast-path benefit is maintained even at saturation (41ms vs Raft's 76ms).
+
+**CPU observations:** EPaxos (16.6%) and SwiftPaxos (31.4%) have the lowest CPU at peak because the current simplified implementations don't actively participate in consensus on non-proposing replicas. Jetpack-based protocols use 50-55% CPU because every replica participates in fast-path ack collection via RPC. CoPilot and Mencius hit CPU saturation, which is why they fail at higher concurrency. See `docs/full_protocol_throughput_2026-04-16.md` for per-host CPU breakdown.
 
 **Known issues:**
 - CURP throughput collapses at conc >= 50 (p50 jumps to 1000+ms)
