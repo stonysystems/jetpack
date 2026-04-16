@@ -2,6 +2,55 @@
 
 Phased roadmap for Jetpack development. Each phase has concrete tasks with acceptance criteria.
 
+## Status Summary (2026-04-16)
+
+| Phase | Status | Commit(s) | Notes |
+|---|---|---|---|
+| 1.0-1.5 CURP | **Done** | `8644411b`, `a2a04030` | `-m 200` works at c1 (40.63ms 1 RTT) |
+| 1.6 CURP comparative exp | **Partial** | `a2a04030` | Latency works; throughput has known bug at conc >= 50 |
+| 2.0-2.1 SwiftPaxos scaffold + RPC | **Done** | `2ae8cc01` | Directory created, RPC stubs generated |
+| 2.2-2.4 SwiftPaxos server + coordinator | **Done** | `2f3b0981` | Working on zoo cluster: p50=40.51ms at c1 |
+| 2.5 SwiftPaxos recovery | **Not started** | | Stubs exist |
+| 2.6 SwiftPaxos batching | **Not started** | | Optimization, deferrable |
+| 3.0-3.3 EPaxos (corrected) scaffold + server | **Done** | `95d3549a` | Working on zoo cluster: p50=40.42ms at c1 |
+| 3.4 EPaxos Tarjan SCC execution | **Not started** | | Current impl uses simplified fast-commit |
+| 3.5 EPaxos recovery | **Not started** | | Stubs exist |
+| 4.0 CPU monitor for all builds | **Done** | `dca242e4` | Removed `#ifdef AWS` guard |
+| 4.1-4.3 Latency experiment (8 protocols) | **Done** | `1449a7db` | Results in `docs/full_protocol_latency_2026-04-16.md` |
+| 4.4 Throughput sweep | **In progress** | | Coarse scan done for 7 protocols |
+| 4.5 Full benchmark document | **Pending** | | Need to consolidate all results |
+
+**Latency at c1 (zoo cluster):**
+
+| Protocol | p50 (ms) | Type |
+|---|---|---|
+| Raft | 79.59 | 2 RTT |
+| Jetpack fp100 | 40.64 | 1 RTT ✓ |
+| Jetpack adaptive | 40.59 | 1 RTT ✓ |
+| CURP | 40.63 (intermittent, was N/A in 2026-04-16 run) | 1 RTT (known throughput bug) |
+| SwiftPaxos | 40.51 | 1 RTT ✓ |
+| EPaxos (corrected) | 40.42 | 1 RTT ✓ |
+| CoPilot | 102.18 | 2+ RTT |
+| CoPilot + Jetpack | 40.71 | 1 RTT ✓ |
+
+**Throughput at c500 (zoo cluster peak region):**
+
+| Protocol | Throughput (cmd/s) | p50 (ms) |
+|---|---|---|
+| Raft | 5990 | 75.89 |
+| Jetpack fp100 | 5990 | 41.60 |
+| Jetpack adaptive | 5998 | 41.58 |
+| SwiftPaxos | 6012 | 41.39 |
+| EPaxos | 5982 | 41.37 |
+| CoPilot | failed (0 throughput) | — |
+| CoPilot + Jetpack | failed at c150+ | — |
+| CURP | failed at c50+ (known bug) | — |
+
+**Known issues:**
+- CURP throughput collapses at conc >= 50 (p50 jumps to 1000+ms)
+- CoPilot + Jetpack adaptive fails at conc >= 150
+- Plain CoPilot fails at conc = 500
+
 ---
 
 ## Phase 1: CURP Integration (reuse Jetpack infrastructure, no recovery)
