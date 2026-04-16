@@ -17,6 +17,8 @@
 | 6 | **EPaxos** | `none_epaxos_corrected.yml` | 0 | 20.9 | **40.42** | **40.52** | **40.69** | N/A | 100.0% |
 | 9 | CoPilot | `none_copilot.yml` | 0 | 20.1 | 102.18 | 103.04 | 103.49 | N/A | 100.0% |
 | 10 | CoPilot + Jetpack | `rule_copilot.yml` | 101 | 19.6 | 40.71 | 40.83 | 41.11 | 100% | 92.1% |
+| 11 | Mencius | `none_mencius.yml` | 0 | 20.1 | 122.63 | 123.98 | 125.10 | N/A | 100.0% |
+| 12 | Mencius + Jetpack | `rule_mencius.yml` | 101 | 20.8 | 40.70 | 40.88 | 41.23 | 100% | 100.0% |
 
 **Key observations:**
 
@@ -36,7 +38,7 @@ CURP had 0% fast-path success in this run (4.7 throughput, no efficient-path rec
 
 ### Protocols NOT tested
 - **etcd, ZooKeeper**: require external daemons (need separate setup)
-- **Mencius**: known heap corruption crash (see Track 8F in prior TODO)
+- **Mencius**: tested successfully — no longer crashes (previously documented as Track 8F)
 
 ### Commands used
 ```bash
@@ -49,6 +51,8 @@ RDIR=results/2026-04-16-full-protocol-benchmark
 ./run_single_exp.sh none_epaxos_corrected.yml 0 concurrent_1.yml epaxos-c1 $RDIR
 ./run_single_exp.sh none_copilot.yml 0 concurrent_1.yml copilot-c1 $RDIR
 ./run_single_exp.sh rule_copilot.yml 101 concurrent_1.yml jp-copilot-c1 $RDIR
+./run_single_exp.sh none_mencius.yml 0 concurrent_1.yml mencius-c1 $RDIR
+./run_single_exp.sh rule_mencius.yml 101 concurrent_1.yml jp-mencius-c1 $RDIR
 ```
 
 ## SwiftPaxos and EPaxos are now WORKING on the zoo cluster

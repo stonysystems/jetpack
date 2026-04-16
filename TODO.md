@@ -32,6 +32,8 @@ Phased roadmap for Jetpack development. Each phase has concrete tasks with accep
 | EPaxos (corrected) | 40.42 | 1 RTT ✓ |
 | CoPilot | 102.18 | 2+ RTT |
 | CoPilot + Jetpack | 40.71 | 1 RTT ✓ |
+| Mencius | 122.63 | 3 RTT (rotating leader) |
+| Mencius + Jetpack | 40.70 | 1 RTT ✓ |
 
 **Peak throughput across all tested concurrencies (c50, c150, c200, c300, c500):**
 
@@ -44,6 +46,8 @@ Phased roadmap for Jetpack development. Each phase has concrete tasks with accep
 | EPaxos | 5996.1 | c300 | 41.23 | c200 |
 | CoPilot | 4463.6 | c150 | 103.25 | fails at c500 |
 | CoPilot + Jetpack | 1480.7 | c50 | 41.56 | fails at c150 |
+| Mencius | 216.6 | c50 | low | fails at c150 |
+| Mencius + Jetpack | fails at c50+ | — | — | — |
 | CURP | n/a | — | — | Known bug at c50+ |
 
 All 5 scalable protocols saturate at ~6000 cmd/s at c200 — indicating a single-core server bottleneck. Jetpack's fast-path benefit is maintained even at saturation (41ms vs Raft's 76ms).

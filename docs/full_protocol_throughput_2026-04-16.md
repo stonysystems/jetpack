@@ -93,6 +93,8 @@
 | **EPaxos** | **5996.1** | **c300** | **41.23** | c200 | ✓ |
 | CoPilot | 4463.6 | c150 | 103.25 | fails at c500 | ✗ |
 | CoPilot + Jetpack | 1480.7 | c50 | 41.56 | fails at c150 | ✗ |
+| Mencius | 216.6 | c50 | — | fails at c150 | ✗ |
+| Mencius + Jetpack | fails at c50+ | — | — | — | ✗ |
 | CURP | n/a | — | — | Known bug | ✗ |
 
 ## Key Findings
