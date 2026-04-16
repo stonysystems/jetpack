@@ -10,11 +10,11 @@ Phased roadmap for Jetpack development. Each phase has concrete tasks with accep
 | 1.6 CURP comparative exp | **Partial** | `a2a04030` | Latency works; throughput has known bug at conc >= 50 |
 | 2.0-2.1 SwiftPaxos scaffold + RPC | **Done** | `2ae8cc01` | Directory created, RPC stubs generated |
 | 2.2-2.4 SwiftPaxos server + coordinator | **Done** | `2f3b0981` | Working on zoo cluster: p50=40.51ms at c1 |
-| 2.5 SwiftPaxos recovery | **Not started** | | Stubs exist |
+| 2.5 SwiftPaxos recovery | **Partial** | `0e470abb` | Recovery stubs for NewLeader/NewLeaderAck/Sync; full merge logic deferred |
 | 2.6 SwiftPaxos batching | **Not started** | | Optimization, deferrable |
 | 3.0-3.3 EPaxos (corrected) scaffold + server | **Done** | `95d3549a` | Working on zoo cluster: p50=40.42ms at c1 |
 | 3.4 EPaxos Tarjan SCC execution | **Not started** | | Current impl uses simplified fast-commit |
-| 3.5 EPaxos recovery | **Not started** | | Stubs exist |
+| 3.5 EPaxos recovery | **Partial** | `c4da883b` | Recovery stubs for Prepare/TryPreAccept; 6-case decision tree deferred |
 | 4.0 CPU monitor for all builds | **Done** | `dca242e4` | Removed `#ifdef AWS` guard |
 | 4.1-4.3 Latency experiment (8 protocols) | **Done** | `1449a7db` | Results in `docs/full_protocol_latency_2026-04-16.md` |
 | 4.4 Throughput sweep | **Done** | `89d53a58` | Coarse + bisect complete for 5 scalable protocols |
