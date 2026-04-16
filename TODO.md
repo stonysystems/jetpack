@@ -13,7 +13,7 @@ Phased roadmap for Jetpack development. Each phase has concrete tasks with accep
 | 2.5 SwiftPaxos recovery | **Partial** | `0e470abb` | Recovery stubs for NewLeader/NewLeaderAck/Sync; full merge logic deferred |
 | 2.6 SwiftPaxos batching | **Not started** | | Optimization, deferrable |
 | 3.0-3.3 EPaxos (corrected) scaffold + server | **Done** | `95d3549a` | Working on zoo cluster: p50=40.42ms at c1 |
-| 3.4 EPaxos Tarjan SCC execution | **Not started** | | Current impl uses simplified fast-commit |
+| 3.4 EPaxos Tarjan SCC execution | **Done** | `76b3fba5` | Verified: 5138 cmd/s local test, commands execute in dependency order |
 | 3.5 EPaxos recovery | **Partial** | `c4da883b` | Recovery stubs for Prepare/TryPreAccept; 6-case decision tree deferred |
 | 4.0 CPU monitor for all builds | **Done** | `dca242e4` | Removed `#ifdef AWS` guard |
 | 4.1-4.3 Latency experiment (8 protocols) | **Done** | `1449a7db` | Results in `docs/full_protocol_latency_2026-04-16.md` |
