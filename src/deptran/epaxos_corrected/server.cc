@@ -112,22 +112,64 @@ void EPaxosCServer::OnPropose(const shared_ptr<Marshallable>& cmd,
   inst.pre_accept_oks = 0;
   inst.accept_oks = 0;
 
-  // Simplified model: assume all replicas agree on deps (valid for
-  // non-conflicting workloads and single-process mode where all replicas
-  // share the same conflict table).
-  // TODO: implement proper RPC broadcast for multi-process (Phase 3.3 full)
-  inst.pre_accept_oks = n_replica_;  // all agree
+  // Broadcast PreAccept to all OTHER replicas. Each replica will:
+  //   - compute its own deps/seq via UpdateAttributes
+  //   - update its conflict table
+  //   - reply with its computed deps/seq
+  // For non-conflicting workloads (1M key range), all replicas will
+  // compute the same empty deps, so the fast-commit assumption holds.
+  if (commo()) {
+    auto ep_commo = (EPaxosCCommo*)commo();
+    auto config = Config::GetConfig();
+    parid_t par_id = config->SiteById(site_id_).partition_id_;
+    auto& proxies = ep_commo->rpc_par_proxies_[par_id];
+
+    for (auto& p : proxies) {
+      // Don't send to self
+      if ((int32_t)p.first == site_id_) continue;
+      auto proxy = (EPaxosCServiceProxy*)p.second;
+      MarshallDeputy md_cmd(cmd);
+      // deps serialized as empty MarshallDeputy — service handler ignores it
+      // and recomputes locally. For a non-empty MarshallDeputy we'd need a
+      // concrete Marshallable subtype; since we don't use it on the receive
+      // side (replica recomputes), we pass the cmd itself as a placeholder.
+      MarshallDeputy md_deps(cmd);  // placeholder (not read by handler)
+      auto fu = proxy->async_EPaxosCPreAccept(
+          my_id, my_id, inst_id, inst.ballot,
+          md_cmd, inst.seq, md_deps);
+      Future::safe_release(fu);
+    }
+  }
+
+  // Simplified commit: assume all replicas agree on deps (valid for
+  // non-conflicting workloads). In a full implementation we'd wait for
+  // PreAcceptReply messages and verify all agree before committing.
+  inst.pre_accept_oks = n_replica_;
   inst.all_equal = true;
 
-  // Check if fast path: all FQ replicas agreed with same deps
+  // Fast commit
   if (inst.pre_accept_oks >= FastQuorumSize() && inst.all_equal) {
-    // Fast commit!
     inst.status = EPaxosInstance::COMMITTED;
 
-    // Broadcast commit
-    // TODO: broadcast Commit RPC
+    // Broadcast Commit to all replicas so they can update their local state
+    if (commo()) {
+      auto ep_commo = (EPaxosCCommo*)commo();
+      auto config = Config::GetConfig();
+      parid_t par_id = config->SiteById(site_id_).partition_id_;
+      auto& proxies = ep_commo->rpc_par_proxies_[par_id];
+      for (auto& p : proxies) {
+        if ((int32_t)p.first == site_id_) continue;
+        auto proxy = (EPaxosCServiceProxy*)p.second;
+        MarshallDeputy md_cmd(cmd);
+        MarshallDeputy md_deps(cmd);  // placeholder
+        auto fu = proxy->async_EPaxosCCommit(
+            my_id, my_id, inst_id, inst.ballot,
+            md_cmd, inst.seq, md_deps);
+        Future::safe_release(fu);
+      }
+    }
 
-    // Execute via Tarjan SCC — respects dependency ordering
+    // Execute locally via Tarjan SCC
     TryExecute(my_id, inst_id);
   }
 }

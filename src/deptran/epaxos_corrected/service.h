@@ -33,7 +33,10 @@ class EPaxosCServiceImplC : public EPaxosCServiceService {
       svr_->OnPreAccept(leader, replica, instance, ballot, sp_cmd,
                          seq, in_deps, reply_status, reply_ballot,
                          reply_seq, &out_deps);
-      // TODO: serialize out_deps into reply_deps
+      // Set reply_deps to a valid MarshallDeputy (use cmd as placeholder
+      // since we don't currently transmit actual deps). Without this, the
+      // reply serialization fails at marshallable.h:81 verify.
+      *reply_deps = MarshallDeputy(sp_cmd);
       defer->reply();
     });
   }
@@ -86,6 +89,17 @@ class EPaxosCServiceImplC : public EPaxosCServiceService {
     svr_->OnPrepare(leader, replica, instance, ballot,
                      reply_status, reply_ballot, reply_vbal, &seq_out);
     *reply_seq = seq_out;
+    // Set reply MarshallDeputy fields to avoid UNKNOWN-kind serialization crash.
+    // Use the instance's stored cmd as a placeholder (recovery decoder doesn't
+    // use these fields in the current simplified implementation).
+    shared_ptr<Marshallable> dummy;
+    if (svr_) {
+      auto& inst = svr_->GetInstance(replica, instance);
+      dummy = inst.cmd;
+    }
+    if (!dummy) dummy = std::make_shared<SimpleRWCommand>();
+    *reply_cmd = MarshallDeputy(dummy);
+    *reply_deps = MarshallDeputy(dummy);
     defer->reply();
   }
 
