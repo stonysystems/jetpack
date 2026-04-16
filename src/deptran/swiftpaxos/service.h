@@ -66,6 +66,7 @@ class SwiftPaxosServiceImplC : public SwiftPaxosServiceService {
                       const ballot_t& ballot,
                       rrr::i32* res,
                       rrr::DeferredReply* defer) override {
+    svr_->OnNewLeaderRecv(replica, ballot);
     *res = 0;
     defer->reply();
   }
@@ -76,6 +77,7 @@ class SwiftPaxosServiceImplC : public SwiftPaxosServiceService {
                          const MarshallDeputy& cmd_states,
                          rrr::i32* res,
                          rrr::DeferredReply* defer) override {
+    svr_->OnNewLeaderAckRecv(replica, ballot, cballot);
     *res = 0;
     defer->reply();
   }
@@ -85,6 +87,7 @@ class SwiftPaxosServiceImplC : public SwiftPaxosServiceService {
                  const MarshallDeputy& cmd_states,
                  rrr::i32* res,
                  rrr::DeferredReply* defer) override {
+    svr_->OnSyncRecv(replica, ballot);
     *res = 0;
     defer->reply();
   }

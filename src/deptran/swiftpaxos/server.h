@@ -47,7 +47,8 @@ class SwiftPaxosServer : public TxLogServer {
  public:
   // Protocol state
   ballot_t ballot_ = 0;
-  int status_ = 0;  // 0 = NORMAL
+  ballot_t cballot_ = 0;  // committed ballot (for recovery)
+  int status_ = 0;  // 0 = NORMAL, 1 = RECOVERING
 
   // Leader state
   int64_t seqnum_ = 0;  // leader's sequence counter
@@ -75,6 +76,9 @@ class SwiftPaxosServer : public TxLogServer {
   bool IsLeader() override { return IsSwiftLeader(); }
   bool IsFPGALeader() override { return IsSwiftLeader(); }
 
+  // Status constants
+  enum Status { NORMAL = 0, RECOVERING = 1 };
+
   // Normal path
   void OnPropose(const shared_ptr<Marshallable>& cmd,
                  const std::function<void()>& commit_cb = nullptr);
@@ -82,6 +86,22 @@ class SwiftPaxosServer : public TxLogServer {
   void OnSlowAck(const SwiftAck& ack);
   void CheckCommit(SwiftCmdDesc& desc);
   void Deliver(SwiftCmdDesc& desc);
+
+  // Recovery path (Phase 2.5)
+  // NewLeader: a replica proposes to become the new leader with a higher ballot.
+  // All replicas enter RECOVERING status and respond with their committed state.
+  void OnNewLeaderRecv(siteid_t replica, ballot_t ballot);
+
+  // NewLeaderAck: the proposed new leader collects state from majority of replicas.
+  // Each reply includes cballot (committed ballot) and committed commands.
+  void OnNewLeaderAckRecv(siteid_t replica, ballot_t ballot, ballot_t cballot);
+
+  // Sync: the new leader broadcasts the merged state to all replicas.
+  // Replicas apply this state and return to NORMAL status.
+  void OnSyncRecv(siteid_t replica, ballot_t ballot);
+
+  // Trigger recovery: called when a replica detects leader failure
+  void TriggerRecovery();
 
   // Conflict detection
   bool HasConflict(key_t key, uint64_t cmd_id);

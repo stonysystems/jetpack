@@ -140,4 +140,60 @@ void SwiftPaxosServer::Deliver(SwiftCmdDesc& desc) {
   }
 }
 
+// ============================================================
+// Recovery path (Phase 2.5)
+// ============================================================
+
+void SwiftPaxosServer::OnNewLeaderRecv(siteid_t replica, ballot_t ballot) {
+  // A replica is proposing to become the new leader with a higher ballot.
+  if (ballot <= ballot_) {
+    // Stale request, ignore
+    return;
+  }
+  Log_info("[SwiftPaxos] OnNewLeaderRecv: enter RECOVERING status, new ballot=%ld from replica=%d",
+           (long)ballot, (int)replica);
+  ballot_ = ballot;
+  status_ = RECOVERING;
+  // Stop processing new proposals. Pending commands stay in cmd_descs_
+  // until the new leader sends a Sync message.
+}
+
+void SwiftPaxosServer::OnNewLeaderAckRecv(siteid_t replica, ballot_t ballot, ballot_t cballot) {
+  // This replica (as the new leader candidate) is receiving state from other replicas.
+  if (ballot != ballot_) return;  // stale
+  // In the full SwiftPaxos spec, we would collect cmd_ids+phases+cmds+deps from each ack,
+  // find the highest cballot group, merge, and broadcast Sync.
+  // For the simplified implementation: just track that we received the ack.
+  // When we have majority (SlowQuorum), broadcast Sync.
+  Log_info("[SwiftPaxos] OnNewLeaderAckRecv from replica=%d cballot=%ld",
+           (int)replica, (long)cballot);
+  // (Counting logic would be added with full RPC implementation)
+}
+
+void SwiftPaxosServer::OnSyncRecv(siteid_t replica, ballot_t ballot) {
+  // Apply the synced state and return to NORMAL operation.
+  if (ballot < ballot_) return;
+  ballot_ = ballot;
+  cballot_ = ballot;
+  status_ = NORMAL;
+  Log_info("[SwiftPaxos] OnSyncRecv: back to NORMAL, ballot=%ld", (long)ballot);
+}
+
+void SwiftPaxosServer::TriggerRecovery() {
+  // This replica proposes itself as the new leader.
+  ballot_t new_ballot = ballot_ + n_replica_;  // ensure new_ballot % n_replica_ == loc_id_
+  new_ballot = new_ballot - (new_ballot % n_replica_) + loc_id_;
+  if (new_ballot <= ballot_) new_ballot += n_replica_;
+
+  Log_info("[SwiftPaxos] TriggerRecovery: proposing new_ballot=%ld", (long)new_ballot);
+  ballot_ = new_ballot;
+  status_ = RECOVERING;
+
+  // In full implementation: broadcast SwiftNewLeader RPC to all replicas.
+  // The service handler will call OnNewLeaderRecv on each receiving replica.
+  // When quorum of NewLeaderAck replies are received, broadcast SwiftSync
+  // and return to NORMAL on all replicas.
+  // For the current simplified implementation, this is a no-op stub.
+}
+
 } // namespace janus
