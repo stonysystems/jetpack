@@ -54,7 +54,7 @@
 | 150 | 4463.6 | 103.25 | 104.42 | 105.81 |
 | 500 | **failed** | — | — | — |
 
-### CoPilot + Jetpack adaptive
+### Jetpack+CoPilot adaptive
 
 | Conc | Throughput | p50 (ms) | p90 (ms) | p99 (ms) |
 |---|---|---|---|---|
@@ -75,8 +75,8 @@
 | Protocol | c200 Tput | c200 p50 | c300 Tput | c300 p50 |
 |---|---|---|---|---|
 | Raft | 5946.1 | 78.07 | 5989.1 | 75.27 |
-| Jetpack fp100 | 5965.0 | 41.87 | 6004.3 | 42.03 |
-| Jetpack adaptive | 5958.4 | 41.98 | 6002.6 | 41.96 |
+| Jetpack+Raft fp100 | 5965.0 | 41.87 | 6004.3 | 42.03 |
+| Jetpack+Raft adaptive | 5958.4 | 41.98 | 6002.6 | 41.96 |
 | SwiftPaxos | 5968.8 | 41.29 | 5986.5 | 41.19 |
 | EPaxos | 5965.1 | 41.56 | 5996.1 | 41.23 |
 
@@ -87,14 +87,14 @@
 | Protocol | Peak Throughput | Peak Conc | p50 at peak | Server CPU median per host (zoo0/1/2/3/4) | CPU avg | Saturates at |
 |---|---|---|---|---|---|---|
 | Raft | 5989.6 | c500 | 75.89 | 37.9 / 5.5 / 24.2 / 28.3 / 49.5 | 29.1% | c200 |
-| Jetpack fp100 | 6004.3 | c300 | 42.03 | 47.4 / 29.0 / 65.3 / 95.9 / 35.5 | 54.6% | c200 |
-| Jetpack adaptive | 6002.6 | c300 | 41.96 | 35.8 / 27.7 / 58.3 / 95.9 / 35.5 | 50.6% | c200 |
+| Jetpack+Raft fp100 | 6004.3 | c300 | 42.03 | 47.4 / 29.0 / 65.3 / 95.9 / 35.5 | 54.6% | c200 |
+| Jetpack+Raft adaptive | 6002.6 | c300 | 41.96 | 35.8 / 27.7 / 58.3 / 95.9 / 35.5 | 50.6% | c200 |
 | **SwiftPaxos** | **6012.1** | **c500** | **41.39** | 59.2 / 23.7 / 26.3 / 31.3 / 16.5 | **31.4%** | c200 |
 | **EPaxos** | **5996.1** | **c300** | **41.23** | 75.8 / 0.0 / 2.0 / 3.1 / 2.0 | **16.6%** | c200 |
 | CoPilot | 4463.6 | c150 | 103.25 | 98.0 / 93.0 / 89.0 / 93.8 / 54.7 | 85.7% | fails at c500 |
-| CoPilot + Jetpack | 1480.7 | c50 | 41.56 | 67.7 / 39.6 / 41.1 / 52.1 / 22.7 | 44.6% | fails at c150 |
+| Jetpack+CoPilot adaptive | 1480.7 | c50 | 41.56 | 67.7 / 39.6 / 41.1 / 52.1 / 22.7 | 44.6% | fails at c150 |
 | Mencius | 216.6 | c50 | low | 100 / 100 / 100 / 100 / 100 | 100% | fails at c150 |
-| Mencius + Jetpack | fails at c50+ | — | — | — | — | — |
+| Jetpack+Mencius adaptive | fails at c50+ | — | — | — | — | — |
 | CURP | n/a | — | — | — | — | Known bug |
 
 ## UPDATE: The ~6000 cmd/s ceiling was a client-side bottleneck (confirmed)
@@ -104,16 +104,16 @@
 | Protocol | 30 clients | 60 clients | Max CPU (60c) |
 |---|---|---|---|
 | Raft | 5990 | **12006** | 83.8% |
-| Jetpack fp100 | 6004 | **11996** | 97.9% |
-| Jetpack adaptive | 6003 | **11975** | **100%** (saturated) |
+| Jetpack+Raft fp100 | 6004 | **11996** | 97.9% |
+| Jetpack+Raft adaptive | 6003 | **11975** | **100%** (saturated) |
 | SwiftPaxos | 6012 | **11998** | 88.6% |
 | EPaxos | 5996 | **11983** | 56.7% |
 
 **Root cause**: Each client worker was capped at ~200 cmd/s by client-side coroutine/dispatch serialization. 30 clients × 200 = 6000 cmd/s. 60 clients × 200 = 12000 cmd/s.
 
 **At 60 clients, the REAL protocol limits become visible:**
-- **Jetpack adaptive**: 100% CPU on one replica → fully saturated at 12k, cannot scale further
-- **Jetpack fp100**: 97.9% CPU → essentially saturated
+- **Jetpack+Raft adaptive**: 100% CPU on one replica → fully saturated at 12k, cannot scale further
+- **Jetpack+Raft fp100**: 97.9% CPU → essentially saturated
 - **SwiftPaxos**: 88.6% CPU → approaching limit
 - **Raft**: 83.8% CPU → still some headroom (~15-18% left on leader)
 - **EPaxos**: 56.7% CPU → simplified impl doesn't fully stress the cluster
@@ -152,8 +152,8 @@ The original observations were correct but misinterpreted:
 | Raft | 5990 | 49% (zoo4) | 29.1% | low (no fast path) |
 | SwiftPaxos | 6012 | 59% (zoo0) | 31.4% | low (simplified, only proposer works) |
 | EPaxos | 5996 | 76% (zoo0) | 16.6% | very low (simplified, only proposer) |
-| Jetpack fp100 | 6004 | 96% (zoo3, leader) | 54.6% | high (active fast-path RPCs on all replicas) |
-| Jetpack adaptive | 6003 | 96% (zoo3) | 50.6% | high (same) |
+| Jetpack+Raft fp100 | 6004 | 96% (zoo3, leader) | 54.6% | high (active fast-path RPCs on all replicas) |
+| Jetpack+Raft adaptive | 6003 | 96% (zoo3) | 50.6% | high (same) |
 | CoPilot | 4464 | 98% (zoo0) | 85.7% | very high (dual-pilot coordination) |
 | Mencius | 217 | 100% (all) | 100% | saturated (pre-existing scalability issue) |
 
@@ -170,7 +170,7 @@ The current EPaxos implementation uses a "simplified fast-commit" that assumes a
 
 ## Key Findings
 
-1. **All 5 RTT-optimized protocols reach ~6000 cmd/s ceiling**: Raft, Jetpack fp100/adaptive, SwiftPaxos, EPaxos all saturate at the same point — indicating a cluster-level bottleneck (likely the single-core-pinned server thread).
+1. **All 5 RTT-optimized protocols reach ~6000 cmd/s ceiling**: Raft, Jetpack+Raft fp100/adaptive, SwiftPaxos, EPaxos all saturate at the same point — indicating a cluster-level bottleneck (likely the single-core-pinned server thread).
 
 2. **SwiftPaxos and EPaxos work at scale**: Both new implementations scale cleanly to c500 with 1 RTT latency maintained. This confirms the basic protocol implementations are correct for the normal path.
 
@@ -201,6 +201,6 @@ done
 Server-pinned core 1 CPU median (from `.res` `server median` field, mid-10s):
 - At c500 saturation: all protocols except Raft show 30-70% CPU on core 1
 - Raft baseline at c500: 37.9%
-- Jetpack fp100 at c500: 31.3% (lower because fast path does less work per request)
+- Jetpack+Raft fp100 at c500: 31.3% (lower because fast path does less work per request)
 - SwiftPaxos at c500: 59.2% (more work: dependency tracking)
 - EPaxos at c500: 67.7% (more work: per-replica dep arrays + instance space)

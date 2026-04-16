@@ -40,29 +40,29 @@ Documentation produced:
 | Protocol | p50 (ms) | Type |
 |---|---|---|
 | Raft | 79.59 | 2 RTT |
-| Jetpack fp100 | 40.64 | 1 RTT ✓ |
-| Jetpack adaptive | 40.59 | 1 RTT ✓ |
+| Jetpack+Raft fp100 | 40.64 | 1 RTT ✓ |
+| Jetpack+Raft adaptive | 40.59 | 1 RTT ✓ |
 | CURP | 40.63 (intermittent, was N/A in 2026-04-16 run) | 1 RTT (known throughput bug) |
 | SwiftPaxos | 40.51 | 1 RTT ✓ |
 | EPaxos (corrected) | 40.42 | 1 RTT ✓ |
 | CoPilot | 102.18 | 2+ RTT |
-| CoPilot + Jetpack | 40.71 | 1 RTT ✓ |
+| Jetpack+CoPilot adaptive | 40.71 | 1 RTT ✓ |
 | Mencius | 122.63 | 3 RTT (rotating leader) |
-| Mencius + Jetpack | 40.70 | 1 RTT ✓ |
+| Jetpack+Mencius adaptive | 40.70 | 1 RTT ✓ |
 
 **Peak throughput across all tested concurrencies (c50, c150, c200, c300, c500):**
 
 | Protocol | Peak (cmd/s) | @ conc | p50 at peak | Server CPU avg across 5 hosts |
 |---|---|---|---|---|
 | Raft | 5989.6 | c500 | 75.89 | 29.1% |
-| Jetpack fp100 | 6004.3 | c300 | 42.03 | 54.6% |
-| Jetpack adaptive | 6002.6 | c300 | 41.96 | 50.6% |
+| Jetpack+Raft fp100 | 6004.3 | c300 | 42.03 | 54.6% |
+| Jetpack+Raft adaptive | 6002.6 | c300 | 41.96 | 50.6% |
 | SwiftPaxos | 6012.1 | c500 | 41.39 | 31.4% |
 | EPaxos | 5996.1 | c300 | 41.23 | 16.6% |
 | CoPilot | 4463.6 | c150 | 103.25 | 85.7% (fails at c500) |
-| CoPilot + Jetpack | 1480.7 | c50 | 41.56 | 44.6% (fails at c150) |
+| Jetpack+CoPilot adaptive | 1480.7 | c50 | 41.56 | 44.6% (fails at c150) |
 | Mencius | 216.6 | c50 | low | 100% (fails at c150) |
-| Mencius + Jetpack | fails at c50+ | — | — | — |
+| Jetpack+Mencius adaptive | fails at c50+ | — | — | — |
 | CURP | n/a | — | — | Known bug at c50+ |
 
 All 5 scalable protocols hit the same ~6000 cmd/s ceiling at c200 **because of a client-side bottleneck**. Each client worker caps at ~200 cmd/s. 30 clients × 200 = 6000. **Confirmed by running with 60 clients → throughput doubles to ~12000 cmd/s for all protocols.**
@@ -72,16 +72,16 @@ All 5 scalable protocols hit the same ~6000 cmd/s ceiling at c200 **because of a
 | Protocol | Tput (cmd/s) | Max CPU | p50 |
 |---|---|---|---|
 | Raft | 12006 | 83.8% | 84ms |
-| Jetpack fp100 | 11996 | 97.9% | 42.85ms |
-| Jetpack adaptive | 11975 | **100%** (saturated) | 44.61ms |
+| Jetpack+Raft fp100 | 11996 | 97.9% | 42.85ms |
+| Jetpack+Raft adaptive | 11975 | **100%** (saturated) | 44.61ms |
 | SwiftPaxos | 11998 | 88.6% | 41.49ms |
 | EPaxos | 11983 | 56.7% | 41.50ms |
 
-At 60 clients, **Jetpack adaptive hits true CPU saturation** (100% on leader). Raft and SwiftPaxos still have ~15-20% headroom. Jetpack's fast-path latency benefit is preserved at scale (42ms vs Raft's 84ms). See `docs/full_protocol_throughput_2026-04-16.md` for full analysis.
+At 60 clients, **Jetpack+Raft adaptive hits true CPU saturation** (100% on leader). Raft and SwiftPaxos still have ~15-20% headroom. Jetpack's fast-path latency benefit is preserved at scale (42ms vs Raft's 84ms). See `docs/full_protocol_throughput_2026-04-16.md` for full analysis.
 
 **Known issues:**
 - CURP throughput collapses at conc >= 50 (p50 jumps to 1000+ms)
-- CoPilot + Jetpack adaptive fails at conc >= 150
+- Jetpack+CoPilot adaptive fails at conc >= 150
 - Plain CoPilot fails at conc = 500
 
 ---
@@ -115,8 +115,8 @@ Config:                  rule_raft.yml -m 100             rule_raft.yml -m 200
 | `-m` | Name | Fast-path rate | Leader conflict check | Recovery | Protocol restriction |
 |---|---|---|---|---|---|
 | `0` | Original | 0% (no fast path) | N/A | N/A | Any |
-| `100` | Jetpack fp100 | 100% | Command pool | Paxos recovery | Any |
-| `101` | Jetpack adaptive | Adaptive (throttled) | Command pool | Paxos recovery | Any |
+| `100` | Jetpack+Raft fp100 | 100% | Command pool | Paxos recovery | Any |
+| `101` | Jetpack+Raft adaptive | Adaptive (throttled) | Command pool | Paxos recovery | Any |
 | `200` | CURP | 100% (hardcoded) | Raft log (uncommitted) | None | Raft only |
 
 ### 1.0 Add CURP mode constant and validation
@@ -972,17 +972,17 @@ Record in the results doc: git commit hash, build timestamp, binary sha256.
 | # | Label | Config | `-m` | Notes |
 |---|---|---|---|---|
 | 1 | Raft | `none_raft.yml` | `0` | Baseline, 2 RTT |
-| 2 | Raft + Jetpack fp100 | `rule_raft.yml` | `100` | Jetpack 100% fast path |
-| 3 | Raft + Jetpack adaptive | `rule_raft.yml` | `101` | Jetpack adaptive throttle |
+| 2 | Raft + Jetpack+Raft fp100 | `rule_raft.yml` | `100` | Jetpack 100% fast path |
+| 3 | Raft + Jetpack+Raft adaptive | `rule_raft.yml` | `101` | Jetpack+Raft adaptive throttle |
 | 4 | CURP (+ Raft) | `none_curp.yml` | `200` | Leader checks log, no recovery |
 | 5 | SwiftPaxos | `none_swiftpaxos.yml` | `0` | Leaderless, hash-based |
 | 6 | EPaxos (corrected) | `none_epaxos_corrected.yml` | `0` | Leaderless, dependency graph |
 | 7 | etcd | `none_etcd.yml` | `0` | External etcd backend |
 | 8 | ZooKeeper | `none_zookeeper.yml` | `0` | External ZK backend |
 | 9 | CoPilot | `none_copilot.yml` | `0` | Dual-pilot protocol |
-| 10 | CoPilot + Jetpack adaptive | `rule_copilot.yml` | `101` | Jetpack on CoPilot |
+| 10 | Jetpack+CoPilot adaptive | `rule_copilot.yml` | `101` | Jetpack on CoPilot |
 | 11 | Mencius | `none_mencius.yml` | `0` | Rotating leader |
-| 12 | Mencius + Jetpack adaptive | `rule_mencius.yml` | `101` | Jetpack on Mencius |
+| 12 | Jetpack+Mencius adaptive | `rule_mencius.yml` | `101` | Jetpack on Mencius |
 
 ### 4.3 Experiment 1: Latency (low load)
 
@@ -1002,10 +1002,10 @@ RDIR=results/$(date +%Y-%m-%d)-full-protocol-benchmark
 # 1. Raft
 ./run_single_exp.sh none_raft.yml 0 concurrent_1.yml raft-c1 $RDIR
 
-# 2. Raft + Jetpack fp100
+# 2. Raft + Jetpack+Raft fp100
 ./run_single_exp.sh rule_raft.yml 100 concurrent_1.yml jp-raft-fp100-c1 $RDIR
 
-# 3. Raft + Jetpack adaptive
+# 3. Raft + Jetpack+Raft adaptive
 ./run_single_exp.sh rule_raft.yml 101 concurrent_1.yml jp-raft-adaptive-c1 $RDIR
 
 # 4. CURP
@@ -1026,13 +1026,13 @@ RDIR=results/$(date +%Y-%m-%d)-full-protocol-benchmark
 # 9. CoPilot
 ./run_single_exp.sh none_copilot.yml 0 concurrent_1.yml copilot-c1 $RDIR
 
-# 10. CoPilot + Jetpack adaptive
+# 10. Jetpack+CoPilot adaptive
 ./run_single_exp.sh rule_copilot.yml 101 concurrent_1.yml jp-copilot-adaptive-c1 $RDIR
 
 # 11. Mencius
 ./run_single_exp.sh none_mencius.yml 0 concurrent_1.yml mencius-c1 $RDIR
 
-# 12. Mencius + Jetpack adaptive
+# 12. Jetpack+Mencius adaptive
 ./run_single_exp.sh rule_mencius.yml 101 concurrent_1.yml jp-mencius-adaptive-c1 $RDIR
 ```
 

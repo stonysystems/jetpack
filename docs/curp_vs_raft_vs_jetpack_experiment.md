@@ -30,8 +30,8 @@
 |---|---|---|---|---|---|---|---|---|
 | Raft | `none_raft.yml` | `0` | 20.0 | 79.86 | 90.40 | 91.58 | N/A | 72.4% |
 | CURP | `none_curp.yml` | `200` | 20.9 | 40.63 | 40.71 | 41.04 | 100% | 72.9% |
-| Jetpack fp100 | `rule_raft.yml` | `100` | 20.0 | 40.63 | 40.74 | 41.10 | 100% | 100.0% |
-| Jetpack adaptive | `rule_raft.yml` | `101` | 19.7 | 40.63 | 40.86 | 40.95 | 100% | 65.7% |
+| Jetpack+Raft fp100 | `rule_raft.yml` | `100` | 20.0 | 40.63 | 40.74 | 41.10 | 100% | 100.0% |
+| Jetpack+Raft adaptive | `rule_raft.yml` | `101` | 19.7 | 40.63 | 40.86 | 40.95 | 100% | 65.7% |
 
 **Commands used:**
 ```bash
@@ -59,7 +59,7 @@ RDIR=results/2026-04-15-curp-vs-raft-vs-jetpack
 | 150 | 4480.7 | 73.87 | 80.59 |
 | 500 | 5995.8 | 78.68 | 87.04 |
 
-### Jetpack fp100
+### Jetpack+Raft fp100
 
 | Conc | Throughput | p50 (ms) | p90 (ms) |
 |---|---|---|---|

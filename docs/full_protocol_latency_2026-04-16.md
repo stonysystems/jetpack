@@ -10,15 +10,15 @@
 | # | Protocol | Config | `-m` | Throughput | p50 (ms) | p90 (ms) | p99 (ms) | FP rate | Server CPU median (zoo0) |
 |---|---|---|---|---|---|---|---|---|---|
 | 1 | Raft | `none_raft.yml` | 0 | 20.0 | 79.59 | 89.01 | 92.98 | N/A | 47.4% |
-| 2 | Jetpack fp100 | `rule_raft.yml` | 100 | 20.1 | 40.64 | 40.78 | 40.91 | 100% | 68.0% |
-| 3 | Jetpack adaptive | `rule_raft.yml` | 101 | 19.8 | 40.59 | 40.67 | 40.74 | 100% | 64.9% |
+| 2 | Jetpack+Raft fp100 | `rule_raft.yml` | 100 | 20.1 | 40.64 | 40.78 | 40.91 | 100% | 68.0% |
+| 3 | Jetpack+Raft adaptive | `rule_raft.yml` | 101 | 19.8 | 40.59 | 40.67 | 40.74 | 100% | 64.9% |
 | 4 | CURP | `none_curp.yml` | 200 | 4.7 | N/A | N/A | N/A | 0% | 72.2% |
 | 5 | **SwiftPaxos** | `none_swiftpaxos.yml` | 0 | 20.1 | **40.51** | **40.58** | **41.42** | N/A | 100.0% |
 | 6 | **EPaxos** | `none_epaxos_corrected.yml` | 0 | 20.9 | **40.42** | **40.52** | **40.69** | N/A | 100.0% |
 | 9 | CoPilot | `none_copilot.yml` | 0 | 20.1 | 102.18 | 103.04 | 103.49 | N/A | 100.0% |
-| 10 | CoPilot + Jetpack | `rule_copilot.yml` | 101 | 19.6 | 40.71 | 40.83 | 41.11 | 100% | 92.1% |
+| 10 | Jetpack+CoPilot adaptive | `rule_copilot.yml` | 101 | 19.6 | 40.71 | 40.83 | 41.11 | 100% | 92.1% |
 | 11 | Mencius | `none_mencius.yml` | 0 | 20.1 | 122.63 | 123.98 | 125.10 | N/A | 100.0% |
-| 12 | Mencius + Jetpack | `rule_mencius.yml` | 101 | 20.8 | 40.70 | 40.88 | 41.23 | 100% | 100.0% |
+| 12 | Jetpack+Mencius adaptive | `rule_mencius.yml` | 101 | 20.8 | 40.70 | 40.88 | 41.23 | 100% | 100.0% |
 
 **Key observations:**
 

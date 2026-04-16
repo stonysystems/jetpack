@@ -50,7 +50,7 @@ Goal: Measure per-request latency below saturation to see protocol cost.
 | Protocol | Conc | Total Tput | p50 (ms) | p90 (ms) | p99 (ms) | FP rate |
 |---|---|---|---|---|---|---|
 | Raft | 1 | 20.7 | 79.64 | 89.08 | 91.65 | N/A |
-| JP+Raft fp100 | 1 | 20.5 | 40.62 | 40.65 | 40.74 | 100% |
+| Jetpack+Raft fp100 | 1 | 20.5 | 40.62 | 40.65 | 40.74 | 100% |
 | JP+Raft adaptive | 1 | 19.7 | 40.54 | 40.71 | 40.76 | 100% |
 
 ### CPU Usage — Server Thread (core 1) per Host (avg% / max%)
@@ -58,21 +58,21 @@ Goal: Measure per-request latency below saturation to see protocol cost.
 | Protocol | zoo0 | zoo1 | zoo2 | zoo3 | zoo4 | Server Avg | Server Max |
 |---|---|---|---|---|---|---|---|
 | Raft | 74.6/100.0 | 7.9/97.0 | 10.8/91.1 | 14.7/100.0 | 18.6/99.0 | 25.3 | 100.0 |
-| JP fp100 | 75.6/100.0 | 3.5/97.0 | 9.4/95.1 | 22.0/100.0 | 16.3/99.0 | 25.4 | 100.0 |
-| JP adaptive | 84.3/100.0 | 4.9/98.0 | 10.0/97.0 | 26.9/100.0 | 24.8/97.0 | 30.2 | 100.0 |
+| Jetpack+Raft fp100 | 75.6/100.0 | 3.5/97.0 | 9.4/95.1 | 22.0/100.0 | 16.3/99.0 | 25.4 | 100.0 |
+| Jetpack+Raft adaptive | 84.3/100.0 | 4.9/98.0 | 10.0/97.0 | 26.9/100.0 | 24.8/97.0 | 30.2 | 100.0 |
 
 ### CPU Usage — Whole Host (avg% / max%)
 
 | Protocol | zoo0 | zoo1 | zoo2 | zoo3 | zoo4 | Host Avg | Host Max |
 |---|---|---|---|---|---|---|---|
 | Raft | 11.4/12.6 | 1.1/2.2 | 5.6/8.0 | 4.8/6.1 | 57.5/88.2 | 16.1 | 88.2 |
-| JP fp100 | 11.6/12.6 | 1.3/2.4 | 5.3/7.6 | 5.4/7.3 | 20.1/92.2 | 8.7 | 92.2 |
-| JP adaptive | 12.9/18.1 | 2.0/5.9 | 6.9/11.1 | 6.7/15.2 | 44.3/63.9 | 14.6 | 63.9 |
+| Jetpack+Raft fp100 | 11.6/12.6 | 1.3/2.4 | 5.3/7.6 | 5.4/7.3 | 20.1/92.2 | 8.7 | 92.2 |
+| Jetpack+Raft adaptive | 12.9/18.1 | 2.0/5.9 | 6.9/11.1 | 6.7/15.2 | 44.3/63.9 | 14.6 | 63.9 |
 
 **Key observations**:
 - Raft baseline: **p50 ~ 80ms** (2 RTT = 2 x 40ms)
-- Jetpack fp100: **p50 ~ 41ms** (1 RTT = 40ms), exactly as expected for fast-path
-- Jetpack adaptive: **p50 ~ 41ms**, adaptive mode achieves same latency as fp100 at low load (100% fast-path)
+- Jetpack+Raft fp100: **p50 ~ 41ms** (1 RTT = 40ms), exactly as expected for fast-path
+- Jetpack+Raft adaptive: **p50 ~ 41ms**, adaptive mode achieves same latency as fp100 at low load (100% fast-path)
 - Jetpack cuts latency by ~50% (1 RTT vs 2 RTT)
 - zoo0 has the highest server-core CPU (likely the Raft leader)
 - zoo4 has anomalously high host CPU from an unrelated external process
@@ -133,7 +133,7 @@ Goal: Find max sustainable throughput via adaptive concurrency sweep.
 | 500 | 5996.2 | 41.66 | 43.54 | 52.48 | 99.97% |
 | 1000 | 5983.9 | 48.12 | 60.53 | 76.30 | 99.96% |
 
-### JP fp100 — Server Thread CPU (core 1) per Host (avg% / max%)
+### Jetpack+Raft fp100 — Server Thread CPU (core 1) per Host (avg% / max%)
 
 | Conc | zoo0 | zoo1 | zoo2 | zoo3 | zoo4 | Server Avg | Server Max |
 |---|---|---|---|---|---|---|---|
@@ -145,7 +145,7 @@ Goal: Find max sustainable throughput via adaptive concurrency sweep.
 | 500 | 74.7/100.0 | 19.2/98.1 | 41.6/99.0 | 54.4/100.0 | 42.8/98.0 | 46.5 | 100.0 |
 | 1000 | 63.6/100.0 | 20.0/99.0 | 42.0/95.0 | 48.2/94.1 | 68.8/100.0 | 48.5 | 100.0 |
 
-### JP fp100 — Whole Host CPU (avg% / max%)
+### Jetpack+Raft fp100 — Whole Host CPU (avg% / max%)
 
 | Conc | zoo0 | zoo1 | zoo2 | zoo3 | zoo4 | Host Avg | Host Max |
 |---|---|---|---|---|---|---|---|
@@ -170,7 +170,7 @@ Goal: Find max sustainable throughput via adaptive concurrency sweep.
 | 500 | 5998.9 | 41.55 | 42.60 | 52.04 | 99.97% |
 | 1000 | 5994.6 | 42.22 | 43.62 | 52.63 | 99.98% |
 
-### JP adaptive — Server Thread CPU (core 1) per Host (avg% / max%)
+### Jetpack+Raft adaptive — Server Thread CPU (core 1) per Host (avg% / max%)
 
 | Conc | zoo0 | zoo1 | zoo2 | zoo3 | zoo4 | Server Avg | Server Max |
 |---|---|---|---|---|---|---|---|
@@ -181,7 +181,7 @@ Goal: Find max sustainable throughput via adaptive concurrency sweep.
 | 500 | 66.8/100.0 | 18.9/100.0 | 41.9/97.0 | 49.5/100.0 | 28.8/98.0 | 41.2 | 100.0 |
 | 1000 | 55.8/100.0 | 19.6/98.0 | 42.7/98.0 | 61.4/100.0 | 42.9/96.0 | 44.5 | 100.0 |
 
-### JP adaptive — Whole Host CPU (avg% / max%)
+### Jetpack+Raft adaptive — Whole Host CPU (avg% / max%)
 
 | Conc | zoo0 | zoo1 | zoo2 | zoo3 | zoo4 | Host Avg | Host Max |
 |---|---|---|---|---|---|---|---|

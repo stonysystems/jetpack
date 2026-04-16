@@ -17,15 +17,15 @@ Consolidated results from the full protocol benchmark suite on a 5-node cluster.
 | # | Label | Config | `-m` flag | Notes |
 |---|---|---|---|---|
 | 1 | Raft | `none_raft.yml` | 0 | Baseline, 2 RTT |
-| 2 | Raft + Jetpack fp100 | `rule_raft.yml` | 100 | Jetpack 100% fast path |
-| 3 | Raft + Jetpack adaptive | `rule_raft.yml` | 101 | Jetpack adaptive throttle |
+| 2 | Raft + Jetpack+Raft fp100 | `rule_raft.yml` | 100 | Jetpack 100% fast path |
+| 3 | Raft + Jetpack+Raft adaptive | `rule_raft.yml` | 101 | Jetpack+Raft adaptive throttle |
 | 4 | CURP (+Raft) | `none_curp.yml` | 200 | Leader checks log, witnesses check pool |
 | 5 | SwiftPaxos | `none_swiftpaxos.yml` | 0 | Leader-optimized leaderless, hash-based |
 | 6 | EPaxos (corrected) | `none_epaxos_corrected.yml` | 0 | Leaderless, dependency graph |
 | 7 | CoPilot | `none_copilot.yml` | 0 | Dual-pilot protocol |
-| 8 | CoPilot + Jetpack | `rule_copilot.yml` | 101 | Jetpack on CoPilot |
+| 8 | Jetpack+CoPilot adaptive | `rule_copilot.yml` | 101 | Jetpack on CoPilot |
 | 9 | Mencius | `none_mencius.yml` | 0 | Rotating leader |
-| 10 | Mencius + Jetpack | `rule_mencius.yml` | 101 | Jetpack on Mencius |
+| 10 | Jetpack+Mencius adaptive | `rule_mencius.yml` | 101 | Jetpack on Mencius |
 | 11 | etcd | `none_etcd.yml` | 0 | External etcd backend (NOT TESTED — requires daemon) |
 | 12 | ZooKeeper | `none_zookeeper.yml` | 0 | External ZK backend (NOT TESTED — requires daemon) |
 
@@ -43,14 +43,14 @@ Consolidated results from the full protocol benchmark suite on a 5-node cluster.
 | **CURP** | **40.63** | 40.71 | 41.04 | **1.0 RTT** |
 | **SwiftPaxos** | **40.51** | 40.58 | 41.42 | **1.0 RTT** |
 | **EPaxos (corrected)** | **40.42** | 40.52 | 40.69 | **1.0 RTT** |
-| **CoPilot + Jetpack** | **40.71** | 40.83 | 41.11 | **1.0 RTT** |
-| **Mencius + Jetpack** | **40.70** | 40.88 | 41.23 | **1.0 RTT** |
+| **Jetpack+CoPilot adaptive** | **40.71** | 40.83 | 41.11 | **1.0 RTT** |
+| **Jetpack+Mencius adaptive** | **40.70** | 40.88 | 41.23 | **1.0 RTT** |
 
 **Observations:**
 - Baseline (non-Jetpack) protocols require 2+ RTTs: Raft=2, CoPilot=2.5, Mencius=3
 - All fast-path protocols achieve **clean 1 RTT (40ms)** with p99 < 42ms
 - Jetpack plugin delivers consistent 1 RTT regardless of base protocol
-- CURP matches Jetpack fp100 exactly (same infrastructure, different leader check)
+- CURP matches Jetpack+Raft fp100 exactly (same infrastructure, different leader check)
 - SwiftPaxos and EPaxos achieve 1 RTT via their own mechanisms (hash agreement / dep agreement)
 
 ## Peak Throughput
@@ -63,9 +63,9 @@ Consolidated results from the full protocol benchmark suite on a 5-node cluster.
 | SwiftPaxos | **6012.1** | **41.39** | ✓ Scales to c500 (winner) |
 | EPaxos | 5996.1 | 41.23 | ✓ Scales to c500 |
 | CoPilot | 4463.6 | 103.25 | ✗ Fails at c500 |
-| CoPilot + Jetpack | 1480.7 | 41.56 | ✗ Fails at c150 |
+| Jetpack+CoPilot adaptive | 1480.7 | 41.56 | ✗ Fails at c150 |
 | Mencius | 216.6 | low | ✗ Fails at c150 |
-| Mencius + Jetpack | n/a | — | ✗ Fails at c50 |
+| Jetpack+Mencius adaptive | n/a | — | ✗ Fails at c50 |
 | CURP | n/a | — | ✗ Known bug at c50+ |
 
 **All 5 scalable protocols saturate at c200 (~5960 cmd/s), improving marginally to c500 (~6000 cmd/s).** This indicates a server-side CPU bottleneck on the single pinned core.
@@ -76,7 +76,7 @@ Consolidated results from the full protocol benchmark suite on a 5-node cluster.
 All 7 fast-path variants (Jetpack on Raft/CoPilot/Mencius, CURP, SwiftPaxos, EPaxos) achieve ~40ms p50 vs the baseline's 80-122ms. The consistency across protocols confirms the 1 RTT commit mechanism works regardless of the underlying consensus.
 
 ### 2. Same throughput ceiling at ~6000 cmd/s
-The 5 scalable protocols (Raft, Jetpack fp100/adaptive, SwiftPaxos, EPaxos) all cap at ~6000 cmd/s. This bottleneck is the single-core server thread, not the protocol — suggesting further throughput gains require multi-threading the server.
+The 5 scalable protocols (Raft, Jetpack+Raft fp100/adaptive, SwiftPaxos, EPaxos) all cap at ~6000 cmd/s. This bottleneck is the single-core server thread, not the protocol — suggesting further throughput gains require multi-threading the server.
 
 ### 3. Latency advantage preserved at saturation
 At the peak concurrency, Jetpack-based protocols maintain ~42ms p50 while Raft operates at ~76ms. The fast-path optimization doesn't degrade under load — latency stays near 1 RTT even when throughput saturates.
