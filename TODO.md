@@ -2,6 +2,19 @@
 
 Phased roadmap for Jetpack development. Each phase has concrete tasks with acceptance criteria.
 
+## Session Outcomes
+
+- **Phase 1 (CURP)**: Complete implementation. Works at c1 with 1 RTT; known throughput issue at c50+.
+- **Phase 2 (SwiftPaxos)**: Full protocol working (normal path) + recovery stubs. p50=40.51ms, peaks at 6012 cmd/s.
+- **Phase 3 (EPaxos)**: Full protocol + Tarjan SCC execution + recovery stubs. p50=40.42ms, peaks at 5996 cmd/s.
+- **Phase 4 (Benchmark)**: Latency + throughput sweeps complete for 10 of 12 protocol configurations.
+
+Documentation produced:
+- `docs/curp_vs_raft_vs_jetpack_experiment.md` — CURP results
+- `docs/full_protocol_latency_2026-04-16.md` — Latency benchmarks
+- `docs/full_protocol_throughput_2026-04-16.md` — Throughput benchmarks
+- `docs/consensus_protocol_comparison_2026-04-16.md` — Consolidated comparison
+
 ## Status Summary (2026-04-16)
 
 | Phase | Status | Commit(s) | Notes |
