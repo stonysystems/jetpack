@@ -5,11 +5,21 @@ Phased roadmap for Jetpack development. Each phase has concrete tasks with accep
 ## Session Outcomes
 
 - **Phase 1 (CURP)**: Complete implementation. Works at c1 with 1 RTT; known throughput issue at c50+.
-- **Phase 2 (SwiftPaxos)**: ⚠️ **SIMPLIFIED implementation** — replicas don't exchange acks; coordinator synthesizes them. Latency (~40ms) is real but CPU numbers understate true protocol cost.
-- **Phase 3 (EPaxos)**: ⚠️ **SIMPLIFIED implementation** — no RPC broadcast at all; only proposer does work. Tarjan SCC execution implemented. CPU numbers do not reflect real distributed consensus cost.
-- **Phase 4 (Benchmark)**: Latency + throughput sweeps complete for 10 of 12 protocol configurations, but see caveat on SwiftPaxos/EPaxos.
+- **Phase 2 (SwiftPaxos)**: **Real implementation with inter-replica ack exchange** (commit `8f136dd8`). Latency 42ms (1 RTT). Max CPU 99% on leader (was 88.6% simplified), all replicas busy 80-99%.
+- **Phase 3 (EPaxos)**: **Real implementation with PreAccept/Commit broadcast** (commit `c167dc84`). Latency 41ms (1 RTT). Max CPU 82.8% (was 56.7% simplified), all replicas now do per-command work.
+- **Phase 4 (Benchmark)**: Latency + throughput sweeps complete for 10 of 12 protocol configurations.
 
-⚠️ **Honesty caveat**: The low CPU usage observed for SwiftPaxos (88.6%) and EPaxos (56.7%) at peak throughput is NOT a protocol virtue — it's because the current implementations skip inter-replica communication. A proper implementation would likely show CPU comparable to or higher than Jetpack+Raft (98%+) because these protocols have more per-command work (hash computation, dependency tracking, ack exchange).
+**Updated CPU at peak (60 clients c500):**
+
+| Protocol | Max CPU | All-replica CPU | vs Simplified |
+|---|---|---|---|
+| Jetpack+Raft fp100 | 97.9% | varied | (unchanged, was already real) |
+| Jetpack+Raft adaptive | 100% | varied | (unchanged, was already real) |
+| SwiftPaxos | **99%** | 80-99% | was 88.6% (synthesized acks) |
+| EPaxos | **82.8%** | 29-83% | was 56.7% (no broadcast) |
+| Raft | 83.8% | 5-84% | (unchanged) |
+
+SwiftPaxos and EPaxos now do actual distributed consensus work on all replicas per command.
 
 **Scope reduction**: Failure recovery for SwiftPaxos (2.5) and EPaxos (3.5) is **not required**. SwiftPaxos batching (2.6) is **not required**. The recovery stubs that exist in the codebase are harmless no-ops and can be left in place.
 
@@ -69,17 +79,17 @@ Documentation produced:
 
 All 5 scalable protocols hit the same ~6000 cmd/s ceiling at c200 **because of a client-side bottleneck**. Each client worker caps at ~200 cmd/s. 30 clients × 200 = 6000. **Confirmed by running with 60 clients → throughput doubles to ~12000 cmd/s for all protocols.**
 
-**True protocol peaks (60 clients at c500):**
+**True protocol peaks (60 clients at c500, with SwiftPaxos/EPaxos real impl):**
 
 | Protocol | Tput (cmd/s) | Max CPU | p50 |
 |---|---|---|---|
 | Raft | 12006 | 83.8% | 84ms |
 | Jetpack+Raft fp100 | 11996 | 97.9% | 42.85ms |
 | Jetpack+Raft adaptive | 11975 | **100%** (saturated) | 44.61ms |
-| SwiftPaxos | 11998 | 88.6% | 41.49ms |
-| EPaxos | 11983 | 56.7% | 41.50ms |
+| SwiftPaxos | 12001 | **99%** | 42.09ms |
+| EPaxos | 11992 | 82.8% | 41.43ms |
 
-At 60 clients, **Jetpack+Raft adaptive hits true CPU saturation** (100% on leader). Raft and SwiftPaxos still have ~15-20% headroom. Jetpack's fast-path latency benefit is preserved at scale (42ms vs Raft's 84ms). See `docs/full_protocol_throughput_2026-04-16.md` for full analysis.
+At 60 clients, **Jetpack+Raft adaptive and SwiftPaxos both hit CPU saturation** (100%/99%). All protocols now reflect real distributed consensus work. Jetpack's fast-path latency benefit is preserved at scale (42ms vs Raft's 84ms). See `docs/full_protocol_throughput_2026-04-16.md` for full analysis.
 
 **Known issues:**
 - CURP throughput collapses at conc >= 50 (p50 jumps to 1000+ms)

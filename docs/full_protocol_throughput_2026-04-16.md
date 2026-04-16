@@ -1,24 +1,27 @@
 # Full Protocol Throughput Benchmark — 2026-04-16
 
-## ⚠️ IMPORTANT CAVEAT: SwiftPaxos and EPaxos are SIMPLIFIED implementations
-
-The current implementations of SwiftPaxos and EPaxos **do not perform full distributed consensus**. Specifically:
+## UPDATE (commits `8f136dd8`, `c167dc84`): SwiftPaxos and EPaxos now do REAL inter-replica consensus
 
 **SwiftPaxos** (`src/deptran/swiftpaxos/`):
 - Coordinator broadcasts `SwiftPropose` RPC to all 5 replicas ✓
 - Each replica does per-key conflict check ✓
-- **Replicas do NOT exchange FastAck/SlowAck between themselves** ✗ — the coordinator synthesizes acks locally (assumes no conflict)
+- **Each replica broadcasts FastAck/SlowAck to all other replicas via RPC ✓** (FIXED commit `8f136dd8`)
+- Each replica counts acks locally and commits when FQ reached
 
 **EPaxos (corrected)** (`src/deptran/epaxos_corrected/`):
-- Coordinator only calls `svr_->OnPropose(cmd)` locally — **no RPC broadcast at all** ✗
-- Server uses `inst.pre_accept_oks = n_replica_` to pretend all replicas agreed ✗
-- **Only the proposing replica does any work per command** — other 4 replicas are idle
+- **Coordinator's OnPropose broadcasts PreAccept RPC to all other replicas ✓** (FIXED commit `c167dc84`)
+- Each replica runs `UpdateAttributes` + `UpdateConflicts` on PreAccept
+- After fast commit, broadcasts Commit RPC to all replicas
+- All 5 replicas do real work per command
 
-**Consequence**: The CPU numbers for SwiftPaxos (88.6% max at 60 clients) and EPaxos (56.7% max) are NOT representative of the true protocol cost. In a correct implementation, both should have CPU comparable to or higher than Jetpack+Raft (98%+) because:
-- SwiftPaxos per-command work: hash computation + FastAck broadcast + hash comparison on all replicas
-- EPaxos per-command work: dependency array computation + PreAccept/Accept broadcasts + reply merging + Tarjan SCC execution
+**Resulting CPU change at 60 clients c500:**
 
-**Latency (1 RTT) is somewhat valid** because the coordinator-to-replica RPC round trip is real, but the inter-replica RTTs that real consensus requires are skipped.
+| Protocol | Simplified (old) | Real (new) |
+|---|---|---|
+| SwiftPaxos | 88.6% max, 31.4% avg | **99% max, 80-99% all hosts** |
+| EPaxos | 56.7% max, 16.6% avg | **82.8% max, 29-83% all hosts** |
+
+The older table entries below reflect the simplified 30-client measurements. Still kept for historical reference. The authoritative 60-client real-impl numbers are in the final table.
 
 ---
 
@@ -123,15 +126,17 @@ The current implementations of SwiftPaxos and EPaxos **do not perform full distr
 
 **Doubling clients from 30 to 60 exactly doubled throughput** to ~12000 cmd/s for all protocols:
 
-| Protocol | 30 clients | 60 clients | Max CPU (60c) |
-|---|---|---|---|
-| Raft | 5990 | **12006** | 83.8% |
-| Jetpack+Raft fp100 | 6004 | **11996** | 97.9% |
-| Jetpack+Raft adaptive | 6003 | **11975** | **100%** (saturated) |
-| SwiftPaxos | 6012 | **11998** | 88.6% |
-| EPaxos | 5996 | **11983** | 56.7% |
+| Protocol | 30 clients | 60 clients | Max CPU (60c, simplified) | Max CPU (60c, REAL impl) |
+|---|---|---|---|---|
+| Raft | 5990 | **12006** | 83.8% | 83.8% (unchanged) |
+| Jetpack+Raft fp100 | 6004 | **11996** | 97.9% | 97.9% (unchanged) |
+| Jetpack+Raft adaptive | 6003 | **11975** | **100%** | **100%** (unchanged) |
+| SwiftPaxos | 6012 | **11998** | 88.6% | **99%** |
+| EPaxos | 5996 | **11983** | 56.7% | **82.8%** |
 
-**Root cause**: Each client worker was capped at ~200 cmd/s by client-side coroutine/dispatch serialization. 30 clients × 200 = 6000 cmd/s. 60 clients × 200 = 12000 cmd/s.
+(Raft and Jetpack+Raft were already real implementations; only SwiftPaxos and EPaxos changed.)
+
+**Root cause of throughput ceiling**: Each client worker was capped at ~200 cmd/s by client-side coroutine/dispatch serialization. 30 clients × 200 = 6000 cmd/s. 60 clients × 200 = 12000 cmd/s.
 
 **At 60 clients, the REAL protocol limits become visible:**
 - **Jetpack+Raft adaptive**: 100% CPU on one replica → fully saturated at 12k, cannot scale further
