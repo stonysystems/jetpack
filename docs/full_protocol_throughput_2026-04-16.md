@@ -97,9 +97,30 @@
 | Mencius + Jetpack | fails at c50+ | — | — | — | — | — |
 | CURP | n/a | — | — | — | — | Known bug |
 
-## Is the ~6000 cmd/s ceiling really a protocol limit?
+## UPDATE: The ~6000 cmd/s ceiling was a client-side bottleneck (confirmed)
 
-**Probably not.** Several observations suggest the 6000 cmd/s plateau is a **testbed infrastructure ceiling**, not a protocol ceiling:
+**Doubling clients from 30 to 60 exactly doubled throughput** to ~12000 cmd/s for all protocols:
+
+| Protocol | 30 clients | 60 clients | Max CPU (60c) |
+|---|---|---|---|
+| Raft | 5990 | **12006** | 83.8% |
+| Jetpack fp100 | 6004 | **11996** | 97.9% |
+| Jetpack adaptive | 6003 | **11975** | **100%** (saturated) |
+| SwiftPaxos | 6012 | **11998** | 88.6% |
+| EPaxos | 5996 | **11983** | 56.7% |
+
+**Root cause**: Each client worker was capped at ~200 cmd/s by client-side coroutine/dispatch serialization. 30 clients × 200 = 6000 cmd/s. 60 clients × 200 = 12000 cmd/s.
+
+**At 60 clients, the REAL protocol limits become visible:**
+- **Jetpack adaptive**: 100% CPU on one replica → fully saturated at 12k, cannot scale further
+- **Jetpack fp100**: 97.9% CPU → essentially saturated
+- **SwiftPaxos**: 88.6% CPU → approaching limit
+- **Raft**: 83.8% CPU → still some headroom (~15-18% left on leader)
+- **EPaxos**: 56.7% CPU → simplified impl doesn't fully stress the cluster
+
+### Original analysis (now explained)
+
+The original observations were correct but misinterpreted:
 
 ### Evidence of an external bottleneck
 

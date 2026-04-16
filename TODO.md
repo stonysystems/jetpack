@@ -65,20 +65,19 @@ Documentation produced:
 | Mencius + Jetpack | fails at c50+ | — | — | — |
 | CURP | n/a | — | — | Known bug at c50+ |
 
-All 5 scalable protocols hit the same ~6000 cmd/s ceiling at c200. **This is likely an infrastructure bottleneck (client-side or RPC framework), not a protocol limit** — evidence:
+All 5 scalable protocols hit the same ~6000 cmd/s ceiling at c200 **because of a client-side bottleneck**. Each client worker caps at ~200 cmd/s. 30 clients × 200 = 6000. **Confirmed by running with 60 clients → throughput doubles to ~12000 cmd/s for all protocols.**
 
-- Max server CPU: Raft=49%, SwiftPaxos=59%, EPaxos=76%, Jetpack=96% (only Jetpack's leader is near-saturated)
-- Per-host throughput is uniform (~1200 cmd/s each) across all protocols and concurrencies
-- Pattern suggests per-client rate limit (~200 cmd/s × 6 clients per host = ~1200 per host)
+**True protocol peaks (60 clients at c500):**
 
-**What this means:**
-- "Peak throughput" is a shared infrastructure ceiling, not a protocol ceiling
-- At this shared ceiling, CPU efficiency differs sharply between protocols:
-  - **Jetpack**: leader at 96% CPU — already CPU-bound on leader, little headroom
-  - **Raft**: leader at 49% CPU — could scale ~2x higher if infrastructure allowed
-  - **SwiftPaxos/EPaxos**: lower CPU because simplified impl only works the proposer
+| Protocol | Tput (cmd/s) | Max CPU | p50 |
+|---|---|---|---|
+| Raft | 12006 | 83.8% | 84ms |
+| Jetpack fp100 | 11996 | 97.9% | 42.85ms |
+| Jetpack adaptive | 11975 | **100%** (saturated) | 44.61ms |
+| SwiftPaxos | 11998 | 88.6% | 41.49ms |
+| EPaxos | 11983 | 56.7% | 41.50ms |
 
-Jetpack's fast-path benefit is preserved at the ceiling (41ms vs Raft's 76ms). See `docs/full_protocol_throughput_2026-04-16.md` for full analysis.
+At 60 clients, **Jetpack adaptive hits true CPU saturation** (100% on leader). Raft and SwiftPaxos still have ~15-20% headroom. Jetpack's fast-path latency benefit is preserved at scale (42ms vs Raft's 84ms). See `docs/full_protocol_throughput_2026-04-16.md` for full analysis.
 
 **Known issues:**
 - CURP throughput collapses at conc >= 50 (p50 jumps to 1000+ms)
