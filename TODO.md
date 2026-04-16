@@ -5,9 +5,11 @@ Phased roadmap for Jetpack development. Each phase has concrete tasks with accep
 ## Session Outcomes
 
 - **Phase 1 (CURP)**: Complete implementation. Works at c1 with 1 RTT; known throughput issue at c50+.
-- **Phase 2 (SwiftPaxos)**: Full protocol working (normal path) + recovery stubs. p50=40.51ms, peaks at 6012 cmd/s.
-- **Phase 3 (EPaxos)**: Full protocol + Tarjan SCC execution + recovery stubs. p50=40.42ms, peaks at 5996 cmd/s.
+- **Phase 2 (SwiftPaxos)**: Full protocol working (normal path). p50=40.51ms, peaks at 6012 cmd/s.
+- **Phase 3 (EPaxos)**: Full protocol + Tarjan SCC execution. p50=40.42ms, peaks at 5996 cmd/s.
 - **Phase 4 (Benchmark)**: Latency + throughput sweeps complete for 10 of 12 protocol configurations.
+
+**Scope reduction**: Failure recovery for SwiftPaxos (2.5) and EPaxos (3.5) is **not required**. SwiftPaxos batching (2.6) is **not required**. The recovery stubs that exist in the codebase are harmless no-ops and can be left in place.
 
 Documentation produced:
 - `docs/curp_vs_raft_vs_jetpack_experiment.md` — CURP results
@@ -23,11 +25,11 @@ Documentation produced:
 | 1.6 CURP comparative exp | **Partial** | `a2a04030` | Latency works; throughput has known bug at conc >= 50 |
 | 2.0-2.1 SwiftPaxos scaffold + RPC | **Done** | `2ae8cc01` | Directory created, RPC stubs generated |
 | 2.2-2.4 SwiftPaxos server + coordinator | **Done** | `2f3b0981` | Working on zoo cluster: p50=40.51ms at c1 |
-| 2.5 SwiftPaxos recovery | **Partial** | `0e470abb` | Recovery stubs for NewLeader/NewLeaderAck/Sync; full merge logic deferred |
-| 2.6 SwiftPaxos batching | **Not started** | | Optimization, deferrable |
+| 2.5 SwiftPaxos recovery | **Dropped** | `0e470abb` | Not needed. Stubs remain in codebase as harmless no-ops |
+| 2.6 SwiftPaxos batching | **Dropped** | | Not needed |
 | 3.0-3.3 EPaxos (corrected) scaffold + server | **Done** | `95d3549a` | Working on zoo cluster: p50=40.42ms at c1 |
 | 3.4 EPaxos Tarjan SCC execution | **Done** | `76b3fba5` | Verified: 5138 cmd/s local test, commands execute in dependency order |
-| 3.5 EPaxos recovery | **Partial** | `c4da883b` | Recovery stubs for Prepare/TryPreAccept; 6-case decision tree deferred |
+| 3.5 EPaxos recovery | **Dropped** | `c4da883b` | Not needed. Stubs remain in codebase as harmless no-ops |
 | 4.0 CPU monitor for all builds | **Done** | `dca242e4` | Removed `#ifdef AWS` guard |
 | 4.1-4.3 Latency experiment (8 protocols) | **Done** | `1449a7db` | Results in `docs/full_protocol_latency_2026-04-16.md` |
 | 4.4 Throughput sweep | **Done** | `89d53a58` | Coarse + bisect complete for 5 scalable protocols |
@@ -469,7 +471,9 @@ The client (coordinator) tracks both FQ and SQ message sets per command:
 - [ ] Client falls back to SQ slow path when hashes differ
 - [ ] Latency metrics distinguish fast vs slow path commits
 
-### 2.5 Recovery — leader election and state sync
+### 2.5 Recovery — leader election and state sync [DROPPED]
+
+**Status**: Dropped — failure recovery for SwiftPaxos is not required for our scope. The RPC handler stubs remain in the codebase as harmless no-ops (commit `0e470abb`). The detailed design below is preserved for historical reference.
 
 When a leader fails, the new leader runs recovery:
 
@@ -504,7 +508,9 @@ When a leader fails, the new leader runs recovery:
 - [ ] No committed command is lost during recovery
 - [ ] Recovery completes and replicas resume normal processing
 
-### 2.6 Message batching (optimization)
+### 2.6 Message batching (optimization) [DROPPED]
+
+**Status**: Dropped — not required for our scope. The detailed design below is preserved for historical reference.
 
 SwiftPaxos batches multiple acks into single messages to reduce network overhead:
 
@@ -785,7 +791,9 @@ int SlowQuorumSize() { return (n_ + 1) / 2; }        // e.g., N=5 → SQ=3
 - [ ] Execution respects dependency ordering (no command executes before its dependencies)
 - [ ] All replicas produce the same execution order for the same set of committed commands
 
-### 3.5 Recovery — Prepare, TryPreAccept
+### 3.5 Recovery — Prepare, TryPreAccept [DROPPED]
+
+**Status**: Dropped — failure recovery for EPaxos is not required for our scope. The RPC handler stubs remain in the codebase as harmless no-ops (commit `c4da883b`). The detailed design below is preserved for historical reference.
 
 **When triggered**: Execution thread detects an instance stuck in non-COMMITTED state for >10 seconds (COMMIT_GRACE_PERIOD).
 
