@@ -82,11 +82,10 @@ class EPaxosCServiceImplC : public EPaxosCServiceService {
                       rrr::i32* reply_seq,
                       MarshallDeputy* reply_deps,
                       rrr::DeferredReply* defer) override {
-    // TODO: recovery (Phase 3.5)
-    *reply_status = 0;
-    *reply_ballot = 0;
-    *reply_vbal = 0;
-    *reply_seq = 0;
+    int32_t seq_out = 0;
+    svr_->OnPrepare(leader, replica, instance, ballot,
+                     reply_status, reply_ballot, reply_vbal, &seq_out);
+    *reply_seq = seq_out;
     defer->reply();
   }
 
@@ -104,14 +103,15 @@ class EPaxosCServiceImplC : public EPaxosCServiceService {
                            rrr::i64* conflict_instance,
                            rrr::i32* conflict_status,
                            rrr::DeferredReply* defer) override {
-    // TODO: recovery (Phase 3.5)
-    *reply_status = 0;
-    *reply_ballot = 0;
-    *reply_vbal = 0;
-    *conflict_replica = 0;
-    *conflict_instance = 0;
-    *conflict_status = 0;
-    defer->reply();
+    Coroutine::CreateRun([=, &cmd, &deps]() {
+      auto sp_cmd = const_cast<MarshallDeputy&>(cmd).sp_data_;
+      vector<int32_t> in_deps;  // TODO: deserialize
+      svr_->OnTryPreAccept(leader, replica, instance, ballot, sp_cmd,
+                            seq, in_deps, reply_status, reply_ballot,
+                            reply_vbal, conflict_replica, conflict_instance,
+                            conflict_status);
+      defer->reply();
+    });
   }
 };
 

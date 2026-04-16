@@ -213,4 +213,75 @@ void EPaxosCServer::TryExecute(int32_t replica, int32_t instance) {
   // TODO: Tarjan SCC-based execution (Phase 3.4)
 }
 
+// ============================================================
+// Recovery (Phase 3.5)
+// ============================================================
+
+void EPaxosCServer::OnPrepare(siteid_t leader, siteid_t replica, int64_t instance,
+                               ballot_t ballot,
+                               int32_t* reply_status, ballot_t* reply_ballot,
+                               ballot_t* reply_vbal, int32_t* reply_seq) {
+  auto& inst = GetInstance(replica, instance);
+  if (ballot < inst.ballot) {
+    *reply_status = 0;  // NACK (stale ballot)
+    *reply_ballot = inst.ballot;
+    *reply_vbal = inst.vbal;
+    *reply_seq = inst.seq;
+    return;
+  }
+
+  // Adopt the new ballot for this instance. The leader will collect replies
+  // from a majority and decide the outcome.
+  inst.ballot = ballot;
+  *reply_status = inst.status;
+  *reply_ballot = inst.ballot;
+  *reply_vbal = inst.vbal;
+  *reply_seq = inst.seq;
+}
+
+void EPaxosCServer::OnTryPreAccept(siteid_t leader, siteid_t replica, int64_t instance,
+                                    ballot_t ballot, const shared_ptr<Marshallable>& cmd,
+                                    int32_t seq, const vector<int32_t>& deps,
+                                    int32_t* reply_status, ballot_t* reply_ballot,
+                                    ballot_t* reply_vbal,
+                                    siteid_t* conflict_replica, int64_t* conflict_instance,
+                                    int32_t* conflict_status) {
+  auto& inst = GetInstance(replica, instance);
+  if (ballot < inst.ballot) {
+    *reply_status = 0;  // NACK
+    *reply_ballot = inst.ballot;
+    *reply_vbal = inst.vbal;
+    *conflict_replica = 0;
+    *conflict_instance = 0;
+    *conflict_status = 0;
+    return;
+  }
+
+  // In the full EPaxos recovery, we'd check for conflicting instances in our
+  // conflict table. For now, always accept (simplified).
+  inst.ballot = ballot;
+  if (inst.status == EPaxosInstance::NONE) {
+    inst.cmd = cmd;
+    inst.seq = seq;
+    inst.deps = deps;
+    inst.status = EPaxosInstance::PREACCEPTED;
+  }
+  *reply_status = inst.status;
+  *reply_ballot = inst.ballot;
+  *reply_vbal = inst.vbal;
+  *conflict_replica = 0;
+  *conflict_instance = 0;
+  *conflict_status = 0;
+}
+
+void EPaxosCServer::StartRecovery(int32_t replica, int32_t instance) {
+  auto& inst = GetInstance(replica, instance);
+  // Increment ballot beyond all ballots we've seen
+  inst.ballot = inst.ballot + n_replica_ + 1;
+  // In full impl: broadcast EPaxosCPrepare to all replicas, collect majority
+  // of PrepareReply, decide fate based on 6 corrected subcases.
+  Log_info("[EPaxos] StartRecovery for replica=%d instance=%d new_ballot=%ld",
+           replica, instance, (long)inst.ballot);
+}
+
 } // namespace janus

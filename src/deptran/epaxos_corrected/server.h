@@ -108,6 +108,25 @@ class EPaxosCServer : public TxLogServer {
 
   // Execution
   void TryExecute(int32_t replica, int32_t instance);
+
+  // Recovery (Phase 3.5)
+  // Prepare: new leader for a stuck instance proposes a higher ballot
+  void OnPrepare(siteid_t leader, siteid_t replica, int64_t instance,
+                 ballot_t ballot,
+                 int32_t* reply_status, ballot_t* reply_ballot,
+                 ballot_t* reply_vbal, int32_t* reply_seq);
+
+  // TryPreAccept: recovery optimization, checks for conflicts with existing instances
+  void OnTryPreAccept(siteid_t leader, siteid_t replica, int64_t instance,
+                      ballot_t ballot, const shared_ptr<Marshallable>& cmd,
+                      int32_t seq, const vector<int32_t>& deps,
+                      int32_t* reply_status, ballot_t* reply_ballot,
+                      ballot_t* reply_vbal,
+                      siteid_t* conflict_replica, int64_t* conflict_instance,
+                      int32_t* conflict_status);
+
+  // Trigger recovery for a stuck instance
+  void StartRecovery(int32_t replica, int32_t instance);
 };
 
 } // namespace janus
