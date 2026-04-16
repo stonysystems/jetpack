@@ -27,7 +27,36 @@ Saturation N = last swept client count at which some host was still below the 99
 2. **Raft scales further than the simplified coarse run suggested** — it held ~14k at 89.9% CPU on the leader. At N80 it crashed to 985ms p50 (the leader core saturated at 100%).
 3. **SwiftPaxos reaches the same ballpark as Raft** (~12k cmd/s), but at ~98% CPU on zoo0 — its per-command cost is higher (dependency tracking + per-key conflict check) so it runs hotter.
 4. **Jetpack+Raft variants peak lowest** despite providing 1-RTT latency. The fast-path speculative broadcast costs CPU on the leader — at N45-50 the leader pins to 100%. The throughput ceiling is set by the leader's pinned core, which has to process both the Raft slow-path AND the fast-path RPCs.
-5. **CPU efficiency (peak-tput / max-CPU)**: EPaxos ~200 cmd/s per CPU-percent, Raft ~155, SwiftPaxos ~121, Jetpack+Raft fp100 ~97, Jetpack+Raft adaptive ~85. EPaxos's distributed-work model wins twice: higher peak and lower max-CPU at peak.
+5. **CPU efficiency (peak-tput / max-CPU)**: EPaxos ~200 cmd/s per CPU-percent, Raft ~155, SwiftPaxos ~121, Jetpack+Raft fp100 ~97, Jetpack+Raft adaptive ~85. This "per-CPU-percent" metric measures how much throughput each protocol gets out of its bottleneck replica's core, which is what determines peak tput.
+
+## Is EPaxos actually cheaper per command? No — it's just distributed
+
+The user's intuition is right: EPaxos runs `UpdateAttributes` (scan 5 per-replica conflict maps) and `UpdateConflicts` on every PreAccept on every replica, plus the full PreAccept→(Commit) message flow. That is *more* work per command than Raft's append+replicate+commit, not less.
+
+Evidence that EPaxos really is more expensive per command, at a fixed total throughput of ~6000 cmd/s (N30):
+
+| Protocol | Busiest replica (zoo0) CPU % | Avg CPU across 5 replicas |
+|---|---:|---:|
+| Raft | 38.3% | 28.6% |
+| EPaxos | 65.3% | 36.0% |
+
+At the same 6000 cmd/s, EPaxos's busiest core burns **70% more CPU** than Raft's leader. But EPaxos distributes work near-symmetrically across all 5 replicas (each serves as proposer for its local clients), whereas Raft concentrates all replication work on the leader's single pinned core. So the bottleneck is:
+
+- **Raft**: leader core saturates first → peak = (1 core × 100%) ÷ per-command-work-on-leader ≈ 14k cmd/s.
+- **EPaxos**: all cores grow roughly in sync → peak = (5 cores × ~100%) ÷ (5 × per-replica-work-per-cmd) ≈ 20k cmd/s before any one replica pins.
+
+The factor-of-1.43 gap (19991 / 13984) between EPaxos and Raft comes entirely from load-balancing — not from EPaxos being cheaper. If Raft added a proxy layer that spread dispatches across replicas, it could match EPaxos's ceiling. And if EPaxos's per-command work were reduced (e.g., batched PreAccept, eliminated per-replica UpdateAttributes scan), it would exceed 20k.
+
+## Pinning is enforced but asymmetric by design
+
+Each deptran_server has 3 threads:
+- TID 2098546 (main): no affinity mask — allowed on any core. Stays ~idle after setup.
+- TID 2098548 (reactor / server thread): affinity 0x2 → pinned to core 1.
+- TID 2098551 (disk / poll thread): affinity 0x2 → pinned to core 1.
+
+So both active server threads share **one** core (core 1). "server median" in each `.res` is the /proc/stat CPU-1 busy fraction over the middle 10s. That faithfully captures the protocol's per-replica CPU because (a) the two active threads are pinned there, (b) the main thread is idle. Cross-protocol comparison via this metric is fair.
+
+Caveat: cpu0 on zoo0 runs ~100% across all protocols — that's an unrelated system process on core 0, not deptran. It doesn't affect core-1 measurements.
 
 ## Full sweep tables
 
