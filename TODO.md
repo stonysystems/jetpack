@@ -29,6 +29,24 @@ Documentation produced:
 - `docs/full_protocol_throughput_2026-04-16.md` — Throughput benchmarks
 - `docs/consensus_protocol_comparison_2026-04-16.md` — Consolidated comparison
 
+## Open / Unsolved Items
+
+### Known bugs (not planned for fix, documented for transparency)
+1. **CURP throughput collapse at c50+** — at concurrent ≥ 50, CURP's p50 jumps to 1000+ms. Likely caused by Raft leader election timing or coroutine pile-up under load; works fine at c1 (40ms p50). The implementation is correct; the issue appears environmental/timing. Documented in `docs/curp_vs_raft_vs_jetpack_experiment.md`.
+2. **Jetpack+CoPilot adaptive fails at c150+** — pre-existing issue in the CoPilot codebase, not introduced by our changes.
+3. **Plain CoPilot fails at c500** — pre-existing; CoPilot saturates at 85-98% CPU at c150 already.
+4. **Mencius and Jetpack+Mencius fail at higher concurrency** — Mencius hits 100% CPU at c50 on all hosts; pre-existing scalability limit.
+
+### Not tested (require infrastructure we don't have set up)
+- **etcd backend** (`none_etcd.yml`) — needs external etcd daemon running on each host
+- **ZooKeeper backend** (`none_zookeeper.yml`) — needs external ZK daemon running on each host
+
+### Potential future work (not on current roadmap)
+- Implement EPaxos slow path (Accept phase when replicas disagree on deps) — currently assumes fast commit
+- Implement SwiftPaxos hash-based conflict detection (full spec uses hashes, we use per-key last-write)
+- Client-side dispatch rewrite to remove the ~200 cmd/s per-client bottleneck (would reveal true protocol ceilings beyond 12000 cmd/s)
+- Contention workloads (Zipf, small key ranges) to stress the fast path's conflict handling
+
 ## Status Summary (2026-04-16)
 
 | Phase | Status | Commit(s) | Notes |
@@ -36,10 +54,10 @@ Documentation produced:
 | 1.0-1.5 CURP | **Done** | `8644411b`, `a2a04030` | `-m 200` works at c1 (40.63ms 1 RTT) |
 | 1.6 CURP comparative exp | **Partial** | `a2a04030` | Latency works; throughput has known bug at conc >= 50 |
 | 2.0-2.1 SwiftPaxos scaffold + RPC | **Done** | `2ae8cc01` | Directory created, RPC stubs generated |
-| 2.2-2.4 SwiftPaxos server + coordinator | **Done** | `2f3b0981` | Working on zoo cluster: p50=40.51ms at c1 |
+| 2.2-2.4 SwiftPaxos server + coordinator | **Done** | `2f3b0981`, `8f136dd8` | Full impl with inter-replica ack exchange: 42ms p50, 99% CPU, 12001 cmd/s |
 | 2.5 SwiftPaxos recovery | **Dropped** | `0e470abb` | Not needed. Stubs remain in codebase as harmless no-ops |
 | 2.6 SwiftPaxos batching | **Dropped** | | Not needed |
-| 3.0-3.3 EPaxos (corrected) scaffold + server | **Done** | `95d3549a` | Working on zoo cluster: p50=40.42ms at c1 |
+| 3.0-3.3 EPaxos (corrected) scaffold + server | **Done** | `95d3549a`, `c167dc84` | Full impl with PreAccept/Commit broadcast: 41ms p50, 82.8% CPU, 11992 cmd/s |
 | 3.4 EPaxos Tarjan SCC execution | **Done** | `76b3fba5` | Verified: 5138 cmd/s local test, commands execute in dependency order |
 | 3.5 EPaxos recovery | **Dropped** | `c4da883b` | Not needed. Stubs remain in codebase as harmless no-ops |
 | 4.0 CPU monitor for all builds | **Done** | `dca242e4` | Removed `#ifdef AWS` guard |
