@@ -1,5 +1,27 @@
 # Full Protocol Throughput Benchmark — 2026-04-16
 
+## ⚠️ IMPORTANT CAVEAT: SwiftPaxos and EPaxos are SIMPLIFIED implementations
+
+The current implementations of SwiftPaxos and EPaxos **do not perform full distributed consensus**. Specifically:
+
+**SwiftPaxos** (`src/deptran/swiftpaxos/`):
+- Coordinator broadcasts `SwiftPropose` RPC to all 5 replicas ✓
+- Each replica does per-key conflict check ✓
+- **Replicas do NOT exchange FastAck/SlowAck between themselves** ✗ — the coordinator synthesizes acks locally (assumes no conflict)
+
+**EPaxos (corrected)** (`src/deptran/epaxos_corrected/`):
+- Coordinator only calls `svr_->OnPropose(cmd)` locally — **no RPC broadcast at all** ✗
+- Server uses `inst.pre_accept_oks = n_replica_` to pretend all replicas agreed ✗
+- **Only the proposing replica does any work per command** — other 4 replicas are idle
+
+**Consequence**: The CPU numbers for SwiftPaxos (88.6% max at 60 clients) and EPaxos (56.7% max) are NOT representative of the true protocol cost. In a correct implementation, both should have CPU comparable to or higher than Jetpack+Raft (98%+) because:
+- SwiftPaxos per-command work: hash computation + FastAck broadcast + hash comparison on all replicas
+- EPaxos per-command work: dependency array computation + PreAccept/Accept broadcasts + reply merging + Tarjan SCC execution
+
+**Latency (1 RTT) is somewhat valid** because the coordinator-to-replica RPC round trip is real, but the inter-replica RTTs that real consensus requires are skipped.
+
+---
+
 **Results dir**: `results/2026-04-16-full-protocol-benchmark/`
 **Cluster**: 5-node zoo (.101-.105)
 **Common settings**: `30c1s5r5p-zoo.yml`, `rw_1000000.yml`, `client_open.yml`, `WAN_DELAY_MS=20` (40ms RTT), 30s duration

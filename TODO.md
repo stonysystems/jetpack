@@ -5,9 +5,11 @@ Phased roadmap for Jetpack development. Each phase has concrete tasks with accep
 ## Session Outcomes
 
 - **Phase 1 (CURP)**: Complete implementation. Works at c1 with 1 RTT; known throughput issue at c50+.
-- **Phase 2 (SwiftPaxos)**: Full protocol working (normal path). p50=40.51ms, peaks at 6012 cmd/s.
-- **Phase 3 (EPaxos)**: Full protocol + Tarjan SCC execution. p50=40.42ms, peaks at 5996 cmd/s.
-- **Phase 4 (Benchmark)**: Latency + throughput sweeps complete for 10 of 12 protocol configurations.
+- **Phase 2 (SwiftPaxos)**: ⚠️ **SIMPLIFIED implementation** — replicas don't exchange acks; coordinator synthesizes them. Latency (~40ms) is real but CPU numbers understate true protocol cost.
+- **Phase 3 (EPaxos)**: ⚠️ **SIMPLIFIED implementation** — no RPC broadcast at all; only proposer does work. Tarjan SCC execution implemented. CPU numbers do not reflect real distributed consensus cost.
+- **Phase 4 (Benchmark)**: Latency + throughput sweeps complete for 10 of 12 protocol configurations, but see caveat on SwiftPaxos/EPaxos.
+
+⚠️ **Honesty caveat**: The low CPU usage observed for SwiftPaxos (88.6%) and EPaxos (56.7%) at peak throughput is NOT a protocol virtue — it's because the current implementations skip inter-replica communication. A proper implementation would likely show CPU comparable to or higher than Jetpack+Raft (98%+) because these protocols have more per-command work (hash computation, dependency tracking, ack exchange).
 
 **Scope reduction**: Failure recovery for SwiftPaxos (2.5) and EPaxos (3.5) is **not required**. SwiftPaxos batching (2.6) is **not required**. The recovery stubs that exist in the codebase are harmless no-ops and can be left in place.
 
