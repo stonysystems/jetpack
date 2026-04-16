@@ -835,8 +835,10 @@ int main(int argc, char *argv[]) {
     Log_info("!!!!!!!!!!!!! before client_launch_workers(client_infos);");
     client_launch_workers(client_infos);
 
-#ifdef AWS
-    int server_core_id = 1;
+    // Monitor CPU usage of the server thread's pinned core during the mid-third
+    // of the experiment. getUsage() sleeps for the full duration, sampling
+    // /proc/stat for core_id every second during the middle third only.
+    int server_core_id = 1;  // server thread pinned to core 1
     std::vector<double> cpu_usage = getUsage(server_core_id, Config::GetConfig()->duration_);
     double memory_during_test = cpu_usage[cpu_usage.size() - 1];
     Log_info("CORE %d USAGE: ", server_core_id);
@@ -845,11 +847,6 @@ int main(int argc, char *argv[]) {
     }
     Log_info("server median : %.3f", median(cpu_usage));
     Log_info("memory during test: %.3f", memory_during_test);
-#endif
-#ifndef AWS
-
-    sleep(Config::GetConfig()->duration_);
-#endif
     wait_for_clients();
     failover_server_quit = true;
     Log_info("all clients have shut down.");
