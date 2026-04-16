@@ -44,10 +44,8 @@ void SwiftPaxosCommo::BroadcastFastAck(parid_t par_id,
   auto proxies = rpc_par_proxies_[par_id];
   for (auto& p : proxies) {
     auto proxy = (SwiftPaxosServiceProxy*)p.second;
-    MarshallDeputy dep_md;
-    MarshallDeputy checksum_md;
     auto fu = proxy->async_SwiftFastAck(replica, ballot, cmd_id,
-                                         dep_md, checksum_md, seqnum);
+                                         (int32_t)key, seqnum);
     Future::safe_release(fu);
   }
 }

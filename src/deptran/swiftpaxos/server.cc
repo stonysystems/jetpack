@@ -79,6 +79,30 @@ void SwiftPaxosServer::OnPropose(const shared_ptr<Marshallable>& cmd,
   } else {
     OnFastAck(ack);
   }
+
+  // Broadcast ack to all OTHER replicas via RPC (real inter-replica consensus).
+  // Each replica is responsible for sending its own FastAck/SlowAck to every
+  // other replica in the partition. This is the actual SwiftPaxos protocol —
+  // the coordinator only triggers the propose; the replicas exchange acks.
+  if (commo()) {
+    auto swift_commo = (SwiftPaxosCommo*)commo();
+    auto config = Config::GetConfig();
+    parid_t par_id = config->SiteById(site_id_).partition_id_;
+    auto& proxies = swift_commo->rpc_par_proxies_[par_id];
+    for (auto& p : proxies) {
+      // Don't send to self (self-ack already processed above)
+      if ((int32_t)p.first == site_id_) continue;
+      auto proxy = (SwiftPaxosServiceProxy*)p.second;
+      if (has_conflict) {
+        auto fu = proxy->async_SwiftSlowAck(loc_id_, ballot_, (int64_t)cmd_id);
+        Future::safe_release(fu);
+      } else {
+        auto fu = proxy->async_SwiftFastAck(loc_id_, ballot_, (int64_t)cmd_id,
+                                             (int32_t)key, desc.seqnum);
+        Future::safe_release(fu);
+      }
+    }
+  }
 }
 
 void SwiftPaxosServer::OnFastAck(const SwiftAck& ack) {

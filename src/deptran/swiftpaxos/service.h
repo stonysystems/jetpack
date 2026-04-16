@@ -31,8 +31,7 @@ class SwiftPaxosServiceImplC : public SwiftPaxosServiceService {
   void SwiftFastAck(const siteid_t& replica,
                     const ballot_t& ballot,
                     const rrr::i64& cmd_id,
-                    const MarshallDeputy& dep,
-                    const MarshallDeputy& checksum,
+                    const rrr::i32& key,
                     const rrr::i64& seqnum,
                     rrr::i32* res,
                     rrr::DeferredReply* defer) override {
@@ -40,6 +39,7 @@ class SwiftPaxosServiceImplC : public SwiftPaxosServiceService {
     ack.replica = replica;
     ack.ballot = ballot;
     ack.cmd_id = cmd_id;
+    ack.key = key;
     ack.seqnum = seqnum;
     ack.is_slow = false;
     svr_->OnFastAck(ack);

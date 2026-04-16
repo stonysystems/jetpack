@@ -430,8 +430,7 @@ abstract service SwiftPaxosService {
   defer SwiftFastAck(siteid_t replica,
                      ballot_t ballot,
                      i64 cmd_id,
-                     MarshallDeputy dep,
-                     MarshallDeputy checksum,
+                     i32 key,
                      i64 seqnum |
                      i32 res);
 
