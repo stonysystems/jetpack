@@ -41,7 +41,7 @@ Documentation produced:
 
 ### Known bugs still open
 
-1. **CURP throughput at c50+ is lower than Raft** (was 234→592 cmd/s at c=150; leader-skip helped but the fast-path speculative broadcast still competes with Raft dispatch on the leader's pinned core). To fully fix, the fast-path work would need to move off the pinned server core.
+1. **CURP throughput at c50+ is unexplainedly lower than Jetpack+Raft** (was 234→592 cmd/s at c=50; Jetpack+Raft fp100 at c=50 hits ~9993). Per-request work accounting (post leader-skip fix) actually shows CURP doing *less* server-side work than Jetpack+Raft fp100 — one fewer spec RPC, no `command_pool_` GC on leader. The observed 17× throughput gap is not explained by per-request overhead. Evidence: the gap concentrates on follower-host clients (fast-path succeeds ~2948× on the leader-co-located host but only ~1-47× on the 4 follower hosts). Likely a bug in CURP-specific code paths at high concurrency (maybe RPC stall, WRONG_LEADER retry cascade, or slow-path/fast-path callback interaction), not a design-level overhead. Root cause not investigated past this point.
 2. **CoPilot `munmap_chunk(): invalid pointer` at c500** — heap corruption on zoo0 during shutdown. Happens after the experiment completes (mid-10s measurement done), so doesn't invalidate throughput numbers, but crashes the process. Not fixed — requires a deeper investigation of the CoPilot coroutine lifecycle.
 3. **Jetpack+CoPilot adaptive fails at c150+** — pre-existing.
 4. **Mencius and Jetpack+Mencius fail at higher concurrency** — pre-existing scalability limit.
