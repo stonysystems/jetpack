@@ -37,14 +37,14 @@ Documentation produced:
 - **etcd backend benchmarked** — **Done** (`scripts/start_etcd_cluster.sh` spins up 5-node etcd cluster). c1 p50=83ms @ 3.8 cmd/s/host; c50 total 1478 cmd/s similar to Raft. etcd works end-to-end with the existing `none_etcd.yml` config.
 - **CoPilot `verify(ins)` crash at c500 (OnAccept/OnFastAccept)** — **Fixed**. Late-arriving Accept for a freed slot now returns a valid reply instead of aborting. Matches the existing nullptr handling in OnPrepare/OnCommit.
 - **client_worker.cc `verify(!coo->_inuse_)` race** — **Fixed**. `_inuse_ = false` now happens before `free_coordinators_.push_back(coo)` so a concurrent FindOrCreateCoordinator doesn't see a still-in-use coordinator.
-- **CURP leader-skip optimization** — **Applied**. CURP spec RPC now skips the Raft leader (leader already has the cmd in its log via the slow-path dispatch, so a spec RPC is redundant and doubles leader load). CURP at c1 still works; c50+ still has a throughput ceiling tied to the leader's single pinned core but is no longer as pathological.
+- **CURP leader-skip optimization** — **Applied** (commit `4d25d67f`). CURP spec RPC now skips the Raft leader.
+- **CURP c≥10 throughput collapse** — **Fixed** (commit `a1d6b8b2`). Root cause: followers never learned the real Raft leader because CURP skips `OnJetpackBeginRecovery` (which is JP's view-propagation path). Non-leader hosts' view stayed at leader=-1, fell back to locale 0, and the leader-skip targeted a follower instead of the real leader — so the real leader received spec RPCs as a "witness," occasionally voted NO, and collapsed the fast-path quorum. Fix: update follower `new_view_` and the communicator view on every `OnAppendEntries` in CURP mode. Measured c=10: 114→286, c=30: 352→879 (matches JP+Raft at 884), c=50: 600→1482 (matches Raft at 1485). p50 stays at 41ms across all hosts.
 
 ### Known bugs still open
 
-1. **CURP throughput at c50+ is unexplainedly lower than Jetpack+Raft** (was 234→592 cmd/s at c=50; Jetpack+Raft fp100 at c=50 hits ~9993). Per-request work accounting (post leader-skip fix) actually shows CURP doing *less* server-side work than Jetpack+Raft fp100 — one fewer spec RPC, no `command_pool_` GC on leader. The observed 17× throughput gap is not explained by per-request overhead. Evidence: the gap concentrates on follower-host clients (fast-path succeeds ~2948× on the leader-co-located host but only ~1-47× on the 4 follower hosts). Likely a bug in CURP-specific code paths at high concurrency (maybe RPC stall, WRONG_LEADER retry cascade, or slow-path/fast-path callback interaction), not a design-level overhead. Root cause not investigated past this point.
-2. **CoPilot `munmap_chunk(): invalid pointer` at c500** — heap corruption on zoo0 during shutdown. Happens after the experiment completes (mid-10s measurement done), so doesn't invalidate throughput numbers, but crashes the process. Not fixed — requires a deeper investigation of the CoPilot coroutine lifecycle.
-3. **Jetpack+CoPilot adaptive fails at c150+** — pre-existing.
-4. **Mencius and Jetpack+Mencius fail at higher concurrency** — pre-existing scalability limit.
+1. **CoPilot `munmap_chunk(): invalid pointer` at c500** — heap corruption on zoo0 during shutdown. Happens after the experiment completes (mid-10s measurement done), so doesn't invalidate throughput numbers, but crashes the process. Not fixed — requires a deeper investigation of the CoPilot coroutine lifecycle.
+2. **Jetpack+CoPilot adaptive fails at c150+** — pre-existing.
+3. **Mencius and Jetpack+Mencius fail at higher concurrency** — pre-existing scalability limit.
 
 ### Not tested (infrastructure blocker only)
 
@@ -63,7 +63,7 @@ Documentation produced:
 | Phase | Status | Commit(s) | Notes |
 |---|---|---|---|
 | 1.0-1.5 CURP | **Done** | `8644411b`, `a2a04030` | `-m 200` works at c1 (40.63ms 1 RTT) |
-| 1.6 CURP comparative exp | **Partial** | `a2a04030` | Latency works; throughput has known bug at conc >= 50 |
+| 1.6 CURP comparative exp | **Done** | `a2a04030`, `a1d6b8b2` | Latency 41ms @ c1, throughput matches JP+Raft (879 @ c30, 1482 @ c50) after follower view-update fix |
 | 2.0-2.1 SwiftPaxos scaffold + RPC | **Done** | `2ae8cc01` | Directory created, RPC stubs generated |
 | 2.2-2.4 SwiftPaxos server + coordinator | **Done** | `2f3b0981`, `8f136dd8` | Full impl with inter-replica ack exchange: 42ms p50, 99% CPU, 12001 cmd/s |
 | 2.5 SwiftPaxos recovery | **Dropped** | `0e470abb` | Not needed. Stubs remain in codebase as harmless no-ops |
