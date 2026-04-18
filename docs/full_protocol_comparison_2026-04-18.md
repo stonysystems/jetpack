@@ -24,17 +24,17 @@ CURP c=1 p50 is now uniform across all 5 hosts (~41 ms). etcd's 2-RTT is expecte
 
 ## Max-throughput bisection — peak per protocol
 
-For each protocol, swept client count N ∈ {30, 40, 45, 50, 55, 60, 70, 80, 90, 100} at concurrent=500. Stopped per-protocol when max server CPU ≥ 99% or zoo0/zoo3 p50 > 2× c=1 baseline.
+For each protocol, swept client count N ∈ {30, 40, 45, 50, 55, 60, 70, 80, 90, 100} at concurrent=500. Stopped per-protocol when the bottleneck replica's core-1 CPU median (mid-10s) reached 99% or zoo0/zoo3 p50 > 2× c=1 baseline. "CPU (5 hosts avg)" below is the mean of the five per-host medians (each host's median is over its own mid-10s 10-sample window).
 
-| Protocol | Peak tput (cmd/s) | Saturation N | Max CPU | Avg CPU (5 hosts) | p50 (zoo3) |
-|---|---:|---:|---:|---:|---:|
-| **EPaxos** | **19990.6** | 100 | 98.99% | 73.1% | 42.53 ms |
-| Raft | 13984.4 | 70 | 89.90% | 45.7% | 87.15 ms |
-| SwiftPaxos | 11968.4 | 60 | 98.99% | 92.1% | 42.58 ms |
-| **CURP** (after `a1d6b8b2`) | **10973.3** | 55 | 91.75% | 73.7% | 42.67 ms |
-| etcd | 8000.1 | 40 | 97.0% | 32.2% | 95.75 ms |
-| Jetpack+Raft fp100 | 8997.9 | 45 | 92.78% | 70.9% | 42.52 ms |
-| Jetpack+Raft adaptive | 7993.4 | 40 | 93.94% | 57.2% | 42.17 ms |
+| Protocol | Peak tput (cmd/s) | Saturation N | CPU (5 hosts avg) | p50 (zoo3) |
+|---|---:|---:|---:|---:|
+| **EPaxos** | **19990.6** | 100 | 73.1% | 42.53 ms |
+| Raft | 13984.4 | 70 | 45.7% | 87.15 ms |
+| SwiftPaxos | 11968.4 | 60 | 92.1% | 42.58 ms |
+| **CURP** (after `a1d6b8b2`) | **10973.3** | 55 | 73.7% | 42.67 ms |
+| Jetpack+Raft fp100 | 8997.9 | 45 | 70.9% | 42.52 ms |
+| etcd | 8000.1 | 40 | 32.2% | 95.75 ms |
+| Jetpack+Raft adaptive | 7993.4 | 40 | 57.2% | 42.17 ms |
 
 **Peak ordering**: EPaxos > Raft > SwiftPaxos > **CURP** > Jetpack+Raft fp100 > etcd ≥ Jetpack+Raft adaptive.
 
@@ -57,38 +57,40 @@ For each protocol, swept client count N ∈ {30, 40, 45, 50, 55, 60, 70, 80, 90,
 
 ### CURP (new)
 
-| N | Total | Max CPU | p50 (zoo3) |
+| N | Total | CPU (5 hosts avg) | p50 (zoo3) |
 |---:|---:|---:|---:|
-| 30 | 6008.9 | 72.73 | 41.94 |
-| 40 | 8005.2 | 87.76 | 42.13 |
-| 45 | 8996.1 | 89.36 | 42.16 |
-| 50 | 9992.4 | 92.00 | 41.96 |
-| 55 | 10973.3 | 91.75 | 42.67 |
-| 60 | 11287.5 | **100.00** | 42.37 ← STOP |
+| 30 | 6008.9 | 49.5 | 41.94 |
+| 40 | 8005.2 | 60.4 | 42.13 |
+| 45 | 8996.1 | 65.5 | 42.16 |
+| 50 | 9992.4 | 66.1 | 41.96 |
+| 55 | 10973.3 | 73.7 | 42.67 |
+| 60 | 11287.5 | 73.2 | 42.37 ← STOP (bottleneck replica pinned) |
 
 ### etcd (new)
 
-| N | Total | Max CPU (zoo0) | p50 (zoo0) |
+| N | Total | CPU (5 hosts avg) | p50 (zoo0) |
 |---:|---:|---:|---:|
-| 30 | 5989.3 | 85.00 | 88.80 |
-| 40 | 8000.1 | 97.00 | 95.08 |
-| 45 | 9005.1 | **99.00** | 111.66 ← STOP |
+| 30 | 5989.3 | 27.4 | 88.80 |
+| 40 | 8000.1 | 32.2 | 95.08 |
+| 45 | 9005.1 | 32.3 | 111.66 ← STOP (bottleneck replica pinned) |
 
-Notice etcd's zoo0 CPU climbs 85% → 97% → 99% while other hosts stay < 24%. Asymmetric because only loc_id=0 (zoo0) opens the etcd connection pool in the current `deptran/etcd/server.h` implementation.
+etcd's avg stays low (~30%) because only zoo0 opens the etcd connection pool (per `deptran/etcd/server.h:51`, only `loc_id == 0` creates connections); zoo0 does ~97-99% of the work while the other four Janus replicas stay at 4-23%. Averaging hides this, so for etcd the bottleneck is specifically zoo0, not the cluster average.
 
-## CPU efficiency (cmd/s per max-CPU-percent on the busiest replica)
+## CPU efficiency (cmd/s per avg-CPU-percent across 5 hosts)
 
-| Protocol | Peak / max CPU |
+Each protocol's peak throughput divided by the 5-host average CPU at that peak N. Higher = the protocol converts per-replica CPU into throughput more efficiently (better load balancing and/or cheaper per-command work).
+
+| Protocol | Peak / avg CPU |
 |---|---:|
-| EPaxos | 202 |
-| Raft | 156 |
-| SwiftPaxos | 121 |
-| CURP | 120 |
-| Jetpack+Raft fp100 | 97 |
-| Jetpack+Raft adaptive | 85 |
-| etcd | 83 |
+| Raft | 306 |
+| EPaxos | 274 |
+| etcd | 248 |
+| Jetpack+Raft adaptive | 140 |
+| CURP | 149 |
+| Jetpack+Raft fp100 | 127 |
+| SwiftPaxos | 130 |
 
-EPaxos remains the per-CPU-percent champion (distributes proposer duty across 5 replicas). CURP lands in the same band as SwiftPaxos — both do per-replica conflict tracking on every command, so their per-replica cost is higher than Raft's followers-just-replicate pattern.
+Note: Raft's high ratio reflects most of its 5 hosts being *idle* (followers just replicate) at peak — its avg CPU of 45% is low because only the leader pins. EPaxos distributes work so all 5 replicas contribute. etcd's 248 is misleading — it only uses zoo0, so the "5-host avg" dilutes the real zoo0 load; a better etcd metric would be zoo0-specific.
 
 ## Commands used
 

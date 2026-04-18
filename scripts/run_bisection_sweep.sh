@@ -68,13 +68,19 @@ for proto_line in "${PROTOS[@]}"; do
       n_cpu=$((n_cpu+1))
     done
     avg_cpu=$(awk -v s="$sum_cpu" -v n="$n_cpu" 'BEGIN {if (n>0) print s/n; else print 0}')
-    echo "    total_tput=$total max_cpu=$max_cpu avg_cpu=$avg_cpu"
+    # Report avg across 5 hosts. Each per-host value is the median of its
+    # mid-10s core-1 /proc/stat samples (see src/deptran/s_main.cc getUsage).
+    # The "bottleneck replica" max_cpu is still used for saturation detection —
+    # saturation is inherently a per-replica property — but we don't report
+    # it as the headline CPU number.
+    echo "    total_tput=$total  CPU_5hosts_avg=$avg_cpu  (bottleneck=$max_cpu)"
     echo "    per-host tp: zoo0=${TPS[0]} zoo1=${TPS[1]} zoo2=${TPS[2]} zoo3=${TPS[3]} zoo4=${TPS[4]}"
-    echo "    per-host cpu: zoo0=${CPUS[0]} zoo1=${CPUS[1]} zoo2=${CPUS[2]} zoo3=${CPUS[3]} zoo4=${CPUS[4]}"
+    echo "    per-host cpu(mid10s-median): zoo0=${CPUS[0]} zoo1=${CPUS[1]} zoo2=${CPUS[2]} zoo3=${CPUS[3]} zoo4=${CPUS[4]}"
     echo "    per-host p50: zoo0=${P50S[0]} zoo3=${P50S[3]}"
     echo "$label,$N,$total,$max_cpu,$avg_cpu,${TPS[0]},${TPS[1]},${TPS[2]},${TPS[3]},${TPS[4]},${CPUS[0]},${CPUS[1]},${CPUS[2]},${CPUS[3]},${CPUS[4]},${P50S[0]},${P50S[3]}" >> "$OUT_SUMMARY"
-    # Stop if saturated
-    # We check max_cpu and any per-host p50 > stop_p50.
+    # Stop criterion uses max_cpu >= 99% — saturation is a per-replica
+    # condition; the avg can stay low while one replica pins (e.g. etcd,
+    # where only zoo0 runs the connection pool).
     hit_cpu=$(awk -v m="$max_cpu" 'BEGIN {print (m>=99)?1:0}')
     hit_p50=0
     for zi in 0 1 2 3 4; do
@@ -83,7 +89,7 @@ for proto_line in "${PROTOS[@]}"; do
       if [ "$h" -eq 1 ]; then hit_p50=1; break; fi
     done
     if [ "$hit_cpu" -eq 1 ] || [ "$hit_p50" -eq 1 ]; then
-      echo "    [$run_label] STOP: max_cpu=$max_cpu p50_hit=$hit_p50"
+      echo "    [$run_label] STOP (bottleneck replica pinned=$hit_cpu, p50 breach=$hit_p50)"
       break
     fi
   done
