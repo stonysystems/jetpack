@@ -32,7 +32,7 @@ P50_BASE["swiftpaxos"]=42
 P50_BASE["epaxos"]=42
 
 OUT_SUMMARY="$RDIR/summary.csv"
-echo "proto,N,total_tput,max_cpu,avg_cpu,zoo0_tp,zoo1_tp,zoo2_tp,zoo3_tp,zoo4_tp,zoo0_cpu,zoo1_cpu,zoo2_cpu,zoo3_cpu,zoo4_cpu,zoo0_p50,zoo3_p50" > "$OUT_SUMMARY"
+echo "proto,N,total_tput,max_cpu,avg_cpu,zoo1_tp,zoo2_tp,zoo3_tp,zoo4_tp,zoo5_tp,zoo1_cpu,zoo2_cpu,zoo3_cpu,zoo4_cpu,zoo5_cpu,zoo1_p50,zoo4_p50" > "$OUT_SUMMARY"
 
 for proto_line in "${PROTOS[@]}"; do
   read -r cfg mode label <<< "$proto_line"
@@ -54,7 +54,8 @@ for proto_line in "${PROTOS[@]}"; do
     total=0; max_cpu=0; sum_cpu=0; n_cpu=0
     declare -a TPS CPUS P50S
     for zi in 0 1 2 3 4; do
-      f="$RDIR/${run_label}-zoo${zi}.res"
+      # Per-host file names use the 1-indexed display name (zoo1..zoo5).
+      f="$RDIR/${run_label}-zoo$((zi+1)).res"
       tp=$(grep -m1 "Mid throughput" "$f" 2>/dev/null | awk '{print $NF}')
       cpu=$(grep -m1 "server median" "$f" 2>/dev/null | awk '{print $NF}')
       p50=$(grep "All-efficient.*statistics" "$f" 2>/dev/null | head -1 | awk '{for(i=1;i<=NF;i++) if($i=="50pct") {print $(i+1); exit}}')
@@ -74,13 +75,13 @@ for proto_line in "${PROTOS[@]}"; do
     # saturation is inherently a per-replica property — but we don't report
     # it as the headline CPU number.
     echo "    total_tput=$total  CPU_5hosts_avg=$avg_cpu  (bottleneck=$max_cpu)"
-    echo "    per-host tp: zoo0=${TPS[0]} zoo1=${TPS[1]} zoo2=${TPS[2]} zoo3=${TPS[3]} zoo4=${TPS[4]}"
-    echo "    per-host cpu(mid10s-median): zoo0=${CPUS[0]} zoo1=${CPUS[1]} zoo2=${CPUS[2]} zoo3=${CPUS[3]} zoo4=${CPUS[4]}"
-    echo "    per-host p50: zoo0=${P50S[0]} zoo3=${P50S[3]}"
+    echo "    per-host tp: zoo1=${TPS[0]} zoo2=${TPS[1]} zoo3=${TPS[2]} zoo4=${TPS[3]} zoo5=${TPS[4]}"
+    echo "    per-host cpu(mid10s-median): zoo1=${CPUS[0]} zoo2=${CPUS[1]} zoo3=${CPUS[2]} zoo4=${CPUS[3]} zoo5=${CPUS[4]}"
+    echo "    per-host p50: zoo1=${P50S[0]} zoo4=${P50S[3]}"
     echo "$label,$N,$total,$max_cpu,$avg_cpu,${TPS[0]},${TPS[1]},${TPS[2]},${TPS[3]},${TPS[4]},${CPUS[0]},${CPUS[1]},${CPUS[2]},${CPUS[3]},${CPUS[4]},${P50S[0]},${P50S[3]}" >> "$OUT_SUMMARY"
     # Stop criterion uses max_cpu >= 99% — saturation is a per-replica
     # condition; the avg can stay low while one replica pins (e.g. etcd,
-    # where only zoo0 runs the connection pool).
+    # where only zoo1 runs the connection pool).
     hit_cpu=$(awk -v m="$max_cpu" 'BEGIN {print (m>=99)?1:0}')
     hit_p50=0
     for zi in 0 1 2 3 4; do

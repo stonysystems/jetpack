@@ -265,11 +265,12 @@ Communicator::LeaderProxyForPartition(parid_t par_id, int idx) const {
     verify(it != rpc_par_proxies_.end());
     auto& partition_proxies = it->second;
     auto config = Config::GetConfig();
-    // naive_rpc routes all clients to locale_id=1 (zoo1 / .102) by design,
+    // naive_rpc routes all clients to locale_id=1 (zoo2 / .102) by design,
     // not locale 0. Lets us saturate an isolated server without clobbering
-    // the zoo0 measurement with local-client noise and without co-locating
+    // the zoo1 measurement with local-client noise and without co-locating
     // the target with any client work (every client host is "remote" to
-    // zoo1 in the naive_rpc sweep).
+    // zoo2 in the naive_rpc sweep). "zoo2" = 1-indexed display name for
+    // locale 1 / IP .102; internally the locale id is unchanged.
     int target_locale = (config->replica_proto_ == MODE_NAIVE_RPC) ? 1 : 0;
     auto proxy_it = std::find_if(
         partition_proxies.begin(),
@@ -1762,7 +1763,7 @@ View Communicator::GetPartitionView(parid_t partition_id) {
 
 locid_t Communicator::GetLeaderForPartition(parid_t partition_id) {
   // naive_rpc: no consensus, no view updates. Route every client RPC to
-  // locale_id=1 (zoo1 / .102) so we can saturate a single isolated server
+  // locale_id=1 (zoo2 / .102) so we can saturate a single isolated server
   // for a CPU ceiling measurement. Must be checked before the view path
   // because ClientWorker sets a dynamic leader_callback_ that funnels into
   // this function on every dispatch.

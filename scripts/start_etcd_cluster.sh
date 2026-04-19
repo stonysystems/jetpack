@@ -1,5 +1,5 @@
 #!/bin/bash
-# Start a 5-node etcd cluster across zoo0..zoo4.
+# Start a 5-node etcd cluster across zoo1..zoo5.
 # Each node runs on localhost:2379 (client) and port 2380 (peer).
 # The cluster is a real 5-replica etcd cluster; Janus connects to the local
 # etcd on each replica host (see src/deptran/etcd/server.h).
@@ -7,7 +7,7 @@
 set -e
 
 IPS=(130.245.173.101 130.245.173.102 130.245.173.103 130.245.173.104 130.245.173.105)
-NAMES=(zoo0 zoo1 zoo2 zoo3 zoo4)
+NAMES=(zoo1 zoo2 zoo3 zoo4 zoo5)
 
 # Initial cluster string: name=peer_url
 CLUSTER=""

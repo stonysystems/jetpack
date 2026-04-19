@@ -26,7 +26,9 @@ declare -a servers replicanames
 for i in $(seq 0 $((N_SERVER - 1))); do
     ip=$(jq -r ".servers[$i].server_${i}_ip" "$SCRIPT_DIR/setup.json")
     servers+=("$ip")
-    replicanames+=("zoo${i}")
+    # Human-facing names are zoo1..zoo5 (1-indexed to match .101..105).
+    # Internally locale_id is still 0..4; the name is only a display string.
+    replicanames+=("zoo$((i+1))")
 done
 
 DURATION=30
@@ -148,8 +150,8 @@ for i in "${!servers[@]}"; do
 done
 echo "  Total throughput: $TOTAL_TPUT"
 
-# Extract latency from zoo0 (any replica reports it)
-RESFILE0="$RESULT_DIR/${LABEL}-zoo0.res"
+# Extract latency from zoo1 (any replica reports it)
+RESFILE0="$RESULT_DIR/${LABEL}-zoo1.res"
 if [ -f "$RESFILE0" ]; then
     echo ""
     tail -c 102400 "$RESFILE0" | grep -E "All-efficient-attempts|Fastpath statistics|Cpu-usage-leaders|server median" || true
