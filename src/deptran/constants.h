@@ -109,6 +109,11 @@ namespace janus {
 #define MODE_ZOOKEEPER (0x9002)
 #define MODE_SWIFTPAXOS (0x8000)
 #define MODE_EPAXOS_CORRECTED (0x8001)
+// naive_rpc: no replication, no consensus. All client RPCs go to a single
+// server (locale_id=1, i.e. .102). Used as a baseline to measure the floor
+// cost (pure RPC round-trip + server processing) and to saturate a single
+// server for a CPU ceiling measurement without any consensus work interfering.
+#define MODE_NAIVE_RPC (0xA000)
 #define MODE_NOT_READY     (0x00)
 
 // CURP mode flag for -m parameter (not a protocol mode constant)

@@ -1099,7 +1099,10 @@ bool Config::do_logging() {
 
 bool Config::IsReplicated() {
   // TODO
-  return (replica_proto_ != MODE_NONE);
+  // MODE_NAIVE_RPC behaves like MODE_NONE at the server-worker level — no
+  // rep_sched_ is created. The value only signals "route all clients to a
+  // single server (locale_id=1)" in the communicator.
+  return (replica_proto_ != MODE_NONE && replica_proto_ != MODE_NAIVE_RPC);
   return true;
 }
 

@@ -1,0 +1,132 @@
+
+
+site:
+  server: # each line is a partition, the first is the master site_name:port
+    - ["s101:38000", "s201:38001", "s301:38002", "s401:38003", "s501:38004"]
+  client: # each line is a partition
+    - ["c01", "c02", "c03", "c04", "c05", "c06", "c07", "c08", "c09", "c10", "c11", "c12", "c13", "c14", "c15", "c16", "c17", "c18", "c19", "c20", "c21", "c22", "c23", "c24", "c25", "c26", "c27", "c28", "c29", "c30", "c31", "c32", "c33", "c34", "c35", "c36", "c37", "c38", "c39", "c40", "c41", "c42", "c43", "c44", "c45", "c46", "c47", "c48", "c49", "c50", "c51", "c52", "c53", "c54", "c55", "c56", "c57", "c58", "c59", "c60", "c61", "c62", "c63", "c64", "c65", "c66", "c67", "c68", "c69", "c70", "c71", "c72", "c73", "c74", "c75", "c76", "c77", "c78", "c79", "c80", "c81", "c82", "c83", "c84", "c85", "c86", "c87", "c88", "c89", "c90", "c91", "c92", "c93", "c94", "c95", "c96", "c97", "c98", "c99", "c100", "c101", "c102", "c103", "c104", "c105", "c106", "c107", "c108", "c109", "c110"]
+
+
+process:
+  s101: zoo0
+  s201: zoo1
+  s301: zoo2
+  s401: zoo3
+  s501: zoo4
+  c01: zoo0
+  c02: zoo0
+  c03: zoo0
+  c04: zoo0
+  c05: zoo0
+  c06: zoo0
+  c07: zoo0
+  c08: zoo0
+  c09: zoo0
+  c10: zoo0
+  c11: zoo0
+  c12: zoo0
+  c13: zoo0
+  c14: zoo0
+  c15: zoo0
+  c16: zoo0
+  c17: zoo0
+  c18: zoo0
+  c19: zoo0
+  c20: zoo0
+  c21: zoo0
+  c22: zoo0
+  c23: zoo1
+  c24: zoo1
+  c25: zoo1
+  c26: zoo1
+  c27: zoo1
+  c28: zoo1
+  c29: zoo1
+  c30: zoo1
+  c31: zoo1
+  c32: zoo1
+  c33: zoo1
+  c34: zoo1
+  c35: zoo1
+  c36: zoo1
+  c37: zoo1
+  c38: zoo1
+  c39: zoo1
+  c40: zoo1
+  c41: zoo1
+  c42: zoo1
+  c43: zoo1
+  c44: zoo1
+  c45: zoo2
+  c46: zoo2
+  c47: zoo2
+  c48: zoo2
+  c49: zoo2
+  c50: zoo2
+  c51: zoo2
+  c52: zoo2
+  c53: zoo2
+  c54: zoo2
+  c55: zoo2
+  c56: zoo2
+  c57: zoo2
+  c58: zoo2
+  c59: zoo2
+  c60: zoo2
+  c61: zoo2
+  c62: zoo2
+  c63: zoo2
+  c64: zoo2
+  c65: zoo2
+  c66: zoo2
+  c67: zoo3
+  c68: zoo3
+  c69: zoo3
+  c70: zoo3
+  c71: zoo3
+  c72: zoo3
+  c73: zoo3
+  c74: zoo3
+  c75: zoo3
+  c76: zoo3
+  c77: zoo3
+  c78: zoo3
+  c79: zoo3
+  c80: zoo3
+  c81: zoo3
+  c82: zoo3
+  c83: zoo3
+  c84: zoo3
+  c85: zoo3
+  c86: zoo3
+  c87: zoo3
+  c88: zoo3
+  c89: zoo4
+  c90: zoo4
+  c91: zoo4
+  c92: zoo4
+  c93: zoo4
+  c94: zoo4
+  c95: zoo4
+  c96: zoo4
+  c97: zoo4
+  c98: zoo4
+  c99: zoo4
+  c100: zoo4
+  c101: zoo4
+  c102: zoo4
+  c103: zoo4
+  c104: zoo4
+  c105: zoo4
+  c106: zoo4
+  c107: zoo4
+  c108: zoo4
+  c109: zoo4
+  c110: zoo4
+
+host:
+  zoo0: 130.245.173.101
+  zoo1: 130.245.173.102
+  zoo2: 130.245.173.103
+  zoo3: 130.245.173.104
+  zoo4: 130.245.173.105
