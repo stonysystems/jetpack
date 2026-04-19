@@ -476,6 +476,7 @@ map<string, int> &Frame::FrameNameToMode() {
   static map<string, int> frame_name_mode_s = {
       {"none",          MODE_NONE},
       {"naive_rpc",     MODE_NAIVE_RPC},
+      {"naive_fastpath",MODE_NAIVE_FASTPATH},
       {"none_copilot",  MODE_NONE_COPILOT},
       {"2pl",           MODE_2PL},
       {"occ",           MODE_OCC},

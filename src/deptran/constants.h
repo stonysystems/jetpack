@@ -114,6 +114,12 @@ namespace janus {
 // cost (pure RPC round-trip + server processing) and to saturate a single
 // server for a CPU ceiling measurement without any consensus work interfering.
 #define MODE_NAIVE_RPC (0xA000)
+// naive_fastpath: no real consensus. Client broadcasts the Dispatch RPC to
+// all 5 replicas; each server executes the R/W and replies unconditionally
+// (no conflict check, no ordering, no log). Client commits once it collects
+// 4 of 5 replies. Serves as the distributed-work baseline for protocols
+// like CURP/EPaxos/SwiftPaxos that also broadcast and rely on a quorum.
+#define MODE_NAIVE_FASTPATH (0xA001)
 #define MODE_NOT_READY     (0x00)
 
 // CURP mode flag for -m parameter (not a protocol mode constant)

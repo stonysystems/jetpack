@@ -1,0 +1,19 @@
+mode:
+  cc: naive_fastpath   # concurrency control + client coordinator
+  ab: none             # no replication layer
+  batch: false
+  retry: 20
+  ongoing: 1
+
+# naive_fastpath: client broadcasts each Dispatch RPC to all 5 replicas;
+# each server executes the R/W and replies unconditionally (no consensus,
+# no conflict check, no ordering); client commits once 4 of 5 replies
+# arrive (RuleSuperMajority for n=5, f=2).
+#
+# Serves as the distributed-work baseline for protocols that use a
+# broadcast + quorum pattern (CURP, EPaxos, SwiftPaxos). The difference
+# between naive_fastpath and those protocols is the consensus bookkeeping
+# layered on top; naive_fastpath measures the floor cost of the pattern.
+#
+# No replication, no durability, no linearizability — do not use in
+# production. Benchmark-only.

@@ -1102,7 +1102,12 @@ bool Config::IsReplicated() {
   // MODE_NAIVE_RPC behaves like MODE_NONE at the server-worker level — no
   // rep_sched_ is created. The value only signals "route all clients to a
   // single server (locale_id=1)" in the communicator.
-  return (replica_proto_ != MODE_NONE && replica_proto_ != MODE_NAIVE_RPC);
+  // MODE_NAIVE_FASTPATH is similar: the client-side broadcast to all 5
+  // replicas happens in CoordinatorNaiveFastpath; the server side is just
+  // SchedulerNone. No separate replication layer is needed.
+  return (replica_proto_ != MODE_NONE &&
+          replica_proto_ != MODE_NAIVE_RPC &&
+          replica_proto_ != MODE_NAIVE_FASTPATH);
   return true;
 }
 
