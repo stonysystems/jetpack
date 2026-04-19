@@ -11,12 +11,12 @@ All four protocols use `loc_id_ == 0` as the Jetpack-level "leader":
 | etcd       | `loc_id_ == 0`            | `src/deptran/etcd/server.h:85`   |
 | ZooKeeper  | `loc_id_ == 0`            | `src/deptran/zookeeper/server.h:97`|
 
-In the Zoo config (`config/30c1s5r5p-zoo.yml`), `zoo0` (130.245.173.101)
+In the Zoo config (`config/30c1s5r5p-zoo.yml`), `zoo2` (130.245.173.101)
 gets `locale_id == 0` and is therefore the initial leader for all protocols.
 
 ### How to kill the leader
 
-Use `--kill-target 0` to kill the deptran_server on zoo0:
+Use `--kill-target 0` to kill the deptran_server on zoo2:
 
 ```bash
 cd scripts && bash 09-build_and_test_run_wan.sh \
@@ -37,8 +37,8 @@ cd scripts && bash 09-build_and_test_run_wan.sh \
 ### failover.yml integration
 
 `config/failover.yml` provides **synthetic** failover (soft/hard method):
-- `failserver: leader` targets `locale_id == 0` (zoo0)
-- `failserver: follower` targets `locale_id == 1` (zoo1)
+- `failserver: leader` targets `locale_id == 0` (zoo2)
+- `failserver: follower` targets `locale_id == 1` (zoo3)
 - `failserver: <N>` targets the Nth server
 
 The `--kill-target` flag adds a **real** `pkill -9` on top of this.

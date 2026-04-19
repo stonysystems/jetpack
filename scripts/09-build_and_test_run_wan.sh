@@ -47,7 +47,7 @@ FAILOVER_TEST=false
 BUILD_MODE=""
 CUSTOM_FILENAME=""
 DRY_RUN=false
-KILL_TARGET=""        # server index to kill (e.g., 0 for zoo0/server0)
+KILL_TARGET=""        # server index to kill (e.g., 0 for zoo1/server0)
 KILL_DELAY=20         # seconds after experiment start before kill
 RESULT_DIR=""         # output directory (default: test_output)
 

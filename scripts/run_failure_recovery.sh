@@ -2,7 +2,7 @@
 # run_failure_recovery.sh — Run Zoo failure-recovery experiments for Track 6
 #
 # Executes 4 failure-recovery runs (rule_raft, rule_mongodb, rule_etcd, rule_zookeeper)
-# with real deptran_server kill on the leader node (zoo0).
+# with real deptran_server kill on the leader node (zoo1).
 #
 # Prerequisites:
 #   - Experiment 0 complete (fixed_conc.json exists)
@@ -70,7 +70,7 @@ DURATION=90
 
 echo "=== Zoo Failure Recovery Experiments ==="
 echo "Protocols: ${FR_PROTOCOLS[*]}"
-echo "Kill target: zoo0 (leader, locale_id 0)"
+echo "Kill target: zoo1 (leader, locale_id 0)"
 echo "Kill delay: ${KILL_DELAY}s"
 echo "Duration: ${DURATION}s"
 echo "Result dir: $EXP_DIR/failure_recovery"
@@ -190,7 +190,7 @@ EVIDENCE
         fi
     done
 
-    # The killed server (zoo0) won't have throughput markers, so expect 4/5
+    # The killed server (zoo1) won't have throughput markers, so expect 4/5
     if [ "$success_count" -ge 4 ]; then
         echo "[$protocol] SUCCESS: $success_count/5 servers have throughput data (1 was killed)"
     elif [ "$success_count" -ge 3 ]; then
@@ -206,7 +206,7 @@ cat > "$EXP_DIR/failure_recovery/RECOVERY_SUMMARY.md" <<'HEADER'
 # Zoo Failure Recovery Summary
 
 ## Experiment Parameters
-- Kill target: zoo0 (130.245.173.101, locale_id 0, leader)
+- Kill target: zoo1 (130.245.173.101, locale_id 0, leader)
 - Kill method: `pkill -9 deptran_server` via SSH
 - WAN latency: 20ms one-way (WAN_DELAY_MS=20)
 - Client mode: open-loop (client_open_failure_recovery.yml)

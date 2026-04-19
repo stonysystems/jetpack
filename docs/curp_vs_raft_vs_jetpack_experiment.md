@@ -1,5 +1,8 @@
 # CURP vs Raft vs Jetpack+Raft Experiment
 
+> **Naming note (2026-04-19 rename):** Host names in this doc are 1-indexed (`zoo1=.101`, `zoo2=.102`, `zoo3=.103`, `zoo4=.104`, `zoo5=.105`). The result files on disk for this experiment were recorded under the older 0-indexed scheme (`-zoo0.res` … `-zoo4.res`); read those with the mapping `zoo0↔zoo1`, `zoo1↔zoo2`, `zoo2↔zoo3`, `zoo3↔zoo4`, `zoo4↔zoo5`.
+
+
 **Date**: 2026-04-15
 **Results dir**: `results/2026-04-15-curp-vs-raft-vs-jetpack/`
 **Binary**: Docker zoo-build on jetpack branch
@@ -8,11 +11,11 @@
 
 | Host | IP |
 |---|---|
-| zoo0 | 130.245.173.101 |
-| zoo1 | 130.245.173.102 |
-| zoo2 | 130.245.173.103 |
-| zoo3 | 130.245.173.104 |
-| zoo4 | 130.245.173.105 |
+| zoo1 | 130.245.173.101 |
+| zoo2 | 130.245.173.102 |
+| zoo3 | 130.245.173.103 |
+| zoo4 | 130.245.173.104 |
+| zoo5 | 130.245.173.105 |
 
 ## Common Settings
 

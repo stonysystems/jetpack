@@ -1,5 +1,8 @@
 # Full Protocol Latency Benchmark — 2026-04-16
 
+> **Naming note (2026-04-19 rename):** Host names in this doc are 1-indexed (`zoo1=.101`, `zoo2=.102`, `zoo3=.103`, `zoo4=.104`, `zoo5=.105`). The result files on disk for this experiment were recorded under the older 0-indexed scheme (`-zoo0.res` … `-zoo4.res`); read those with the mapping `zoo0↔zoo1`, `zoo1↔zoo2`, `zoo2↔zoo3`, `zoo3↔zoo4`, `zoo4↔zoo5`.
+
+
 **Results dir**: `results/2026-04-16-full-protocol-benchmark/`
 **Cluster**: 5-node zoo (.101-.105)
 **Common settings**: `30c1s5r5p-zoo.yml`, `rw_1000000.yml`, `client_open.yml`, `concurrent_1`, `WAN_DELAY_MS=20` (40ms RTT), 30s duration
@@ -7,7 +10,7 @@
 
 ## Experiment 1: Low-Load Latency (concurrent_1)
 
-| # | Protocol | Config | `-m` | Throughput | p50 (ms) | p90 (ms) | p99 (ms) | FP rate | Server CPU median (zoo0) |
+| # | Protocol | Config | `-m` | Throughput | p50 (ms) | p90 (ms) | p99 (ms) | FP rate | Server CPU median (zoo1) |
 |---|---|---|---|---|---|---|---|---|---|
 | 1 | Raft | `none_raft.yml` | 0 | 20.0 | 79.59 | 89.01 | 92.98 | N/A | 47.4% |
 | 2 | Jetpack+Raft fp100 | `rule_raft.yml` | 100 | 20.1 | 40.64 | 40.78 | 40.91 | 100% | 68.0% |

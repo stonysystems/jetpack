@@ -1,5 +1,8 @@
 # Full Protocol Throughput Benchmark — 2026-04-16
 
+> **Naming note (2026-04-19 rename):** Host names in this doc are 1-indexed (`zoo1=.101`, `zoo2=.102`, `zoo3=.103`, `zoo4=.104`, `zoo5=.105`). The result files on disk for this experiment were recorded under the older 0-indexed scheme (`-zoo0.res` … `-zoo4.res`); read those with the mapping `zoo0↔zoo1`, `zoo1↔zoo2`, `zoo2↔zoo3`, `zoo3↔zoo4`, `zoo4↔zoo5`.
+
+
 ## UPDATE (commits `8f136dd8`, `c167dc84`): SwiftPaxos and EPaxos now do REAL inter-replica consensus
 
 **SwiftPaxos** (`src/deptran/swiftpaxos/`):
@@ -33,7 +36,7 @@ The older table entries below reflect the simplified 30-client measurements. Sti
 
 ### Raft (baseline, no fast path)
 
-| Conc | Throughput | p50 (ms) | p90 (ms) | p99 (ms) | Server CPU median (zoo0) |
+| Conc | Throughput | p50 (ms) | p90 (ms) | p99 (ms) | Server CPU median (zoo1) |
 |---|---|---|---|---|---|
 | 50 | 1485.2 | 73.83 | 81.50 | 86.56 | 73.2% |
 | 150 | 4473.0 | 74.07 | 80.61 | 85.38 | 44.2% |
@@ -41,7 +44,7 @@ The older table entries below reflect the simplified 30-client measurements. Sti
 
 ### Jetpack+Raft fp100 (force 100% fast path)
 
-| Conc | Throughput | p50 (ms) | p90 (ms) | p99 (ms) | Server CPU median (zoo0) |
+| Conc | Throughput | p50 (ms) | p90 (ms) | p99 (ms) | Server CPU median (zoo1) |
 |---|---|---|---|---|---|
 | 50 | 1478.3 | 41.27 | 41.89 | 42.38 | 74.2% |
 | 150 | 4471.3 | 41.94 | 43.02 | 47.28 | 35.4% |
@@ -49,7 +52,7 @@ The older table entries below reflect the simplified 30-client measurements. Sti
 
 ### Jetpack+Raft adaptive
 
-| Conc | Throughput | p50 (ms) | p90 (ms) | p99 (ms) | Server CPU median (zoo0) |
+| Conc | Throughput | p50 (ms) | p90 (ms) | p99 (ms) | Server CPU median (zoo1) |
 |---|---|---|---|---|---|
 | 50 | 1478.3 | 41.29 | 41.94 | 42.51 | 73.5% |
 | 150 | 4475.2 | 41.96 | 43.03 | 47.83 | 51.0% |
@@ -57,7 +60,7 @@ The older table entries below reflect the simplified 30-client measurements. Sti
 
 ### SwiftPaxos (leaderless-like with leader optimization)
 
-| Conc | Throughput | p50 (ms) | p90 (ms) | p99 (ms) | Server CPU median (zoo0) |
+| Conc | Throughput | p50 (ms) | p90 (ms) | p99 (ms) | Server CPU median (zoo1) |
 |---|---|---|---|---|---|
 | 50 | 1476.4 | 40.79 | 41.20 | 42.82 | 85.9% |
 | 150 | 4472.6 | 41.45 | 41.92 | 43.57 | 60.6% |
@@ -65,7 +68,7 @@ The older table entries below reflect the simplified 30-client measurements. Sti
 
 ### EPaxos (corrected, leaderless)
 
-| Conc | Throughput | p50 (ms) | p90 (ms) | p99 (ms) | Server CPU median (zoo0) |
+| Conc | Throughput | p50 (ms) | p90 (ms) | p99 (ms) | Server CPU median (zoo1) |
 |---|---|---|---|---|---|
 | 50 | 1485.5 | 40.61 | 40.82 | 41.17 | 82.0% |
 | 150 | 4480.8 | 41.25 | 41.56 | 42.09 | 62.6% |
@@ -109,7 +112,7 @@ The older table entries below reflect the simplified 30-client measurements. Sti
 
 ## Summary Table — Peak Throughput (across all concurrency points)
 
-| Protocol | Peak Throughput | Peak Conc | p50 at peak | Server CPU median per host (zoo0/1/2/3/4) | CPU avg | Saturates at |
+| Protocol | Peak Throughput | Peak Conc | p50 at peak | Server CPU median per host (zoo1/2/3/4/5) | CPU avg | Saturates at |
 |---|---|---|---|---|---|---|
 | Raft | 5989.6 | c500 | 75.89 | 37.9 / 5.5 / 24.2 / 28.3 / 49.5 | 29.1% | c200 |
 | Jetpack+Raft fp100 | 6004.3 | c300 | 42.03 | 47.4 / 29.0 / 65.3 / 95.9 / 35.5 | 54.6% | c200 |
@@ -176,12 +179,12 @@ The original observations were correct but misinterpreted:
 
 | Protocol | Peak Tput | Max CPU (1 host) | Avg CPU (5 hosts) | CPU cost per cmd (approx) |
 |---|---|---|---|---|
-| Raft | 5990 | 49% (zoo4) | 29.1% | low (no fast path) |
-| SwiftPaxos | 6012 | 59% (zoo0) | 31.4% | low (simplified, only proposer works) |
-| EPaxos | 5996 | 76% (zoo0) | 16.6% | very low (simplified, only proposer) |
-| Jetpack+Raft fp100 | 6004 | 96% (zoo3, leader) | 54.6% | high (active fast-path RPCs on all replicas) |
-| Jetpack+Raft adaptive | 6003 | 96% (zoo3) | 50.6% | high (same) |
-| CoPilot | 4464 | 98% (zoo0) | 85.7% | very high (dual-pilot coordination) |
+| Raft | 5990 | 49% (zoo5) | 29.1% | low (no fast path) |
+| SwiftPaxos | 6012 | 59% (zoo1) | 31.4% | low (simplified, only proposer works) |
+| EPaxos | 5996 | 76% (zoo1) | 16.6% | very low (simplified, only proposer) |
+| Jetpack+Raft fp100 | 6004 | 96% (zoo4, leader) | 54.6% | high (active fast-path RPCs on all replicas) |
+| Jetpack+Raft adaptive | 6003 | 96% (zoo4) | 50.6% | high (same) |
+| CoPilot | 4464 | 98% (zoo1) | 85.7% | very high (dual-pilot coordination) |
 | Mencius | 217 | 100% (all) | 100% | saturated (pre-existing scalability issue) |
 
 ### Why Jetpack's 96% leader CPU at shared 6000 ceiling is interesting

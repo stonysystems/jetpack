@@ -1,5 +1,8 @@
 # Raft vs Jetpack+Raft Experiment (SwiftPaxos-Style)
 
+> **Naming note (2026-04-19 rename):** Host names in this doc are 1-indexed (`zoo1=.101`, `zoo2=.102`, `zoo3=.103`, `zoo4=.104`, `zoo5=.105`). The result files on disk for this experiment were recorded under the older 0-indexed scheme (`-zoo0.res` … `-zoo4.res`); read those with the mapping `zoo0↔zoo1`, `zoo1↔zoo2`, `zoo2↔zoo3`, `zoo3↔zoo4`, `zoo4↔zoo5`.
+
+
 **Date**: 2026-04-14
 **Results dir**: `results/2026-04-14-raft-jetpack-swiftpaxos-style/`
 **Binary**: Docker zoo-build on jetpack branch (commit 0cc8b12d)
@@ -8,11 +11,11 @@
 
 | Host | IP | Process |
 |---|---|---|
-| zoo0 | 130.245.173.101 | replica + 6 clients |
-| zoo1 | 130.245.173.102 | replica + 6 clients |
-| zoo2 | 130.245.173.103 | replica + 6 clients |
-| zoo3 | 130.245.173.104 | replica + 6 clients |
-| zoo4 | 130.245.173.105 | replica + 6 clients |
+| zoo1 | 130.245.173.101 | replica + 6 clients |
+| zoo2 | 130.245.173.102 | replica + 6 clients |
+| zoo3 | 130.245.173.103 | replica + 6 clients |
+| zoo4 | 130.245.173.104 | replica + 6 clients |
+| zoo5 | 130.245.173.105 | replica + 6 clients |
 
 Hardware: 2x Xeon Silver 4216 (64 logical CPUs), 64 GB RAM per host.
 
@@ -55,7 +58,7 @@ Goal: Measure per-request latency below saturation to see protocol cost.
 
 ### CPU Usage — Server Thread (core 1) per Host (avg% / max%)
 
-| Protocol | zoo0 | zoo1 | zoo2 | zoo3 | zoo4 | Server Avg | Server Max |
+| Protocol | zoo1 | zoo2 | zoo3 | zoo4 | zoo5 | Server Avg | Server Max |
 |---|---|---|---|---|---|---|---|
 | Raft | 74.6/100.0 | 7.9/97.0 | 10.8/91.1 | 14.7/100.0 | 18.6/99.0 | 25.3 | 100.0 |
 | Jetpack+Raft fp100 | 75.6/100.0 | 3.5/97.0 | 9.4/95.1 | 22.0/100.0 | 16.3/99.0 | 25.4 | 100.0 |
@@ -63,7 +66,7 @@ Goal: Measure per-request latency below saturation to see protocol cost.
 
 ### CPU Usage — Whole Host (avg% / max%)
 
-| Protocol | zoo0 | zoo1 | zoo2 | zoo3 | zoo4 | Host Avg | Host Max |
+| Protocol | zoo1 | zoo2 | zoo3 | zoo4 | zoo5 | Host Avg | Host Max |
 |---|---|---|---|---|---|---|---|
 | Raft | 11.4/12.6 | 1.1/2.2 | 5.6/8.0 | 4.8/6.1 | 57.5/88.2 | 16.1 | 88.2 |
 | Jetpack+Raft fp100 | 11.6/12.6 | 1.3/2.4 | 5.3/7.6 | 5.4/7.3 | 20.1/92.2 | 8.7 | 92.2 |
@@ -74,8 +77,8 @@ Goal: Measure per-request latency below saturation to see protocol cost.
 - Jetpack+Raft fp100: **p50 ~ 41ms** (1 RTT = 40ms), exactly as expected for fast-path
 - Jetpack+Raft adaptive: **p50 ~ 41ms**, adaptive mode achieves same latency as fp100 at low load (100% fast-path)
 - Jetpack cuts latency by ~50% (1 RTT vs 2 RTT)
-- zoo0 has the highest server-core CPU (likely the Raft leader)
-- zoo4 has anomalously high host CPU from an unrelated external process
+- zoo1 has the highest server-core CPU (likely the Raft leader)
+- zoo5 has anomalously high host CPU from an unrelated external process
 
 ---
 
@@ -97,7 +100,7 @@ Goal: Find max sustainable throughput via adaptive concurrency sweep.
 
 ### Raft — Server Thread CPU (core 1) per Host (avg% / max%)
 
-| Conc | zoo0 | zoo1 | zoo2 | zoo3 | zoo4 | Server Avg | Server Max |
+| Conc | zoo1 | zoo2 | zoo3 | zoo4 | zoo5 | Server Avg | Server Max |
 |---|---|---|---|---|---|---|---|
 | 1 | 74.6/100.0 | 7.9/97.0 | 10.8/91.1 | 14.7/100.0 | 18.6/99.0 | 25.3 | 100.0 |
 | 50 | 71.7/100.0 | 4.3/98.0 | 11.3/98.0 | 21.0/100.0 | 13.4/78.4 | 24.3 | 100.0 |
@@ -109,7 +112,7 @@ Goal: Find max sustainable throughput via adaptive concurrency sweep.
 
 ### Raft — Whole Host CPU (avg% / max%)
 
-| Conc | zoo0 | zoo1 | zoo2 | zoo3 | zoo4 | Host Avg | Host Max |
+| Conc | zoo1 | zoo2 | zoo3 | zoo4 | zoo5 | Host Avg | Host Max |
 |---|---|---|---|---|---|---|---|
 | 1 | 11.4/12.6 | 1.1/2.2 | 5.6/8.0 | 4.8/6.1 | 57.5/88.2 | 16.1 | 88.2 |
 | 50 | 11.9/13.4 | 1.3/2.4 | 5.4/7.5 | 5.2/7.2 | 28.5/55.6 | 10.5 | 55.6 |
@@ -135,7 +138,7 @@ Goal: Find max sustainable throughput via adaptive concurrency sweep.
 
 ### Jetpack+Raft fp100 — Server Thread CPU (core 1) per Host (avg% / max%)
 
-| Conc | zoo0 | zoo1 | zoo2 | zoo3 | zoo4 | Server Avg | Server Max |
+| Conc | zoo1 | zoo2 | zoo3 | zoo4 | zoo5 | Server Avg | Server Max |
 |---|---|---|---|---|---|---|---|
 | 1 | 75.6/100.0 | 3.5/97.0 | 9.4/95.1 | 22.0/100.0 | 16.3/99.0 | 25.4 | 100.0 |
 | 50 | 65.3/100.0 | 8.0/97.1 | 21.8/95.0 | 28.9/100.0 | 37.2/100.0 | 32.2 | 100.0 |
@@ -147,7 +150,7 @@ Goal: Find max sustainable throughput via adaptive concurrency sweep.
 
 ### Jetpack+Raft fp100 — Whole Host CPU (avg% / max%)
 
-| Conc | zoo0 | zoo1 | zoo2 | zoo3 | zoo4 | Host Avg | Host Max |
+| Conc | zoo1 | zoo2 | zoo3 | zoo4 | zoo5 | Host Avg | Host Max |
 |---|---|---|---|---|---|---|---|
 | 1 | 11.6/12.6 | 1.3/2.4 | 5.3/7.6 | 5.4/7.3 | 20.1/92.2 | 8.7 | 92.2 |
 | 50 | 11.5/13.0 | 1.2/2.1 | 3.4/5.2 | 5.0/7.1 | 53.6/70.1 | 14.9 | 70.1 |
@@ -172,7 +175,7 @@ Goal: Find max sustainable throughput via adaptive concurrency sweep.
 
 ### Jetpack+Raft adaptive — Server Thread CPU (core 1) per Host (avg% / max%)
 
-| Conc | zoo0 | zoo1 | zoo2 | zoo3 | zoo4 | Server Avg | Server Max |
+| Conc | zoo1 | zoo2 | zoo3 | zoo4 | zoo5 | Server Avg | Server Max |
 |---|---|---|---|---|---|---|---|
 | 1 | 84.3/100.0 | 4.9/98.0 | 10.0/97.0 | 26.9/100.0 | 24.8/97.0 | 30.2 | 100.0 |
 | 50 | 79.3/100.0 | 8.2/98.0 | 20.9/99.0 | 44.5/97.0 | 29.8/99.0 | 36.5 | 100.0 |
@@ -183,7 +186,7 @@ Goal: Find max sustainable throughput via adaptive concurrency sweep.
 
 ### Jetpack+Raft adaptive — Whole Host CPU (avg% / max%)
 
-| Conc | zoo0 | zoo1 | zoo2 | zoo3 | zoo4 | Host Avg | Host Max |
+| Conc | zoo1 | zoo2 | zoo3 | zoo4 | zoo5 | Host Avg | Host Max |
 |---|---|---|---|---|---|---|---|
 | 1 | 12.9/18.1 | 2.0/5.9 | 6.9/11.1 | 6.7/15.2 | 44.3/63.9 | 14.6 | 63.9 |
 | 50 | 12.0/15.0 | 1.8/5.6 | 4.7/8.9 | 6.7/12.3 | 59.4/88.9 | 16.9 | 88.9 |
@@ -214,8 +217,8 @@ Goal: Find max sustainable throughput via adaptive concurrency sweep.
 
 ## CPU Usage Notes
 
-- **zoo0** consistently shows highest core1 usage (65-85%) — it is likely the Raft leader.
-- **zoo4** shows anomalously high host-level CPU usage (often 50-90%) unrelated to deptran — another process on that machine.
+- **zoo1** consistently shows highest core1 usage (65-85%) — it is likely the Raft leader.
+- **zoo5** shows anomalously high host-level CPU usage (often 50-90%) unrelated to deptran — another process on that machine.
 - Core 4 was excluded from pinning (occupied by external process).
 - CPU monitoring via `/proc/stat` polling (1 sample/sec), parsed by `scripts/parse_cpustat.py`.
 - "Server Avg" = average of all 5 hosts' core1 avg%. "Server Max" = max across all hosts' core1 max%.

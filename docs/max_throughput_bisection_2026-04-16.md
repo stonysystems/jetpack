@@ -1,9 +1,12 @@
 # Max-Throughput Bisection — 2026-04-16
 
+> **Naming note (2026-04-19 rename):** Host names in this doc are 1-indexed (`zoo1=.101`, `zoo2=.102`, `zoo3=.103`, `zoo4=.104`, `zoo5=.105`). The result files on disk for this experiment were recorded under the older 0-indexed scheme (`-zoo0.res` … `-zoo4.res`); read those with the mapping `zoo0↔zoo1`, `zoo1↔zoo2`, `zoo2↔zoo3`, `zoo3↔zoo4`, `zoo4↔zoo5`.
+
+
 **Results dir**: `results/2026-04-16-bisection/`
 **Cluster**: 5-node zoo (.101-.105), pinned server core 1
 **Settings**: `concurrent=500`, `rw_1000000.yml`, `client_open.yml`, `WAN_DELAY_MS=20` (40ms RTT), 30s per point
-**Stop criterion**: per-protocol sweep stops at the first client count where max server CPU ≥ 99% on any host OR zoo0/zoo3 p50 > 2× c1-baseline (85ms for Raft, 42ms for others).
+**Stop criterion**: per-protocol sweep stops at the first client count where max server CPU ≥ 99% on any host OR zoo1/zoo4 p50 > 2× c1-baseline (85ms for Raft, 42ms for others).
 
 **What changed since the coarse 30-vs-60 run:** added finer-grained client configs (40, 45, 50, 55, 70, 75, 80, 90, 100) and swept each protocol until it hit a real ceiling. This separates protocol CPU efficiency from the client-side per-worker ~200 cmd/s cap that dominated the 30-client numbers.
 
@@ -13,7 +16,7 @@
 
 Saturation N = last swept client count at which the bottleneck replica was still below 99% and p50 was still within budget. The next larger N tripped the stop.
 
-| Protocol | Peak tput (cmd/s) | Saturation N | CPU (5 hosts avg) | p50 (zoo3) | Stopped at N |
+| Protocol | Peak tput (cmd/s) | Saturation N | CPU (5 hosts avg) | p50 (zoo4) | Stopped at N |
 |---|---:|---:|---:|---:|---:|
 | **EPaxos** | **19990.6** | **100** | 73.1% | 42.53 ms | (did not stop in sweep range) |
 | **Raft** | **13984.4** | **70** | 45.7% | 87.15 ms | 80 (bottleneck replica pinned, p50 985ms) |
@@ -37,7 +40,7 @@ The user's intuition is right: EPaxos runs `UpdateAttributes` (scan 5 per-replic
 
 Evidence that EPaxos really is more expensive per command, at a fixed total throughput of ~6000 cmd/s (N30):
 
-| Protocol | Busiest replica (zoo0) CPU % | Avg CPU across 5 replicas |
+| Protocol | Busiest replica (zoo1) CPU % | Avg CPU across 5 replicas |
 |---|---:|---:|
 | Raft | 38.3% | 28.6% |
 | EPaxos | 65.3% | 36.0% |
@@ -58,13 +61,13 @@ Each deptran_server has 3 threads:
 
 So both active server threads share **one** core (core 1). "server median" in each `.res` is the /proc/stat CPU-1 busy fraction over the middle 10s. That faithfully captures the protocol's per-replica CPU because (a) the two active threads are pinned there, (b) the main thread is idle. Cross-protocol comparison via this metric is fair.
 
-Caveat: cpu0 on zoo0 runs ~100% across all protocols — that's an unrelated system process on core 0, not deptran. It doesn't affect core-1 measurements.
+Caveat: cpu0 on zoo1 runs ~100% across all protocols — that's an unrelated system process on core 0, not deptran. It doesn't affect core-1 measurements.
 
 ## Full sweep tables
 
 ### Raft (baseline)
 
-| N | Total tput | CPU avg (5 hosts) | p50 (zoo0) | p50 (zoo3) |
+| N | Total tput | CPU avg (5 hosts) | p50 (zoo1) | p50 (zoo4) |
 |---:|---:|---:|---:|---:|
 | 30 | 5982.6 | 28.57 | 75.61 | 75.91 |
 | 40 | 7993.5 | 28.04 | 76.57 | 77.02 |
@@ -79,7 +82,7 @@ Raft latency is stable at ~76-88ms p50 while scaling. At N80 the leader pins to 
 
 ### Jetpack+Raft fp100 (force 100% fast-path)
 
-| N | Total tput | CPU avg (5 hosts) | p50 (zoo0) | p50 (zoo3) |
+| N | Total tput | CPU avg (5 hosts) | p50 (zoo1) | p50 (zoo4) |
 |---:|---:|---:|---:|---:|
 | 30 | 6002.0 | 51.85 | 41.99 | 42.26 |
 | 40 | 7985.6 | 58.70 | 41.99 | 42.22 |
@@ -90,7 +93,7 @@ Fast-path p50 is ~42ms throughout (half of Raft). But peak throughput is much lo
 
 ### Jetpack+Raft adaptive
 
-| N | Total tput | CPU avg (5 hosts) | p50 (zoo0) | p50 (zoo3) |
+| N | Total tput | CPU avg (5 hosts) | p50 (zoo1) | p50 (zoo4) |
 |---:|---:|---:|---:|---:|
 | 30 | 5997.5 | 52.95 | 41.55 | 41.99 |
 | 40 | 7993.4 | 57.21 | 41.90 | 42.17 |
@@ -100,7 +103,7 @@ Adaptive mode saturates slightly earlier than fp100 — likely because it someti
 
 ### SwiftPaxos
 
-| N | Total tput | CPU avg (5 hosts) | p50 (zoo0) | p50 (zoo3) |
+| N | Total tput | CPU avg (5 hosts) | p50 (zoo1) | p50 (zoo4) |
 |---:|---:|---:|---:|---:|
 | 30 | 5987.7 | 79.61 | 41.60 | 42.07 |
 | 40 | 7983.7 | 87.66 | 41.71 | 42.17 |
@@ -114,7 +117,7 @@ SwiftPaxos runs hot from N=30 onward (all 5 replicas at ~80-95% CPU) but keeps s
 
 ### EPaxos
 
-| N | Total tput | CPU avg (5 hosts) | p50 (zoo0) | p50 (zoo3) |
+| N | Total tput | CPU avg (5 hosts) | p50 (zoo1) | p50 (zoo4) |
 |---:|---:|---:|---:|---:|
 | 30 | 6005.9 | 36.04 | 41.45 | 41.85 |
 | 40 | 7998.7 | 43.24 | 41.43 | 41.80 |

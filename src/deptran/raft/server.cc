@@ -1044,7 +1044,7 @@ void RaftServer::OnAppendEntries(const slotid_t slot_id,
       // spec-broadcast leader-skip targets the real leader. JP mode updates
       // every replica's view via OnJetpackBeginRecovery, but CURP skips that
       // flow; without this block, followers keep the default view (leader=-1
-      // -> falls back to locale 0 = zoo0), causing CURP spec broadcasts on
+      // -> falls back to locale 0 = zoo1), causing CURP spec broadcasts on
       // every host except the true leader's host to include the real leader
       // as a "witness" that occasionally votes NO, blocking the fast path.
       if (Config::GetConfig()->jetpack_fastpath_attempt_rate_ == CURP_MODE

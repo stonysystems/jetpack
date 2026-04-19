@@ -1,10 +1,13 @@
 # Full Protocol Comparison (with CURP + etcd + naive_rpc) — 2026-04-18, updated 2026-04-19
 
+> **Naming note (2026-04-19 rename):** Host names in this doc are 1-indexed (`zoo1=.101`, `zoo2=.102`, `zoo3=.103`, `zoo4=.104`, `zoo5=.105`). The result files on disk for this experiment were recorded under the older 0-indexed scheme (`-zoo0.res` … `-zoo4.res`); read those with the mapping `zoo0↔zoo1`, `zoo1↔zoo2`, `zoo2↔zoo3`, `zoo3↔zoo4`, `zoo4↔zoo5`.
+
+
 **Results dirs**: `results/2026-04-16-bisection/` (Raft, Jetpack+Raft fp100/adaptive, SwiftPaxos, EPaxos), `results/2026-04-18-curp-etcd-rerun/` (CURP, etcd), `results/2026-04-19-naive-rpc/` (naive_rpc).
 
 **Cluster**: 5-node zoo (.101-.105), pinned server core 1, WAN_DELAY_MS=20 (40ms RTT), `rw_1000000.yml`, `client_open.yml`, 30s per point.
 
-**naive_rpc** is a new "no-consensus" baseline: client sends one Dispatch RPC to the configured leader (zoo0 by default), server executes the R/W locally and replies. Implementation is just `config/none_naive_rpc.yml` (`cc: none, ab: naive_rpc` — an alias for `MODE_NONE` added in `frame.cc`); this re-uses `CoordinatorNone` on the client and `SchedulerNone::Dispatch`+`OnCommit` on the server, with `IsReplicated()==false` so `OnCommit` skips Raft and commits locally. It measures the floor — pure RPC framework + 1 WAN RTT, with no replication or ordering.
+**naive_rpc** is a new "no-consensus" baseline: client sends one Dispatch RPC to the configured leader (zoo1 by default), server executes the R/W locally and replies. Implementation is just `config/none_naive_rpc.yml` (`cc: none, ab: naive_rpc` — an alias for `MODE_NONE` added in `frame.cc`); this re-uses `CoordinatorNone` on the client and `SchedulerNone::Dispatch`+`OnCommit` on the server, with `IsReplicated()==false` so `OnCommit` skips Raft and commits locally. It measures the floor — pure RPC framework + 1 WAN RTT, with no replication or ordering.
 
 ## Latency at c=1 (all 8 protocols)
 
@@ -27,9 +30,9 @@ etcd's 2-RTT is expected — etcd client lib runs its own Raft commit path on to
 
 ## Max-throughput bisection — peak per protocol
 
-For each protocol, swept client count N ∈ {30, 40, 45, 50, 55, 60, 70, 80, 90, 100} at concurrent=500. Stopped per-protocol when the bottleneck replica's core-1 CPU median (mid-10s) reached 99% or zoo0/zoo3 p50 > 2× c=1 baseline. "CPU (5 hosts avg)" below is the mean of the five per-host medians (each host's median is over its own mid-10s 10-sample window).
+For each protocol, swept client count N ∈ {30, 40, 45, 50, 55, 60, 70, 80, 90, 100} at concurrent=500. Stopped per-protocol when the bottleneck replica's core-1 CPU median (mid-10s) reached 99% or zoo1/zoo4 p50 > 2× c=1 baseline. "CPU (5 hosts avg)" below is the mean of the five per-host medians (each host's median is over its own mid-10s 10-sample window).
 
-| Protocol | Peak tput (cmd/s) | Saturation N | CPU (5 hosts avg) | p50 (zoo3) |
+| Protocol | Peak tput (cmd/s) | Saturation N | CPU (5 hosts avg) | p50 (zoo4) |
 |---|---:|---:|---:|---:|
 | **naive_rpc** | **19980.6** | 100 (did not saturate) | 20.1% | 41.72 ms |
 | **EPaxos** | **19990.6** | 100 | 73.1% | 42.53 ms |
@@ -40,7 +43,7 @@ For each protocol, swept client count N ∈ {30, 40, 45, 50, 55, 60, 70, 80, 90,
 | etcd | 8000.1 | 40 | 32.2% | 95.75 ms |
 | Jetpack+Raft adaptive | 7993.4 | 40 | 57.2% | 42.17 ms |
 
-**naive_rpc was not the ceiling.** The naive_rpc sweep reached N=100 (19980 cmd/s at only 20% avg CPU, bottleneck zoo0 at 58%) without hitting the 99% stop threshold. Throughput scaled almost exactly as `200 × N` across the entire sweep — the same client-side per-worker ~200 cmd/s cap that all other protocols hit at low N. The 200-cmd/s-per-client cap is in the client coordinator/coroutine dispatch path, independent of what the server does. **Any protocol can ride that cap up to 20k at N=100**; beyond that, the server-side consensus cost starts to matter. EPaxos reaches the same 19991 peak; all other protocols hit their *server-side* bottleneck before the client cap.
+**naive_rpc was not the ceiling.** The naive_rpc sweep reached N=100 (19980 cmd/s at only 20% avg CPU, bottleneck zoo1 at 58%) without hitting the 99% stop threshold. Throughput scaled almost exactly as `200 × N` across the entire sweep — the same client-side per-worker ~200 cmd/s cap that all other protocols hit at low N. The 200-cmd/s-per-client cap is in the client coordinator/coroutine dispatch path, independent of what the server does. **Any protocol can ride that cap up to 20k at N=100**; beyond that, the server-side consensus cost starts to matter. EPaxos reaches the same 19991 peak; all other protocols hit their *server-side* bottleneck before the client cap.
 
 **Peak ordering**: EPaxos > Raft > SwiftPaxos > **CURP** > Jetpack+Raft fp100 > etcd ≥ Jetpack+Raft adaptive.
 
@@ -48,11 +51,11 @@ For each protocol, swept client count N ∈ {30, 40, 45, 50, 55, 60, 70, 80, 90,
 
 1. **CURP is now competitive with SwiftPaxos in throughput and gives 1-RTT latency.** Peak 10973 @ N=55 vs SwiftPaxos 11968 @ N=60 — CURP is within 9% at a lower saturation N. Both achieve 42ms p50 across all hosts.
 
-2. **CURP still peaks lower than vanilla Raft.** Raft 13984 vs CURP 10973 — CURP's speculative broadcast still costs non-leader CPU (`command_pool_.push_back` on every witness), so its non-leader replicas work harder (avg CPU 73.7% vs Raft's 45.7%). That extra work means CURP's max-CPU host (zoo3, the leader) pins sooner than Raft's leader does.
+2. **CURP still peaks lower than vanilla Raft.** Raft 13984 vs CURP 10973 — CURP's speculative broadcast still costs non-leader CPU (`command_pool_.push_back` on every witness), so its non-leader replicas work harder (avg CPU 73.7% vs Raft's 45.7%). That extra work means CURP's max-CPU host (zoo4, the leader) pins sooner than Raft's leader does.
 
 3. **CURP beats Jetpack+Raft fp100 on peak throughput** (10973 vs 8998, +22%), because CURP skips the spec RPC to the leader. The leader in CURP only does Raft replication, whereas in Jetpack+Raft fp100 it does both.
 
-4. **etcd peaks at 8000 cmd/s @ N=40.** The bottleneck is the single etcd-client connection pool on zoo0 (loc_id=0 is the only replica that opens the pool, per `deptran/etcd/server.h`). zoo0 pins at 97-99% CPU while the other 4 Janus replicas stay idle (4-23% CPU). So etcd's Janus-layer peak is zoo0's own pinned core; the underlying etcd cluster has more capacity but we don't exploit it.
+4. **etcd peaks at 8000 cmd/s @ N=40.** The bottleneck is the single etcd-client connection pool on zoo1 (loc_id=0 is the only replica that opens the pool, per `deptran/etcd/server.h`). zoo1 pins at 97-99% CPU while the other 4 Janus replicas stay idle (4-23% CPU). So etcd's Janus-layer peak is zoo1's own pinned core; the underlying etcd cluster has more capacity but we don't exploit it.
 
 5. **Latency difference at peak is significant**:
    - CURP / Jetpack+Raft / SwiftPaxos / EPaxos: 42 ms p50 (1 RTT).
@@ -63,7 +66,7 @@ For each protocol, swept client count N ∈ {30, 40, 45, 50, 55, 60, 70, 80, 90,
 
 ### CURP (new)
 
-| N | Total | CPU (5 hosts avg) | p50 (zoo3) |
+| N | Total | CPU (5 hosts avg) | p50 (zoo4) |
 |---:|---:|---:|---:|
 | 30 | 6008.9 | 49.5 | 41.94 |
 | 40 | 8005.2 | 60.4 | 42.13 |
@@ -74,17 +77,17 @@ For each protocol, swept client count N ∈ {30, 40, 45, 50, 55, 60, 70, 80, 90,
 
 ### etcd (new)
 
-| N | Total | CPU (5 hosts avg) | p50 (zoo0) |
+| N | Total | CPU (5 hosts avg) | p50 (zoo1) |
 |---:|---:|---:|---:|
 | 30 | 5989.3 | 27.4 | 88.80 |
 | 40 | 8000.1 | 32.2 | 95.08 |
 | 45 | 9005.1 | 32.3 | 111.66 ← STOP (bottleneck replica pinned) |
 
-etcd's avg stays low (~30%) because only zoo0 opens the etcd connection pool (per `deptran/etcd/server.h:51`, only `loc_id == 0` creates connections); zoo0 does ~97-99% of the work while the other four Janus replicas stay at 4-23%. Averaging hides this, so for etcd the bottleneck is specifically zoo0, not the cluster average.
+etcd's avg stays low (~30%) because only zoo1 opens the etcd connection pool (per `deptran/etcd/server.h:51`, only `loc_id == 0` creates connections); zoo1 does ~97-99% of the work while the other four Janus replicas stay at 4-23%. Averaging hides this, so for etcd the bottleneck is specifically zoo1, not the cluster average.
 
 ### naive_rpc (new baseline)
 
-| N | Total | CPU (5 hosts avg) | p50 (zoo3) | Bottleneck zoo0 |
+| N | Total | CPU (5 hosts avg) | p50 (zoo4) | Bottleneck zoo1 |
 |---:|---:|---:|---:|---:|
 | 30 | 5999.1 | 15.0 | 41.70 | 65% |
 | 40 | 7986.6 | 8.6 | 41.71 | 28% |
@@ -97,7 +100,7 @@ etcd's avg stays low (~30%) because only zoo0 opens the etcd connection pool (pe
 | 90 | 17996.0 | 18.9 | 41.71 | 55% |
 | 100 | 19980.6 | 20.1 | 41.72 | 58% |
 
-Throughput tracks `200 × N` to within 0.1% at every point. p50 stays flat at 41.7 ms (= 40 ms WAN RTT + ~1-2 ms dispatch/execute). Bottleneck zoo0 stays at 40-80% throughout — it never pins. Conclusion: at N≤100, the client-side per-worker issue cap dominates; the server has ample headroom. To see naive_rpc's true server ceiling we'd need to break the client cap or push N past 150.
+Throughput tracks `200 × N` to within 0.1% at every point. p50 stays flat at 41.7 ms (= 40 ms WAN RTT + ~1-2 ms dispatch/execute). Bottleneck zoo1 stays at 40-80% throughout — it never pins. Conclusion: at N≤100, the client-side per-worker issue cap dominates; the server has ample headroom. To see naive_rpc's true server ceiling we'd need to break the client cap or push N past 150.
 
 ## CPU efficiency (cmd/s per avg-CPU-percent across 5 hosts)
 
@@ -113,7 +116,7 @@ Each protocol's peak throughput divided by the 5-host average CPU at that peak N
 | Jetpack+Raft fp100 | 127 |
 | SwiftPaxos | 130 |
 
-Note: Raft's high ratio reflects most of its 5 hosts being *idle* (followers just replicate) at peak — its avg CPU of 45% is low because only the leader pins. EPaxos distributes work so all 5 replicas contribute. etcd's 248 is misleading — it only uses zoo0, so the "5-host avg" dilutes the real zoo0 load; a better etcd metric would be zoo0-specific.
+Note: Raft's high ratio reflects most of its 5 hosts being *idle* (followers just replicate) at peak — its avg CPU of 45% is low because only the leader pins. EPaxos distributes work so all 5 replicas contribute. etcd's 248 is misleading — it only uses zoo1, so the "5-host avg" dilutes the real zoo1 load; a better etcd metric would be zoo1-specific.
 
 ## Commands used
 

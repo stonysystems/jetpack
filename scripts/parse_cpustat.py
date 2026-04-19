@@ -44,7 +44,7 @@ def main():
     label = sys.argv[2]
     core_id = int(sys.argv[3]) if len(sys.argv) > 3 else 1
 
-    replicas = ['zoo0', 'zoo1', 'zoo2', 'zoo3', 'zoo4']
+    replicas = ['zoo1', 'zoo2', 'zoo3', 'zoo4', 'zoo5']
 
     for replica in replicas:
         cpufile = os.path.join(result_dir, f"{label}-{replica}-cpustat.txt")
