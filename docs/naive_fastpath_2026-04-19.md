@@ -34,32 +34,34 @@ p50 is ~41 ms — same as the 1-RTT consensus protocols (EPaxos, SwiftPaxos, CUR
 
 ## Max throughput — per-point sweep
 
-Fixed `concurrent=500`, swept N ∈ {30, 50, 70, 100, 120, 140}. Stopped when the busiest replica's core-1 mid-10s median CPU ≥ 99%.
+Fixed `concurrent=500`, swept N ∈ {30, 50, 70, 100, 120, 140}. Each host reports the median of its core-1 /proc/stat samples over seconds 10–19 of the 30 s experiment (`server median` in the `.res` file). "CPU (5-host avg)" is the mean of those five per-host medians. The sweep uses a per-replica saturation detector internally so it knows when to stop, but the headline CPU column is the 5-host avg — that's the honest cross-protocol metric.
 
-| N | Total tput (cmd/s) | CPU 5-host avg | Max CPU (host) | zoo0 | zoo1 | zoo2 | zoo3 | zoo4 | p50 zoo0 | p50 zoo3 |
-|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| 30 | 5986 | 44.9 | 84.0 (zoo0) | 84.0 | 19.8 | 44.3 | 51.0 | 25.3 | 41.52 | 41.93 |
-| 50 | 10000 | 59.8 | 78.0 (zoo0) | 78.0 | 28.9 | 73.7 | 74.8 | 43.9 | 41.57 | 41.97 |
-| 70 | 13980 | 75.1 | 92.9 (zoo3) | 85.9 | 41.9 | 89.5 | 92.9 | 65.3 | 41.73 | 42.07 |
-| 100 | 19963 | 81.5 | 94.1 (zoo3) | 68.0 | 63.9 | 93.9 | 94.1 | 87.8 | 41.84 | 42.16 |
-| 120 | 23974 | 81.7 | 96.0 (zoo4) | 70.8 | 71.6 | 82.2 | 87.9 | 96.0 | 41.68 | 41.93 |
-| **140** | **27966** | **88.0** | **99.0 (zoo4)** ← STOP | 79.0 | 77.6 | 92.2 | 92.1 | **99.0** | 41.84 | 42.10 |
+| N | Total tput (cmd/s) | CPU (5-host avg) | zoo0 | zoo1 | zoo2 | zoo3 | zoo4 | p50 zoo0 (ms) | p50 zoo3 (ms) |
+|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 30 | 5986 | 44.9 | 84.0 | 19.8 | 44.3 | 51.0 | 25.3 | 41.52 | 41.93 |
+| 50 | 10000 | 59.8 | 78.0 | 28.9 | 73.7 | 74.8 | 43.9 | 41.57 | 41.97 |
+| 70 | 13980 | 75.1 | 85.9 | 41.9 | 89.5 | 92.9 | 65.3 | 41.73 | 42.07 |
+| 100 | 19963 | 81.5 | 68.0 | 63.9 | 93.9 | 94.1 | 87.8 | 41.84 | 42.16 |
+| 120 | 23974 | 81.7 | 70.8 | 71.6 | 82.2 | 87.9 | 96.0 | 41.68 | 41.93 |
+| **140** | **27966** | **88.0** ← STOP (bottleneck replica pinned) | 79.0 | 77.6 | 92.2 | 92.1 | 99.0 | 41.84 | 42.10 |
 
 Peak **27,966 cmd/s at N=140**, p50 stays at ~42 ms the entire sweep.
 
 ## Where it lands in the protocol comparison
 
-| Protocol | Peak tput (cmd/s) | Saturation N | Target CPU at peak | p50 at peak |
+All CPU columns are 5-host averages of mid-10s core-1 medians. For single-target setups (naive_rpc-to-zoo1, etcd) the average dilutes the target host's load; the target host's own median is given in parens.
+
+| Protocol | Peak tput (cmd/s) | Saturation N | CPU (5-host avg) | p50 at peak |
 |---|---:|---:|---:|---:|
-| naive_rpc → zoo1 only | 39968 | 200 | 99% (zoo1, no local clients) | 41.62 ms |
-| **naive_fastpath (new)** | **27966** | **140** | 99% (zoo4, both server+28 local clients) | 42.10 ms |
-| EPaxos | 19991 | 100 | avg 73% (distributed) | 42.53 ms |
-| Raft | 13984 | 70 | leader ~90% | 87.15 ms |
-| SwiftPaxos | 11968 | 60 | avg 92% (all hosts) | 42.58 ms |
-| CURP | 10973 | 55 | avg 74%, leader ~92% | 42.67 ms |
-| Jetpack+Raft fp100 | 8998 | 45 | avg 71%, leader ~93% | 42.52 ms |
-| etcd | 8000 | 40 | zoo0 99% | 95.75 ms |
-| Jetpack+Raft adaptive | 7993 | 40 | avg 57%, leader ~94% | 42.17 ms |
+| naive_rpc → zoo1 only | 39968 | 200 | 56.4 (target zoo1 ~99) | 41.62 ms |
+| **naive_fastpath (new)** | **27966** | **140** | 88.0 | 42.10 ms |
+| EPaxos | 19991 | 100 | 73.1 | 42.53 ms |
+| Raft | 13984 | 70 | 45.7 | 87.15 ms |
+| SwiftPaxos | 11968 | 60 | 92.1 | 42.58 ms |
+| CURP | 10973 | 55 | 73.7 | 42.67 ms |
+| Jetpack+Raft fp100 | 8998 | 45 | 70.9 | 42.52 ms |
+| etcd | 8000 | 40 | 32.2 (target zoo0 ~99) | 95.75 ms |
+| Jetpack+Raft adaptive | 7993 | 40 | 57.2 | 42.17 ms |
 
 **Interpretation:**
 
