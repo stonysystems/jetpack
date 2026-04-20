@@ -31,6 +31,16 @@ Documentation produced:
 
 ## Open / Unsolved Items
 
+### Recently completed (2026-04-18 → 2026-04-20)
+
+- **naive_raft baseline protocol** — **Done** (commit `ccaf65ec`). Client sends Dispatch to fixed leader at locale_id=1 (zoo2); leader broadcasts to 4 followers with `dep_id.str="nr_replicate"` marker and waits for 2 follower acks (3/5 simple majority counting self). No log / election / heartbeats. Baseline for the CPU/latency cost of the leader-broadcast + majority-quorum shape without real-Raft bookkeeping. Implementation: [src/deptran/naive_raft/commo.{h,cc}](src/deptran/naive_raft/), gated hooks in `service.cc` + `communicator.cc`, config [config/none_naive_raft.yml](config/none_naive_raft.yml).
+- **naive_raft peak throughput (core-17 pin, zoo cluster, 2026-04-20)** — Adaptive sweep: peak **18 004 cmd/s at N=90**, saturation between N=90 (zoo2 p50=87 ms) and N=93 (863 ms). Leader (zoo2) CPU pins at ~99.8–100% from N=50 onward; 5-host avg stays ~52%. Data: [results/2026-04-20-naive-raft-core17/naive_raft-adaptive.csv](results/2026-04-20-naive-raft-core17/naive_raft-adaptive.csv).
+- **naive_fastpath baseline protocol** — **Done** (commit `0a10a415`). Client broadcasts Dispatch to all 5 replicas; commits on 4/5 replies (RuleSuperMajority). Distributed-work baseline for CURP/EPaxos/SwiftPaxos-shaped broadcast protocols. Implementation in [src/deptran/naive_fastpath/](src/deptran/naive_fastpath/). See [docs/naive_fastpath_2026-04-19.md](docs/naive_fastpath_2026-04-19.md).
+- **naive_rpc baseline protocol** — **Done** (commit `ff41f0c1`). All client RPCs routed to `locale_id=1` (zoo2) — no replication, no quorum; pure RPC round-trip + server processing. Peak 39 968 cmd/s. See [docs/naive_rpc_zoo2_saturation_2026-04-19.md](docs/naive_rpc_zoo2_saturation_2026-04-19.md).
+- **Zoo host rename (0-indexed → 1-indexed)** — **Done** (commits `12d918c1`, `b67f9c42`). `zoo0..zoo4` → `zoo1..zoo5` to match the `.101..105` IP suffix. Internal `locale_id` still `0..4`; rename is display-layer only. All docs updated.
+- **SERVER_CORE_ID env var** — **Done** (commit `ccaf65ec`). Runtime-configurable server-thread pin core (default 1). Replaces the hardcoded `core_id = 1` in [s_main.cc](src/deptran/s_main.cc) and [scheduler.cc](src/deptran/scheduler.cc); client skip-core logic also tracks it. Emits a new `server average : X.XXX` log line next to `server median` so sweep scripts can report the mean of the mid-10s per-second core-N samples.
+- **Adaptive sweep infrastructure** — **Done** (commit `ccaf65ec`). [scripts/run_adaptive_sweep.sh](scripts/run_adaptive_sweep.sh) probes N=1 (baseline, client co-located with leader on zoo2), 50, 100, then extends or bisects until zoo2 p50 > 2× baseline. [scripts/gen_client_config.sh](scripts/gen_client_config.sh) generates `Nc1s5r5p-zoo.yml` on demand (clients round-robin across zoo1..5). Bisection sweep + single-exp scripts updated to parse the new `server average` line (with fallback to legacy `server median`).
+
 ### Recently completed (2026-04-16 follow-up)
 
 - **Precise max-throughput bisection** — **Done** (commit `4d25d67f` infra + results in `docs/max_throughput_bisection_2026-04-16.md`). Peak ordering: EPaxos 19991 @ N100 > Raft 13984 @ N70 > SwiftPaxos 11968 @ N60 > Jetpack+Raft fp100 8998 @ N45 > Jetpack+Raft adaptive 7993 @ N40.
@@ -52,6 +62,9 @@ Documentation produced:
 
 ### Potential future work (not on current roadmap)
 
+- **Rerun the full 5-protocol adaptive sweep at core-17 pin** (Raft, SwiftPaxos, EPaxos, Jetpack+Raft fp100, Jetpack+Raft adaptive). naive_raft is done (see above); the others should reuse `scripts/run_adaptive_sweep.sh` with `SERVER_CORE_ID=17` to produce directly comparable per-host CPU / p50 / p90 / p99 tables. Estimated ~1 h of cluster time.
+- **Write the core-17 sweep report** once the 5-protocol data is in — should replace the `docs/max_throughput_bisection_2026-04-16.md` summary with the new avg-CPU metric and per-host columns.
+- **Optional WAN-aware WAN_WAIT** — the current `_wan_wait()` in [communicator.h](src/deptran/communicator.h) delays every RPC unconditionally. The user's experiment spec says "no extra latency when the client and server are colocated," but in practice colocated RPCs still pay the delay. Skipping WAN_WAIT based on src/dst site identity would drop the 1-client baseline from ~82 ms to ~40 ms; currently every protocol's baseline is inflated by this.
 - Push EPaxos past N100 — it didn't hit the 99% stop in the current sweep (peak 19991 @ 98.99%). N=120 or 140 likely reveals its true ceiling.
 - Implement EPaxos slow path (Accept phase when replicas disagree on deps).
 - Implement SwiftPaxos hash-based conflict detection.
