@@ -4,6 +4,8 @@ Applies the canonical setting in [docs/max_throughput_experiment_setting.md](max
 
 All result dirs: `results/2026-04-20-<proto>-core17/` with per-N `.res`, `cpustat.txt`, and `SETTING.md` snapshots. Driver: [scripts/run_tier1_batch.sh](../scripts/run_tier1_batch.sh) + [scripts/run_adaptive_sweep.sh](../scripts/run_adaptive_sweep.sh).
 
+**Leader placement note** (2026-04-20 rerun of raft-family protocols): raft, jp-raft-fp100, and jp-raft-adaptive were rerun after biasing the Raft election timer toward `locale_id=1` (see [src/deptran/raft/server.cc:919](../src/deptran/raft/server.cc#L919)) and adding `MODE_RAFT`/`MODE_FPGA_RAFT` to [Communicator::GetLeaderForPartition](../src/deptran/communicator.cc#L1775) so clients route to zoo2 by default. The original-pass (zoo1-leader) result dirs are kept under `results/2026-04-20-<proto>-core17-zoo1leader/` for comparison but are not authoritative.
+
 ## Peak per protocol
 
 Ranked by peak `cmd/s`.
@@ -14,25 +16,26 @@ Ranked by peak `cmd/s`.
 | **epaxos** | **27 363** | 137 | 78.2 | 236.7 | 546.9 | 78.8 | 99.5 | 18.2 | 52.5 | 57.7 | 25.5 | **50.7** |
 | **naive_raft** | **18 004** | 90 | 87.5 | 153.1 | 217.2 | 88.0 | 23.1 | 99.8 | 48.6 | 59.6 | 29.7 | **52.2** |
 | **swiftpaxos** | **16 788** | 84 | 43.3 | 44.5 | 68.5 | 43.5 | 99.9 | 69.6 | 93.9 | 93.8 | 83.0 | **88.0** |
-| **raft** | **15 331** | 81 | 96.4 | 571.4 | 849.6 | 96.6 | 96.1 | 13.7 | 37.5 | 52.8 | 23.1 | **44.6** |
+| **raft (zoo2)** | **16 276** | 84 | 734.3 | 831.7 | 908.8 | 734.4 | 19.5 | **100.0** | 42.9 | 50.9 | 27.9 | **48.3** |
 | **etcd** | **13 002** | 65 | 89.0 | 98.1 | 118.0 | 89.5 | 99.9 | 5.7 | 14.6 | 16.5 | 7.4 | **28.8** |
-| **jp-raft-fp100** | 9 990 | 50 | 42.3 | 46.9 | 83.6 | 42.7 | 91.1 | 45.1 | 84.9 | 88.3 | 56.3 | **73.2** |
-| **jp-raft-adaptive** | 9 955 | 50 | 43.4 | 61.6 | 194.5 | 43.7 | 40.9 | 46.6 | 84.0 | 99.1 | 58.1 | **65.7** |
+| **jp-raft-fp100 (zoo2)** | 10 003 | 50 | 42.2 | 46.7 | 68.9 | 42.6 | 41.1 | 89.7 | 84.7 | 88.5 | 56.4 | **72.1** |
+| **jp-raft-adaptive (zoo2)** | 9 981 | 50 | 42.3 | 47.2 | 80.8 | 42.6 | 41.5 | 89.7 | 83.9 | 88.5 | 58.5 | **72.4** |
+
+**Raft leader on zoo2 confirmed.** At peak N=84 the raft leader core (zoo2) pins at **100.0 %** while the other four replicas sit at 20–51 %. This matches the experiment spec ("if the protocol has a leader/master/unique server, put it on zoo2"). See the per-protocol CSVs for the bisection rows that bracket the peak.
 
 Notes on saturation-detection quirks the script exposed:
 
-- **jp-raft-fp100 and jp-raft-adaptive peaks are under-reported.** Both collapsed between N=50 and N=100: at N=100 zoo2 produced no latency data (`zoo2_p50=0` from missing client-side aggregation on that host, see below), so the stop criterion didn't trip on the zoo2 clause. Bisection rows from N=106 onward all stopped because zoo3/zoo4 latencies were in the 1–3 s range. The N=50 row is therefore the last clean point; the "true" peak likely sits somewhere in [50, 100] and needs a denser sweep to locate.
+- **jp-raft-fp100 and jp-raft-adaptive still collapse between N=50 and N=100.** N=50 is clean (42 ms p50, ~10 k cmd/s, zoo2=90 % CPU). N≥100 frequently records tput=0 — clients fail to aggregate any commands because zoo2 pins at 100 % and the fast-path speculative RPCs drown out progress. The adaptive CPU-threshold disable we added today ([src/deptran/rule/coordinator.cc](../src/deptran/rule/coordinator.cc), threshold 80 % leader CPU) helped at 50 but didn't prevent the 100-client collapse. The "true" peak for these modes likely sits in [50, 100] and needs either a denser sweep or a tighter adaptive throttle to locate.
 - **etcd peak is still zoo1-bound.** Only zoo1 opens the etcd connection pool (per `src/deptran/etcd/server.h:51`, only `locale_id=0` creates connections), so the 5-host avg (28.8 %) badly under-reports what's happening on zoo1 (99.9 %). The real bottleneck is zoo1's single core.
-- **raft zoo1 is the leader core** — 96 % there is the saturation signal, not the low 5-host avg.
 
 ## Peak ordering
 
-**naive_epaxos > epaxos > naive_raft > swiftpaxos > raft > etcd > jp-raft-fp100 ≈ jp-raft-adaptive.**
+**naive_epaxos > epaxos > naive_raft > swiftpaxos ≈ raft > etcd > jp-raft-fp100 ≈ jp-raft-adaptive.**
 
 Two notable clusters:
 
-1. **Distributed-leader protocols dominate.** naive_epaxos (44 k), epaxos (27 k), and naive_raft (18 k) distribute work across all 5 replicas and hit 44 k+ peaks because no single replica pins until much later in the sweep. naive_epaxos's peak is **2.6 × naive_raft's** — the "per-site leader" design (every server is a leader for its own local clients) spreads write load evenly, while naive_raft concentrates all writes on zoo2.
-2. **Fixed-leader protocols pin early.** raft, etcd, and (approximately) jp-raft-* all hit their ceiling when zoo1 or zoo2 reaches ~100 % core-17 CPU. That's typical of any protocol where a single replica does an outsized share of work.
+1. **Distributed-leader protocols dominate.** naive_epaxos (44 k), epaxos (27 k), and naive_raft (18 k) distribute work across all 5 replicas and hit 44 k+ peaks because no single replica pins until much later in the sweep. naive_epaxos's peak is **2.5 × naive_raft's** — the "per-site leader" design (every server is a leader for its own local clients) spreads write load evenly, while naive_raft concentrates all writes on zoo2.
+2. **Fixed-leader protocols pin early.** raft (zoo2), swiftpaxos, etcd (zoo1 only for connection pool), and jp-raft-* all hit their ceiling when a single replica reaches ~100 % core-17 CPU. Raft and SwiftPaxos peaks are nearly identical (~16 k cmd/s) because both saturate their leader core at similar rates; SwiftPaxos keeps p50 at ~43 ms (1 RTT) while Raft's p50 blows up to 734 ms once zoo2 pins.
 
 ## Baseline latencies at N=1 (client co-located with leader)
 

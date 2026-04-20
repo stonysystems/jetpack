@@ -1781,6 +1781,15 @@ locid_t Communicator::GetLeaderForPartition(parid_t partition_id) const {
   if (Config::GetConfig()->replica_proto_ == MODE_NAIVE_RAFT) {
     return 1;
   }
+  // Raft / Jetpack+Raft: the Raft election is rigged to prefer locale 1
+  // (see raft/server.cc's election-timeout priority). Route clients there
+  // up front so the first Dispatch doesn't hit zoo1 and get redirected.
+  // Once the leader is elected the view callback will keep returning 1 —
+  // this is a static hint for the first few ticks before the view is set.
+  if (Config::GetConfig()->replica_proto_ == MODE_RAFT ||
+      Config::GetConfig()->replica_proto_ == MODE_FPGA_RAFT) {
+    return 1;
+  }
   // naive_epaxos: client sends to its co-located server. Resolution is
   // done in the client-side leader callback (client_worker.cc) because
   // that's where we can consult the client's Config::SiteInfo to look up

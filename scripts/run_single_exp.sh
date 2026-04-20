@@ -125,6 +125,22 @@ done
 wait
 sleep 3
 
+# Wait for the per-host .res files to actually contain "Mid throughput is"
+# before the caller parses them. Protocols that take longer to elect a
+# leader (notably Raft with priority-weighted election timeouts) finish
+# the mid-10s window and the final stats log AFTER the 30s duration —
+# the older code sometimes parsed .res a few seconds too early and got
+# 0/-1 placeholders. Cap the extra wait at 30 s per host.
+for i in "${!servers[@]}"; do
+    resfile="$RESULT_DIR/${LABEL}-${replicanames[$i]}.res"
+    for _ in $(seq 1 30); do
+        if [ -f "$resfile" ] && tail -c 102400 "$resfile" | grep -q "Mid throughput is"; then
+            break
+        fi
+        sleep 1
+    done
+done
+
 # Pull CSV results
 scp "$SERVER_USERNAME@${servers[0]}:$ZOO_DIR/results/recent_csv/${LABEL}-*" "$RESULT_DIR/" 2>/dev/null || true
 scp "$SERVER_USERNAME@${servers[0]}:$ZOO_DIR/results/recent_csv/tdigest_${LABEL}-*" "$RESULT_DIR/" 2>/dev/null || true

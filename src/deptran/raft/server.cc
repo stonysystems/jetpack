@@ -916,13 +916,23 @@ void RaftServer::StartElectionTimer() {
     Log_debug("start timer for election") ;
     double duration = randDuration() ;
     auto check_interval = HEARTBEAT_INTERVAL / 2;
+    // Priority: locale 1 (zoo2) wins elections by default (shortest timeout),
+    // then locale 0, then 2/3/4. Matches the experiment convention that any
+    // leader/master/unique-server role lives on zoo2 (see
+    // docs/max_throughput_experiment_setting.md). Original AWS-branch
+    // timeouts were 10-11s uniformly (no priority) so whoever lost the
+    // random-ordering race became leader. Applied to both AWS and non-AWS
+    // because the zoo cluster compiles with AWS defined (constants.h).
+    int _prio = (frame_->site_info_->locale_id == 1)
+                    ? 1
+                    : (int) frame_->site_info_->locale_id + 2;
 #ifdef AWS
-    auto election_timeout = RandomGenerator::rand(2000 * HEARTBEAT_INTERVAL,
-                                                  2200 * HEARTBEAT_INTERVAL);
+    auto election_timeout = RandomGenerator::rand(_prio * 1000 * HEARTBEAT_INTERVAL,
+                                                  _prio * 1100 * HEARTBEAT_INTERVAL);
 #endif
 #ifndef AWS
-    auto election_timeout = RandomGenerator::rand((frame_->site_info_->locale_id + 1) * 5 * HEARTBEAT_INTERVAL,
-                                                  (frame_->site_info_->locale_id + 1) * 10 * HEARTBEAT_INTERVAL);
+    auto election_timeout = RandomGenerator::rand(_prio * 5 * HEARTBEAT_INTERVAL,
+                                                  _prio * 10 * HEARTBEAT_INTERVAL);
 #endif
     while(!stop_) {
       Coroutine::Sleep(check_interval);
@@ -945,13 +955,15 @@ void RaftServer::StartElectionTimer() {
           Coroutine::Sleep(wait_int_);
           if(stop_) return ;
         }
+        // Re-election: use the same locale-1-favored priority as the initial
+        // timeout so zoo2 also wins subsequent elections after failovers.
 #ifdef AWS
-        election_timeout = RandomGenerator::rand(2000 * HEARTBEAT_INTERVAL,
-                                                 2200 * HEARTBEAT_INTERVAL);
+        election_timeout = RandomGenerator::rand(_prio * 1000 * HEARTBEAT_INTERVAL,
+                                                 _prio * 1100 * HEARTBEAT_INTERVAL);
 #endif
 #ifndef AWS
-        election_timeout = RandomGenerator::rand((frame_->site_info_->locale_id + 1) * 5 * HEARTBEAT_INTERVAL,
-                                                 (frame_->site_info_->locale_id + 1) * 10 * HEARTBEAT_INTERVAL);
+        election_timeout = RandomGenerator::rand(_prio * 5 * HEARTBEAT_INTERVAL,
+                                                 _prio * 10 * HEARTBEAT_INTERVAL);
 #endif
       }
     } 
