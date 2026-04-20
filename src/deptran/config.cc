@@ -1107,10 +1107,13 @@ bool Config::IsReplicated() {
   // SchedulerNone. No separate replication layer is needed.
   // MODE_NAIVE_RAFT: leader-side broadcast is handled inline in
   // ClassicServiceImpl::Dispatch; server-side scheduler is still SchedulerNone.
+  // MODE_NAIVE_EPAXOS: same pattern as naive_raft but every server is a
+  // potential leader for its co-located clients (no fixed leader).
   return (replica_proto_ != MODE_NONE &&
           replica_proto_ != MODE_NAIVE_RPC &&
           replica_proto_ != MODE_NAIVE_FASTPATH &&
-          replica_proto_ != MODE_NAIVE_RAFT);
+          replica_proto_ != MODE_NAIVE_RAFT &&
+          replica_proto_ != MODE_NAIVE_EPAXOS);
   return true;
 }
 

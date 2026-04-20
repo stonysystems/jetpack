@@ -129,6 +129,14 @@ namespace janus {
 // for the CPU/latency cost of the leader-broadcast + majority-quorum shape
 // without the bookkeeping of real Raft.
 #define MODE_NAIVE_RAFT (0xA002)
+// naive_epaxos: no real consensus, EPaxos-shaped leader-per-site
+// broadcast. Each client sends Dispatch to its *co-located* server
+// (locale_id == client's own locale); that server broadcasts to the 4
+// others with dep_id.str="ne_replicate" and waits for 2 follower acks
+// (3/5 simple majority counting self). No log, no election, no dep
+// tracking — a distributed-leader baseline that matches EPaxos's
+// request routing without any EPaxos bookkeeping.
+#define MODE_NAIVE_EPAXOS (0xA003)
 #define MODE_NOT_READY     (0x00)
 
 // CURP mode flag for -m parameter (not a protocol mode constant)

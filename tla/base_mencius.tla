@@ -424,6 +424,19 @@ BecomeToBeLeader(i) ==
                         [j \in Server |-> 0]]
     /\ UNCHANGED <<messages, currentTerm, votedFor, candidateVars, logVars, menciusVars>>
 
+\* Empty view change: forces server i into ToBeLeader so the Jetpack
+\* composition's recovery can fire. Mencius has no whole-ensemble view
+\* change (each server owns its round-robin slots independently); this
+\* action is a no-op at the base-protocol level except for the ostate
+\* transition. Can be enabled from any state other than ToBeLeader.
+EmptyViewChange(i) ==
+    /\ ostate[i] /= ToBeLeader
+    /\ currentTerm' = [currentTerm EXCEPT ![i] = currentTerm[i] + 1]
+    /\ ostate' = [ostate EXCEPT ![i] = ToBeLeader]
+    /\ nextIndex' = [nextIndex EXCEPT ![i] = [j \in Server |-> 1]]
+    /\ matchIndex' = [matchIndex EXCEPT ![i] = [j \in Server |-> 0]]
+    /\ UNCHANGED <<messages, votedFor, candidateVars, logVars, menciusVars>>
+
 (***************************************************************************)
 (* Message plumbing                                                        *)
 (***************************************************************************)

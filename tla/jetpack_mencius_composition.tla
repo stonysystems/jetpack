@@ -119,6 +119,10 @@ BecomeToBeLeader(i) ==
     /\ B!BecomeToBeLeader(i)
     /\ UNCHANGED <<jetpackVars, clientVars, executionVars>>
 
+EmptyViewChange(i) ==
+    /\ B!EmptyViewChange(i)
+    /\ UNCHANGED <<jetpackVars, clientVars, executionVars>>
+
 AdvanceCommitIndex(i) ==
     /\ B!AdvanceCommitIndex(i)
     /\ UNCHANGED <<jetpackVars, clientVars, executionVars>>
@@ -332,6 +336,7 @@ DropMessage(m) ==
 Next ==
     /\ \/ \E i \in Server : Restart(i)
        \/ \E i \in Server : BecomeToBeLeader(i)
+       \/ \E i \in Server : EmptyViewChange(i)
        \/ \E i \in Server : ApplyCommitted(i)
        \/ \E i \in Server : AdvanceCommitIndex(i)
        \/ \E i \in Server, v \in J!Commands : ClientRequest(i, v)

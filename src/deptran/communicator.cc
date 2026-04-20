@@ -1781,6 +1781,12 @@ locid_t Communicator::GetLeaderForPartition(parid_t partition_id) {
   if (Config::GetConfig()->replica_proto_ == MODE_NAIVE_RAFT) {
     return 1;
   }
+  // naive_epaxos: client sends to its co-located server (every server is
+  // a potential leader for its local clients). loc_id_ on this client
+  // communicator is set by client_worker.cc to the client's own locale.
+  if (Config::GetConfig()->replica_proto_ == MODE_NAIVE_EPAXOS) {
+    return loc_id_;
+  }
   View view = GetPartitionView(partition_id);
 
   if (!view.IsEmpty()) {

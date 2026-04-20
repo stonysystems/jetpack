@@ -1,16 +1,15 @@
----------------------- MODULE jetpack_copilot_composition ----------------------
-\* Composition of Jetpack plugin with CoPilot base protocol.
+-------------------------- MODULE jetpack_mongodb_composition --------------------------
+\* Composition of Jetpack plugin with MongoDB base protocol.
 \*
 \* This wrapper module:
-\*   1. Declares all variables (shared + CoPilot-specific + Jetpack + client + execution)
-\*   2. INSTANCE's base_copilot.tla (CoPilot protocol) and jetpack.tla (plugin)
+\*   1. Declares all variables (shared + MongoDB-specific + Jetpack + client + execution)
+\*   2. INSTANCE's base_mongodb.tla (MongoDB protocol) and jetpack.tla (plugin)
 \*   3. Wraps base protocol actions with UNCHANGED <<jetpackVars, clientVars, executionVars>>
-\*   4. Wraps Jetpack actions with UNCHANGED copilotExtraVars
+\*   4. Wraps Jetpack actions with UNCHANGED mongodbVars
 \*   5. Wires Init, Next, Spec, and properties
 \*
-\* CoPilot uses per-server proposer IDs (Proposer = Server). Two sequences
-\* are active at any time (pilot + copilot). ApplyCommitted uses cpLog
-\* dependency ordering to determine execution order across proposers.
+\* Like Raft, MongoDB uses a single replication stream ("sole" proposer), so
+\* ApplyCommitted walks the sole sequence in order.
 
 EXTENDS Naturals, FiniteSets, Sequences, TLC
 
@@ -30,17 +29,12 @@ VARIABLES
     log,
     commitIndex,
 
-    \* Raft-compatible election variables (used by Jetpack's interface).
+    \* MongoDB-specific variables.
     votedFor,
     votesResponded,
     votesGranted,
     nextIndex,
     matchIndex,
-
-    \* CoPilot-specific variables.
-    role,
-    cpLog,
-    cpBallot,
 
     \* Jetpack per-server variables.
     jstate, jepoch, oepoch, old_view, new_view, jpool,
@@ -53,13 +47,11 @@ VARIABLES
     original_execution_cmds, execution_cmds
 
 \* Variable groups for UNCHANGED clauses.
-copilotExtraVars == <<votedFor, votesResponded, votesGranted, nextIndex, matchIndex,
-                      role, cpLog, cpBallot>>
+mongodbVars   == <<votedFor, votesResponded, votesGranted, nextIndex, matchIndex>>
 serverVars    == <<currentTerm, ostate, votedFor>>
 candidateVars == <<votesResponded, votesGranted>>
 leaderVars    == <<nextIndex, matchIndex>>
 logVars       == <<log, commitIndex>>
-copilotVars   == <<role, cpLog, cpBallot>>
 jetpackVars   == <<jstate, jepoch, oepoch, old_view, new_view, jpool,
                    recovery_set, chosen_value, br_responses,
                    prep_responses, accept_responses>>
@@ -67,18 +59,18 @@ clientVars    == <<client_view, client_pending, client_successes, client_heard_f
 executionVars == <<original_execution_cmds, execution_cmds>>
 
 vars == <<messages, serverVars, candidateVars, leaderVars,
-          logVars, copilotVars, jetpackVars, clientVars, executionVars>>
+          logVars, jetpackVars, clientVars, executionVars>>
 
 (****************************************************************************)
 (* INSTANCE base protocol and Jetpack modules                               *)
 (****************************************************************************)
 
-B == INSTANCE base_copilot
+B == INSTANCE base_mongodb
 
-\* CoPilot: per-server proposer IDs. Each server is its own proposer.
-J == INSTANCE jetpack WITH NoOpCmd <- [tag |-> "CoPilotNoOp"],
-                          Proposer <- Server,
-                          ProposerOf <- LAMBDA i : i
+\* MongoDB: single proposer "sole". ProposerOf maps every server to "sole".
+J == INSTANCE jetpack WITH NoOpCmd <- [tag |-> "MongoDbNoOp"],
+                          Proposer <- {"sole"},
+                          ProposerOf <- LAMBDA i : "sole"
 
 (****************************************************************************)
 (* Re-exported constants                                                    *)
@@ -113,144 +105,139 @@ Timeout(i) ==
     /\ B!Timeout(i)
     /\ UNCHANGED <<jetpackVars, clientVars, executionVars>>
 
-BecomeToBeLeader(i) ==
-    /\ B!BecomeToBeLeader(i)
+RequestVote(i, j) ==
+    /\ B!RequestVote(i, j)
     /\ UNCHANGED <<jetpackVars, clientVars, executionVars>>
 
-FastTakeover(i) ==
-    /\ B!FastTakeover(i)
+AppendOplog(i, j) ==
+    /\ B!AppendOplog(i, j)
+    /\ UNCHANGED <<jetpackVars, clientVars, executionVars>>
+
+RollbackOplog(i, j) ==
+    /\ B!RollbackOplog(i, j)
+    /\ UNCHANGED <<jetpackVars, clientVars, executionVars>>
+
+LearnCommitPoint(i, j) ==
+    /\ B!LearnCommitPoint(i, j)
+    /\ UNCHANGED <<jetpackVars, clientVars, executionVars>>
+
+BecomeToBeLeader(i) ==
+    /\ B!BecomeToBeLeader(i)
     /\ UNCHANGED <<jetpackVars, clientVars, executionVars>>
 
 EmptyViewChange(i) ==
     /\ B!EmptyViewChange(i)
     /\ UNCHANGED <<jetpackVars, clientVars, executionVars>>
 
-\* CoPilot ClientRequest: wrapper adds Jetpack's AvailableCommands filter.
 ClientRequest(i, v) ==
-    /\ v \in J!AvailableCommands
     /\ B!ClientRequest(i, v)
     /\ UNCHANGED <<jetpackVars, clientVars, executionVars>>
 
-\* CoPilot ApplyCommitted: execute next committed entry using cpLog ordering.
-\* CoPilot's execution order respects dependency ordering from cpLog.
-\* For simplicity, we execute the next committed entry from any proposer
-\* whose committed prefix hasn't been fully executed yet.
+AdvanceCommitIndex(i) ==
+    /\ B!AdvanceCommitIndex(i)
+    /\ UNCHANGED <<jetpackVars, clientVars, executionVars>>
+
+\* MongoDB ApplyCommitted: execute the next committed entry from the sole
+\* sequence. Like Raft, MongoDB has only one proposer, so execution order
+\* is simply log order.
 ApplyCommitted(i) ==
     /\ ostate[i] = Leader
-    /\ \E j \in Server :
-        LET ci == commitIndex[i][j]
-            logLen == Len(log[i][j])
-            \* Find next unexecuted entry: first position whose value
-            \* is not yet in original_execution_cmds
-            execSet == J!SeqToSet(original_execution_cmds)
-        IN /\ ci > 0
-           /\ logLen >= ci
-           /\ \E k \in 1..ci :
-                /\ log[i][j][k].value \notin execSet
-                /\ log[i][j][k].value # [tag |-> "CoPilotNoOp"]
-                /\ \* All dependencies must be executed first
-                   LET cmd == log[i][j][k].value
-                   IN \A dep \in J!SeqToSet(original_execution_cmds) : TRUE
-                /\ original_execution_cmds' = Append(original_execution_cmds, log[i][j][k].value)
-                /\ execution_cmds' = Append(execution_cmds, log[i][j][k].value)
+    /\ LET ci == commitIndex[i]["sole"]
+           execIdx == Len(original_execution_cmds) + 1
+       IN /\ execIdx <= ci
+          /\ LET entry == log[i]["sole"][execIdx]
+             IN /\ original_execution_cmds' = Append(original_execution_cmds, entry.value)
+                /\ execution_cmds' = Append(execution_cmds, entry.value)
     /\ UNCHANGED <<messages, serverVars, candidateVars, leaderVars, logVars,
-                   copilotVars, jetpackVars, clientVars>>
+                   jetpackVars, clientVars>>
 
 (****************************************************************************)
-(* Wrapped CoPilot message handlers                                         *)
+(* Wrapped MongoDB message handlers                                         *)
 (****************************************************************************)
 
-HandleCoPilotPreAccept(i, m) ==
-    /\ B!HandleCoPilotPreAccept(i, m)
-    /\ UNCHANGED <<jetpackVars, clientVars, executionVars>>
-
-HandleCoPilotPreAcceptResponse(i, m) ==
-    /\ B!HandleCoPilotPreAcceptResponse(i, m)
-    /\ UNCHANGED <<jetpackVars, clientVars, executionVars>>
-
-HandleCoPilotCommit(i, m) ==
-    /\ B!HandleCoPilotCommit(i, m)
+MongoDbReceive(m) ==
+    /\ B!MongoDbReceive(m)
     /\ UNCHANGED <<jetpackVars, clientVars, executionVars>>
 
 (****************************************************************************)
-(* Wrapped Jetpack transitions (add UNCHANGED copilotExtraVars)             *)
+(* Wrapped Jetpack transitions (add UNCHANGED mongodbVars)                  *)
 (****************************************************************************)
 
 WClientSendPreaccept(c) ==
     /\ J!ClientSendPreaccept(c)
-    /\ UNCHANGED copilotExtraVars
+    /\ UNCHANGED mongodbVars
 
 WHandlePreacceptRequest(i, m) ==
     /\ J!HandlePreacceptRequest(i, m)
-    /\ UNCHANGED copilotExtraVars
+    /\ UNCHANGED mongodbVars
 
 WHandlePreacceptResponse(c, m) ==
     /\ J!HandlePreacceptResponse(c, m)
-    /\ UNCHANGED copilotExtraVars
+    /\ UNCHANGED mongodbVars
 
 WSendBeginRecovery(i) ==
     /\ J!SendBeginRecovery(i)
-    /\ UNCHANGED copilotExtraVars
+    /\ UNCHANGED mongodbVars
 
 WHandleBeginRecoveryRequest(i, m) ==
     /\ J!HandleBeginRecoveryRequest(i, m)
-    /\ UNCHANGED copilotExtraVars
+    /\ UNCHANGED mongodbVars
 
 WHandleBeginRecoveryResponse(i, m) ==
     /\ J!HandleBeginRecoveryResponse(i, m)
-    /\ UNCHANGED copilotExtraVars
+    /\ UNCHANGED mongodbVars
 
 WCompleteBeginRecovery(i) ==
     /\ J!CompleteBeginRecovery(i)
-    /\ UNCHANGED copilotExtraVars
+    /\ UNCHANGED mongodbVars
 
 WSendPrepare(i) ==
     /\ J!SendPrepare(i)
-    /\ UNCHANGED copilotExtraVars
+    /\ UNCHANGED mongodbVars
 
 WHandlePrepareRequest(i, m) ==
     /\ J!HandlePrepareRequest(i, m)
-    /\ UNCHANGED copilotExtraVars
+    /\ UNCHANGED mongodbVars
 
 WHandlePrepareResponse(i, m) ==
     /\ J!HandlePrepareResponse(i, m)
-    /\ UNCHANGED copilotExtraVars
+    /\ UNCHANGED mongodbVars
 
 WCompletePrepare(i) ==
     /\ J!CompletePrepare(i)
-    /\ UNCHANGED copilotExtraVars
+    /\ UNCHANGED mongodbVars
 
 WSendAccept(i) ==
     /\ J!SendAccept(i)
-    /\ UNCHANGED copilotExtraVars
+    /\ UNCHANGED mongodbVars
 
 WHandleAcceptRequest(i, m) ==
     /\ J!HandleAcceptRequest(i, m)
-    /\ UNCHANGED copilotExtraVars
+    /\ UNCHANGED mongodbVars
 
 WHandleAcceptResponse(i, m) ==
     /\ J!HandleAcceptResponse(i, m)
-    /\ UNCHANGED copilotExtraVars
+    /\ UNCHANGED mongodbVars
 
 WCompleteAccept(i) ==
     /\ J!CompleteAccept(i)
-    /\ UNCHANGED copilotExtraVars
+    /\ UNCHANGED mongodbVars
 
 WResubmit(i) ==
     /\ J!Resubmit(i)
-    /\ UNCHANGED copilotExtraVars
+    /\ UNCHANGED mongodbVars
 
 WCompleteResubmit(i) ==
     /\ J!CompleteResubmit(i)
-    /\ UNCHANGED copilotExtraVars
+    /\ UNCHANGED mongodbVars
 
 WFinishRecovery(i) ==
     /\ J!FinishRecovery(i)
-    /\ UNCHANGED copilotExtraVars
+    /\ UNCHANGED mongodbVars
 
 WHandleFinishRecovery(i, m) ==
     /\ J!HandleFinishRecovery(i, m)
-    /\ UNCHANGED copilotExtraVars
+    /\ UNCHANGED mongodbVars
 
 (****************************************************************************)
 (* Message receive plumbing                                                 *)
@@ -258,18 +245,14 @@ WHandleFinishRecovery(i, m) ==
 
 ServerReceive(m) ==
     /\ m.mdest \in Server
-    /\ \/ /\ m.mtype = B!CoPilotPreAcceptRequest
-          /\ HandleCoPilotPreAccept(m.mdest, m)
-       \/ /\ m.mtype = B!CoPilotPreAcceptResponse
-          /\ HandleCoPilotPreAcceptResponse(m.mdest, m)
-       \/ /\ m.mtype = B!CoPilotCommitRequest
-          /\ HandleCoPilotCommit(m.mdest, m)
+    /\ \/ /\ m.mtype \in B!MongoDbMessageTypes
+          /\ MongoDbReceive(m)
        \/ /\ m.mtype = J!PreacceptRequest
           /\ WHandlePreacceptRequest(m.mdest, m)
        \/ /\ m.mtype = J!PreacceptResponse
           /\ J!Discard(m)
           /\ UNCHANGED <<serverVars, candidateVars, leaderVars, logVars,
-                         copilotVars, jetpackVars, clientVars, executionVars>>
+                         jetpackVars, clientVars, executionVars>>
        \/ /\ m.mtype = J!BeginRecoveryRequest
           /\ WHandleBeginRecoveryRequest(m.mdest, m)
        \/ /\ m.mtype = J!BeginRecoveryResponse
@@ -293,12 +276,12 @@ ClientReceive(m) ==
 DuplicateMessage(m) ==
     /\ J!Send(m)
     /\ UNCHANGED <<serverVars, candidateVars, leaderVars, logVars,
-                   copilotVars, jetpackVars, clientVars, executionVars>>
+                   jetpackVars, clientVars, executionVars>>
 
 DropMessage(m) ==
     /\ J!Discard(m)
     /\ UNCHANGED <<serverVars, candidateVars, leaderVars, logVars,
-                   copilotVars, jetpackVars, clientVars, executionVars>>
+                   jetpackVars, clientVars, executionVars>>
 
 (****************************************************************************)
 (* Next-state relation                                                      *)
@@ -307,11 +290,15 @@ DropMessage(m) ==
 Next ==
     /\ \/ \E i \in Server : Restart(i)
        \/ \E i \in Server : Timeout(i)
+       \/ \E i, j \in Server : RequestVote(i, j)
        \/ \E i \in Server : BecomeToBeLeader(i)
        \/ \E i \in Server : EmptyViewChange(i)
+       \/ \E i \in Server : AdvanceCommitIndex(i)
        \/ \E i \in Server : ApplyCommitted(i)
+       \/ \E i, j \in Server : AppendOplog(i, j)
+       \/ \E i, j \in Server : RollbackOplog(i, j)
+       \/ \E i, j \in Server : LearnCommitPoint(i, j)
        \/ \E i \in Server, v \in J!Commands : ClientRequest(i, v)
-       \/ \E i \in Server : FastTakeover(i)
 
        \/ \E c \in Client : WClientSendPreaccept(c)
        \/ \E i \in Server : WSendBeginRecovery(i)
@@ -335,8 +322,7 @@ StateConstraint ==
     /\ \A i \in Server : currentTerm[i] <= 3
     /\ \A m \in DOMAIN messages : messages[m] <= 1
     /\ Cardinality(DOMAIN messages) <= 5
-    /\ \A i \in Server : \A j \in Server : Len(log[i][j]) <= 4
-    /\ \A i \in Server : Len(cpLog[i]) <= 4
+    /\ \A i \in Server : Len(log[i]["sole"]) <= 4
     /\ Len(original_execution_cmds) <= 4
     /\ Len(execution_cmds) <= 4
 
@@ -345,8 +331,7 @@ SmallStateConstraint ==
     /\ \A i \in Server : currentTerm[i] <= 2
     /\ \A m \in DOMAIN messages : messages[m] <= 1
     /\ Cardinality(DOMAIN messages) <= 2
-    /\ \A i \in Server : \A j \in Server : Len(log[i][j]) <= 2
-    /\ \A i \in Server : Len(cpLog[i]) <= 2
+    /\ \A i \in Server : Len(log[i]["sole"]) <= 2
     /\ Len(original_execution_cmds) <= 2
     /\ Len(execution_cmds) <= 2
 
@@ -359,11 +344,7 @@ MultiSequenceLogAgreement == J!MultiSequenceLogAgreement
 LogOrderMatchesExecution == J!LogOrderMatchesExecution
 ExecutionDedupMatches == J!ExecutionDedupMatches
 
-\* At most two active proposers (pilot + copilot) at any time.
-ActiveProposerBound ==
-    Cardinality({i \in Server : role[i] \in {B!Pilot, B!Copilot}}) <= 2
-
-Safety == [](CommittedLogAgreement /\ MultiSequenceLogAgreement /\ LogOrderMatchesExecution /\ ExecutionDedupMatches /\ ActiveProposerBound)
+Safety == [](CommittedLogAgreement /\ MultiSequenceLogAgreement /\ LogOrderMatchesExecution /\ ExecutionDedupMatches)
 
 SpecSafety == Spec => Safety
 

@@ -306,6 +306,24 @@ ClientRequest(i, v) ==
     /\ ostate[i] = Leader
     /\ Propose(i, v)
 
+\* Empty view change: forces server i into ToBeLeader so the Jetpack
+\* composition's recovery can fire. CoPilot's native failure handling is
+\* fast-takeover only (copilot -> pilot, no "view change" over the whole
+\* ensemble); this action is a no-op at the base-protocol level except
+\* for the ostate transition. Can be enabled from any state other than
+\* ToBeLeader itself.
+EmptyViewChange(i) ==
+    /\ ostate[i] /= ToBeLeader
+    /\ currentTerm' = [currentTerm EXCEPT ![i] = currentTerm[i] + 1]
+    /\ ostate' = [ostate EXCEPT ![i] = ToBeLeader]
+    /\ role' = [j \in Server |-> IF j = i THEN Pilot
+                                  ELSE IF role[j] = Pilot THEN Copilot
+                                  ELSE role[j]]
+    /\ nextIndex' = [nextIndex EXCEPT ![i] = [j \in Server |-> 1]]
+    /\ matchIndex' = [matchIndex EXCEPT ![i] = [j \in Server |-> 0]]
+    /\ UNCHANGED <<messages, votedFor, candidateVars, logVars,
+                   cpLog, cpBallot>>
+
 (***************************************************************************)
 (* Message plumbing                                                        *)
 (***************************************************************************)
