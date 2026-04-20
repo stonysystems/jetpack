@@ -34,6 +34,11 @@ P50_BASE["epaxos"]=42
 OUT_SUMMARY="$RDIR/summary.csv"
 echo "proto,N,total_tput,max_cpu,avg_cpu,zoo1_tp,zoo2_tp,zoo3_tp,zoo4_tp,zoo5_tp,zoo1_cpu,zoo2_cpu,zoo3_cpu,zoo4_cpu,zoo5_cpu,zoo1_p50,zoo4_p50" > "$OUT_SUMMARY"
 
+# Per-host CPU is now parsed from the "server average" log line (mean of the
+# mid-10s per-second core-N samples). Old runs wrote "server median" instead;
+# if the average line is missing we fall back to median so historical result
+# dirs still parse without re-running them.
+
 for proto_line in "${PROTOS[@]}"; do
   read -r cfg mode label <<< "$proto_line"
   baseline=${P50_BASE[$label]:-80}
@@ -57,7 +62,11 @@ for proto_line in "${PROTOS[@]}"; do
       # Per-host file names use the 1-indexed display name (zoo1..zoo5).
       f="$RDIR/${run_label}-zoo$((zi+1)).res"
       tp=$(grep -m1 "Mid throughput" "$f" 2>/dev/null | awk '{print $NF}')
-      cpu=$(grep -m1 "server median" "$f" 2>/dev/null | awk '{print $NF}')
+      # Prefer the new "server average" line; fall back to legacy "server median".
+      cpu=$(grep -m1 "server average" "$f" 2>/dev/null | awk '{print $NF}')
+      if [ -z "$cpu" ]; then
+        cpu=$(grep -m1 "server median" "$f" 2>/dev/null | awk '{print $NF}')
+      fi
       p50=$(grep "All-efficient.*statistics" "$f" 2>/dev/null | head -1 | awk '{for(i=1;i<=NF;i++) if($i=="50pct") {print $(i+1); exit}}')
       [ -z "$tp" ] && tp=0
       [ -z "$cpu" ] && cpu=0

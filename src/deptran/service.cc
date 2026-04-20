@@ -17,6 +17,7 @@
 #include "rcc/server.h"
 #include "scheduler.h"
 #include "tapir/scheduler.h"
+#include "naive_raft/commo.h"
 #include "../bench/rw/workload.h" //<copilot+ kv debug>
 
 namespace janus {
@@ -138,6 +139,21 @@ void ClassicServiceImpl::Dispatch(const i64& cmd_id,
   shared_ptr<Marshallable> sp = md.sp_data_;
   std::shared_ptr<ViewData> latest_view;
 
+  // naive_raft leader path: kick off the follower broadcast before running
+  // local execution so the two overlap. Followers receive the marker
+  // dep_id.str == "nr_replicate" and skip this branch (fall straight to
+  // local execution + reply, per the default flow below).
+  shared_ptr<QuorumEvent> nr_event;
+  if (Config::GetConfig()->replica_proto_ == MODE_NAIVE_RAFT &&
+      dtxn_sched()->loc_id_ == 1 &&
+      dep_id.str != "nr_replicate") {
+    nr_event = NaiveRaftStartReplicate(dtxn_sched()->commo_,
+                                       dtxn_sched()->partition_id_,
+                                       dtxn_sched()->loc_id_,
+                                       cmd_id,
+                                       md);
+  }
+
   auto dispatch_single_command =
       [&](cmdid_t single_cmd_id, const shared_ptr<Marshallable>& single_cmd) -> int {
         if (!single_cmd) {
@@ -193,7 +209,13 @@ void ClassicServiceImpl::Dispatch(const i64& cmd_id,
   } else {
     view_data->SetMarshallable(std::make_shared<ViewData>());
   }
-  
+
+  // naive_raft leader: block until 2 followers have replied (3/5 simple
+  // majority counting self) before acking the client.
+  if (nr_event) {
+    nr_event->Wait();
+  }
+
   *coro_id = Coroutine::CurrentCoroutine()->id;
   defer->reply();
   // }, __FILE__, cmd_id);

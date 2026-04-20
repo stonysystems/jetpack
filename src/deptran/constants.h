@@ -120,6 +120,15 @@ namespace janus {
 // 4 of 5 replies. Serves as the distributed-work baseline for protocols
 // like CURP/EPaxos/SwiftPaxos that also broadcast and rely on a quorum.
 #define MODE_NAIVE_FASTPATH (0xA001)
+// naive_raft: no real consensus, just a Raft-shaped broadcast on the leader.
+// Client sends Dispatch to the fixed leader (locale_id=1, zoo2/.102); leader
+// broadcasts Dispatch to the 4 followers with dep_id.str="nr_replicate";
+// leader counts itself + waits for 2 follower replies (3/5 simple majority)
+// before executing locally and replying to the client. Followers just
+// execute locally and ack. No log, no election, no heartbeats — a baseline
+// for the CPU/latency cost of the leader-broadcast + majority-quorum shape
+// without the bookkeeping of real Raft.
+#define MODE_NAIVE_RAFT (0xA002)
 #define MODE_NOT_READY     (0x00)
 
 // CURP mode flag for -m parameter (not a protocol mode constant)

@@ -18,6 +18,9 @@ namespace janus {
 // Runtime WAN delay in microseconds. 0 = disabled.
 std::atomic<uint64_t> wan_delay_us{0};
 
+// Runtime server-thread pinning core. 1 = legacy default.
+std::atomic<int> server_core_id{1};
+
 // Static member definitions
 std::map<parid_t, View> Communicator::partition_views_;
 std::mutex Communicator::partition_views_mutex_;
@@ -271,7 +274,9 @@ Communicator::LeaderProxyForPartition(parid_t par_id, int idx) const {
     // the target with any client work (every client host is "remote" to
     // zoo2 in the naive_rpc sweep). "zoo2" = 1-indexed display name for
     // locale 1 / IP .102; internally the locale id is unchanged.
-    int target_locale = (config->replica_proto_ == MODE_NAIVE_RPC) ? 1 : 0;
+    int target_locale =
+        (config->replica_proto_ == MODE_NAIVE_RPC ||
+         config->replica_proto_ == MODE_NAIVE_RAFT) ? 1 : 0;
     auto proxy_it = std::find_if(
         partition_proxies.begin(),
         partition_proxies.end(),
@@ -1768,6 +1773,12 @@ locid_t Communicator::GetLeaderForPartition(parid_t partition_id) {
   // because ClientWorker sets a dynamic leader_callback_ that funnels into
   // this function on every dispatch.
   if (Config::GetConfig()->replica_proto_ == MODE_NAIVE_RPC) {
+    return 1;
+  }
+  // naive_raft: all clients send the initial Dispatch RPC to the fixed
+  // leader at locale_id=1 (zoo2 / .102). The leader-side broadcast to the
+  // 4 followers happens server-side in ClassicServiceImpl::Dispatch.
+  if (Config::GetConfig()->replica_proto_ == MODE_NAIVE_RAFT) {
     return 1;
   }
   View view = GetPartitionView(partition_id);

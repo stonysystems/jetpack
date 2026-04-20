@@ -34,6 +34,11 @@ done
 DURATION=30
 TIMEOUT_SEC=180
 
+# Server-thread pin core. Forwarded to deptran_server via SERVER_CORE_ID and
+# used locally to pick the matching /proc/stat row for CPU parsing.
+SERVER_CORE_ID="${SERVER_CORE_ID:-1}"
+SERVER_CPU_ROW="cpu${SERVER_CORE_ID} "
+
 mkdir -p "$RESULT_DIR"
 
 # Kill leftover deptran_server processes
@@ -75,7 +80,7 @@ sleep 1  # let monitors start
 # system glibc is newer than the docker_libs glibc (e.g. Debian trixie 2.41 vs
 # our Ubuntu 22.04 2.35). Setting only LD_LIBRARY_PATH is insufficient because
 # the system dynamic linker is what gets invoked first.
-SERVER_CMD="export LD_LIBRARY_PATH=${ZOO_DIR}/build/docker_libs:\${HOME}/local/lib:\${LD_LIBRARY_PATH}; export WAN_DELAY_MS=20; cd $ZOO_DIR && ${ZOO_DIR}/build/docker_libs/ld-linux-x86-64.so.2 build/deptran_server -f config/${PROTOCOL_CFG} -f config/client_open.yml -f config/${CLIENT_CFG} -f config/rw_1000000.yml -f config/${CONC_CFG} -m ${MODE} -d ${DURATION}"
+SERVER_CMD="export LD_LIBRARY_PATH=${ZOO_DIR}/build/docker_libs:\${HOME}/local/lib:\${LD_LIBRARY_PATH}; export WAN_DELAY_MS=20; export SERVER_CORE_ID=${SERVER_CORE_ID}; cd $ZOO_DIR && ${ZOO_DIR}/build/docker_libs/ld-linux-x86-64.so.2 build/deptran_server -f config/${PROTOCOL_CFG} -f config/client_open.yml -f config/${CLIENT_CFG} -f config/rw_1000000.yml -f config/${CONC_CFG} -m ${MODE} -d ${DURATION}"
 
 echo "[$LABEL] Command: $SERVER_CMD"
 echo "[$LABEL] Starting experiment..."
@@ -159,7 +164,7 @@ fi
 
 # Parse /proc/stat CPU data: compute per-core and host-level CPU usage
 echo ""
-echo "=== [$LABEL] CPU Usage (core 1 = server thread) ==="
+echo "=== [$LABEL] CPU Usage (core ${SERVER_CORE_ID} = server thread) ==="
 
 parse_cpu_usage() {
     local cpustat_file="$1"
@@ -200,9 +205,9 @@ parse_cpu_usage() {
 for i in "${!servers[@]}"; do
     cpufile="$RESULT_DIR/${LABEL}-${replicanames[$i]}-cpustat.txt"
     if [ -f "$cpufile" ] && [ -s "$cpufile" ]; then
-        read -r c1_avg c1_max <<< "$(parse_cpu_usage "$cpufile" "cpu1 ")"
+        read -r core_avg core_max <<< "$(parse_cpu_usage "$cpufile" "${SERVER_CPU_ROW}")"
         read -r host_avg host_max <<< "$(parse_cpu_usage "$cpufile" "cpu ")"
-        echo "  ${replicanames[$i]}: core1 avg=${c1_avg}% max=${c1_max}%  |  host avg=${host_avg}% max=${host_max}%"
+        echo "  ${replicanames[$i]}: core${SERVER_CORE_ID} avg=${core_avg}% max=${core_max}%  |  host avg=${host_avg}% max=${host_max}%"
     else
         echo "  ${replicanames[$i]}: no CPU data"
     fi

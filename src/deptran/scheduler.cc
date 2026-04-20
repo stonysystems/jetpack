@@ -15,6 +15,7 @@
 #include "../bench/rw/workload.h"
 #include "raft/server.h"
 #include "config.h"
+#include "communicator.h"
 
 #include <algorithm>
 #include <gperftools/profiler.h>
@@ -66,7 +67,9 @@ void TxLogServer::StartCpuMonitorIfNeeded() {
   cpu_monitor_started_ = true;
   cpu_monitor_stop_ = false;
   Coroutine::CreateRun([this]() {
-    const int core_id = 1; // AWS pins server to core 1
+    // Read configured server core (default 1). Matches SERVER_CORE_ID env
+    // var used for thread pinning and for the mid-10s sampling in s_main.
+    const int core_id = server_core_id.load(std::memory_order_relaxed);
     CpuStatSnapshot prev{};
     bool has_prev = false;
     while (!cpu_monitor_stop_) {

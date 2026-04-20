@@ -17,6 +17,11 @@ namespace janus {
 // 0 means disabled (no delay).
 extern std::atomic<uint64_t> wan_delay_us;
 
+// Runtime-configurable core to pin server threads to and sample /proc/stat
+// for. Set via SERVER_CORE_ID env var (default 1). Also used to derive which
+// core client threads should skip to avoid stomping on the server.
+extern std::atomic<int> server_core_id;
+
 static void _wan_wait() {
   uint64_t delay = wan_delay_us.load(std::memory_order_relaxed);
   if (delay > 0) {

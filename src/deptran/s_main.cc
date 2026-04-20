@@ -289,9 +289,13 @@ void client_launch_workers(vector<Config::SiteInfo> &client_sites) {
       Log_info("start a client thread on core %d, client-id:%d", core_id, client_id);
     }
     core_id ++;
-    // Skip core 1 (server thread) and core 4 (occupied by another process)
-    while (core_id == 1 || core_id == 4) {
-      core_id++;
+    // Skip the server core (SERVER_CORE_ID, default 1) and core 4 (another
+    // process). Re-read server core every iteration in case env was updated.
+    {
+      int server_core = server_core_id.load(std::memory_order_relaxed);
+      while (core_id == server_core || core_id == 4) {
+        core_id++;
+      }
     }
 #endif
     client_threads_g.push_back(std::move(th_));
@@ -307,7 +311,7 @@ void server_launch_worker(vector<Config::SiteInfo>& server_sites) {
   svr_workers_g.resize(server_sites.size(), ServerWorker());
   int i=0;
   vector<std::thread> setup_ths;
-  int core_id = 1;
+  int core_id = server_core_id.load(std::memory_order_relaxed);
 #ifdef SIMULATE_WAN
   core_id = 5; //
 #endif
@@ -803,6 +807,16 @@ int main(int argc, char *argv[]) {
 #endif
   }
 
+  // Initialize server-thread pinning core from environment (default 1).
+  {
+    const char* core_env = getenv("SERVER_CORE_ID");
+    if (core_env != nullptr) {
+      int c = atoi(core_env);
+      server_core_id.store(c, std::memory_order_relaxed);
+      Log_info("server core pinning set via SERVER_CORE_ID=%s (core %d)", core_env, c);
+    }
+  }
+
 
 
   auto client_infos = Config::GetConfig()->GetMyClients();
@@ -838,14 +852,32 @@ int main(int argc, char *argv[]) {
     // Monitor CPU usage of the server thread's pinned core during the mid-third
     // of the experiment. getUsage() sleeps for the full duration, sampling
     // /proc/stat for core_id every second during the middle third only.
-    int server_core_id = 1;  // server thread pinned to core 1
-    std::vector<double> cpu_usage = getUsage(server_core_id, Config::GetConfig()->duration_);
+    // server thread pinned to server_core_id (default 1).
+    int svr_core = server_core_id.load(std::memory_order_relaxed);
+    std::vector<double> cpu_usage = getUsage(svr_core, Config::GetConfig()->duration_);
     double memory_during_test = cpu_usage[cpu_usage.size() - 1];
-    Log_info("CORE %d USAGE: ", server_core_id);
+    Log_info("CORE %d USAGE: ", svr_core);
     for(int i = 0; i < cpu_usage.size(); i++){
       Log_info("%.4F", cpu_usage[i]);
     }
+    // Report both median and mean of the mid-10s samples. The mean is the
+    // "per-host avg CPU" headline for this experiment; median is kept for
+    // backward compat with older sweep scripts.
     Log_info("server median : %.3f", median(cpu_usage));
+    {
+      double sum = 0.0;
+      size_t n = 0;
+      for (double v : cpu_usage) {
+        // getUsage() pushes the final memory_during_test sample as the
+        // last element; skip it so the mean reflects CPU samples only.
+        if (n < cpu_usage.size() - 1) {
+          sum += v;
+          n++;
+        }
+      }
+      double avg = (n > 0) ? sum / n : 0.0;
+      Log_info("server average : %.3f", avg);
+    }
     Log_info("memory during test: %.3f", memory_during_test);
     wait_for_clients();
     failover_server_quit = true;

@@ -1105,9 +1105,12 @@ bool Config::IsReplicated() {
   // MODE_NAIVE_FASTPATH is similar: the client-side broadcast to all 5
   // replicas happens in CoordinatorNaiveFastpath; the server side is just
   // SchedulerNone. No separate replication layer is needed.
+  // MODE_NAIVE_RAFT: leader-side broadcast is handled inline in
+  // ClassicServiceImpl::Dispatch; server-side scheduler is still SchedulerNone.
   return (replica_proto_ != MODE_NONE &&
           replica_proto_ != MODE_NAIVE_RPC &&
-          replica_proto_ != MODE_NAIVE_FASTPATH);
+          replica_proto_ != MODE_NAIVE_FASTPATH &&
+          replica_proto_ != MODE_NAIVE_RAFT);
   return true;
 }
 
