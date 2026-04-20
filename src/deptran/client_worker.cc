@@ -854,11 +854,33 @@ ClientWorker::ClientWorker(uint32_t id, Config::SiteInfo& site_info, Config* con
   num_try.store(0);
   commo_ = frame_->CreateCommo(poll_mgr_);
   commo_->loc_id_ = my_site_.locale_id;
-  
+
+  // Resolve naive_epaxos's co-located server locale_id at startup. Clients
+  // have their own locale_id (0..N-1 across *clients*), distinct from
+  // server locale_ids — so we look up the server on the same physical
+  // host and route there. Falls back to -1 (resolved via GetLeaderForPartition)
+  // if no match; every valid deployment should find a match.
+  locid_t naive_epaxos_target_locale = -1;
+  if (config->replica_proto_ == MODE_NAIVE_EPAXOS) {
+    for (auto& s : config->sites_) {
+      if (s.type_ == Config::SERVER && s.host == my_site_.host) {
+        naive_epaxos_target_locale = s.locale_id;
+        break;
+      }
+    }
+    verify(naive_epaxos_target_locale >= 0);
+    Log_info("[NAIVE_EPAXOS] client %s @ %s -> server locale_id=%d",
+             my_site_.name.c_str(), my_site_.host.c_str(),
+             naive_epaxos_target_locale);
+  }
+
   // Set up dynamic leader callback for the communicator
-  commo_->SetLeaderCallback([this](parid_t par_id) {
+  commo_->SetLeaderCallback([this, naive_epaxos_target_locale](parid_t par_id) {
+    if (Config::GetConfig()->replica_proto_ == MODE_NAIVE_EPAXOS) {
+      return naive_epaxos_target_locale;
+    }
     locid_t leader = commo_->GetLeaderForPartition(par_id);
-    // Log_info("[CLIENT_CALLBACK] GetLeaderForPartition(%d) returned %d on communicator %p", 
+    // Log_info("[CLIENT_CALLBACK] GetLeaderForPartition(%d) returned %d on communicator %p",
     //          par_id, leader, commo_);
     return leader;
   });

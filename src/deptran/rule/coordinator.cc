@@ -101,6 +101,40 @@ void CoordinatorRule::GotoNextPhase() {
                      cpu_disabled, go_to_fastpath_,
                      client_worker_->go_to_jetpack_fastpath_cnt_);
           }
+        } else if (Config::GetConfig()->replica_proto_ == MODE_RAFT ||
+                   Config::GetConfig()->replica_proto_ == MODE_FPGA_RAFT) {
+          // Adaptive: at high leader CPU the fast-path spec RPC is pure
+          // overhead on the same pinned core that's already handling the
+          // Raft replication load. Hard-disable fast-path when the leader
+          // is near saturation, so the peak throughput matches plain Raft
+          // instead of falling below it (the spec RPCs steal cycles the
+          // leader would otherwise spend on AppendEntries).
+          //
+          // Threshold 80%: below this, the leader has spare cycles and
+          // fast-path's 1-RTT latency win is worth the extra CPU; above
+          // this, every speculative attempt competes with Raft work.
+          // Randomized so the disable ramps in instead of flipping on at
+          // a hard boundary (same shape as the Mencius throttle above).
+          double avg_leaders = client_worker_->cpu_usage_leaders_.recent_100_ave();
+          static double max_leader_avg_raft = 0.0;
+          if (avg_leaders > max_leader_avg_raft) {
+            max_leader_avg_raft = avg_leaders;
+          }
+          double rand_val = RandomGenerator::rand(0, 30);
+          bool cpu_disabled = (max_leader_avg_raft - 80.0 > rand_val);
+          if (cpu_disabled) {
+            go_to_fastpath_ = false;
+          }
+          static int raft_log_counter = 0;
+          if (++raft_log_counter % 500 == 1) {
+            Log_info("[CPU-RAFT] avg_leaders=%.2f max_leader=%.2f "
+                     "threshold=%.2f rand=%.2f cpu_disabled=%d go_fp=%d "
+                     "fp_cnt=%d",
+                     avg_leaders, max_leader_avg_raft,
+                     max_leader_avg_raft - 80.0, rand_val,
+                     cpu_disabled, go_to_fastpath_,
+                     client_worker_->go_to_jetpack_fastpath_cnt_);
+          }
         }
       } else {
         verify(0);

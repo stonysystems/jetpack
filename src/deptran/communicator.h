@@ -521,7 +521,11 @@ class Communicator {
   // View management methods (static for global access)
   static void UpdatePartitionView(parid_t partition_id, const std::shared_ptr<ViewData>& view_data);
   static View GetPartitionView(parid_t partition_id);
-  static locid_t GetLeaderForPartition(parid_t partition_id);
+  // Non-static (and const) so that client-side callers can return
+  // this->loc_id_ when the protocol wants clients to hit their co-located
+  // server (e.g. MODE_NAIVE_EPAXOS — every server is a leader for its
+  // local clients).
+  locid_t GetLeaderForPartition(parid_t partition_id) const;
   std::pair<int, ClassicProxy*> ConnectToSite(Config::SiteInfo &site,
                                               std::chrono::milliseconds timeout_ms);
   ClientSiteProxyPair ConnectToClientSite(Config::SiteInfo &site,

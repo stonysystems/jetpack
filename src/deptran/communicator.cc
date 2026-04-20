@@ -1766,7 +1766,7 @@ View Communicator::GetPartitionView(parid_t partition_id) {
   return View();
 }
 
-locid_t Communicator::GetLeaderForPartition(parid_t partition_id) {
+locid_t Communicator::GetLeaderForPartition(parid_t partition_id) const {
   // naive_rpc: no consensus, no view updates. Route every client RPC to
   // locale_id=1 (zoo2 / .102) so we can saturate a single isolated server
   // for a CPU ceiling measurement. Must be checked before the view path
@@ -1781,12 +1781,11 @@ locid_t Communicator::GetLeaderForPartition(parid_t partition_id) {
   if (Config::GetConfig()->replica_proto_ == MODE_NAIVE_RAFT) {
     return 1;
   }
-  // naive_epaxos: client sends to its co-located server (every server is
-  // a potential leader for its local clients). loc_id_ on this client
-  // communicator is set by client_worker.cc to the client's own locale.
-  if (Config::GetConfig()->replica_proto_ == MODE_NAIVE_EPAXOS) {
-    return loc_id_;
-  }
+  // naive_epaxos: client sends to its co-located server. Resolution is
+  // done in the client-side leader callback (client_worker.cc) because
+  // that's where we can consult the client's Config::SiteInfo to look up
+  // the server on the same host — commo_->loc_id_ alone is the client's
+  // own locale_id (which is NOT the same as any server's locale_id).
   View view = GetPartitionView(partition_id);
 
   if (!view.IsEmpty()) {
