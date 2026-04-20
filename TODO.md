@@ -62,8 +62,8 @@ Documentation produced:
 
 ### Potential future work (not on current roadmap)
 
-- **Rerun the full 5-protocol adaptive sweep at core-17 pin** (Raft, SwiftPaxos, EPaxos, Jetpack+Raft fp100, Jetpack+Raft adaptive). naive_raft is done (see above); the others should reuse `scripts/run_adaptive_sweep.sh` with `SERVER_CORE_ID=17` to produce directly comparable per-host CPU / p50 / p90 / p99 tables. Estimated ~1 h of cluster time.
-- **Write the core-17 sweep report** once the 5-protocol data is in — should replace the `docs/max_throughput_bisection_2026-04-16.md` summary with the new avg-CPU metric and per-host columns.
+- **Rerun the full 5-protocol adaptive sweep at core-17 pin** (Raft, SwiftPaxos, EPaxos, Jetpack+Raft fp100, Jetpack+Raft adaptive). naive_raft is done (see above); the others reuse `scripts/run_adaptive_sweep.sh` with `SERVER_CORE_ID=17`. Canonical setting: [docs/max_throughput_experiment_setting.md](docs/max_throughput_experiment_setting.md). Each run's results folder gets a self-contained `SETTING.md` snapshot auto-written by the sweep script. Estimated ~1 h of cluster time.
+- **Write the core-17 sweep report** once the 5-protocol data is in — should replace the `docs/max_throughput_bisection_2026-04-16.md` summary with the new avg-CPU metric and per-host columns, following the presentation layout in [docs/max_throughput_experiment_setting.md](docs/max_throughput_experiment_setting.md).
 - **Optional WAN-aware WAN_WAIT** — the current `_wan_wait()` in [communicator.h](src/deptran/communicator.h) delays every RPC unconditionally. The user's experiment spec says "no extra latency when the client and server are colocated," but in practice colocated RPCs still pay the delay. Skipping WAN_WAIT based on src/dst site identity would drop the 1-client baseline from ~82 ms to ~40 ms; currently every protocol's baseline is inflated by this.
 - Push EPaxos past N100 — it didn't hit the 99% stop in the current sweep (peak 19991 @ 98.99%). N=120 or 140 likely reveals its true ceiling.
 - Implement EPaxos slow path (Accept phase when replicas disagree on deps).
