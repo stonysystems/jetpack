@@ -916,16 +916,19 @@ void RaftServer::StartElectionTimer() {
     Log_debug("start timer for election") ;
     double duration = randDuration() ;
     auto check_interval = HEARTBEAT_INTERVAL / 2;
-    // Priority: locale 1 (zoo2) wins elections by default (shortest timeout),
-    // then locale 0, then 2/3/4. Matches the experiment convention that any
-    // leader/master/unique-server role lives on zoo2 (see
-    // docs/max_throughput_experiment_setting.md). Original AWS-branch
-    // timeouts were 10-11s uniformly (no priority) so whoever lost the
-    // random-ordering race became leader. Applied to both AWS and non-AWS
-    // because the zoo cluster compiles with AWS defined (constants.h).
-    int _prio = (frame_->site_info_->locale_id == 1)
-                    ? 1
-                    : (int) frame_->site_info_->locale_id + 2;
+    // Priority: locale 1 (zoo2) wins the initial election with a short
+    // timeout; all other locales have timeouts longer than the experiment
+    // duration so they don't steal leadership when zoo2's heartbeats get
+    // late under load. Without the huge gap for non-zoo2 replicas, a
+    // saturated zoo2 (100% CPU) misses heartbeats, zoo1 times out, sends
+    // RequestVote with a higher term, zoo2 steps down as follower, and
+    // RAFT_ELECTION_ONLY_INIT_AND_POST_FAILURE_ONCE_PATCH prevents zoo2
+    // from being re-elected — leadership thrashes and latency collapses.
+    // Applied to both AWS and non-AWS (AWS is defined in constants.h).
+    // _prio=20 → 100-110s timeout, much longer than the 30s experiment,
+    // but within int range (RandomGenerator::rand uses int, so _prio can't
+    // go much higher without overflow on the multiplication below).
+    int _prio = (frame_->site_info_->locale_id == 1) ? 1 : 20;
 #ifdef AWS
     auto election_timeout = RandomGenerator::rand(_prio * 1000 * HEARTBEAT_INTERVAL,
                                                   _prio * 1100 * HEARTBEAT_INTERVAL);

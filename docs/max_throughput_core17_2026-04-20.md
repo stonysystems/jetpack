@@ -16,26 +16,27 @@ Ranked by peak `cmd/s`.
 | **epaxos** | **27 363** | 137 | 78.2 | 236.7 | 546.9 | 78.8 | 99.5 | 18.2 | 52.5 | 57.7 | 25.5 | **50.7** |
 | **naive_raft** | **18 004** | 90 | 87.5 | 153.1 | 217.2 | 88.0 | 23.1 | 99.8 | 48.6 | 59.6 | 29.7 | **52.2** |
 | **swiftpaxos** | **16 788** | 84 | 43.3 | 44.5 | 68.5 | 43.5 | 99.9 | 69.6 | 93.9 | 93.8 | 83.0 | **88.0** |
-| **raft (zoo2)** | **16 276** | 84 | 734.3 | 831.7 | 908.8 | 734.4 | 19.5 | **100.0** | 42.9 | 50.9 | 27.9 | **48.3** |
+| **raft (zoo2)** | **16 790** | 84 | 98.9 | 146.4 | 205.9 | 99.2 | 21.1 | **99.5** | 49.9 | 57.6 | 28.1 | **51.3** |
+| **jp-raft-adaptive (zoo2)** | **14 189** | 71 | 44.9 | 54.6 | 78.3 | 45.2 | 53.6 | **100.0** | 92.1 | 92.5 | 76.3 | **82.9** |
+| **jp-raft-fp100 (zoo2)** | **13 586** | 68 | 44.5 | 53.8 | 81.5 | 44.9 | 52.2 | **99.9** | 92.7 | 93.6 | 73.7 | **82.4** |
 | **etcd** | **13 002** | 65 | 89.0 | 98.1 | 118.0 | 89.5 | 99.9 | 5.7 | 14.6 | 16.5 | 7.4 | **28.8** |
-| **jp-raft-fp100 (zoo2)** | 10 003 | 50 | 42.2 | 46.7 | 68.9 | 42.6 | 41.1 | 89.7 | 84.7 | 88.5 | 56.4 | **72.1** |
-| **jp-raft-adaptive (zoo2)** | 9 981 | 50 | 42.3 | 47.2 | 80.8 | 42.6 | 41.5 | 89.7 | 83.9 | 88.5 | 58.5 | **72.4** |
 
-**Raft leader on zoo2 confirmed.** At peak N=84 the raft leader core (zoo2) pins at **100.0 %** while the other four replicas sit at 20–51 %. This matches the experiment spec ("if the protocol has a leader/master/unique server, put it on zoo2"). See the per-protocol CSVs for the bisection rows that bracket the peak.
+**Raft leader on zoo2 confirmed.** At peak N=84 the raft leader core (zoo2) pins at **99.5 %** while the other four replicas sit at 21–57 %. This matches the experiment spec ("if the protocol has a leader/master/unique server, put it on zoo2"). See the per-protocol CSVs for the bisection rows that bracket the peak.
 
-Notes on saturation-detection quirks the script exposed:
+**Stable-leader fix** (rerun of raft-family after the earlier pass had tput=0 holes between N=50 and N=100): with `RAFT_ELECTION_ONLY_INIT_AND_POST_FAILURE_ONCE_PATCH` defined, a saturated zoo2 would miss heartbeats, zoo1's election timer would fire, zoo1 would steal leadership with a higher term, and the patch would then block zoo2 from re-winning — leadership thrashed and latency collapsed. Fix: election timeout for `locale_id != 1` set to `20 × 1000 × HEARTBEAT_INTERVAL` (~100 s), well beyond the 30 s experiment duration, so non-zoo2 replicas never time out in-test even if heartbeats slip. With this, jp-raft-fp100 peaks at **13 586** (+36 % vs 10 003 before) and jp-raft-adaptive at **14 189** (+42 % vs 9 981). Adaptive now beats fp100 at saturation — the throttle's CPU-threshold disable (added [src/deptran/rule/coordinator.cc](../src/deptran/rule/coordinator.cc)) kicks in and lets the leader spend cycles on raft replication instead of failed spec RPCs.
 
-- **jp-raft-fp100 and jp-raft-adaptive still collapse between N=50 and N=100.** N=50 is clean (42 ms p50, ~10 k cmd/s, zoo2=90 % CPU). N≥100 frequently records tput=0 — clients fail to aggregate any commands because zoo2 pins at 100 % and the fast-path speculative RPCs drown out progress. The adaptive CPU-threshold disable we added today ([src/deptran/rule/coordinator.cc](../src/deptran/rule/coordinator.cc), threshold 80 % leader CPU) helped at 50 but didn't prevent the 100-client collapse. The "true" peak for these modes likely sits in [50, 100] and needs either a denser sweep or a tighter adaptive throttle to locate.
+Notes on saturation-detection quirks:
+
 - **etcd peak is still zoo1-bound.** Only zoo1 opens the etcd connection pool (per `src/deptran/etcd/server.h:51`, only `locale_id=0` creates connections), so the 5-host avg (28.8 %) badly under-reports what's happening on zoo1 (99.9 %). The real bottleneck is zoo1's single core.
 
 ## Peak ordering
 
-**naive_epaxos > epaxos > naive_raft > swiftpaxos ≈ raft > etcd > jp-raft-fp100 ≈ jp-raft-adaptive.**
+**naive_epaxos > epaxos > naive_raft > swiftpaxos ≈ raft > jp-raft-adaptive ≈ jp-raft-fp100 > etcd.**
 
 Two notable clusters:
 
 1. **Distributed-leader protocols dominate.** naive_epaxos (44 k), epaxos (27 k), and naive_raft (18 k) distribute work across all 5 replicas and hit 44 k+ peaks because no single replica pins until much later in the sweep. naive_epaxos's peak is **2.5 × naive_raft's** — the "per-site leader" design (every server is a leader for its own local clients) spreads write load evenly, while naive_raft concentrates all writes on zoo2.
-2. **Fixed-leader protocols pin early.** raft (zoo2), swiftpaxos, etcd (zoo1 only for connection pool), and jp-raft-* all hit their ceiling when a single replica reaches ~100 % core-17 CPU. Raft and SwiftPaxos peaks are nearly identical (~16 k cmd/s) because both saturate their leader core at similar rates; SwiftPaxos keeps p50 at ~43 ms (1 RTT) while Raft's p50 blows up to 734 ms once zoo2 pins.
+2. **Fixed-leader protocols pin early.** raft (zoo2), swiftpaxos, jp-raft-*, etcd (zoo1 only for connection pool) all hit their ceiling when a single replica reaches ~100 % core-17 CPU. Raft and SwiftPaxos peaks are nearly identical (~16–17 k cmd/s); both saturate the leader core at similar rates. SwiftPaxos keeps p50 at ~43 ms (1 RTT) while Raft's p50 stays near 99 ms at peak (still comfortably under the 156 ms stop threshold). Jetpack+Raft variants trade peak for latency: ~13–14 k cmd/s at 45 ms p50 — lower ceiling than plain Raft because the fast-path spec RPCs compete with raft replication on the same pinned leader core.
 
 ## Baseline latencies at N=1 (client co-located with leader)
 
@@ -58,9 +59,8 @@ CSVs with every N attempted (including bisection steps): `<result_dir>/<proto>-a
 
 ## Open issues surfaced
 
-1. **jp-raft-* collapse at N=100+** — the rule_raft mode hits a rapid latency cliff that the adaptive throttle's CPU-based cutoff (added today at 80 % leader CPU, `src/deptran/rule/coordinator.cc`) didn't prevent. N=100 zoo2 latency data is dropped entirely (`zoo2_p50=0`) — likely a client-side aggregation bug when zoo2 clients have pending commands at shutdown. The tuning still needs a tighter threshold and/or the client-aggregation fix.
-2. **Stop criterion fragility** — baseline and stop both look at zoo2 p50 only. When zoo2 reports 0 (missing-data sentinel) at saturated N, the zoo2 clause doesn't trip and bisection runs on other zoo hosts' latencies. A future iteration of the sweep script should fall back to max-across-clients p50 when zoo2 is -1 or 0.
-3. **naive_rpc and naive_fastpath** were not rerun under core-17 today. The 2026-04-19 results ([docs/naive_rpc_zoo2_saturation_2026-04-19.md](naive_rpc_zoo2_saturation_2026-04-19.md), [docs/naive_fastpath_2026-04-19.md](naive_fastpath_2026-04-19.md)) are still the reference. The core-17 rerun is a small follow-up if directly-comparable numbers are needed.
+1. **Stop criterion fragility** — baseline and stop both look at zoo2 p50 only. When zoo2 reports 0 (missing-data sentinel) at saturated N, the zoo2 clause doesn't trip and bisection runs on other zoo hosts' latencies. A future iteration of the sweep script should fall back to max-across-clients p50 when zoo2 is -1 or 0.
+2. **naive_rpc and naive_fastpath** were not rerun under core-17 today. The 2026-04-19 results ([docs/naive_rpc_zoo2_saturation_2026-04-19.md](naive_rpc_zoo2_saturation_2026-04-19.md), [docs/naive_fastpath_2026-04-19.md](naive_fastpath_2026-04-19.md)) are still the reference. The core-17 rerun is a small follow-up if directly-comparable numbers are needed.
 
 ## Commands to reproduce
 
