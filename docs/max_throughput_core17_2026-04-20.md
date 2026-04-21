@@ -20,6 +20,7 @@ Ranked by peak `cmd/s`.
 | **jp-raft-adaptive (zoo2)** | **14 189** | 71 | 44.9 | 54.6 | 78.3 | 45.2 | 53.6 | **100.0** | 92.1 | 92.5 | 76.3 | **82.9** |
 | **jp-raft-fp100 (zoo2)** | **13 586** | 68 | 44.5 | 53.8 | 81.5 | 44.9 | 52.2 | **99.9** | 92.7 | 93.6 | 73.7 | **82.4** |
 | **etcd** | **13 002** | 65 | 89.0 | 98.1 | 118.0 | 89.5 | 99.9 | 5.7 | 14.6 | 16.5 | 7.4 | **28.8** |
+| **CURP (zoo2)** | **11 973** | 60 | 44.2 | 56.9 | 89.2 | 44.4 | 49.9 | **96.2** | 86.0 | 81.9 | 68.9 | **76.6** |
 
 **Raft leader on zoo2 confirmed.** At peak N=84 the raft leader core (zoo2) pins at **99.5 %** while the other four replicas sit at 21–57 %. This matches the experiment spec ("if the protocol has a leader/master/unique server, put it on zoo2"). See the per-protocol CSVs for the bisection rows that bracket the peak.
 
@@ -31,12 +32,14 @@ Notes on saturation-detection quirks:
 
 ## Peak ordering
 
-**naive_epaxos > epaxos > naive_raft > swiftpaxos ≈ raft > jp-raft-adaptive ≈ jp-raft-fp100 > etcd.**
+**naive_epaxos > epaxos > naive_raft > swiftpaxos ≈ raft > jp-raft-adaptive ≈ jp-raft-fp100 > etcd > CURP.**
 
 Two notable clusters:
 
 1. **Distributed-leader protocols dominate.** naive_epaxos (44 k), epaxos (27 k), and naive_raft (18 k) distribute work across all 5 replicas and hit 44 k+ peaks because no single replica pins until much later in the sweep. naive_epaxos's peak is **2.5 × naive_raft's** — the "per-site leader" design (every server is a leader for its own local clients) spreads write load evenly, while naive_raft concentrates all writes on zoo2.
 2. **Fixed-leader protocols pin early.** raft (zoo2), swiftpaxos, jp-raft-*, etcd (zoo1 only for connection pool) all hit their ceiling when a single replica reaches ~100 % core-17 CPU. Raft and SwiftPaxos peaks are nearly identical (~16–17 k cmd/s); both saturate the leader core at similar rates. SwiftPaxos keeps p50 at ~43 ms (1 RTT) while Raft's p50 stays near 99 ms at peak (still comfortably under the 156 ms stop threshold). Jetpack+Raft variants trade peak for latency: ~13–14 k cmd/s at 45 ms p50 — lower ceiling than plain Raft because the fast-path spec RPCs compete with raft replication on the same pinned leader core.
+
+**CURP notes.** Peak 11 973 @ N=60 with 5-host avg 76.6 % (zoo2 96.2 %, zoo3/4 80–86 %, zoo5 69 %, zoo1 50 %). The adaptive sweep only gave us two usable points (N=50, N=100 — the rest collapsed to tput=0 or bimodal p99 > 7 s), so a dense manual sweep at N=55/60/65/70 located the real saturation between N=60 and N=65. Above N=60, zoo2 pins at 100 % and p99 spikes into seconds while p50 stays at 42 ms — a sign of long tail queueing, not clean saturation. CURP peaks lower than jp-raft-* despite the leader-skip optimization because witness replicas (zoo3/4/5) still do `command_pool_.push_back` on every command, so non-leader CPU is ~69–86 % here vs 74–94 % for jp-raft-fp100 — similar distributed cost, but plain Raft replication runs alongside the CURP speculative path on the leader.
 
 ## Baseline latencies at N=1 (client co-located with leader)
 
@@ -52,6 +55,7 @@ Measured zoo2 p50 at N=1 (used as stop_p50 / 2). All baselines are inflated by 2
 | epaxos | 41.51 | 1-RTT |
 | jp-raft-fp100 | 41.63 | 1-RTT |
 | jp-raft-adaptive | 41.61 | 1-RTT |
+| CURP | 41.58 | 1-RTT |
 
 ## Full per-N tables
 
