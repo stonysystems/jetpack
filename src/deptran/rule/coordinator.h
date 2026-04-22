@@ -29,6 +29,11 @@ class CoordinatorRule : public CoordinatorClassic {
   void GotoNextPhase() override;
   void BroadcastRuleSpeculativeExecute(int cmd_ver);
   void DispatchAsync(bool fastpath_broadcast_mode);
+  // Fused path: sends one DispatchWithRuleSpec RPC to the leader and
+  // RuleSpeculativeExecute to the N-1 followers. Replaces the separate
+  // DispatchAsync + BroadcastRuleSpeculativeExecute pair when the merge
+  // flag is on and the protocol has a single leader.
+  void DispatchAndSpeculativeExecuteFused(int cmd_ver);
 };
 
 } // namespace janus

@@ -157,8 +157,18 @@ class Frequency {
 };
 
 class RevoveryCandidates {
-  // <cmd_id, cmd>
-  unordered_map<uint64_t, shared_ptr<Marshallable>> candidates_;
+ public:
+  // Entry cached per cmd_id. Storing is_write here avoids re-parsing the
+  // Marshallable during remove() (the old code constructed a full
+  // SimpleRWCommand just to call IsWrite()). 8-byte shared_ptr + 1 bool
+  // (padded to 16 bytes) per entry.
+  struct Entry {
+    shared_ptr<Marshallable> cmd;
+    bool is_write;
+  };
+ private:
+  // <cmd_id, entry>
+  unordered_map<uint64_t, Entry> candidates_;
   unordered_map<uint64_t, bool> appeared_;
   int total_write_ = 0;
   uint64_t to_recover_id_ = -1;
@@ -395,6 +405,32 @@ class TxLogServer {
   bool cpu_monitor_started_{false};
   double last_cpu_usage_{-1.0};
   bool cpu_monitor_stop_{false};
+
+  // Lightweight profiling counters for Jetpack hot paths. Sampled on every
+  // spec RPC handler / dispatch RPC handler / Raft OnAppendEntries invocation
+  // and printed at shutdown. Atomic so coroutines on the same thread and any
+  // worker threads both contribute safely.
+  std::atomic<uint64_t> prof_spec_calls_{0};
+  std::atomic<uint64_t> prof_spec_ns_{0};
+  std::atomic<uint64_t> prof_dispatch_calls_{0};
+  std::atomic<uint64_t> prof_dispatch_ns_{0};
+  std::atomic<uint64_t> prof_pool_push_calls_{0};
+  std::atomic<uint64_t> prof_pool_push_ns_{0};
+  // Sub-phases of push_back: outer map lookup, inner bucket insert/vote,
+  // conflict-detection path. Helps answer "is unordered_map the bottleneck?"
+  std::atomic<uint64_t> prof_pool_extract_ns_{0};
+  std::atomic<uint64_t> prof_pool_outer_lookup_ns_{0};
+  std::atomic<uint64_t> prof_pool_inner_insert_ns_{0};
+  // Pool remove / has_appeared
+  std::atomic<uint64_t> prof_pool_remove_calls_{0};
+  std::atomic<uint64_t> prof_pool_remove_ns_{0};
+  std::atomic<uint64_t> prof_pool_has_appeared_calls_{0};
+  std::atomic<uint64_t> prof_pool_has_appeared_ns_{0};
+  // Peak pool sizes (outer distinct keys; inner cmd count)
+  std::atomic<uint64_t> prof_pool_peak_keys_{0};
+  std::atomic<uint64_t> prof_pool_peak_cmds_{0};
+  std::atomic<uint64_t> prof_append_entries_calls_{0};
+  std::atomic<uint64_t> prof_append_entries_ns_{0};
 
   void *svr_workers_g{nullptr};
 

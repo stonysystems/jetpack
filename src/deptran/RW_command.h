@@ -32,6 +32,15 @@ class SimpleRWCommand: public Marshallable {
   static double GetCommandMsTime(shared_ptr<Marshallable> cmd);
   static double GetCommandMsTimeElaps(shared_ptr<Marshallable> cmd);
   static key_t GetKey(shared_ptr<Marshallable> cmd);
+  // Lightweight extractor for hot paths (e.g. JetpackCommandPool::push_back):
+  // reads key/cmd_id/is_write directly from the underlying TxPieceData's input
+  // map without copying it. The full SimpleRWCommand(cmd) constructor deep-
+  // copies the value map twice, which adds ~1-2 μs per spec RPC at 10k/s.
+  // Returns false if cmd type isn't parseable (behaves like verify(0) path).
+  static bool ExtractPoolKeys(const shared_ptr<Marshallable>& cmd,
+                              key_t* key,
+                              uint64_t* cmd_id,
+                              bool* is_write);
   static bool NeedRecordConflictInOriginalPath(shared_ptr<Marshallable> cmd);
   static bool Conflict(shared_ptr<Marshallable> cmd1, shared_ptr<Marshallable> cmd2);
   static uint64_t CombineInt32(pair<uint32_t, uint32_t> a) {

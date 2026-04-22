@@ -202,6 +202,77 @@ CommunicatorRule::BroadcastRuleSpeculativeExecute(shared_ptr<vector<shared_ptr<S
   return e;
 }
 
+// Leader-skipping variant used with the fused DispatchWithRuleSpec path.
+//
+// Semantics mirror CURP: the leader is excluded from the fastpath vote. The
+// rationale is that the fused RPC drives the normal Dispatch (Raft log entry)
+// on the leader, which is a stronger durability guarantee than the spec vote.
+// So the client forms fastpath quorum from follower votes alone:
+//   n_rpc         = n_total - 1       (only followers vote)
+//   n_leaders_rpc = 0                 (leader vote not required)
+// This lets fastpath commit in 1 RTT from follower spec RPCs — without
+// waiting for the leader's fused reply, which has to wait for Raft
+// replication (2 RTTs) and would otherwise defeat the fastpath latency win.
+// The fused Dispatch reply still arrives eventually; it drives the slowpath
+// if the fastpath quorum is not reached.
+shared_ptr<RuleSpeculativeExecuteQuorumEvent>
+CommunicatorRule::BroadcastRuleSpeculativeExecuteSkipLeader(shared_ptr<vector<shared_ptr<SimpleCommand>>> vec_piece_data) {
+  verify(!vec_piece_data->empty());
+  auto par_id = vec_piece_data->at(0)->PartitionId();
+
+  shared_ptr<VecPieceData> sp_vpd(new VecPieceData);
+  sp_vpd->sp_vec_piece_data_ = vec_piece_data;
+  MarshallDeputy md(sp_vpd);
+
+  int n_total = Config::GetConfig()->GetPartitionSize(par_id);
+
+  siteid_t leader_site_id = Communicator::LeaderProxyForPartition(par_id).first;
+  int n_rpc = n_total - 1;          // followers only
+  int n_leaders_rpc = 0;            // leader vote not required for fastpath
+  auto e = Reactor::CreateSpEvent<RuleSpeculativeExecuteQuorumEvent>(
+      n_rpc, SimpleRWCommand::RuleSuperMajority(n_rpc), n_leaders_rpc);
+  WAN_WAIT;
+  for (auto& pair : rpc_par_proxies_[par_id]) {
+    if (pair.first == leader_site_id) continue;  // leader handled by fused RPC
+    rrr::FutureAttr fuattr;
+    fuattr.callback =
+        [e, this](Future* fu) {
+          if (fu->get_error_code() != 0) {
+            Log_info("Get a error message in reply");
+            return;
+          }
+          bool_t accepted;
+          value_t result;
+          bool_t is_leader;
+          double cpu_usage;
+          double queue_depth;
+          fu->get_reply() >> accepted >> result >> is_leader >> cpu_usage >> queue_depth;
+          e->FeedResponse(accepted, result, is_leader, cpu_usage, queue_depth);
+        };
+
+    DepId di;
+    di.str = "dep";
+    di.id = Communicator::global_id++;
+
+    auto proxy = pair.second;
+
+    // Record Time
+    struct timeval tp;
+    gettimeofday(&tp, NULL);
+    sp_vpd->time_sent_from_client_ = tp.tv_sec * 1000 + tp.tv_usec / 1000.0;
+
+    auto future = proxy->async_RuleSpeculativeExecute(md, fuattr);
+    Future::safe_release(future);
+  }
+
+  // Do NOT wait here: the event completes on follower votes alone (leader
+  // is skipped, see header comment). The caller races this event against
+  // the fused DispatchWithRuleSpec reply to the leader and wins on whichever
+  // completes first (fastpath via followers, or slowpath via dispatch ack).
+  // coordinator waits on the event after issuing both paths.
+  return e;
+}
+
 
 void CommunicatorRule::BroadcastDispatch(
     bool fastpath_broadcast_mode,
@@ -284,7 +355,85 @@ void CommunicatorRule::BroadcastDispatch(
     auto future = proxy->async_Dispatch(cmd_id, di, md, fuattr);
     Future::safe_release(future);
   }
-  
+
+}
+
+
+void CommunicatorRule::BroadcastDispatchWithRuleSpec(
+    shared_ptr<vector<shared_ptr<TxPieceData>>> sp_vec_piece,
+    Coordinator* coo,
+    shared_ptr<RuleSpeculativeExecuteQuorumEvent> spec_event,
+    const function<void(int, TxnOutput&)> & callback) {
+  Log_debug("Do a fused dispatch+rule-spec on client worker");
+  cmdid_t cmd_id = sp_vec_piece->at(0)->root_id_;
+  verify(!sp_vec_piece->empty());
+  auto par_id = sp_vec_piece->at(0)->PartitionId();
+
+  rrr::FutureAttr fuattr;
+  fuattr.callback =
+      [coo, this, callback, par_id, spec_event](Future* fu) {
+        if (fu->get_error_code() != 0) {
+          Log_info("Get a error message in reply");
+          return;
+        }
+        int32_t ret;
+        TxnOutput outputs;
+        uint64_t coro_id = 0;
+        MarshallDeputy view_md;
+        bool_t accepted;
+        int32_t spec_result;
+        bool_t is_leader;
+        double cpu_usage;
+        double queue_depth;
+        fu->get_reply() >> ret >> outputs >> coro_id >> view_md
+                        >> accepted >> spec_result >> is_leader
+                        >> cpu_usage >> queue_depth;
+
+        if (ret == WRONG_LEADER && view_md.sp_data_ != nullptr) {
+          auto sp_view_data = dynamic_pointer_cast<ViewData>(view_md.sp_data_);
+          if (sp_view_data) {
+            UpdatePartitionView(par_id, sp_view_data);
+          }
+        }
+
+        // The leader's fastpath vote is intentionally not fed into the spec
+        // quorum event — the event was constructed for N-1 follower votes
+        // only (see BroadcastRuleSpeculativeExecuteSkipLeader). The leader's
+        // CPU/queue-depth samples are still useful for the adaptive throttle;
+        // feed them through to the event's stats without voting.
+        if (cpu_usage >= 0.0) {
+          // Piggyback stats: FeedResponse updates totals before voting; but
+          // we don't want an extra vote. Spec event has no "stats-only"
+          // entry point today, so just drop these samples for now — the
+          // adaptive controller relies on follower samples which still feed
+          // the event normally. (Follow-up: add a StatsOnly hook if the
+          // CPU heuristic regresses.)
+          (void)cpu_usage; (void)queue_depth; (void)is_leader;
+          (void)accepted; (void)spec_result;
+        }
+
+        callback(ret, outputs);
+      };
+
+  shared_ptr<VecPieceData> sp_vpd(new VecPieceData);
+  sp_vpd->sp_vec_piece_data_ = sp_vec_piece;
+  sp_vpd->time_sent_from_client_ = SimpleRWCommand::GetCurrentMsTime();
+  MarshallDeputy md(sp_vpd);
+
+  DepId di;
+  di.str = "dep";
+  di.id = Communicator::global_id++;
+
+  WAN_WAIT;
+
+  // Route to the current leader only (same lookup the split path uses for
+  // the Dispatch leg when fastpath is on).
+  auto pair_leader_proxies = LeaderProxyForPartition(par_id);
+  for (auto pair_leader_proxy : pair_leader_proxies) {
+    auto proxy = pair_leader_proxy.second;
+    auto future = proxy->async_DispatchWithRuleSpec(cmd_id, di, md, fuattr);
+    Future::safe_release(future);
+  }
 }
 
 

@@ -96,6 +96,11 @@ class Config {
   // Jetpack fast path mode
   int jetpack_fastpath_attempt_rate_ = 0;
   int jetpack_recovery_batch_size_ = 1000;
+  // When true and fastpath is active for a txn, the leader's Dispatch RPC and
+  // RuleSpeculativeExecute RPC are fused into a single DispatchWithRuleSpec
+  // RPC. Reduces per-txn leader-side RPC dispatch overhead (total RPCs drops
+  // from N+1 to N, leader handles 1 RPC instead of 2).
+  bool jetpack_merge_leader_rpc_ = false;
 
   enum SiteInfoType { CLIENT, SERVER };
   struct SiteInfo {

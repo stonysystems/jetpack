@@ -200,6 +200,10 @@ abstract service Classic {
                                double queue_depth);
   defer Dispatch(i64 tid, DepId dep_id, MarshallDeputy cmd |
                  i32 res, TxnOutput output, uint64_t coro_id, MarshallDeputy view_data);
+  defer DispatchWithRuleSpec(i64 tid, DepId dep_id, MarshallDeputy cmd |
+                             i32 res, TxnOutput output, uint64_t coro_id, MarshallDeputy view_data,
+                             bool_t accepted, int32_t spec_result, bool_t is_leader,
+                             double cpu_usage, double queue_depth);
   defer Prepare(i64 tid, 
                 vector<i32> sids,
                 DepId dep_id | 

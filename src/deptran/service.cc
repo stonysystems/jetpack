@@ -90,6 +90,46 @@ void ClassicServiceImpl::Dispatch(const i64& cmd_id,
                                   uint64_t* coro_id,
                                   MarshallDeputy* view_data,
                                   rrr::DeferredReply* defer) {
+  DispatchInner(cmd_id, dep_id, md, res, output, coro_id, view_data);
+  defer->reply();
+}
+
+void ClassicServiceImpl::DispatchWithRuleSpec(const i64& cmd_id,
+                                              const DepId& dep_id,
+                                              const MarshallDeputy& md,
+                                              int32_t* res,
+                                              TxnOutput* output,
+                                              uint64_t* coro_id,
+                                              MarshallDeputy* view_data,
+                                              bool_t* accepted,
+                                              int32_t* spec_result,
+                                              bool_t* is_leader,
+                                              double* cpu_usage,
+                                              double* queue_depth,
+                                              rrr::DeferredReply* defer) {
+  // Fused leader-side handler: run the speculative vote first (it observes
+  // pre-dispatch state, same as the split-RPC ordering when fastpath is on),
+  // then drive the normal Dispatch replication pipeline. Single coroutine,
+  // single reply — halves the per-txn RPC dispatch cost on the leader.
+  shared_ptr<Marshallable> sp = md.sp_data_;
+  dtxn_sched()->OnRuleSpeculativeExecute(sp, accepted, spec_result, is_leader,
+                                         cpu_usage, queue_depth);
+  // Always drive dispatch and always reply. If paused, OnRuleSpeculativeExecute
+  // already set accepted=false, which the client's spec quorum will treat as a
+  // rejection — the dispatch half still needs to ack so the protocol (Raft
+  // etc.) is not held up.
+  DispatchInner(cmd_id, dep_id, md, res, output, coro_id, view_data);
+  defer->reply();
+}
+
+void ClassicServiceImpl::DispatchInner(const i64& cmd_id,
+                                       const DepId& dep_id,
+                                       const MarshallDeputy& md,
+                                       int32_t* res,
+                                       TxnOutput* output,
+                                       uint64_t* coro_id,
+                                       MarshallDeputy* view_data) {
+  auto prof_t0 = std::chrono::steady_clock::now();
   // usleep(20000);
 
 #ifdef LATENCY_LOG_DEBUG
@@ -237,7 +277,13 @@ void ClassicServiceImpl::Dispatch(const i64& cmd_id,
   }
 
   *coro_id = Coroutine::CurrentCoroutine()->id;
-  defer->reply();
+  auto prof_t1 = std::chrono::steady_clock::now();
+  dtxn_sched_->prof_dispatch_calls_.fetch_add(1, std::memory_order_relaxed);
+  dtxn_sched_->prof_dispatch_ns_.fetch_add(
+      std::chrono::duration_cast<std::chrono::nanoseconds>(prof_t1 - prof_t0).count(),
+      std::memory_order_relaxed);
+  // defer->reply() is called by the outer handler (Dispatch or
+  // DispatchWithRuleSpec) after any additional work is done.
   // }, __FILE__, cmd_id);
   // auto func = [cmd_id, sp, output, dep_id, res, coro_id, this, defer]() {
   //   *res = SUCCESS;

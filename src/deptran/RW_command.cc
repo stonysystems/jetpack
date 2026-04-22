@@ -203,6 +203,54 @@ key_t SimpleRWCommand::GetKey(shared_ptr<Marshallable> cmd) {
   return parsed_cmd.key_;
 }
 
+bool SimpleRWCommand::ExtractPoolKeys(const shared_ptr<Marshallable>& cmd,
+                                      key_t* key,
+                                      uint64_t* cmd_id,
+                                      bool* is_write) {
+  // Walk the cmd -> VecPieceData -> first piece path without copying the
+  // value map. Mirrors the branch logic of the full SimpleRWCommand ctor,
+  // but stops at the three fields we need.
+  verify(cmd != nullptr);
+  shared_ptr<TxPieceData> vector0;
+  if (unlikely(cmd->kind_ == MarshallDeputy::CMD_TPC_BATCH)) {
+    shared_ptr<TpcBatchCommand> batch_cmd = dynamic_pointer_cast<TpcBatchCommand>(cmd);
+    verify(batch_cmd->Size() == 1);
+    shared_ptr<TpcCommitCommand> tpc_cmd = batch_cmd->cmds_[0];
+    VecPieceData *cmd_cast = (VecPieceData*)(tpc_cmd->cmd_.get());
+    vector0 = *(cmd_cast->sp_vec_piece_data_->begin());
+  } else if (likely(cmd->kind_ == MarshallDeputy::CMD_TPC_COMMIT)) {
+    shared_ptr<TpcCommitCommand> tpc_cmd = dynamic_pointer_cast<TpcCommitCommand>(cmd);
+    VecPieceData *cmd_cast = (VecPieceData*)(tpc_cmd->cmd_.get());
+    vector0 = *(cmd_cast->sp_vec_piece_data_->begin());
+  } else if (cmd->kind_ == MarshallDeputy::CMD_VEC_PIECE) {
+    shared_ptr<VecPieceData> cmd_cast = dynamic_pointer_cast<VecPieceData>(cmd);
+    vector0 = *(cmd_cast->sp_vec_piece_data_->begin());
+  } else if (cmd->kind_ == MarshallDeputy::CONTAINER_CMD) {
+    vector0 = dynamic_pointer_cast<TxPieceData>(cmd);
+  } else {
+    return false;
+  }
+
+  // cmd_id: pack client_id + cmd_id_in_client via the same scheme used in
+  // JetpackCommandPool::push_back (CombineInt32).
+  *cmd_id = SimpleRWCommand::CombineInt32(vector0->client_id_,
+                                          vector0->cmd_id_in_client_);
+
+  // key: read directly from the shared_ptr'd map; no copy.
+  // value_events_ isn't touched; values_ at key 0 is the workload key.
+  const auto& kv_map = *(vector0->input.values_);
+  auto it = kv_map.find(0);
+  if (it == kv_map.end()) {
+    return false;
+  }
+  *key = it->second.get_i32();
+
+  // is_write: derived from the piece type, same mapping as IsWrite().
+  int32_t t = vector0->type_;
+  *is_write = (t == RW_BENCHMARK_W_TXN || t == RW_BENCHMARK_W_TXN_0);
+  return true;
+}
+
 bool SimpleRWCommand::NeedRecordConflictInOriginalPath(shared_ptr<Marshallable> cmd) {
   shared_ptr<vector<shared_ptr<SimpleCommand>>> sp_vec_piece{nullptr};
   shared_ptr<TxPieceData> vector0;

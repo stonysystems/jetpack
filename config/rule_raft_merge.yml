@@ -1,0 +1,9 @@
+mode:
+  cc: rule # concurrency control
+  ab: raft # atomic broadcast
+  batch: false
+  retry: 20
+  ongoing: 1 # per client
+  # Fuse leader-side Dispatch + RuleSpeculativeExecute into a single RPC.
+  # Reduces per-txn leader RPC count from 2 to 1 (total from N+1 to N).
+  jetpack_merge_leader_rpc: true

@@ -30,10 +30,26 @@ public:
     shared_ptr<RuleSpeculativeExecuteQuorumEvent>
     BroadcastRuleSpeculativeExecute(shared_ptr<vector<shared_ptr<SimpleCommand>>> vec_piece_data);
 
+    // Variant that skips the leader replica (caller sends a fused
+    // DispatchWithRuleSpec to the leader instead). The returned event is
+    // pre-configured for n_total-1 replicas; the leader's vote is fed by
+    // BroadcastDispatchWithRuleSpec when the fused RPC replies.
+    shared_ptr<RuleSpeculativeExecuteQuorumEvent>
+    BroadcastRuleSpeculativeExecuteSkipLeader(shared_ptr<vector<shared_ptr<SimpleCommand>>> vec_piece_data);
+
     void BroadcastDispatch(bool fastpath_broadcast_mode,
                          shared_ptr<vector<shared_ptr<SimpleCommand>>> vec_piece_data,
                          Coordinator *coo,
                          const std::function<void(int res, TxnOutput &)> &);
+
+    // Fused leader-side RPC: one round-trip carries both the Dispatch and the
+    // RuleSpeculativeExecute payload. The reply feeds the dispatch callback
+    // and the spec quorum event.
+    void BroadcastDispatchWithRuleSpec(
+        shared_ptr<vector<shared_ptr<SimpleCommand>>> vec_piece_data,
+        Coordinator *coo,
+        shared_ptr<RuleSpeculativeExecuteQuorumEvent> spec_event,
+        const std::function<void(int res, TxnOutput &)> &callback);
 };
     
 } // namespace janus

@@ -65,6 +65,35 @@ class ClassicServiceImpl : public ClassicService {
                 MarshallDeputy* view_data,
                 DeferredReply* defer_reply) override;
 
+  void DispatchWithRuleSpec(const i64& cmd_id,
+                            const DepId& dep_id,
+                            const MarshallDeputy& cmd,
+                            int32_t* res,
+                            TxnOutput* output,
+                            uint64_t* coro_id,
+                            MarshallDeputy* view_data,
+                            bool_t* accepted,
+                            int32_t* spec_result,
+                            bool_t* is_leader,
+                            double* cpu_usage,
+                            double* queue_depth,
+                            DeferredReply* defer_reply) override;
+
+ private:
+  // Shared body for Dispatch and DispatchWithRuleSpec. Runs the dispatch
+  // pipeline (original-path conflict placeholder + protocol replication) but
+  // does NOT call defer->reply() — the caller does that after any other work
+  // (e.g. running the spec vote in the fused handler).
+  void DispatchInner(const i64& cmd_id,
+                     const DepId& dep_id,
+                     const MarshallDeputy& cmd,
+                     int32_t* res,
+                     TxnOutput* output,
+                     uint64_t* coro_id,
+                     MarshallDeputy* view_data);
+
+ public:
+
   void FailoverPauseSocketOut(rrr::i32* res,
                               rrr::DeferredReply* defer) override ;
 

@@ -511,6 +511,7 @@ void TxLogServer::OnRuleSpeculativeExecute(const shared_ptr<Marshallable>& cmd,
                     bool_t* is_leader,
                     double* cpu_usage,
                     double* queue_depth) {
+  auto prof_t0 = std::chrono::steady_clock::now();
   if (paused_) { // [Jetpack] Bad fix, should be blocked from handle_write, not to this layer
     *accepted = false;
     *result = 0;
@@ -529,12 +530,24 @@ void TxLogServer::OnRuleSpeculativeExecute(const shared_ptr<Marshallable>& cmd,
   } else {
     // Jetpack path (all replicas) or CURP non-leader (witness): check command pool
 #ifdef ZERO_OVERHEAD
+    auto pool_t0 = std::chrono::steady_clock::now();
     no_conflict = rep_sched_->command_pool_.push_back(cmd) && !rep_sched_->ConflictWithOriginalUnexecutedLog(cmd);
+    auto pool_t1 = std::chrono::steady_clock::now();
+    rep_sched_->prof_pool_push_calls_.fetch_add(1, std::memory_order_relaxed);
+    rep_sched_->prof_pool_push_ns_.fetch_add(
+        std::chrono::duration_cast<std::chrono::nanoseconds>(pool_t1 - pool_t0).count(),
+        std::memory_order_relaxed);
 #else
 #ifdef JETPACK_RECOVERY_DEBUG
     Log_info("[JETPACK-DEBUG] OnRuleSpeculativeExecute about to push_back loc_id %d ", loc_id_);
 #endif
+    auto pool_t0 = std::chrono::steady_clock::now();
     no_conflict = rep_sched_->command_pool_.push_back(cmd);
+    auto pool_t1 = std::chrono::steady_clock::now();
+    rep_sched_->prof_pool_push_calls_.fetch_add(1, std::memory_order_relaxed);
+    rep_sched_->prof_pool_push_ns_.fetch_add(
+        std::chrono::duration_cast<std::chrono::nanoseconds>(pool_t1 - pool_t0).count(),
+        std::memory_order_relaxed);
 #endif
   }
   if (no_conflict) {
@@ -557,6 +570,11 @@ void TxLogServer::OnRuleSpeculativeExecute(const shared_ptr<Marshallable>& cmd,
   if (queue_depth) {
     *queue_depth = GetQueueDepthForRule();
   }
+  auto prof_t1 = std::chrono::steady_clock::now();
+  prof_spec_calls_.fetch_add(1, std::memory_order_relaxed);
+  prof_spec_ns_.fetch_add(
+      std::chrono::duration_cast<std::chrono::nanoseconds>(prof_t1 - prof_t0).count(),
+      std::memory_order_relaxed);
 }
 
 void TxLogServer::OriginalPathUnexecutedCmdConflictPlaceHolder(const shared_ptr<Marshallable>& cmd) {
@@ -602,11 +620,10 @@ bool TxLogServer::ConflictWithUncommittedRaftLog(const shared_ptr<Marshallable>&
 }
 
 void RevoveryCandidates::push_back(uint64_t cmd_id, shared_ptr<Marshallable> cmd, bool is_write) {
-  candidates_[cmd_id] = cmd;
+  candidates_[cmd_id] = Entry{cmd, is_write};
   if (total_write_ == 0 && is_write) {
     verify(to_recover_id_ == (uint64_t)(-1));
     to_recover_id_ = cmd_id;
-    // Log_info("[JETPACK-CommandPool] Set to_recover_id_ = %lu (first write)", cmd_id);
   }
   total_write_ += is_write;
 #ifdef JETPACK_DEDUPLICATE_OPTIMIZATION
@@ -617,12 +634,13 @@ void RevoveryCandidates::push_back(uint64_t cmd_id, shared_ptr<Marshallable> cmd
 bool RevoveryCandidates::remove(uint64_t cmd_id) {
   auto it = candidates_.find(cmd_id);
   if (it != candidates_.end()) {
-    SimpleRWCommand parsed_cmd = SimpleRWCommand(it->second);
-    if (total_write_ == 1 && parsed_cmd.IsWrite()) {
+    // is_write is cached in Entry — no SimpleRWCommand reparse needed.
+    bool was_write = it->second.is_write;
+    if (total_write_ == 1 && was_write) {
       to_recover_id_ = (uint64_t)(-1);
     }
-    total_write_ -= parsed_cmd.IsWrite();
-    candidates_.erase(cmd_id);
+    total_write_ -= was_write;
+    candidates_.erase(it);
     return 1;
   } else {
     return 0;
@@ -646,22 +664,19 @@ bool RevoveryCandidates::has_cmd_to_recover() const {
 }
 
 shared_ptr<Marshallable> RevoveryCandidates::cmd_to_recover() {
-  
   if (to_recover_id_ != (uint64_t)(-1)) {
-    if (candidates_.find(to_recover_id_) != candidates_.end()) {
-      return candidates_[to_recover_id_];
-    } else {
-      return nullptr;
+    auto it = candidates_.find(to_recover_id_);
+    if (it != candidates_.end()) {
+      return it->second.cmd;
     }
-  } else {
-    return nullptr;
   }
+  return nullptr;
 }
 
 shared_ptr<Marshallable> RevoveryCandidates::get_cmd(uint64_t cmd_id) const {
   auto it = candidates_.find(cmd_id);
   if (it != candidates_.end()) {
-    return it->second;
+    return it->second.cmd;
   }
   return nullptr;
 }
@@ -712,16 +727,33 @@ bool JetpackCommandPool::push_back(const shared_ptr<Marshallable>& cmd) {
 #endif
     return false;
   }
-  SimpleRWCommand parsed_cmd = SimpleRWCommand(cmd);
-  key_t key = parsed_cmd.key_;
-  uint64_t cmd_id = SimpleRWCommand::CombineInt32(parsed_cmd.cmd_id_.first, parsed_cmd.cmd_id_.second);
+  // Phase 1: extract key/cmd_id/is_write from cmd (no map copy).
+  auto t_ext0 = std::chrono::steady_clock::now();
+  key_t key;
+  uint64_t cmd_id;
+  bool is_write;
+  if (!SimpleRWCommand::ExtractPoolKeys(cmd, &key, &cmd_id, &is_write)) {
+    verify(0);
+  }
+  auto t_ext1 = std::chrono::steady_clock::now();
+  // Phase 2: outer unordered_map lookup (candidates_[key]).
   auto& bucket = candidates_[key];
+  auto t_lookup1 = std::chrono::steady_clock::now();
+  if (owner_) {
+    owner_->prof_pool_extract_ns_.fetch_add(
+        std::chrono::duration_cast<std::chrono::nanoseconds>(t_ext1 - t_ext0).count(),
+        std::memory_order_relaxed);
+    owner_->prof_pool_outer_lookup_ns_.fetch_add(
+        std::chrono::duration_cast<std::chrono::nanoseconds>(t_lookup1 - t_ext1).count(),
+        std::memory_order_relaxed);
+  }
   bool was_empty = bucket.size() == 0;
-  
+
 #ifdef JETPACK_RECOVERY_DEBUG
   Log_info("[JETPACK-DEBUG] JetpackCommandPool::push_back called for key=%d, cmd_id=%lu", key, cmd_id);
 #endif
 
+  auto t_inner0 = std::chrono::steady_clock::now();
 #ifdef READ_NOT_CONFLICT_OPTIMIZATION
   if (bucket.total_write() == 0) {
 #endif
@@ -729,8 +761,7 @@ bool JetpackCommandPool::push_back(const shared_ptr<Marshallable>& cmd) {
   if (bucket.size() == 0) {
 #endif
     // not exist conflict
-    // Log_info("[JETPACK-CommandPool] candidates_[%d].push_back %lu", key, cmd_id);
-    bucket.push_back(cmd_id, cmd, parsed_cmd.IsWrite());
+    bucket.push_back(cmd_id, cmd, is_write);
 #ifdef JETPACK_RECOVERY_DEBUG
     Log_info("[JETPACK-DEBUG] Added cmd to candidates[%d], no conflict", key);
 #endif
@@ -738,54 +769,94 @@ bool JetpackCommandPool::push_back(const shared_ptr<Marshallable>& cmd) {
     pool_log_.push_back(CommandPoolLog(0, cmd, 1, pool_size_));
 #endif
 #ifdef COMMAND_POOL_ON_DISK
-    WriteCommandToDisk(parsed_cmd);
+    // Disk write still needs value; fall back to full parse on the rare path.
+    WriteCommandToDisk(SimpleRWCommand(cmd));
 #endif
     pool_cmd_count_++;
     if (was_empty) {
       pool_size_distribution_.mid_time_append(++pool_size_);
     }
+    auto t_inner1 = std::chrono::steady_clock::now();
+    if (owner_) {
+      owner_->prof_pool_inner_insert_ns_.fetch_add(
+          std::chrono::duration_cast<std::chrono::nanoseconds>(t_inner1 - t_inner0).count(),
+          std::memory_order_relaxed);
+      uint64_t prev_keys = owner_->prof_pool_peak_keys_.load(std::memory_order_relaxed);
+      while ((uint64_t)pool_size_ > prev_keys &&
+             !owner_->prof_pool_peak_keys_.compare_exchange_weak(prev_keys, pool_size_));
+      uint64_t prev_cmds = owner_->prof_pool_peak_cmds_.load(std::memory_order_relaxed);
+      while ((uint64_t)pool_cmd_count_ > prev_cmds &&
+             !owner_->prof_pool_peak_cmds_.compare_exchange_weak(prev_cmds, pool_cmd_count_));
+    }
     return true;
   } else {
     // exist conflict, candidates_[key].size() >= 1
-    // Log_info("[JETPACK-CommandPool] candidates_[%d].push_back %lu", key, cmd_id);
-    bucket.push_back(cmd_id, cmd, parsed_cmd.IsWrite());
+    bucket.push_back(cmd_id, cmd, is_write);
 #ifdef JETPACK_RECOVERY_DEBUG
-    Log_info("[JETPACK-DEBUG] Added cmd to candidates[%d], WITH conflict (size now=%zu)", 
+    Log_info("[JETPACK-DEBUG] Added cmd to candidates[%d], WITH conflict (size now=%zu)",
              key, bucket.size());
 #endif
 #ifdef COMMAND_POOL_LOG_DEBUG
     pool_log_.push_back(CommandPoolLog(0, cmd, 0, pool_size_));
 #endif
     pool_cmd_count_++;
+    auto t_inner1 = std::chrono::steady_clock::now();
+    if (owner_) {
+      owner_->prof_pool_inner_insert_ns_.fetch_add(
+          std::chrono::duration_cast<std::chrono::nanoseconds>(t_inner1 - t_inner0).count(),
+          std::memory_order_relaxed);
+    }
     return false;
   }
 }
 
 int JetpackCommandPool::remove(const shared_ptr<Marshallable>& cmd) {
+  auto t_rm0 = std::chrono::steady_clock::now();
+  auto rm_bookkeep = [&]() {
+    if (owner_) {
+      auto t_rm1 = std::chrono::steady_clock::now();
+      owner_->prof_pool_remove_calls_.fetch_add(1, std::memory_order_relaxed);
+      owner_->prof_pool_remove_ns_.fetch_add(
+          std::chrono::duration_cast<std::chrono::nanoseconds>(t_rm1 - t_rm0).count(),
+          std::memory_order_relaxed);
+    }
+  };
   if (cmd->kind_ != MarshallDeputy::CMD_TPC_BATCH) {
-    SimpleRWCommand parsed_cmd = SimpleRWCommand(cmd);
-    auto& bucket = candidates_[parsed_cmd.key_];
+    // Lightweight extract — no full SimpleRWCommand (saves ~1 μs per call at
+    // 10k/s). Same optimization as push_back.
+    key_t key;
+    uint64_t cmd_id;
+    bool is_write;  // unused in remove path, but cheap to compute
+    if (!SimpleRWCommand::ExtractPoolKeys(cmd, &key, &cmd_id, &is_write)) {
+      verify(0);
+    }
+    auto& bucket = candidates_[key];
     size_t before_size = bucket.size();
-    bool removed = bucket.remove(SimpleRWCommand::CombineInt32(parsed_cmd.cmd_id_.first, parsed_cmd.cmd_id_.second));
+    bool removed = bucket.remove(cmd_id);
     if (removed) {
       pool_cmd_count_--;
       if (before_size == 1) {
         pool_size_distribution_.mid_time_append(--pool_size_);
-        // if (bucket.size() == 0) candidates_.erase(parsed_cmd.key_);
       }
     }
 #ifdef COMMAND_POOL_LOG_DEBUG
     pool_log_.push_back(CommandPoolLog(1, cmd, removed, pool_size_));
 #endif
+    rm_bookkeep();
     return removed;
   } else {
     auto cmds = dynamic_pointer_cast<TpcBatchCommand>(cmd);
     int total_removed = 0;
     for (auto& c: cmds->cmds_) {
-      SimpleRWCommand parsed_cmd = SimpleRWCommand(c);
-      auto& bucket = candidates_[parsed_cmd.key_];
+      key_t key;
+      uint64_t cmd_id;
+      bool is_write;
+      if (!SimpleRWCommand::ExtractPoolKeys(c, &key, &cmd_id, &is_write)) {
+        verify(0);
+      }
+      auto& bucket = candidates_[key];
       size_t before_size = bucket.size();
-      bool removed = bucket.remove(SimpleRWCommand::CombineInt32(parsed_cmd.cmd_id_.first, parsed_cmd.cmd_id_.second));
+      bool removed = bucket.remove(cmd_id);
       if (removed) {
         pool_cmd_count_--;
         if (before_size == 1) {
@@ -798,16 +869,29 @@ int JetpackCommandPool::remove(const shared_ptr<Marshallable>& cmd) {
       pool_log_.push_back(CommandPoolLog(1, c, removed, pool_size_));
 #endif
     }
+    rm_bookkeep();
     return total_removed;
   }
 }
 
 bool JetpackCommandPool::has_appeared(const shared_ptr<Marshallable>& cmd) {
+  auto t_ha0 = std::chrono::steady_clock::now();
+  auto ha_bookkeep = [&]() {
+    if (owner_) {
+      auto t_ha1 = std::chrono::steady_clock::now();
+      owner_->prof_pool_has_appeared_calls_.fetch_add(1, std::memory_order_relaxed);
+      owner_->prof_pool_has_appeared_ns_.fetch_add(
+          std::chrono::duration_cast<std::chrono::nanoseconds>(t_ha1 - t_ha0).count(),
+          std::memory_order_relaxed);
+    }
+  };
   // For a batched command, return whether all of them have appeared
   if (cmd->kind_ != MarshallDeputy::CMD_TPC_BATCH) {
     SimpleRWCommand parsed_cmd = SimpleRWCommand(cmd);
     uint64_t cmd_id = SimpleRWCommand::CombineInt32(parsed_cmd.cmd_id_.first, parsed_cmd.cmd_id_.second);
-    return candidates_[parsed_cmd.key_].has_appeared(cmd_id);
+    bool r = candidates_[parsed_cmd.key_].has_appeared(cmd_id);
+    ha_bookkeep();
+    return r;
   } else {
     auto cmds = dynamic_pointer_cast<TpcBatchCommand>(cmd);
     bool all_has_appeared = true;
@@ -819,6 +903,7 @@ bool JetpackCommandPool::has_appeared(const shared_ptr<Marshallable>& cmd) {
         break;
       }
     }
+    ha_bookkeep();
     return all_has_appeared;
   }
 }

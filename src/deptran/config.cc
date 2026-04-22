@@ -578,6 +578,10 @@ void Config::LoadModeYML(YAML::Node config) {
   if (config["jetpack_recovery_batch_size"]) {
     jetpack_recovery_batch_size_ = config["jetpack_recovery_batch_size"].as<int>();
   }
+  if (config["jetpack_merge_leader_rpc"]) {
+    jetpack_merge_leader_rpc_ = config["jetpack_merge_leader_rpc"].as<bool>();
+    Log_info("[Jetpack] jetpack_merge_leader_rpc = %d", jetpack_merge_leader_rpc_ ? 1 : 0);
+  }
 }
 
 void Config::UpdateWeights(YAML::Node config) {

@@ -181,12 +181,30 @@ void CoordinatorRule::GotoNextPhase() {
         sp_vec_piece_by_par_[par_id] = sp_vec_piece;
       }
 
-      DispatchAsync(go_to_fastpath_ || Config::GetConfig()->replica_proto_ == MODE_COPILOT); // Copilot fast path or not both need to send to pilot and copilot
+      {
+        // Merge mode: single-leader protocols with fastpath on send one
+        // fused DispatchWithRuleSpec RPC to the leader (covers both the
+        // normal Dispatch and the spec vote) and spec RPCs to followers.
+        int proto = Config::GetConfig()->replica_proto_;
+        bool single_leader_proto = (proto == MODE_RAFT ||
+                                    proto == MODE_FPGA_RAFT ||
+                                    proto == MODE_MONGODB ||
+                                    proto == MODE_ETCD ||
+                                    proto == MODE_ZOOKEEPER);
+        bool use_merge = go_to_fastpath_ &&
+                         Config::GetConfig()->jetpack_merge_leader_rpc_ &&
+                         single_leader_proto;
+        if (use_merge) {
+          DispatchAndSpeculativeExecuteFused(phase_cp);
+        } else {
+          DispatchAsync(go_to_fastpath_ || Config::GetConfig()->replica_proto_ == MODE_COPILOT); // Copilot fast path or not both need to send to pilot and copilot
 
-      if (go_to_fastpath_) {
-        BroadcastRuleSpeculativeExecute(phase_cp);
-      } else {
-        // Do nothing
+          if (go_to_fastpath_) {
+            BroadcastRuleSpeculativeExecute(phase_cp);
+          } else {
+            // Do nothing
+          }
+        }
       }
       break;
     case Phase::DISPATCHED:
@@ -351,6 +369,101 @@ void CoordinatorRule::BroadcastRuleSpeculativeExecute(int phase) {
   }
   result_ = e->GetResult();
   // fast_path_success_ = false;
+  if (phase != phase_) return;
+  if (fast_path_success_)
+    GotoNextPhase();
+}
+
+void CoordinatorRule::DispatchAndSpeculativeExecuteFused(int phase) {
+  // Fused path: skip the leader in the spec fan-out and fire a single
+  // DispatchWithRuleSpec RPC to the leader whose reply also feeds the spec
+  // quorum event. Total RPCs: N (1 fused to leader + N-1 spec to followers)
+  // vs. N+1 in the split path. Leader sees 1 RPC instead of 2.
+  auto txn = (TxData*) cmd_;
+  auto cmds_by_par = cmds_by_par_;
+  // [Jetpack] only supports partition = 1 for the rule layer today; the
+  // split path has the same verify below. Keep this constraint explicit.
+  verify(cmds_by_par.size() == 1);
+
+  // 1) Spec quorum event: launch follower-only spec RPCs, do NOT wait.
+  //    The quorum event is sized for N-1 follower votes only; the leader's
+  //    dispatch in the fused RPC provides a stronger guarantee than a spec
+  //    vote (full Raft log entry), so fastpath can commit once followers
+  //    form quorum — no waiting on the fused reply's 2-RTT round trip.
+  //    Lock protects coordinator state while issuing the RPCs; released
+  //    before e->Wait() to avoid deadlocking against DispatchAck which
+  //    also takes mtx_ when the fused reply arrives on another coroutine.
+  shared_ptr<RuleSpeculativeExecuteQuorumEvent> e;
+  parid_t par_id = cmds_by_par.begin()->first;
+  {
+    std::unique_lock<std::recursive_mutex> lock(mtx_);
+    auto sp_vec_piece = sp_vec_piece_by_par_[par_id];
+    verify(sp_vec_piece->size() == 1);  // matches split path's per-piece assumption
+    shared_ptr<VecPieceData> sp_vpd(new VecPieceData);
+    sp_vpd->sp_vec_piece_data_ = sp_vec_piece;
+    sp_vpd_ = sp_vpd;
+#ifdef MONGODB_DEBUG
+    Log_info("%.2f DispatchAndSpeculativeExecuteFused <%d, %d>",
+             SimpleRWCommand::GetMsTimeElaps(),
+             SimpleRWCommand::GetCmdID(sp_vpd_).first,
+             SimpleRWCommand::GetCmdID(sp_vpd_).second);
+#endif
+    e = ((CommunicatorRule *)commo())
+            ->BroadcastRuleSpeculativeExecuteSkipLeader(sp_vec_piece);
+
+    // 2) Fused leader RPC: carries both Dispatch and RuleSpeculativeExecute
+    //    payload in a single round trip. The leader's spec vote in the
+    //    reply is intentionally not fed into the quorum event (see above);
+    //    only the dispatch callback is invoked, driving the slowpath if
+    //    the follower spec quorum is not reached.
+    ((CommunicatorRule *)commo())->BroadcastDispatchWithRuleSpec(
+        sp_vec_piece,
+        this,
+        e,
+        std::bind(&CoordinatorClassic::DispatchAck,
+                  this,
+                  phase_,
+                  dispatch_time_,
+                  std::placeholders::_1,
+                  std::placeholders::_2));
+  }  // release mtx_ before waiting
+
+  // 3) Wait for spec quorum from the N-1 follower votes.
+  e->Wait();
+  if (client_worker_) {
+    client_worker_->cpu_usage_all_.append(e->AvgCpuAll());
+    client_worker_->cpu_usage_leaders_.append(e->AvgCpuLeaders());
+    double leader_queue_depth = e->LeaderQueueDepth();
+    if (leader_queue_depth >= 0.0) {
+      client_worker_->queue_depth_.append(leader_queue_depth);
+    }
+  }
+#ifdef MONGODB_DEBUG
+  Log_info("%.2f DispatchAndSpeculativeExecuteFused after wait <%d, %d>",
+           SimpleRWCommand::GetMsTimeElaps(),
+           SimpleRWCommand::GetCmdID(sp_vpd_).first,
+           SimpleRWCommand::GetCmdID(sp_vpd_).second);
+#endif
+
+  bool latency_window = dispatch_duration_3_times_ > Config::GetConfig()->duration_ * 1000 &&
+                        dispatch_duration_3_times_ < Config::GetConfig()->duration_ * 2 * 1000;
+  bool skip_latency = latency_window && (txn->reply_.res_ == WRONG_LEADER || aborted_);
+  if (latency_window && !skip_latency) {
+    client_worker_->cli2cli_[0].append(SimpleRWCommand::GetCurrentMsTime() - dispatch_time_);
+  }
+  if (e->Yes()) {
+    fast_path_success_ = true;
+    if (latency_window && !skip_latency)
+      client_worker_->cli2cli_[1].append(SimpleRWCommand::GetCurrentMsTime() - dispatch_time_);
+    if (!skip_latency) {
+      client_worker_->cli2cli_[6+cmd_is_write_].append(SimpleRWCommand::GetCurrentMsTime() - dispatch_time_);
+    }
+  } else if (e->No() || e->timeouted_) {
+    fast_path_success_ = false;
+  } else {
+    verify(0);
+  }
+  result_ = e->GetResult();
   if (phase != phase_) return;
   if (fast_path_success_)
     GotoNextPhase();

@@ -429,6 +429,63 @@ void client_shutdown() {
 
 void server_shutdown() {
   Log_info("server_shutdown");
+  // Profiling: print accumulated timing counters from Jetpack hot paths.
+  // Counters are spread across two schedulers per worker: the RPC-handler
+  // scheduler (tx_sched) carries spec/dispatch counters (they're accessed via
+  // dtxn_sched() in ClassicServiceImpl), while the replication scheduler
+  // (rep_sched) carries pool_push and append_entries counters.
+  auto fmt_avg = [](uint64_t n, uint64_t ns) -> double {
+    return n ? (double)ns / n / 1000.0 : 0.0;  // microseconds
+  };
+  for (auto &worker : svr_workers_g) {
+    TxLogServer* tx = worker.tx_sched_;
+    TxLogServer* rep = worker.rep_sched_;
+    if (!tx && !rep) continue;
+    uint64_t spec_n = tx ? tx->prof_spec_calls_.load() : 0;
+    uint64_t spec_ns = tx ? tx->prof_spec_ns_.load() : 0;
+    uint64_t disp_n = tx ? tx->prof_dispatch_calls_.load() : 0;
+    uint64_t disp_ns = tx ? tx->prof_dispatch_ns_.load() : 0;
+    // Also fold in rep_sched's own spec/dispatch counters in case some
+    // protocols dispatch through it directly.
+    if (rep && rep != tx) {
+      spec_n += rep->prof_spec_calls_.load();
+      spec_ns += rep->prof_spec_ns_.load();
+      disp_n += rep->prof_dispatch_calls_.load();
+      disp_ns += rep->prof_dispatch_ns_.load();
+    }
+    uint64_t pool_n = rep ? rep->prof_pool_push_calls_.load() : 0;
+    uint64_t pool_ns = rep ? rep->prof_pool_push_ns_.load() : 0;
+    uint64_t ae_n = rep ? rep->prof_append_entries_calls_.load() : 0;
+    uint64_t ae_ns = rep ? rep->prof_append_entries_ns_.load() : 0;
+    // Sub-phase breakdown and extra pool ops
+    uint64_t pool_ext_ns = rep ? rep->prof_pool_extract_ns_.load() : 0;
+    uint64_t pool_out_ns = rep ? rep->prof_pool_outer_lookup_ns_.load() : 0;
+    uint64_t pool_in_ns = rep ? rep->prof_pool_inner_insert_ns_.load() : 0;
+    uint64_t pool_rm_n = rep ? rep->prof_pool_remove_calls_.load() : 0;
+    uint64_t pool_rm_ns = rep ? rep->prof_pool_remove_ns_.load() : 0;
+    uint64_t pool_ha_n = rep ? rep->prof_pool_has_appeared_calls_.load() : 0;
+    uint64_t pool_ha_ns = rep ? rep->prof_pool_has_appeared_ns_.load() : 0;
+    uint64_t pool_peak_keys = rep ? rep->prof_pool_peak_keys_.load() : 0;
+    uint64_t pool_peak_cmds = rep ? rep->prof_pool_peak_cmds_.load() : 0;
+    locid_t loc = rep ? rep->loc_id_ : (tx ? tx->loc_id_ : -1);
+    Log_info("[PROF] loc=%d spec_calls=%lu spec_avg_us=%.2f spec_total_ms=%.2f | "
+             "dispatch_calls=%lu dispatch_avg_us=%.2f dispatch_total_ms=%.2f | "
+             "pool_push_calls=%lu pool_push_avg_us=%.2f pool_push_total_ms=%.2f | "
+             "append_entries_calls=%lu append_entries_avg_us=%.2f append_entries_total_ms=%.2f",
+             loc,
+             spec_n, fmt_avg(spec_n, spec_ns), spec_ns / 1e6,
+             disp_n, fmt_avg(disp_n, disp_ns), disp_ns / 1e6,
+             pool_n, fmt_avg(pool_n, pool_ns), pool_ns / 1e6,
+             ae_n, fmt_avg(ae_n, ae_ns), ae_ns / 1e6);
+    Log_info("[PROF-POOL] loc=%d peak_keys=%lu peak_cmds=%lu | "
+             "push_breakdown extract_ms=%.2f outer_lookup_ms=%.2f inner_insert_ms=%.2f | "
+             "remove_calls=%lu remove_avg_us=%.2f remove_total_ms=%.2f | "
+             "has_appeared_calls=%lu has_appeared_avg_us=%.2f has_appeared_total_ms=%.2f",
+             loc, pool_peak_keys, pool_peak_cmds,
+             pool_ext_ns / 1e6, pool_out_ns / 1e6, pool_in_ns / 1e6,
+             pool_rm_n, fmt_avg(pool_rm_n, pool_rm_ns), pool_rm_ns / 1e6,
+             pool_ha_n, fmt_avg(pool_ha_n, pool_ha_ns), pool_ha_ns / 1e6);
+  }
   for (auto &worker : svr_workers_g) {
     worker.ShutDown();
   }
