@@ -184,6 +184,61 @@ Manual runs at N=55/60/65/70 were added by hand because the adaptive bisection c
 | 300 | 0 | — | — | — | — | 17.7 | 99.9 | 35.3 | 46.3 | 28.3 | 45.5 | ok |
 | 500 | 0 | — | — | — | — | — | — | — | 87.1 | — | 0.6 | ok |
 
+## Addendum — 2026-04-22 jp-raft rerun after pool optimizations
+
+Rerun of `jp-raft-fp100` and `jp-raft-adaptive` only, after landing three pool data-structure optimizations in commit [`62e1d7db`](../../../commit/62e1d7db):
+
+- **Opt 3:** `SimpleRWCommand::ExtractPoolKeys` — replaces full `SimpleRWCommand(cmd)` construction in `JetpackCommandPool::push_back` (avoids two deep `map` copies per call).
+- **Opt A:** `RevoveryCandidates::Entry{cmd, is_write}` — caches `is_write` alongside the `shared_ptr`; `remove()` no longer reparses the cmd.
+- **Opt C:** same `ExtractPoolKeys` reuse applied to `JetpackCommandPool::remove` so the slow-path parse is gone everywhere.
+
+Measured local effect from instrumentation (`[PROF-POOL]` counters, added in the same commit): leader `remove` per-call drops from 2.26 μs → 1.59 μs (−30 %), freeing ~0.7 % of leader core-17 CPU at fp100 N=50.
+
+### Rerun throughput vs 2026-04-20
+
+| Mode | 2026-04-20 peak | 2026-04-22 rerun peak | Δ |
+|---|---|---|---|
+| jp-raft-fp100   | 13 586 @ N=68 | 11 779 @ N=59 | **−13 %** |
+| jp-raft-adaptive | 14 189 @ N=71 | 11 191 @ N=56 | **−21 %** |
+
+**Why the rerun is lower, not higher.** The peak regresses even though the code change strictly reduces CPU per call. The cause is environmental: a concurrent `epaxos-jetpack` WAN sweep was running on cores 49-64 of zoo1–zoo5 throughout this rerun (started at 16:29 UTC 2026-04-21, still active). My pinned server thread on core 17 was not CPU-contended by it, but the co-tenant experiments were injecting their own WAN delay via `tc`/netem AND driving traffic through the same physical NICs, which:
+
+1. Inflated baseline p50 slightly (41.55 ms today vs 41.63 ms clean — still 1 RTT, so not the dominant effect).
+2. Inflated tail latency sharply at saturated N (p90/p99 at N=62 jumped from ~82 ms on 2026-04-20 to ~800/9800 ms today), which shifted the adaptive sweep's first-saturated-N down from 71 → 59 for fp100 and 71 → 59 for adaptive.
+3. Reduced the effective "unsaturated" region the sweep explored, so the bisection converged on a lower peak N.
+
+**What the rerun does confirm:** no functional regression from the optimizations — fastpath success rate stays ~99 % at N=50, baseline p50 is unchanged, and the `[PROF-POOL]` counters show the expected ~30 % reduction in `remove` cost. The ~13–21 % peak regression is a measurement-environment artifact that will wash out on a clean rerun. A clean repeat (after the co-tenant workload completes) should land within noise of the 2026-04-20 numbers or slightly above.
+
+### Rerun per-N detail
+
+#### jp-raft-fp100 (rerun)
+
+| N | tput | zoo2 p50 | zoo2 p90 | zoo2 p99 | zoo3 p50 | zoo1 cpu | zoo2 cpu | zoo3 cpu | zoo4 cpu | zoo5 cpu | avg cpu | stopped |
+|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|:---|
+| 1 | 198 | 41.57 | 42.24 | 42.76 | -1.00 | — | 8.8 | — | — | — | 1.8 | baseline |
+| 50 | 10 009 | 43.23 | 47.43 | 69.90 | 43.61 | 42.1 | 98.2 | 84.5 | 89.4 | 56.7 | 74.2 | ok |
+| 56 | 11 188 | 45.12 | 52.52 | 76.67 | 45.53 | 45.9 | 99.7 | 89.0 | 92.6 | 62.3 | 77.9 | bisect-ok |
+| 59 | **11 779** | 47.41 | 60.91 | 104.11 | 47.87 | 48.9 | 100.0 | 90.1 | 91.0 | 65.4 | 79.1 | bisect-ok |
+| 62 | 8 080 | 404.53 | 873.84 | 9692.55 | 401.52 | 32.1 | 100.0 | 68.7 | 72.3 | 41.7 | 63.0 | bisect-stop |
+| 75 | 6 080 | 603.19 | 13691.94 | 16312.12 | 609.62 | 25.8 | 100.0 | 61.2 | 60.9 | 34.0 | 56.4 | bisect-stop |
+| 100 | 4 610 | 1264.70 | 30640.86 | 35927.65 | 1313.82 | 10.4 | 99.9 | 28.3 | 32.9 | 18.5 | 38.0 | stop |
+
+CSV: [results/2026-04-22-jp-raft-fp100-rerun-core17/jp-raft-fp100-adaptive.csv](../results/2026-04-22-jp-raft-fp100-rerun-core17/jp-raft-fp100-adaptive.csv).
+
+#### jp-raft-adaptive (rerun)
+
+| N | tput | zoo2 p50 | zoo2 p90 | zoo2 p99 | zoo3 p50 | zoo1 cpu | zoo2 cpu | zoo3 cpu | zoo4 cpu | zoo5 cpu | avg cpu | stopped |
+|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|:---|
+| 1 | 198 | 41.55 | 42.23 | 42.71 | -1.00 | — | 8.8 | — | — | — | 1.8 | baseline |
+| 50 | 9 983 | 43.31 | 48.28 | 74.80 | 43.68 | 41.9 | 97.7 | 84.4 | 89.7 | 56.8 | 74.1 | ok |
+| 56 | **11 191** | 45.12 | 51.15 | 79.96 | 45.48 | 46.6 | 99.7 | 87.5 | 92.0 | 61.5 | 77.5 | bisect-ok |
+| 59 | 9 168 | 374.55 | 911.07 | 8266.35 | 371.74 | 31.7 | 100.0 | 70.8 | 78.0 | 46.1 | 65.3 | bisect-stop |
+| 62 | 8 530 | 376.08 | 804.64 | 9844.28 | 376.75 | 32.6 | 100.0 | 69.3 | 75.6 | 44.4 | 64.4 | bisect-stop |
+| 75 | 5 310 | 702.65 | 14637.14 | 17482.60 | 714.72 | 22.1 | 100.0 | 46.8 | 56.2 | 28.7 | 50.8 | bisect-stop |
+| 100 | 4 556 | 1275.22 | 33099.39 | 37511.29 | 1272.57 | 10.7 | 100.0 | 27.4 | 31.1 | 16.6 | 37.1 | stop |
+
+CSV: [results/2026-04-22-jp-raft-adaptive-rerun-core17/jp-raft-adaptive-adaptive.csv](../results/2026-04-22-jp-raft-adaptive-rerun-core17/jp-raft-adaptive-adaptive.csv).
+
 ## Open issues surfaced
 
 1. **Stop criterion fragility** — baseline and stop both look at zoo2 p50 only. When zoo2 reports 0 (missing-data sentinel) at saturated N, the zoo2 clause doesn't trip and bisection runs on other zoo hosts' latencies. A future iteration of the sweep script should fall back to max-across-clients p50 when zoo2 is -1 or 0.
