@@ -1028,7 +1028,9 @@ void RaftServer::OnAppendEntries(const slotid_t slot_id,
                                  uint64_t *followerCurrentTerm,
                                  uint64_t *followerLastLogIndex,
                                  const function<void()> &cb) {
+#ifdef JETPACK_PROF
   auto prof_t0 = std::chrono::steady_clock::now();
+#endif
   std::lock_guard<std::recursive_mutex> lock(mtx_);
   // if (cmd != nullptr) {
   //   Log_debug("[APPEND_ENTRIES_RECEIVED] Follower %d: received NEW log entry from leader %d, leaderTerm=%ld, prevLogIndex=%ld, prevLogTerm=%ld, leaderCommit=%ld, currentTerm=%ld, lastLogIndex=%ld", 
@@ -1159,11 +1161,13 @@ void RaftServer::OnAppendEntries(const slotid_t slot_id,
 	usleep(25*1000);
 }*/
     cb();
+#ifdef JETPACK_PROF
     auto prof_t1 = std::chrono::steady_clock::now();
     prof_append_entries_calls_.fetch_add(1, std::memory_order_relaxed);
     prof_append_entries_ns_.fetch_add(
         std::chrono::duration_cast<std::chrono::nanoseconds>(prof_t1 - prof_t0).count(),
         std::memory_order_relaxed);
+#endif
 }
 
 void RaftServer::removeCmd(slotid_t slot) {

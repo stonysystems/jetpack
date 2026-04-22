@@ -406,10 +406,11 @@ class TxLogServer {
   double last_cpu_usage_{-1.0};
   bool cpu_monitor_stop_{false};
 
-  // Lightweight profiling counters for Jetpack hot paths. Sampled on every
-  // spec RPC handler / dispatch RPC handler / Raft OnAppendEntries invocation
-  // and printed at shutdown. Atomic so coroutines on the same thread and any
-  // worker threads both contribute safely.
+  // Lightweight profiling counters for Jetpack hot paths. Gated behind
+  // JETPACK_PROF so the production build carries zero overhead (no atomics,
+  // no chrono::now() calls on the hot path). Enable with `-DJETPACK_PROF=1`
+  // at compile time to turn them back on for investigation.
+#ifdef JETPACK_PROF
   std::atomic<uint64_t> prof_spec_calls_{0};
   std::atomic<uint64_t> prof_spec_ns_{0};
   std::atomic<uint64_t> prof_dispatch_calls_{0};
@@ -431,6 +432,7 @@ class TxLogServer {
   std::atomic<uint64_t> prof_pool_peak_cmds_{0};
   std::atomic<uint64_t> prof_append_entries_calls_{0};
   std::atomic<uint64_t> prof_append_entries_ns_{0};
+#endif  // JETPACK_PROF
 
   void *svr_workers_g{nullptr};
 

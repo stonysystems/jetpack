@@ -511,7 +511,9 @@ void TxLogServer::OnRuleSpeculativeExecute(const shared_ptr<Marshallable>& cmd,
                     bool_t* is_leader,
                     double* cpu_usage,
                     double* queue_depth) {
+#ifdef JETPACK_PROF
   auto prof_t0 = std::chrono::steady_clock::now();
+#endif
   if (paused_) { // [Jetpack] Bad fix, should be blocked from handle_write, not to this layer
     *accepted = false;
     *result = 0;
@@ -530,24 +532,32 @@ void TxLogServer::OnRuleSpeculativeExecute(const shared_ptr<Marshallable>& cmd,
   } else {
     // Jetpack path (all replicas) or CURP non-leader (witness): check command pool
 #ifdef ZERO_OVERHEAD
+#ifdef JETPACK_PROF
     auto pool_t0 = std::chrono::steady_clock::now();
+#endif
     no_conflict = rep_sched_->command_pool_.push_back(cmd) && !rep_sched_->ConflictWithOriginalUnexecutedLog(cmd);
+#ifdef JETPACK_PROF
     auto pool_t1 = std::chrono::steady_clock::now();
     rep_sched_->prof_pool_push_calls_.fetch_add(1, std::memory_order_relaxed);
     rep_sched_->prof_pool_push_ns_.fetch_add(
         std::chrono::duration_cast<std::chrono::nanoseconds>(pool_t1 - pool_t0).count(),
         std::memory_order_relaxed);
+#endif
 #else
 #ifdef JETPACK_RECOVERY_DEBUG
     Log_info("[JETPACK-DEBUG] OnRuleSpeculativeExecute about to push_back loc_id %d ", loc_id_);
 #endif
+#ifdef JETPACK_PROF
     auto pool_t0 = std::chrono::steady_clock::now();
+#endif
     no_conflict = rep_sched_->command_pool_.push_back(cmd);
+#ifdef JETPACK_PROF
     auto pool_t1 = std::chrono::steady_clock::now();
     rep_sched_->prof_pool_push_calls_.fetch_add(1, std::memory_order_relaxed);
     rep_sched_->prof_pool_push_ns_.fetch_add(
         std::chrono::duration_cast<std::chrono::nanoseconds>(pool_t1 - pool_t0).count(),
         std::memory_order_relaxed);
+#endif
 #endif
   }
   if (no_conflict) {
@@ -570,11 +580,13 @@ void TxLogServer::OnRuleSpeculativeExecute(const shared_ptr<Marshallable>& cmd,
   if (queue_depth) {
     *queue_depth = GetQueueDepthForRule();
   }
+#ifdef JETPACK_PROF
   auto prof_t1 = std::chrono::steady_clock::now();
   prof_spec_calls_.fetch_add(1, std::memory_order_relaxed);
   prof_spec_ns_.fetch_add(
       std::chrono::duration_cast<std::chrono::nanoseconds>(prof_t1 - prof_t0).count(),
       std::memory_order_relaxed);
+#endif
 }
 
 void TxLogServer::OriginalPathUnexecutedCmdConflictPlaceHolder(const shared_ptr<Marshallable>& cmd) {
@@ -727,17 +739,22 @@ bool JetpackCommandPool::push_back(const shared_ptr<Marshallable>& cmd) {
 #endif
     return false;
   }
-  // Phase 1: extract key/cmd_id/is_write from cmd (no map copy).
+  // Extract key/cmd_id/is_write from cmd without copying the value map
+  // (SimpleRWCommand's full ctor deep-copies it twice).
+#ifdef JETPACK_PROF
   auto t_ext0 = std::chrono::steady_clock::now();
+#endif
   key_t key;
   uint64_t cmd_id;
   bool is_write;
   if (!SimpleRWCommand::ExtractPoolKeys(cmd, &key, &cmd_id, &is_write)) {
     verify(0);
   }
+#ifdef JETPACK_PROF
   auto t_ext1 = std::chrono::steady_clock::now();
-  // Phase 2: outer unordered_map lookup (candidates_[key]).
+#endif
   auto& bucket = candidates_[key];
+#ifdef JETPACK_PROF
   auto t_lookup1 = std::chrono::steady_clock::now();
   if (owner_) {
     owner_->prof_pool_extract_ns_.fetch_add(
@@ -747,13 +764,16 @@ bool JetpackCommandPool::push_back(const shared_ptr<Marshallable>& cmd) {
         std::chrono::duration_cast<std::chrono::nanoseconds>(t_lookup1 - t_ext1).count(),
         std::memory_order_relaxed);
   }
+#endif
   bool was_empty = bucket.size() == 0;
 
 #ifdef JETPACK_RECOVERY_DEBUG
   Log_info("[JETPACK-DEBUG] JetpackCommandPool::push_back called for key=%d, cmd_id=%lu", key, cmd_id);
 #endif
 
+#ifdef JETPACK_PROF
   auto t_inner0 = std::chrono::steady_clock::now();
+#endif
 #ifdef READ_NOT_CONFLICT_OPTIMIZATION
   if (bucket.total_write() == 0) {
 #endif
@@ -776,6 +796,7 @@ bool JetpackCommandPool::push_back(const shared_ptr<Marshallable>& cmd) {
     if (was_empty) {
       pool_size_distribution_.mid_time_append(++pool_size_);
     }
+#ifdef JETPACK_PROF
     auto t_inner1 = std::chrono::steady_clock::now();
     if (owner_) {
       owner_->prof_pool_inner_insert_ns_.fetch_add(
@@ -788,6 +809,7 @@ bool JetpackCommandPool::push_back(const shared_ptr<Marshallable>& cmd) {
       while ((uint64_t)pool_cmd_count_ > prev_cmds &&
              !owner_->prof_pool_peak_cmds_.compare_exchange_weak(prev_cmds, pool_cmd_count_));
     }
+#endif
     return true;
   } else {
     // exist conflict, candidates_[key].size() >= 1
@@ -800,17 +822,20 @@ bool JetpackCommandPool::push_back(const shared_ptr<Marshallable>& cmd) {
     pool_log_.push_back(CommandPoolLog(0, cmd, 0, pool_size_));
 #endif
     pool_cmd_count_++;
+#ifdef JETPACK_PROF
     auto t_inner1 = std::chrono::steady_clock::now();
     if (owner_) {
       owner_->prof_pool_inner_insert_ns_.fetch_add(
           std::chrono::duration_cast<std::chrono::nanoseconds>(t_inner1 - t_inner0).count(),
           std::memory_order_relaxed);
     }
+#endif
     return false;
   }
 }
 
 int JetpackCommandPool::remove(const shared_ptr<Marshallable>& cmd) {
+#ifdef JETPACK_PROF
   auto t_rm0 = std::chrono::steady_clock::now();
   auto rm_bookkeep = [&]() {
     if (owner_) {
@@ -821,6 +846,9 @@ int JetpackCommandPool::remove(const shared_ptr<Marshallable>& cmd) {
           std::memory_order_relaxed);
     }
   };
+#else
+  auto rm_bookkeep = []() {};
+#endif
   if (cmd->kind_ != MarshallDeputy::CMD_TPC_BATCH) {
     // Lightweight extract — no full SimpleRWCommand (saves ~1 μs per call at
     // 10k/s). Same optimization as push_back.
@@ -875,6 +903,7 @@ int JetpackCommandPool::remove(const shared_ptr<Marshallable>& cmd) {
 }
 
 bool JetpackCommandPool::has_appeared(const shared_ptr<Marshallable>& cmd) {
+#ifdef JETPACK_PROF
   auto t_ha0 = std::chrono::steady_clock::now();
   auto ha_bookkeep = [&]() {
     if (owner_) {
@@ -885,6 +914,9 @@ bool JetpackCommandPool::has_appeared(const shared_ptr<Marshallable>& cmd) {
           std::memory_order_relaxed);
     }
   };
+#else
+  auto ha_bookkeep = []() {};
+#endif
   // For a batched command, return whether all of them have appeared
   if (cmd->kind_ != MarshallDeputy::CMD_TPC_BATCH) {
     SimpleRWCommand parsed_cmd = SimpleRWCommand(cmd);

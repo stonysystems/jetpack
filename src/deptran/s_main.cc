@@ -429,11 +429,10 @@ void client_shutdown() {
 
 void server_shutdown() {
   Log_info("server_shutdown");
+#ifdef JETPACK_PROF
   // Profiling: print accumulated timing counters from Jetpack hot paths.
-  // Counters are spread across two schedulers per worker: the RPC-handler
-  // scheduler (tx_sched) carries spec/dispatch counters (they're accessed via
-  // dtxn_sched() in ClassicServiceImpl), while the replication scheduler
-  // (rep_sched) carries pool_push and append_entries counters.
+  // Only compiled in when -DJETPACK_PROF is set; the counter declarations
+  // themselves are also gated so production builds pay zero cost.
   auto fmt_avg = [](uint64_t n, uint64_t ns) -> double {
     return n ? (double)ns / n / 1000.0 : 0.0;  // microseconds
   };
@@ -445,8 +444,6 @@ void server_shutdown() {
     uint64_t spec_ns = tx ? tx->prof_spec_ns_.load() : 0;
     uint64_t disp_n = tx ? tx->prof_dispatch_calls_.load() : 0;
     uint64_t disp_ns = tx ? tx->prof_dispatch_ns_.load() : 0;
-    // Also fold in rep_sched's own spec/dispatch counters in case some
-    // protocols dispatch through it directly.
     if (rep && rep != tx) {
       spec_n += rep->prof_spec_calls_.load();
       spec_ns += rep->prof_spec_ns_.load();
@@ -457,7 +454,6 @@ void server_shutdown() {
     uint64_t pool_ns = rep ? rep->prof_pool_push_ns_.load() : 0;
     uint64_t ae_n = rep ? rep->prof_append_entries_calls_.load() : 0;
     uint64_t ae_ns = rep ? rep->prof_append_entries_ns_.load() : 0;
-    // Sub-phase breakdown and extra pool ops
     uint64_t pool_ext_ns = rep ? rep->prof_pool_extract_ns_.load() : 0;
     uint64_t pool_out_ns = rep ? rep->prof_pool_outer_lookup_ns_.load() : 0;
     uint64_t pool_in_ns = rep ? rep->prof_pool_inner_insert_ns_.load() : 0;
@@ -486,6 +482,7 @@ void server_shutdown() {
              pool_rm_n, fmt_avg(pool_rm_n, pool_rm_ns), pool_rm_ns / 1e6,
              pool_ha_n, fmt_avg(pool_ha_n, pool_ha_ns), pool_ha_ns / 1e6);
   }
+#endif  // JETPACK_PROF
   for (auto &worker : svr_workers_g) {
     worker.ShutDown();
   }

@@ -129,7 +129,9 @@ void ClassicServiceImpl::DispatchInner(const i64& cmd_id,
                                        TxnOutput* output,
                                        uint64_t* coro_id,
                                        MarshallDeputy* view_data) {
+#ifdef JETPACK_PROF
   auto prof_t0 = std::chrono::steady_clock::now();
+#endif
   // usleep(20000);
 
 #ifdef LATENCY_LOG_DEBUG
@@ -277,11 +279,13 @@ void ClassicServiceImpl::DispatchInner(const i64& cmd_id,
   }
 
   *coro_id = Coroutine::CurrentCoroutine()->id;
+#ifdef JETPACK_PROF
   auto prof_t1 = std::chrono::steady_clock::now();
   dtxn_sched_->prof_dispatch_calls_.fetch_add(1, std::memory_order_relaxed);
   dtxn_sched_->prof_dispatch_ns_.fetch_add(
       std::chrono::duration_cast<std::chrono::nanoseconds>(prof_t1 - prof_t0).count(),
       std::memory_order_relaxed);
+#endif
   // defer->reply() is called by the outer handler (Dispatch or
   // DispatchWithRuleSpec) after any additional work is done.
   // }, __FILE__, cmd_id);
