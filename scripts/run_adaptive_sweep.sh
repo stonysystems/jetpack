@@ -1,14 +1,18 @@
 #!/bin/bash
-# run_adaptive_sweep.sh — adaptive client-count sweep to find the saturation
-# point for a single protocol.
+# run_adaptive_sweep.sh — adaptive client-count sweep to find the peak
+# throughput under a tail-latency SLO for a single protocol.
 #
 # Protocol flow:
-#   1. Measure p50 at N=1 to establish the baseline.
-#   2. stop_p50 := 2 * baseline (saturation criterion, per experiment spec).
-#   3. Probe N=50 and N=100. If either trips stop_p50, bisect between the
-#      last unsaturated N and the first saturated N until |hi-lo| <= TOL.
+#   1. Measure p50 at N=1 as a sanity baseline (for CPU idle check).
+#   2. SLO: zoo2 p90 <= 1000 ms. A point "trips stop" when zoo2 p90 > 1000 ms.
+#   3. Probe N=50 and N=100. If either trips stop, bisect between the last
+#      in-SLO point and the first out-of-SLO point until |hi-lo| <= TOL.
 #      Otherwise extend upward (150, 200, 300, 500) until a stop fires.
-#   4. Produces <result_dir>/<label>-adaptive.csv and a pretty-printed
+#   4. After bisect, densely probe N values in [lo-2, hi+2] that were not
+#      already measured, so the throughput peak can be pinned down past the
+#      coarse bisect boundary.
+#   5. Peak = argmax(tput) over all measured rows where zoo2_p90 <= 1000 ms.
+#   6. Produces <result_dir>/<label>-adaptive.csv and a pretty-printed
 #      per-protocol table (tput + zoo2/zoo3 p50/p90/p99 + per-host CPU avg).
 #
 # Usage:
@@ -27,8 +31,10 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 mkdir -p "$RDIR"
 
-BISECT_TOL=5     # stop bisecting once |hi - lo| <= 5 clients
+BISECT_TOL=1     # stop bisecting once |hi - lo| <= 1 client
 UP_SEQ=(150 200 300 500)  # extension points if N=100 doesn't saturate
+STOP_P90_MS=1000 # SLO: stop when zoo2 p90 exceeds this (in ms)
+DENSE_PAD=2      # dense-probe window: [last_ok - PAD, first_stop + PAD]
 
 export SERVER_CORE_ID="${SERVER_CORE_ID:-1}"
 
@@ -56,7 +62,10 @@ Git commit at run time: $(cd "$REPO_DIR" && git rev-parse --short HEAD 2>/dev/nu
 - WAN delay:       \`WAN_DELAY_MS=20\` (40 ms injected RTT)
 - Server core pin: \`SERVER_CORE_ID=${SERVER_CORE_ID}\` (reactor + disk-poll + main server thread)
 - Leader routing:  locale_id=1 (zoo2 / .102) for leader-routing protocols
-- Sweep:           N=1 (baseline on zoo2), 50, 100, then bisect/extend until zoo2 p50 > 2x baseline
+- SLO:             zoo2 p90 <= ${STOP_P90_MS} ms
+- Sweep:           N=1 (baseline on zoo2), 50, 100, then bisect/extend until zoo2 p90 > ${STOP_P90_MS} ms,
+                   followed by a dense +/-${DENSE_PAD} probe around the knee
+- Peak rule:       argmax(tput) over rows with zoo2 p90 <= ${STOP_P90_MS} ms
 
 ## CPU metric
 
@@ -169,15 +178,15 @@ record_row() {
 }
 
 tripped_stop() {
-  # 1 if zoo2 p50 > stop_p50, else 0.
-  awk -v v="$LAST_Z2_P50" -v s="$STOP_P50" 'BEGIN{print (v>s)?1:0}'
+  # 1 if zoo2 p90 > STOP_P90_MS, else 0.
+  awk -v v="$LAST_Z2_P90" -v s="$STOP_P90_MS" 'BEGIN{print (v>s)?1:0}'
 }
 
 echo "=========================================="
 echo "Adaptive sweep: $LABEL (cfg=$CFG mode=$MODE, pin=core ${SERVER_CORE_ID})"
 echo "=========================================="
 
-# 1) Baseline at N=1 (client co-located with leader at zoo2)
+# 1) Baseline at N=1 (client co-located with leader at zoo2) — sanity only
 echo "  [baseline] running N=1..."
 run_point 1
 BASELINE_P50=$LAST_Z2_P50
@@ -186,8 +195,7 @@ if [ "$bad" -eq 1 ]; then
   echo "  [baseline] ERROR: zoo2 p50 at N=1 is ${BASELINE_P50} (non-positive); aborting."
   exit 2
 fi
-STOP_P50=$(awk -v b="$BASELINE_P50" 'BEGIN{print 2*b}')
-echo "  [baseline] zoo2 p50 at N=1 = ${BASELINE_P50}ms  -> stop_p50 = ${STOP_P50}ms"
+echo "  [baseline] zoo2 p50 at N=1 = ${BASELINE_P50}ms  -> SLO is p90 <= ${STOP_P90_MS}ms"
 record_row "baseline"
 
 # 2) Initial probes at N=50, N=100.
@@ -234,15 +242,31 @@ if [ "$first_stop" -ne 0 ]; then
     fi
   done
   echo "  [bisect] converged: last unsaturated=$lo, first saturated=$hi"
+
+  # 4b) Dense probe: fill in the N values in [lo-PAD, hi+PAD] that the bisect
+  # skipped, so we can pin down the throughput peak past the coarse boundary.
+  dense_lo=$((lo - DENSE_PAD))
+  dense_hi=$((hi + DENSE_PAD))
+  [ "$dense_lo" -lt 2 ] && dense_lo=2
+  measured=$(awk -F, 'NR>1 {print $1}' "$OUT_CSV" | sort -un)
+  for N in $(seq "$dense_lo" "$dense_hi"); do
+    if printf '%s\n' "$measured" | grep -qx "$N"; then
+      continue
+    fi
+    run_point "$N"
+    hit=$(tripped_stop)
+    record_row "$([ "$hit" -eq 1 ] && echo "dense-stop" || echo "dense-ok")"
+  done
 else
   echo "  [warning] did not hit saturation in sweep range; extend UP_SEQ"
 fi
 
-# 5) Pretty table.
+# 5) Pretty table (sorted by N ascending for readability).
 echo ""
 echo "=========================================="
-echo "Summary table for $LABEL (stop_p50=${STOP_P50}ms)"
+echo "Summary table for $LABEL (SLO: zoo2_p90 <= ${STOP_P90_MS}ms)"
 echo "=========================================="
+{ head -1 "$OUT_CSV"; tail -n +2 "$OUT_CSV" | sort -t, -k1,1n; } | \
 awk -F, 'NR==1 {
   printf "%4s %8s %7s %7s %7s %7s %7s %7s %7s %7s %7s %7s %7s %7s %s\n",
     "N","tput","z2_p50","z2_p90","z2_p99","z3_p50","z3_p90","z3_p99",
@@ -252,6 +276,19 @@ awk -F, 'NR==1 {
 {
   printf "%4s %8s %7s %7s %7s %7s %7s %7s %7s %7s %7s %7s %7s %7s %s\n",
     $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15
-}' "$OUT_CSV"
+}'
+
+# 6) Peak = argmax(tput) over rows with zoo2_p90 <= STOP_P90_MS.
+echo ""
+awk -F, -v slo="$STOP_P90_MS" '
+  NR>1 && $15!="baseline" && $4+0 <= slo && $2+0 > max {
+    max=$2+0; n=$1; p50=$3; p90=$4; p99=$5; note=$15
+  }
+  END {
+    if (max>0) printf "PEAK under SLO (p90<=%sms): N=%s tput=%s  z2_p50=%sms p90=%sms p99=%sms  [%s]\n",
+                       slo, n, max, p50, p90, p99, note
+    else      print  "PEAK under SLO: none found (no row with p90<=" slo "ms)"
+  }' "$OUT_CSV"
+
 echo ""
 echo "CSV written to $OUT_CSV"
