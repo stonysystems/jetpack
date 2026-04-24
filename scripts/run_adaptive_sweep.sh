@@ -39,7 +39,7 @@ DENSE_PAD=2      # dense-probe window: [last_ok - PAD, first_stop + PAD]
 export SERVER_CORE_ID="${SERVER_CORE_ID:-1}"
 
 OUT_CSV="$RDIR/${LABEL}-adaptive.csv"
-echo "N,tput,zoo2_p50,zoo2_p90,zoo2_p99,zoo3_p50,zoo3_p90,zoo3_p99,zoo1_cpu,zoo2_cpu,zoo3_cpu,zoo4_cpu,zoo5_cpu,avg_cpu,stopped" > "$OUT_CSV"
+echo "N,tput,zoo2_p50,zoo2_p90,zoo2_p99,zoo3_p50,zoo3_p90,zoo3_p99,zoo1_cpu,zoo2_cpu,zoo3_cpu,zoo4_cpu,zoo5_cpu,avg_cpu,fp_att,fp_succ,fp_eff,fp_rate,fp_eff_rate,stopped" > "$OUT_CSV"
 
 # Snapshot the exact experiment setting for this run so the results folder
 # is self-contained (the canonical spec can drift in docs/ after the fact).
@@ -127,6 +127,7 @@ EOF
     > "$RDIR/${run_label}.runlog" 2>&1 || true
 
   local total=0
+  local fp_att_total=0 fp_succ_total=0 fp_eff_total=0
   local -a CPUS P50S P90S P99S
   for zi in 0 1 2 3 4; do
     local f="$RDIR/${run_label}-zoo$((zi+1)).res"
@@ -153,11 +154,38 @@ EOF
     P90S[$zi]=$p90
     P99S[$zi]=$p99
     total=$(awk -v t="$total" -v x="$tp" 'BEGIN{print t+x}')
+
+    # Parse "Fastpath statistics attempted N successed M rate(pct) R
+    # efficient_successed E efficient_rate(pct) ER". Aggregate across
+    # hosts by summing counts; rates derived from the totals so a
+    # saturated host doesn't distort the average.
+    local fp_line
+    fp_line=$(grep -m1 "Fastpath statistics" "$f" 2>/dev/null)
+    if [ -n "$fp_line" ]; then
+      local fp_att fp_succ fp_eff
+      fp_att=$(awk '{for(i=1;i<=NF;i++) if($i=="attempted"){print $(i+1);exit}}' <<< "$fp_line")
+      fp_succ=$(awk '{for(i=1;i<=NF;i++) if($i=="successed"){print $(i+1);exit}}' <<< "$fp_line")
+      fp_eff=$(awk '{for(i=1;i<=NF;i++) if($i=="efficient_successed"){print $(i+1);exit}}' <<< "$fp_line")
+      [ -z "$fp_att" ]  && fp_att=0
+      [ -z "$fp_succ" ] && fp_succ=0
+      [ -z "$fp_eff" ]  && fp_eff=0
+      fp_att_total=$((fp_att_total + fp_att))
+      fp_succ_total=$((fp_succ_total + fp_succ))
+      fp_eff_total=$((fp_eff_total + fp_eff))
+    fi
   done
 
   local avg_cpu
   avg_cpu=$(awk -v a="${CPUS[0]}" -v b="${CPUS[1]}" -v c="${CPUS[2]}" -v d="${CPUS[3]}" -v e="${CPUS[4]}" \
                'BEGIN{printf "%.3f", (a+b+c+d+e)/5}')
+
+  # Cluster fastpath rates. Expressed as a percentage of attempts so the
+  # column is easy to skim; divide by zero is guarded.
+  local fp_rate fp_eff_rate
+  fp_rate=$(awk -v s="$fp_succ_total" -v a="$fp_att_total" \
+              'BEGIN{ if(a>0) printf "%.2f", 100.0*s/a; else printf "0.00" }')
+  fp_eff_rate=$(awk -v s="$fp_eff_total" -v a="$fp_att_total" \
+                  'BEGIN{ if(a>0) printf "%.2f", 100.0*s/a; else printf "0.00" }')
 
   # zoo2 = index 1, zoo3 = index 2.
   LAST_N=$N
@@ -167,14 +195,19 @@ EOF
   LAST_Z1_CPU=${CPUS[0]}; LAST_Z2_CPU=${CPUS[1]}; LAST_Z3_CPU=${CPUS[2]}
   LAST_Z4_CPU=${CPUS[3]}; LAST_Z5_CPU=${CPUS[4]}
   LAST_AVG_CPU=$avg_cpu
+  LAST_FP_ATT=$fp_att_total
+  LAST_FP_SUCC=$fp_succ_total
+  LAST_FP_EFF=$fp_eff_total
+  LAST_FP_RATE=$fp_rate
+  LAST_FP_EFF_RATE=$fp_eff_rate
 }
 
 record_row() {
   local stopped="$1"
-  echo "$LAST_N,$LAST_TPUT,$LAST_Z2_P50,$LAST_Z2_P90,$LAST_Z2_P99,$LAST_Z3_P50,$LAST_Z3_P90,$LAST_Z3_P99,$LAST_Z1_CPU,$LAST_Z2_CPU,$LAST_Z3_CPU,$LAST_Z4_CPU,$LAST_Z5_CPU,$LAST_AVG_CPU,$stopped" >> "$OUT_CSV"
-  printf "    N=%s tput=%s zoo2_p50=%s p90=%s p99=%s zoo3_p50=%s avg_cpu=%s stopped=%s\n" \
+  echo "$LAST_N,$LAST_TPUT,$LAST_Z2_P50,$LAST_Z2_P90,$LAST_Z2_P99,$LAST_Z3_P50,$LAST_Z3_P90,$LAST_Z3_P99,$LAST_Z1_CPU,$LAST_Z2_CPU,$LAST_Z3_CPU,$LAST_Z4_CPU,$LAST_Z5_CPU,$LAST_AVG_CPU,${LAST_FP_ATT:-0},${LAST_FP_SUCC:-0},${LAST_FP_EFF:-0},${LAST_FP_RATE:-0.00},${LAST_FP_EFF_RATE:-0.00},$stopped" >> "$OUT_CSV"
+  printf "    N=%s tput=%s zoo2_p50=%s p90=%s p99=%s zoo3_p50=%s avg_cpu=%s fp_rate=%s%% fp_eff_rate=%s%% stopped=%s\n" \
     "$LAST_N" "$LAST_TPUT" "$LAST_Z2_P50" "$LAST_Z2_P90" "$LAST_Z2_P99" \
-    "$LAST_Z3_P50" "$LAST_AVG_CPU" "$stopped"
+    "$LAST_Z3_P50" "$LAST_AVG_CPU" "${LAST_FP_RATE:-0.00}" "${LAST_FP_EFF_RATE:-0.00}" "$stopped"
 }
 
 tripped_stop() {
@@ -261,6 +294,20 @@ else
   echo "  [warning] did not hit saturation in sweep range; extend UP_SEQ"
 fi
 
+# 4c) Optional user-supplied extra probes. Set EXTRA_NS="76 77 80 90" to
+# force additional data points past the bisect range — useful for
+# verifying that throughput really peaks at the in-SLO knee and doesn't
+# keep climbing into the over-SLO region.
+if [ -n "${EXTRA_NS:-}" ]; then
+  measured=$(awk -F, 'NR>1 {print $1}' "$OUT_CSV" | sort -un)
+  for N in $EXTRA_NS; do
+    if printf '%s\n' "$measured" | grep -qx "$N"; then continue; fi
+    run_point "$N"
+    hit=$(tripped_stop)
+    record_row "$([ "$hit" -eq 1 ] && echo "extra-stop" || echo "extra-ok")"
+  done
+fi
+
 # 5) Pretty table (sorted by N ascending for readability).
 echo ""
 echo "=========================================="
@@ -268,25 +315,25 @@ echo "Summary table for $LABEL (SLO: zoo2_p90 <= ${STOP_P90_MS}ms)"
 echo "=========================================="
 { head -1 "$OUT_CSV"; tail -n +2 "$OUT_CSV" | sort -t, -k1,1n; } | \
 awk -F, 'NR==1 {
-  printf "%4s %8s %7s %7s %7s %7s %7s %7s %7s %7s %7s %7s %7s %7s %s\n",
+  printf "%4s %8s %7s %7s %7s %7s %7s %7s %7s %7s %7s %7s %7s %7s %7s %7s %s\n",
     "N","tput","z2_p50","z2_p90","z2_p99","z3_p50","z3_p90","z3_p99",
-    "z1_cpu","z2_cpu","z3_cpu","z4_cpu","z5_cpu","avg_cpu","note"
+    "z1_cpu","z2_cpu","z3_cpu","z4_cpu","z5_cpu","avg_cpu","fp_rate","fp_eff","note"
   next
 }
 {
-  printf "%4s %8s %7s %7s %7s %7s %7s %7s %7s %7s %7s %7s %7s %7s %s\n",
-    $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15
+  printf "%4s %8s %7s %7s %7s %7s %7s %7s %7s %7s %7s %7s %7s %7s %7s %7s %s\n",
+    $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$18,$19,$20
 }'
 
 # 6) Peak = argmax(tput) over rows with zoo2_p90 <= STOP_P90_MS.
 echo ""
 awk -F, -v slo="$STOP_P90_MS" '
-  NR>1 && $15!="baseline" && $4+0 <= slo && $2+0 > max {
-    max=$2+0; n=$1; p50=$3; p90=$4; p99=$5; note=$15
+  NR>1 && $20!="baseline" && $4+0 <= slo && $2+0 > max {
+    max=$2+0; n=$1; p50=$3; p90=$4; p99=$5; fpr=$18; fper=$19; note=$20
   }
   END {
-    if (max>0) printf "PEAK under SLO (p90<=%sms): N=%s tput=%s  z2_p50=%sms p90=%sms p99=%sms  [%s]\n",
-                       slo, n, max, p50, p90, p99, note
+    if (max>0) printf "PEAK under SLO (p90<=%sms): N=%s tput=%s  z2_p50=%sms p90=%sms p99=%sms  fp_rate=%s%% fp_eff_rate=%s%%  [%s]\n",
+                       slo, n, max, p50, p90, p99, fpr, fper, note
     else      print  "PEAK under SLO: none found (no row with p90<=" slo "ms)"
   }' "$OUT_CSV"
 
