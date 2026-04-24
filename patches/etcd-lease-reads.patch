@@ -1,0 +1,38 @@
+diff --git a/server/etcdserver/bootstrap.go b/server/etcdserver/bootstrap.go
+index d6b899cad..04c5c54bd 100644
+--- a/server/etcdserver/bootstrap.go
++++ b/server/etcdserver/bootstrap.go
+@@ -537,7 +537,7 @@ func bootstrapRaftFromWAL(cfg config.ServerConfig, bwal *bootstrappedWAL) *boots
+ }
+ 
+ func raftConfig(cfg config.ServerConfig, id uint64, s *raft.MemoryStorage) *raft.Config {
+-	return &raft.Config{
++	rc := &raft.Config{
+ 		ID:              id,
+ 		ElectionTick:    cfg.ElectionTicks,
+ 		HeartbeatTick:   1,
+@@ -548,6 +548,24 @@ func raftConfig(cfg config.ServerConfig, id uint64, s *raft.MemoryStorage) *raft
+ 		PreVote:         cfg.PreVote,
+ 		Logger:          NewRaftLoggerZap(cfg.Logger.Named("raft")),
+ 	}
++	// Jetpack patch: allow selecting lease-based linearizable reads via env
++	// var. Upstream etcd leaves raft.Config.ReadOnlyOption at the zero-value
++	// ReadOnlySafe (ReadIndex quorum-confirmed reads). Setting
++	// ETCD_READ_ONLY_OPTION=lease selects ReadOnlyLeaseBased, which answers
++	// linearizable reads from the leader's lease without the ReadIndex round
++	// trip. Any other value falls back to safe and logs a warning.
++	switch strings.ToLower(strings.TrimSpace(os.Getenv("ETCD_READ_ONLY_OPTION"))) {
++	case "", "safe":
++		rc.ReadOnlyOption = raft.ReadOnlySafe
++	case "lease", "lease-based", "leasebased":
++		rc.ReadOnlyOption = raft.ReadOnlyLeaseBased
++		cfg.Logger.Warn("ETCD_READ_ONLY_OPTION=lease: using lease-based linearizable reads (non-default)")
++	default:
++		cfg.Logger.Warn("unrecognized ETCD_READ_ONLY_OPTION; falling back to safe (ReadIndex)",
++			zap.String("value", os.Getenv("ETCD_READ_ONLY_OPTION")))
++		rc.ReadOnlyOption = raft.ReadOnlySafe
++	}
++	return rc
+ }
+ 
+ func (b *bootstrappedRaft) newRaftNode(ss *snap.Snapshotter, wal *wal.WAL, cl *membership.RaftCluster) *raftNode {

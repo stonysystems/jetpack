@@ -102,6 +102,22 @@ class Config {
   // from N+1 to N, leader handles 1 RPC instead of 2).
   bool jetpack_merge_leader_rpc_ = false;
 
+  // etcd client-side batching. When size > 1, the EtcdConnectionThreadPool
+  // coalesces up to size_ ops into one etcd Txn, flushing when the buffer
+  // hits size_ OR timeout_ms_ elapses since the first enqueue, whichever
+  // first. Default (size=1, timeout_ms=0) disables batching entirely.
+  int etcd_batch_size_ = 1;
+  int etcd_batch_timeout_ms_ = 0;
+
+  // Mirror the etcd server's ETCD_READ_ONLY_OPTION=lease setting into the
+  // deptran client/server latency model. When true, read-only ops served
+  // by the leader no longer need a cross-host Raft round (lease-based
+  // linearizable reads), so the simulated WAN delays around the etcd
+  // Submit path are skipped for reads. Writes still pay the full cost
+  // (they need Raft commit regardless). Default false matches stock
+  // etcd's ReadOnlySafe / ReadIndex path.
+  bool etcd_lease_reads_ = false;
+
   enum SiteInfoType { CLIENT, SERVER };
   struct SiteInfo {
     siteid_t id; // unique site id
@@ -234,6 +250,10 @@ class Config {
   int GetPartitionSize(parid_t par_id);
   vector<SiteInfo> GetMyServers() { return SitesByProcessName(this->proc_name_, SERVER); }
   vector<SiteInfo> GetMyClients() { return SitesByProcessName(this->proc_name_, CLIENT); }
+  // Is the given site_id on the same physical host as this process? Used
+  // by the colocation-aware WAN_WAIT_TO macro to skip simulated WAN delay
+  // when caller and peer are on the same zoo host.
+  bool IsSiteLocal(siteid_t site_id);
   int NumClients() {
     return par_clients_.size();
   }
@@ -258,6 +278,9 @@ class Config {
   single_server_t get_single_server();
   uint32_t get_concurrent_txn();
   int GetJetpackRecoveryBatchSize() const { return jetpack_recovery_batch_size_; }
+  int GetEtcdBatchSize() const { return etcd_batch_size_; }
+  int GetEtcdBatchTimeoutMs() const { return etcd_batch_timeout_ms_; }
+  bool GetEtcdLeaseReads() const { return etcd_lease_reads_; }
   bool get_batch_start();
   bool do_early_return();
   bool do_logging();

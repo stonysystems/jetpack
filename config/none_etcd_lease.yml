@@ -1,0 +1,13 @@
+mode:
+  cc: none # concurrency control
+  ab: etcd # atomic broadcast
+  # read_only: occ
+  batch: false
+  retry: 20
+  ongoing: 1 # per client
+  # Akkio etcd experiment, variant (3): raw etcd with lease-based
+  # linearizable reads (mirrors the server-side ETCD_READ_ONLY_OPTION=lease
+  # flag). When enabled, read-only ops skip the simulated cross-host
+  # Raft round in EtcdServer::Submit — they're served from the leader's
+  # local lease-validated state. Writes still pay the full Raft cost.
+  etcd_lease_reads: true

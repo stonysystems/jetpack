@@ -29,7 +29,21 @@ static void _wan_wait() {
   }
 }
 
+// Colocation-aware variant of _wan_wait. Skips the simulated WAN delay when
+// the peer site (by siteid) resolves to the same physical host as this
+// process. Use at RPC dispatch / response-handler sites where the
+// source->destination pair is known, so that client<->leader hops between
+// colocated sites don't pay a fake 20 ms per _wan_wait call.
+static void _wan_wait_to_site(siteid_t peer_site_id) {
+  uint64_t delay = wan_delay_us.load(std::memory_order_relaxed);
+  if (delay == 0) return;
+  auto* cfg = Config::GetConfig();
+  if (cfg != nullptr && cfg->IsSiteLocal(peer_site_id)) return;
+  Reactor::CreateSpEvent<NeverEvent>()->Wait(delay);
+}
+
 #define WAN_WAIT _wan_wait();
+#define WAN_WAIT_TO(peer_site_id) _wan_wait_to_site(peer_site_id);
 
 
 class Coordinator;
@@ -101,6 +115,27 @@ class RuleSpeculativeExecuteQuorumEvent: public QuorumEvent {
       num_leader_ = num_leader;
   }
   void FeedResponse(bool y, value_t result, bool is_leader, double cpu_usage, double queue_depth);
+  // Stats-only variant used by the fused-RPC (merge_leader_rpc) path: the
+  // leader's fused reply carries cpu_usage / queue_depth / is_leader like
+  // any spec response, but the leader is NOT a voter in this event
+  // (see BroadcastRuleSpeculativeExecuteSkipLeader). This routes the
+  // sample into the same totals as FeedResponse without calling VoteYes
+  // or touching the quorum counter, so the adaptive controller gets a
+  // live signal on the leader's CPU in merge mode.
+  void FeedStatsOnly(bool is_leader, double cpu_usage, double queue_depth) {
+    if (cpu_usage >= 0.0) {
+      total_cpu_usage_ += cpu_usage;
+      cpu_samples_++;
+      if (is_leader) {
+        leader_cpu_usage_ += cpu_usage;
+        leader_cpu_samples_++;
+      }
+    }
+    if (queue_depth >= 0.0 && is_leader) {
+      leader_queue_depth_sum_ += queue_depth;
+      leader_queue_samples_++;
+    }
+  }
   bool Yes() override;
   bool No() override;
   value_t GetResult();
@@ -508,6 +543,34 @@ class Communicator {
   SiteProxyPair LeaderProxyForPartition(parid_t, int idx=-1) const;
 
   SiteProxyPair NearestProxyForPartition(parid_t) const;
+  // Safe variants returning int64_t so the "no entry" sentinel (-1) is
+  // always a proper negative regardless of how siteid_t / parid_t are
+  // typedef'd (both are unsigned in this codebase, so returning -1 as
+  // siteid_t silently becomes UINT16_MAX and breaks a `result < 0`
+  // check). Return -1 if the partition has not been cached or if no
+  // proxies have been registered, instead of abort()'ing inside a
+  // verify. Used by WAN_WAIT_TO gating in coordinator ack handlers
+  // where the coordinator may be asked about a partition it never
+  // issued a Dispatch to.
+  int64_t CachedLeaderSiteForPartition(parid_t par_id) const {
+    auto it = leader_cache_.find(par_id);
+    if (it != leader_cache_.end()) return static_cast<int64_t>(it->second.first);
+    return -1;
+  }
+
+  // Return any cached leader site for the communicator's known partitions,
+  // or -1 if nothing has been cached yet. Used as a fallback for
+  // coordinators whose par_id_ was never set (Coordinator::par_id_
+  // defaults to -1 and classic/CC coordinators don't write it). Correct
+  // for single-partition experiments — in a multi-partition setup the
+  // caller should use CachedLeaderSiteForPartition with a known par_id.
+  int64_t AnyCachedLeaderSite() const {
+    if (leader_cache_.empty()) return -1;
+    return static_cast<int64_t>(leader_cache_.begin()->second.first);
+  }
+
+  size_t LeaderCacheSize() const { return leader_cache_.size(); }  // TEMP DEBUG
+
   void SetLeaderCache(parid_t par_id, SiteProxyPair& proxy) {
     leader_cache_[par_id] = proxy;
   }

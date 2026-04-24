@@ -106,7 +106,26 @@ class EtcdServer : public TxLogServer {
 #ifdef ETCD_DEBUG
     Log_info("%.2f Submit <%d, %d> loc_id %d", SimpleRWCommand::GetMsTimeElaps(), SimpleRWCommand::GetCmdID(cmd).first, SimpleRWCommand::GetCmdID(cmd).second, loc_id_);
 #endif
-    WAN_WAIT
+    // The pair of WAN_WAITs bracketing EtcdRequest models etcd's internal
+    // Raft round trip — the heartbeat-to-majority (read) or append-entries
+    // -to-majority (write) cost that a real geo-distributed etcd cluster
+    // would pay. In our cluster etcd is LAN-local, so the real cost is
+    // sub-millisecond; these WAN_WAITs are what makes the simulation
+    // faithful to an inter-DC deployment.
+    //
+    // When etcd is configured with ReadOnlyLeaseBased (server-side flag
+    // ETCD_READ_ONLY_OPTION=lease) and we mirror that with
+    // etcd_lease_reads: true on this side, linearizable reads are served
+    // from the leader's lease-validated state without talking to
+    // followers, so the leader-to-follower round doesn't happen. Skip
+    // both WAN_WAITs for reads in that mode. Writes and non-lease reads
+    // still pay the full round.
+    auto* _cfg = Config::GetConfig();
+    bool _lease_read_skip =
+        (_cfg != nullptr) &&
+        _cfg->GetEtcdLeaseReads() &&
+        SimpleRWCommand(cmd).IsRead();
+    if (!_lease_read_skip) { WAN_WAIT }
     verify(cmd->kind_ == MarshallDeputy::CMD_TPC_COMMIT);
     shared_ptr<TxPieceData> cmd_content = *(((VecPieceData*)(dynamic_pointer_cast<TpcCommitCommand>(cmd)->cmd_.get()))->sp_vec_piece_data_->begin());
     cmd_content->etcd_finished = Reactor::CreateSpEvent<ThreadSafeIntEvent>();
@@ -122,7 +141,7 @@ class EtcdServer : public TxLogServer {
 #ifdef ETCD_DEBUG
     Log_info("%.2f After cmd_content->etcd_finished->Wait() <%d, %d>", SimpleRWCommand::GetMsTimeElaps(), SimpleRWCommand::GetCmdID(cmd).first, SimpleRWCommand::GetCmdID(cmd).second);
 #endif
-    WAN_WAIT
+    if (!_lease_read_skip) { WAN_WAIT }
 #ifdef ETCD_DEBUG
     Log_info("%.2f Before RuleCommandPoolGC <%d, %d>", SimpleRWCommand::GetMsTimeElaps(), SimpleRWCommand::GetCmdID(cmd).first, SimpleRWCommand::GetCmdID(cmd).second);
 #endif

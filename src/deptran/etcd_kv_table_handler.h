@@ -2,6 +2,8 @@
 
 #include <string>
 #include <iostream>
+#include <tuple>
+#include <vector>
 
 #ifndef JANUS_ETCD_HAS_PPLX
 #if defined(__has_include)
@@ -22,6 +24,7 @@
 #include <etcd/SyncClient.hpp>
 #endif
 #include <etcd/Response.hpp>
+#include <etcd/v3/Transaction.hpp>
 
 namespace janus {
 
@@ -102,6 +105,55 @@ class EtcdKVTableHandler {
     }
     return 0;
   }
+
+  // One op per tuple: <is_write, key, value>. value is ignored for reads.
+  using BatchOp = std::tuple<bool, int, int>;
+
+  // Execute a batch of reads/writes as a single unconditional etcd Txn
+  // (no compare predicates => the success list runs atomically on the
+  // leader). Returns true if the Txn returned ok.
+  bool BatchTxn(const std::vector<BatchOp>& ops) {
+    if (ops.empty()) return true;
+    etcdv3::Transaction tx;
+    for (const auto& op : ops) {
+      bool is_write;
+      int key, value;
+      std::tie(is_write, key, value) = op;
+      if (is_write) {
+        tx.add_success_put(MakeKey(key), std::to_string(value));
+      } else {
+        tx.add_success_range(MakeKey(key));
+      }
+    }
+    try {
+#if JANUS_ETCD_HAS_PPLX
+      auto response = client_.txn(tx).get();
+#else
+      auto response = client_.txn(tx);
+#endif
+      return response.is_ok();
+    } catch (const std::exception& e) {
+      std::cerr << "Etcd BatchTxn error: " << e.what() << std::endl;
+    }
+    return false;
+  }
+
+#if JANUS_ETCD_HAS_PPLX
+  pplx::task<etcd::Response> BatchTxnAsync(const std::vector<BatchOp>& ops) {
+    etcdv3::Transaction tx;
+    for (const auto& op : ops) {
+      bool is_write;
+      int key, value;
+      std::tie(is_write, key, value) = op;
+      if (is_write) {
+        tx.add_success_put(MakeKey(key), std::to_string(value));
+      } else {
+        tx.add_success_range(MakeKey(key));
+      }
+    }
+    return client_.txn(tx);
+  }
+#endif
 
   void Clear() {
     try {

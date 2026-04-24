@@ -341,7 +341,25 @@ void CoordinatorClassic::DispatchAck(phase_t phase,
   Log_info("!!!!!!!!!!!! enter CoordinatorClassic::DispatchAck");
 #endif
   //Log_info("Is this being called");
-  WAN_WAIT
+  // Simulated WAN hop from the leader back to this coordinator. Skipped
+  // when the partition's current leader is colocated with this process.
+  //
+  // Coordinator::par_id_ is never written by classic/CC coordinators
+  // (defaults to -1), so CachedLeaderSiteForPartition(par_id_) would
+  // always miss. Fall back to AnyCachedLeaderSite, which picks any
+  // partition's cached leader — correct for single-partition workloads
+  // (where there's only one leader), and a reasonable heuristic
+  // otherwise. If neither is available, _wan_wait_to_site sees -1 and
+  // falls back to the unconditional delay (same as plain WAN_WAIT).
+  int64_t _ack_peer_site = commo()->CachedLeaderSiteForPartition(par_id_);
+  if (_ack_peer_site < 0) {
+    _ack_peer_site = commo()->AnyCachedLeaderSite();
+  }
+  if (_ack_peer_site >= 0) {
+    WAN_WAIT_TO(static_cast<siteid_t>(_ack_peer_site));
+  } else {
+    WAN_WAIT;
+  }
   std::lock_guard<std::recursive_mutex> lock(this->mtx_);
   if (phase != phase_) return;
   auto* txn = (TxData*) cmd_;

@@ -1,0 +1,35 @@
+
+# 5 client sites (one per zoo host), 5 replicas, 1 partition — etcd experiment
+# on the zoo cluster with the primary colocated on zoo1 (s101 -> zoo1).
+#
+# Used by the Akkio-style latency experiment (see
+# scripts/run_akkio_etcd.sh). This file only wires site-name -> proc -> host;
+# the actual client-count-per-host split is controlled by the
+# gen_akkio_client_config.sh script, which emits a separate N-client YAML
+# on top of this 5-site skeleton.
+
+site:
+  server: # each line is a partition, the first is the master site_name:port
+    - ["s101:38000", "s201:38001", "s301:38002", "s401:38003", "s501:38004"]
+  client: # each line is a partition — placeholder 1-per-host; overridden by
+          # the gen_akkio_client_config.sh-emitted file.
+    - ["c01", "c02", "c03", "c04", "c05"]
+
+process:
+  s101: zoo1
+  s201: zoo2
+  s301: zoo3
+  s401: zoo4
+  s501: zoo5
+  c01: zoo1
+  c02: zoo2
+  c03: zoo3
+  c04: zoo4
+  c05: zoo5
+
+host:
+  zoo1: 130.245.173.101
+  zoo2: 130.245.173.102
+  zoo3: 130.245.173.103
+  zoo4: 130.245.173.104
+  zoo5: 130.245.173.105

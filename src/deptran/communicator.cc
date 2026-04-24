@@ -492,8 +492,6 @@ void Communicator::BroadcastDispatch(
   }
   
   SetLeaderCache(par_id, pair_leader_proxy);
-  Log_debug("send dispatch to site %ld, par %d",
-            pair_leader_proxy.first, par_id);
   auto proxy = pair_leader_proxy.second;
   MarshallDeputy md;
   if (using_batch) {
@@ -512,7 +510,9 @@ void Communicator::BroadcastDispatch(
   Log_info("[Jetpack] [C-] BroadcastDispatch at Communicator %.3f", tp.tv_sec * 1000 + tp.tv_usec / 1000.0);
 #endif
 
-  WAN_WAIT;
+  // Simulated WAN hop from this process to the leader. Skipped when the
+  // leader site is colocated with this process.
+  WAN_WAIT_TO(pair_leader_proxy.first);
 #ifdef FULL_LOG_DEBUG
   Log_info("[Jetpack] cmd<%d, %d> before async_Dispatch", SimpleRWCommand::GetCmdID(md.sp_data_).first, SimpleRWCommand::GetCmdID(md.sp_data_).second);
 #endif
@@ -550,8 +550,6 @@ void Communicator::SyncBroadcastDispatch(
   }
   
   SetLeaderCache(par_id, pair_leader_proxy);
-  Log_debug("send dispatch to site %ld, par %d",
-            pair_leader_proxy.first, par_id);
   auto proxy = pair_leader_proxy.second;
   shared_ptr<VecPieceData> sp_vpd(new VecPieceData);
   sp_vpd->sp_vec_piece_data_ = sp_vec_piece;
@@ -571,7 +569,10 @@ void Communicator::SyncBroadcastDispatch(
   Log_info("[Jetpack] [C-] BroadcastDispatch at Communicator %.3f", tp.tv_sec * 1000 + tp.tv_usec / 1000.0);
 #endif
 
-  WAN_WAIT;
+  // Simulated WAN hop from this process to the leader. Skipped when the
+  // leader site is colocated with this process (SyncBroadcastDispatch
+  // variant of the pattern in BroadcastDispatch above).
+  WAN_WAIT_TO(pair_leader_proxy.first);
 #ifdef FULL_LOG_DEBUG
   Log_info("[Jetpack] cmd<%d, %d> before async_Dispatch", SimpleRWCommand::GetCmdID(md.sp_data_).first, SimpleRWCommand::GetCmdID(md.sp_data_).second);
 #endif

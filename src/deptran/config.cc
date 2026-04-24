@@ -582,6 +582,18 @@ void Config::LoadModeYML(YAML::Node config) {
     jetpack_merge_leader_rpc_ = config["jetpack_merge_leader_rpc"].as<bool>();
     Log_info("[Jetpack] jetpack_merge_leader_rpc = %d", jetpack_merge_leader_rpc_ ? 1 : 0);
   }
+  if (config["etcd_batch_size"]) {
+    etcd_batch_size_ = config["etcd_batch_size"].as<int>();
+    Log_info("[etcd] etcd_batch_size = %d", etcd_batch_size_);
+  }
+  if (config["etcd_batch_timeout_ms"]) {
+    etcd_batch_timeout_ms_ = config["etcd_batch_timeout_ms"].as<int>();
+    Log_info("[etcd] etcd_batch_timeout_ms = %d", etcd_batch_timeout_ms_);
+  }
+  if (config["etcd_lease_reads"]) {
+    etcd_lease_reads_ = config["etcd_lease_reads"].as<bool>();
+    Log_info("[etcd] etcd_lease_reads = %d", etcd_lease_reads_ ? 1 : 0);
+  }
 }
 
 void Config::UpdateWeights(YAML::Node config) {
@@ -881,6 +893,17 @@ int Config::NumSites(SiteInfoType type) {
     searching = &par_clients_;
   }
   return searching->size();
+}
+
+bool Config::IsSiteLocal(siteid_t site_id) {
+  if (proc_name_.empty()) return false;
+  if (site_id < 0) return false;
+  auto uid = static_cast<uint32_t>(site_id);
+  if (uid >= sites_.size() + par_clients_.size()) return false;
+  const auto& s = (uid < sites_.size())
+                      ? sites_[uid]
+                      : par_clients_[uid - sites_.size()];
+  return s.proc_name == proc_name_;
 }
 
 const Config::SiteInfo& Config::SiteById(uint32_t id) {
