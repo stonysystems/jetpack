@@ -88,8 +88,37 @@ void TxLogServer::StartCpuMonitorIfNeeded() {
 }
 
 double TxLogServer::SampleCpuUsage() {
-  StartCpuMonitorIfNeeded();
-  return last_cpu_usage_;
+  // Synchronous cached read — cheaper + more reliable than the
+  // Coroutine::CreateRun sampler which never published a sample on
+  // some builds (the adaptive throttle was observing -1.0 consistently).
+  // Rate-limited to ~1 /proc/stat read per 200 ms per thread (matches the
+  // old cadence), so the per-request cost is a handful of nanoseconds
+  // plus one syscall every 200 ms.
+  thread_local CpuStatSnapshot prev{};
+  thread_local bool has_prev = false;
+  thread_local std::chrono::steady_clock::time_point last_read{};
+  thread_local double cached_usage = -1.0;
+
+  auto now = std::chrono::steady_clock::now();
+  bool first = !has_prev;
+  bool due = has_prev &&
+             std::chrono::duration_cast<std::chrono::milliseconds>(now - last_read).count() >= 200;
+  if (first || due) {
+    CpuStatSnapshot curr{};
+    if (ReadCpuStats(server_core_id.load(std::memory_order_relaxed), &curr)) {
+      if (has_prev) {
+        double usage = ComputeCpuUsage(prev, curr);
+        if (usage >= 0.0) {
+          cached_usage = usage;
+          last_cpu_usage_ = usage;
+        }
+      }
+      prev = curr;
+      has_prev = true;
+      last_read = now;
+    }
+  }
+  return cached_usage;
 }
 
 shared_ptr<Tx> TxLogServer::CreateTx(epoch_t epoch, txnid_t tid, bool

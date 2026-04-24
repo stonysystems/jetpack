@@ -103,35 +103,43 @@ void CoordinatorRule::GotoNextPhase() {
           }
         } else if (Config::GetConfig()->replica_proto_ == MODE_RAFT ||
                    Config::GetConfig()->replica_proto_ == MODE_FPGA_RAFT) {
-          // Adaptive: at high leader CPU the fast-path spec RPC is pure
-          // overhead on the same pinned core that's already handling the
-          // Raft replication load. Hard-disable fast-path when the leader
-          // is near saturation, so the peak throughput matches plain Raft
-          // instead of falling below it (the spec RPCs steal cycles the
-          // leader would otherwise spend on AppendEntries).
+          // Adaptive throttle: at high leader CPU the fast-path spec RPCs
+          // become pure overhead on the pinned leader core — they steal
+          // cycles from the Raft replication loop and DROP peak throughput
+          // below what vanilla Raft would achieve. So as the leader
+          // approaches saturation, ramp down the fast-path attempt rate
+          // so jp-raft-adaptive gracefully degrades to vanilla Raft at
+          // peak load (fp_rate -> 0 when cpu -> 100).
           //
-          // Threshold 80%: below this, the leader has spare cycles and
-          // fast-path's 1-RTT latency win is worth the extra CPU; above
-          // this, every speculative attempt competes with Raft work.
-          // Randomized so the disable ramps in instead of flipping on at
-          // a hard boundary (same shape as the Mencius throttle above).
+          // Linear ramp between FP_LO and FP_HI:
+          //   cpu <= FP_LO -> disable_prob = 0
+          //   cpu >= FP_HI -> disable_prob = 1
+          //   linear in between
+          //
+          // FP_LO = 70%: safely above steady-state "healthy" CPU (~50%),
+          //              so we don't throttle in the sweet spot.
+          // FP_HI = 95%: by the time the leader is near the wall, almost
+          //              every attempt is suppressed.
+          //
+          // Uses instantaneous recent-100-avg rather than a monotone max
+          // so the throttle tracks the current load and releases when
+          // load drops (matches the user's intent that we don't stay
+          // throttled forever after one load spike).
+          constexpr double FP_LO = 70.0;
+          constexpr double FP_HI = 95.0;
+          constexpr double FP_RANGE = FP_HI - FP_LO;
           double avg_leaders = client_worker_->cpu_usage_leaders_.recent_100_ave();
-          static double max_leader_avg_raft = 0.0;
-          if (avg_leaders > max_leader_avg_raft) {
-            max_leader_avg_raft = avg_leaders;
-          }
-          double rand_val = RandomGenerator::rand(0, 30);
-          bool cpu_disabled = (max_leader_avg_raft - 80.0 > rand_val);
+          double rand_val = RandomGenerator::rand(0, static_cast<int>(FP_RANGE));
+          bool cpu_disabled = (avg_leaders - FP_LO) > rand_val;
           if (cpu_disabled) {
             go_to_fastpath_ = false;
           }
           static int raft_log_counter = 0;
           if (++raft_log_counter % 500 == 1) {
-            Log_info("[CPU-RAFT] avg_leaders=%.2f max_leader=%.2f "
-                     "threshold=%.2f rand=%.2f cpu_disabled=%d go_fp=%d "
+            Log_info("[CPU-RAFT] avg_leaders=%.2f "
+                     "ramp=[%.0f,%.0f] rand=%.2f cpu_disabled=%d go_fp=%d "
                      "fp_cnt=%d",
-                     avg_leaders, max_leader_avg_raft,
-                     max_leader_avg_raft - 80.0, rand_val,
+                     avg_leaders, FP_LO, FP_HI, rand_val,
                      cpu_disabled, go_to_fastpath_,
                      client_worker_->go_to_jetpack_fastpath_cnt_);
           }
@@ -334,8 +342,17 @@ void CoordinatorRule::BroadcastRuleSpeculativeExecute(int phase) {
   e->Wait();
   // Log_info("[CPU] AvgCpuAll=%.2f AvgCpuLeaders=%.2f", e->AvgCpuAll(), e->AvgCpuLeaders());
   if (client_worker_) {
-    client_worker_->cpu_usage_all_.append(e->AvgCpuAll());
-    client_worker_->cpu_usage_leaders_.append(e->AvgCpuLeaders());
+    if (e->AvgCpuAll() > 0.0) {
+      client_worker_->cpu_usage_all_.append(e->AvgCpuAll());
+    }
+    // Only append when the event actually saw a leader CPU sample. In the
+    // merge-RPC fused path the spec broadcast skips the leader, so this
+    // is 0 and we'd otherwise poison the rolling-avg with zeros that
+    // mask the real saturated leader (the leader sample is appended
+    // separately from the fused RPC reply — see rule/commo.cc).
+    if (e->AvgCpuLeaders() > 0.0) {
+      client_worker_->cpu_usage_leaders_.append(e->AvgCpuLeaders());
+    }
     double leader_queue_depth = e->LeaderQueueDepth();
     if (leader_queue_depth >= 0.0) {
       client_worker_->queue_depth_.append(leader_queue_depth);
@@ -431,8 +448,16 @@ void CoordinatorRule::DispatchAndSpeculativeExecuteFused(int phase) {
   // 3) Wait for spec quorum from the N-1 follower votes.
   e->Wait();
   if (client_worker_) {
-    client_worker_->cpu_usage_all_.append(e->AvgCpuAll());
-    client_worker_->cpu_usage_leaders_.append(e->AvgCpuLeaders());
+    if (e->AvgCpuAll() > 0.0) {
+      client_worker_->cpu_usage_all_.append(e->AvgCpuAll());
+    }
+    // Merge-RPC path: the event holds follower samples only, so
+    // AvgCpuLeaders() is 0. The leader's CPU is appended separately
+    // from BroadcastDispatchWithRuleSpec's reply callback — skipping
+    // the zero here keeps the rolling avg tracking real leader load.
+    if (e->AvgCpuLeaders() > 0.0) {
+      client_worker_->cpu_usage_leaders_.append(e->AvgCpuLeaders());
+    }
     double leader_queue_depth = e->LeaderQueueDepth();
     if (leader_queue_depth >= 0.0) {
       client_worker_->queue_depth_.append(leader_queue_depth);

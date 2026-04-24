@@ -1,4 +1,6 @@
 #include "commo.h"
+#include "../coordinator.h"
+#include "../client_worker.h"
 
 namespace janus
 {
@@ -398,18 +400,25 @@ void CommunicatorRule::BroadcastDispatchWithRuleSpec(
 
         // The leader's fastpath vote is intentionally not fed into the spec
         // quorum event — the event was constructed for N-1 follower votes
-        // only (see BroadcastRuleSpeculativeExecuteSkipLeader). The leader's
-        // CPU/queue-depth samples are still useful for the adaptive throttle;
-        // feed them through to the event's stats without voting.
-        if (cpu_usage >= 0.0) {
-          // Piggyback stats: FeedResponse updates totals before voting; but
-          // we don't want an extra vote. Spec event has no "stats-only"
-          // entry point today, so just drop these samples for now — the
-          // adaptive controller relies on follower samples which still feed
-          // the event normally. (Follow-up: add a StatsOnly hook if the
-          // CPU heuristic regresses.)
-          (void)cpu_usage; (void)queue_depth; (void)is_leader;
-          (void)accepted; (void)spec_result;
+        // only (see BroadcastRuleSpeculativeExecuteSkipLeader). But the
+        // leader's CPU is the critical signal for the adaptive throttle,
+        // and follower CPU is a poor proxy for it when the leader is the
+        // bottleneck. Feed it in two places:
+        //   1) FeedStatsOnly on the spec event, so any post-quorum
+        //      consumer sees the sample (harmless race: the event may
+        //      already have resolved).
+        //   2) Append directly to client_worker_->cpu_usage_leaders_,
+        //      which is what the throttle decision on future txns reads
+        //      via recent_100_ave(). This is the authoritative path when
+        //      the quorum event resolves on followers before the leader
+        //      reply lands.
+        (void)accepted; (void)spec_result;
+        if (spec_event) {
+          spec_event->FeedStatsOnly(static_cast<bool>(is_leader), cpu_usage, queue_depth);
+        }
+        if (static_cast<bool>(is_leader) && cpu_usage >= 0.0 &&
+            coo != nullptr && coo->client_worker_ != nullptr) {
+          coo->client_worker_->cpu_usage_leaders_.append(cpu_usage);
         }
 
         callback(ret, outputs);
