@@ -1,0 +1,15 @@
+mode:
+  cc: rule # concurrency control
+  ab: raft # atomic broadcast
+  batch: false
+  retry: 20
+  ongoing: 1 # per client
+  # Standard Jetpack post-opt config plus the
+  # jetpack_skip_pool_for_original_path optimization, which makes the
+  # command pool track ONLY fast-path attempts. Original-path-only
+  # commands are detected by the leader walking its raft_logs_ in
+  # (executeIndex, lastLogIndex] in RaftServer::ConflictWithOriginalUnexecutedLog.
+  # See docs/2026-04-23_max_throughput_protocols_with_optimized_jetpack.md
+  # for the motivation and the design discussion.
+  jetpack_merge_leader_rpc: true
+  jetpack_skip_pool_for_original_path: true

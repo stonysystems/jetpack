@@ -254,7 +254,18 @@ bool SimpleRWCommand::ExtractPoolKeys(const shared_ptr<Marshallable>& cmd,
 bool SimpleRWCommand::NeedRecordConflictInOriginalPath(shared_ptr<Marshallable> cmd) {
   shared_ptr<vector<shared_ptr<SimpleCommand>>> sp_vec_piece{nullptr};
   shared_ptr<TxPieceData> vector0;
-  if (cmd->kind_ == MarshallDeputy::CMD_TPC_COMMIT) {
+  // CMD_TPC_BATCH wraps a single TpcCommitCommand under merge-RPC. The
+  // tag on that inner cmd is what we need; descend like SimpleRWCommand's
+  // ctor and ExtractPoolKeys do. Without this, RuleCommandPoolGC trips
+  // verify(0) when applyLogs feeds it the leader-logged batch.
+  if (cmd->kind_ == MarshallDeputy::CMD_TPC_BATCH) {
+    shared_ptr<TpcBatchCommand> batch_cmd = dynamic_pointer_cast<TpcBatchCommand>(cmd);
+    verify(batch_cmd->Size() == 1);
+    shared_ptr<TpcCommitCommand> tpc_cmd = batch_cmd->cmds_[0];
+    VecPieceData *cmd_cast = (VecPieceData*)(tpc_cmd->cmd_.get());
+    sp_vec_piece = cmd_cast->sp_vec_piece_data_;
+    vector0 = *(sp_vec_piece->begin());
+  } else if (cmd->kind_ == MarshallDeputy::CMD_TPC_COMMIT) {
     shared_ptr<TpcCommitCommand> tpc_cmd = dynamic_pointer_cast<TpcCommitCommand>(cmd);
     VecPieceData *cmd_cast = (VecPieceData*)(tpc_cmd->cmd_.get());
     sp_vec_piece = cmd_cast->sp_vec_piece_data_;

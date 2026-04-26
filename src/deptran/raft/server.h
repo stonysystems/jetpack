@@ -355,6 +355,17 @@ class RaftServer : public TxLogServer {
                        uint64_t *followerLastLogIndex,
                        const function<void()> &cb);
 
+  // Leader-side override of the Jetpack fast-path conflict check.
+  // Iterates the small inflight_original_path_ map (maintained by
+  // OriginalPathUnexecutedCmdConflictPlaceHolder / RuleCommandPoolGC)
+  // and returns true if any unapplied original-path entry's key
+  // conflicts with cmd (same key, at least one writer). Followers
+  // fall back to the base no-op impl. Used when the
+  // jetpack_skip_pool_for_original_path flag is on, in which case
+  // the command pool only tracks fast-path attempts and original-path
+  // commands have to be detected via this side-index instead.
+  bool ConflictWithOriginalUnexecutedLog(const shared_ptr<Marshallable>& cmd) override;
+
   void Disconnect(const bool disconnect = true);
 
   void Reconnect() {

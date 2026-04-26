@@ -579,7 +579,23 @@ void TxLogServer::OnRuleSpeculativeExecute(const shared_ptr<Marshallable>& cmd,
 #ifdef JETPACK_PROF
     auto pool_t0 = std::chrono::steady_clock::now();
 #endif
-    no_conflict = rep_sched_->command_pool_.push_back(cmd);
+    // Leader-side cross-path conflict check before touching the pool.
+    // pool.push_back ALWAYS appends (it returns conflict status but
+    // still inserts). If we push first and discover a cross-path
+    // conflict via the map, the pool ends up holding a phantom entry
+    // for a rejected fast-path attempt — that attempt never makes it
+    // to Raft, so applyLogs never runs GC for it, and the entry
+    // false-positive-conflicts every future fast-path on the same key.
+    bool skip_pool_conflict = false;
+    if (Config::GetConfig()->GetJetpackSkipPoolForOriginalPath() &&
+        rep_sched_->IsLeader()) {
+      skip_pool_conflict = rep_sched_->ConflictWithOriginalUnexecutedLog(cmd);
+    }
+    if (skip_pool_conflict) {
+      no_conflict = false;
+    } else {
+      no_conflict = rep_sched_->command_pool_.push_back(cmd);
+    }
 #ifdef JETPACK_PROF
     auto pool_t1 = std::chrono::steady_clock::now();
     rep_sched_->prof_pool_push_calls_.fetch_add(1, std::memory_order_relaxed);
@@ -620,14 +636,70 @@ void TxLogServer::OnRuleSpeculativeExecute(const shared_ptr<Marshallable>& cmd,
 
 void TxLogServer::OriginalPathUnexecutedCmdConflictPlaceHolder(const shared_ptr<Marshallable>& cmd) {
   if (Config::GetConfig()->tx_proto_ == MODE_RULE && SimpleRWCommand::NeedRecordConflictInOriginalPath(cmd)) {
-    // Log_info("[JETPACK-CommandPool] loc_id %d about to push_back", loc_id_);
+    // Optimization gate: when jetpack_skip_pool_for_original_path is on,
+    // the command pool only tracks fast-path-attempted commands.
+    // Original-path-only commands (which is what NeedRecordConflictInOriginalPath
+    // identifies) are instead tracked in a small per-replica map that
+    // the leader's ConflictWithOriginalUnexecutedLog iterates directly.
+    // RuleCommandPoolGC removes from the same map — see below.
+    if (Config::GetConfig()->GetJetpackSkipPoolForOriginalPath()) {
+      // Track original-path-only commands in the lean key-indexed map
+      // and SKIP the pool entirely. The leader uses
+      // ConflictWithOriginalUnexecutedLog to consult this map for
+      // cross-path conflict detection on every fast-path attempt.
+      // Followers don't have an authoritative uncommitted log, so they
+      // fall back to consulting the pool (which still tracks fast-path
+      // attempts) — they may miss cross-path conflicts, matching
+      // baseline behavior since OriginalPathUnexecutedCmdConflictPlaceHolder
+      // was already leader-only via service.cc:Dispatch.
+      key_t key;
+      uint64_t cmd_id;
+      bool is_write;
+      if (SimpleRWCommand::ExtractPoolKeys(cmd, &key, &cmd_id, &is_write)) {
+        rep_sched_->inflight_original_path_[key].push_back({cmd_id, is_write});
+      }
+      return;
+    }
     rep_sched_->command_pool_.push_back(cmd);
   }
 }
 
 void TxLogServer::RuleCommandPoolGC(const shared_ptr<Marshallable>& cmd) {
-  if (Config::GetConfig()->tx_proto_ == MODE_RULE)
+  if (Config::GetConfig()->tx_proto_ == MODE_RULE) {
+    // Optimization gate: when jetpack_skip_pool_for_original_path is on,
+    // original-path-only commands were never pushed to the pool — they
+    // were tracked in inflight_original_path_ instead. Erase by cmd_id.
+    // Fast-path commands still go through the pool as usual.
+    if (Config::GetConfig()->GetJetpackSkipPoolForOriginalPath() &&
+        SimpleRWCommand::NeedRecordConflictInOriginalPath(cmd)) {
+      // applyLogs calls RuleCommandPoolGC with `this == RaftServer`, so
+      // the map lives on `this` (NOT `rep_sched_` — RaftServer's
+      // rep_sched_ field is null). The companion insert path runs from
+      // tx_sched_ (where `this` is SchedulerNone) and writes to
+      // rep_sched_->inflight_original_path_ — which IS the same map,
+      // since rep_sched_ on tx_sched_ points to this RaftServer.
+      key_t key;
+      uint64_t cmd_id;
+      bool is_write;
+      if (SimpleRWCommand::ExtractPoolKeys(cmd, &key, &cmd_id, &is_write)) {
+        auto it = inflight_original_path_.find(key);
+        if (it != inflight_original_path_.end()) {
+          auto& bucket = it->second;
+          for (auto bit = bucket.begin(); bit != bucket.end(); ++bit) {
+            if (bit->cmd_id == cmd_id) {
+              bucket.erase(bit);
+              break;
+            }
+          }
+          if (bucket.empty()) {
+            inflight_original_path_.erase(it);
+          }
+        }
+      }
+      return;
+    }
     command_pool_.remove(cmd);
+  }
   // SimpleRWCommand parsed_cmd = SimpleRWCommand(cmd);
   // uint64_t cmd_id = SimpleRWCommand::CombineInt32(parsed_cmd.cmd_id_.first, parsed_cmd.cmd_id_.second);
   // Log_info("command_pool_.remove server %d remove cmd_id <%d, %d> %lld key %d success %d", loc_id_, parsed_cmd.cmd_id_.first, parsed_cmd.cmd_id_.second,

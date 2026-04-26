@@ -582,6 +582,12 @@ void Config::LoadModeYML(YAML::Node config) {
     jetpack_merge_leader_rpc_ = config["jetpack_merge_leader_rpc"].as<bool>();
     Log_info("[Jetpack] jetpack_merge_leader_rpc = %d", jetpack_merge_leader_rpc_ ? 1 : 0);
   }
+  if (config["jetpack_skip_pool_for_original_path"]) {
+    jetpack_skip_pool_for_original_path_ =
+        config["jetpack_skip_pool_for_original_path"].as<bool>();
+    Log_info("[Jetpack] jetpack_skip_pool_for_original_path = %d",
+             jetpack_skip_pool_for_original_path_ ? 1 : 0);
+  }
   if (config["etcd_batch_size"]) {
     etcd_batch_size_ = config["etcd_batch_size"].as<int>();
     Log_info("[etcd] etcd_batch_size = %d", etcd_batch_size_);

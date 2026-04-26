@@ -31,6 +31,43 @@ Documentation produced:
 
 ## Open / Unsolved Items
 
+### Recently completed (2026-04-25 → 2026-04-26)
+
+- **`jetpack_skip_pool_for_original_path` optimization — bug fix + perf gain**.
+  The flag (introduced with the merge-RPC + pool opts on the `jetpack` branch)
+  was crashing the Raft leader on every adaptive (mode 101) and pure-original
+  (mode 0) workload; fp100 (mode 100) survived only because the buggy branch
+  was never taken in that mode. Root cause: `RuleCommandPoolGC` ran with
+  `this == RaftServer` and dereferenced `rep_sched_->inflight_original_path_`,
+  but `RaftServer::rep_sched_` is `nullptr` (only the tx scheduler has its
+  `rep_sched_` populated by `server_worker.cc`). Bisection across ~10
+  configurations missed it because the symptom (`munmap_chunk(): invalid
+  pointer` on followers, `Segmentation fault` on the leader) looked like
+  shared_ptr lifetime / iterator-invalidation; it only surfaced when an N=1
+  baseline fired the unrelated `verify(0)` in `TxLogServer::IsLeader`.
+  Fix: drop the `rep_sched_->` prefix in `RuleCommandPoolGC`
+  (`this->inflight_original_path_` IS the same map, since `tx_sched_->rep_sched_`
+  points to this RaftServer). Other small fixes that landed alongside:
+  `CMD_TPC_BATCH` handling in `NeedRecordConflictInOriginalPath`, key-indexed
+  bucket map (was cmd_id-indexed, O(n) per fast-path attempt),
+  `ExtractPoolKeys` instead of `GetCombinedCmdID` on the hot path,
+  and reordering `OnRuleSpeculativeExecute` so a cross-path conflict
+  doesn't leave a phantom pool entry. Performance — original Raft vs
+  jp-raft-fp0 (fast-path attempt rate = 0, peak under SLO p90 ≤ 1000 ms,
+  core-17 pin):
+
+  | Config | Peak tput | At N |
+  |---|---|---|
+  | Vanilla Raft | 16,798 | 84 |
+  | jp-raft-fp0 (no opt) | 15,597 | 78 |
+  | **jp-raft-fp0 (skip-pool opt)** | **16,382** | **82** |
+
+  The optimization recovers ~65 % of the Jetpack overhead at fp_rate = 0
+  (gap to vanilla: −7.1 % → −2.5 %). Adaptive mode 101 also gains +3 %
+  peak (15,776 vs 15,312), fp100 unchanged within noise. Full report,
+  reproduction commands, and bisection log:
+  [results/2026-04-25_jp_raft_skip_pool_optimization.md](results/2026-04-25_jp_raft_skip_pool_optimization.md).
+
 ### Recently completed (2026-04-18 → 2026-04-20)
 
 - **naive_raft baseline protocol** — **Done** (commit `ccaf65ec`). Client sends Dispatch to fixed leader at locale_id=1 (zoo2); leader broadcasts to 4 followers with `dep_id.str="nr_replicate"` marker and waits for 2 follower acks (3/5 simple majority counting self). No log / election / heartbeats. Baseline for the CPU/latency cost of the leader-broadcast + majority-quorum shape without real-Raft bookkeeping. Implementation: [src/deptran/naive_raft/commo.{h,cc}](src/deptran/naive_raft/), gated hooks in `service.cc` + `communicator.cc`, config [config/none_naive_raft.yml](config/none_naive_raft.yml).

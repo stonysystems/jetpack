@@ -102,6 +102,21 @@ class Config {
   // from N+1 to N, leader handles 1 RPC instead of 2).
   bool jetpack_merge_leader_rpc_ = false;
 
+  // Optimization for the throttled-jp-raft-adaptive case. With this off
+  // (default), every original-path command goes through
+  // OriginalPathUnexecutedCmdConflictPlaceHolder -> command_pool_.push_back
+  // (and RuleCommandPoolGC -> remove on commit). With this on, those
+  // calls are skipped for original-path-only commands; the leader's
+  // fast-path conflict check then has to walk its own uncommitted
+  // raft_logs_ range to detect conflicts with logged-but-unapplied
+  // original-path commands. The pool ends up tracking ONLY fast-path
+  // attempts, which removes ~30k unordered_map ops/sec from the
+  // saturated leader at peak load and lets jp-raft-adaptive close most
+  // of the gap to vanilla raft when the throttle drives fp_rate -> 0.
+  // See docs/2026-04-23_max_throughput_protocols_with_optimized_jetpack.md
+  // and the discussion thread for the design.
+  bool jetpack_skip_pool_for_original_path_ = false;
+
   // etcd client-side batching. When size > 1, the EtcdConnectionThreadPool
   // coalesces up to size_ ops into one etcd Txn, flushing when the buffer
   // hits size_ OR timeout_ms_ elapses since the first enqueue, whichever
@@ -254,6 +269,9 @@ class Config {
   // by the colocation-aware WAN_WAIT_TO macro to skip simulated WAN delay
   // when caller and peer are on the same zoo host.
   bool IsSiteLocal(siteid_t site_id);
+  bool GetJetpackSkipPoolForOriginalPath() const {
+    return jetpack_skip_pool_for_original_path_;
+  }
   int NumClients() {
     return par_clients_.size();
   }

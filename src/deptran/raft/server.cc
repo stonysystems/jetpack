@@ -204,6 +204,41 @@ void RaftServer::Setup() {
   // Election timer will be started in Start() method when first command is submitted
 }
 
+bool RaftServer::ConflictWithOriginalUnexecutedLog(
+    const shared_ptr<Marshallable>& cmd) {
+  // Only the proposing replica (leader) walks its own log here. Followers
+  // don't have an authoritative uncommitted log of their own — they keep
+  // checking the command pool only, in OnRuleSpeculativeExecute.
+  if (!IsLeader()) return false;
+
+  // Key-indexed lookup: only walk entries that share the cmd's key.
+  // The map is keyed by key, so this is O(bucket size) — typically
+  // 0–2 entries for low-contention workloads. Iterating every
+  // original-path command in flight (cmd_id index) saturates the
+  // leader at high adaptive load.
+  if (inflight_original_path_.empty()) return false;
+
+  int cmd_key = 0;
+  uint64_t cmd_id = 0;
+  bool cmd_is_write = false;
+  if (!SimpleRWCommand::ExtractPoolKeys(cmd, &cmd_key, &cmd_id, &cmd_is_write)) {
+    // Non-RW workload (e.g. tpcc): be conservative, let pool decide.
+    return false;
+  }
+
+  auto it = inflight_original_path_.find(cmd_key);
+  if (it == inflight_original_path_.end()) return false;
+  for (auto& entry : it->second) {
+    // Self-match guard for the merge-RPC path where the fast-path attempt
+    // and its own appended log entry could share cmd_id.
+    if (entry.cmd_id == cmd_id) continue;
+    // Conflict semantic: same key with at least one writer.
+    if (!entry.is_write && !cmd_is_write) continue;
+    return true;
+  }
+  return false;
+}
+
 void RaftServer::Disconnect(const bool disconnect) {
   std::lock_guard<std::recursive_mutex> lock(mtx_);
   verify(disconnected_ != disconnect);

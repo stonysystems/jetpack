@@ -649,6 +649,24 @@ class TxLogServer {
   double GetQueueDepthForRule();
   JetpackCommandPool command_pool_;
 
+  // Per-key bucket of in-flight original-path-only commands. Each entry
+  // carries just the cmd_id (for erase) and is_write (for the
+  // write/write-vs-read conflict rule). No shared_ptr to the cmd is
+  // needed because the conflict check only consumes the pre-extracted
+  // fields, and avoiding it skips a SimpleRWCommand re-parse on the
+  // per-fast-path-attempt hot path.
+  struct InflightOriginalEntry {
+    uint64_t cmd_id;
+    bool is_write;
+  };
+  // Key-indexed (NOT cmd_id-indexed): the conflict check runs on every
+  // fast-path attempt and only needs to look at entries with the same
+  // key as the attempt. A cmd_id-indexed map forced an O(n) scan over
+  // every in-flight original-path command, which saturated the leader
+  // under adaptive mode 101 (10k+ attempts/sec × hundreds of entries).
+  // Single-threaded coroutine reactor → no atomics / mutex needed.
+  std::unordered_map<int /*key*/, std::vector<InflightOriginalEntry>> inflight_original_path_;
+
   // For Rule usage
   void OnRuleSpeculativeExecute(const shared_ptr<Marshallable>& cmd,
                                 bool_t* accepted,
@@ -664,13 +682,18 @@ class TxLogServer {
   // CURP: check if cmd conflicts with any uncommitted Raft log entry (leader only)
   bool ConflictWithUncommittedRaftLog(const shared_ptr<Marshallable>& cmd);
 
-#ifdef ZERO_OVERHEAD
+  // Per-protocol leader-side conflict check against the local
+  // uncommitted-and-unapplied log range. Used by OnRuleSpeculativeExecute
+  // when jetpack_skip_pool_for_original_path is enabled, to detect
+  // conflicts between an arriving fast-path attempt and an original-path
+  // command that sits in this leader's protocol log but has not yet
+  // applied to the state machine. Default impl returns false (no
+  // conflict known) — the Raft leader override is the first to provide
+  // a real implementation; Copilot / Mencius can be added later.
   virtual bool ConflictWithOriginalUnexecutedLog(const shared_ptr<Marshallable>& cmd) {
-    // This function should be overrided by the deriviated class (replica server)
-    assert(0);
+    (void)cmd;
     return false;
   }
-#endif
 
   void JetpackRecoveryEntry();
 
