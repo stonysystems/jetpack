@@ -1,6 +1,11 @@
 mode:
-  cc: rule # concurrency control (rule = Jetpack fast-path infrastructure)
-  ab: raft # atomic broadcast (CURP uses Raft as base; -m 200 activates CURP behavior)
+  cc: rule  # concurrency control: rule scheduler hosts the optimistic path
+  ab: raft  # atomic broadcast: Raft handles slow-path replication
   batch: false
   retry: 20
-  ongoing: 1 # per client
+  ongoing: 1  # per client
+  # Fuse the leader-side Dispatch + RuleSpeculativeExecute into a single
+  # round trip so the CURP leader handles half the per-txn RPC work.
+  # Witnesses receive the spec broadcast separately (with the leader
+  # excluded — see rule/commo.cc CURP path).
+  jetpack_merge_leader_rpc: true

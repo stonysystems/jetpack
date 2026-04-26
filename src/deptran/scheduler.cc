@@ -551,13 +551,12 @@ void TxLogServer::OnRuleSpeculativeExecute(const shared_ptr<Marshallable>& cmd,
     if (queue_depth) *queue_depth = -1.0;
     return;
   }
-  // CURP mode: leader checks Raft log for conflicts, non-leader checks command pool
-  bool curp_mode = Config::GetConfig()->jetpack_fastpath_attempt_rate_ == CURP_MODE;
   bool no_conflict;
-  if (curp_mode && IsLeader()) {
-    // CURP leader: check uncommitted Raft log entries for key conflicts
-    no_conflict = !ConflictWithUncommittedRaftLog(cmd);
-    // Leader does NOT insert into command pool — it uses the log as source of truth
+  if (Config::GetConfig()->IsCurpMode()) {
+    // CURP path: every replica records the optimistic attempt in its
+    // own witness and signals back whether any in-flight attempt on
+    // the same key would conflict (write-write or write-read).
+    no_conflict = rep_sched_->curp_witness_.record_attempt(cmd);
   } else {
     // Jetpack path (all replicas) or CURP non-leader (witness): check command pool
 #ifdef ZERO_OVERHEAD
@@ -666,6 +665,15 @@ void TxLogServer::OriginalPathUnexecutedCmdConflictPlaceHolder(const shared_ptr<
 
 void TxLogServer::RuleCommandPoolGC(const shared_ptr<Marshallable>& cmd) {
   if (Config::GetConfig()->tx_proto_ == MODE_RULE) {
+    // CURP path: clear the just-applied attempt from this replica's
+    // witness so future attempts on the same key see it as no longer
+    // in flight. Returns the count of cleared entries (0 on a replica
+    // that never witnessed this cmd, e.g. the leader when the spec
+    // broadcast was configured to skip it).
+    if (Config::GetConfig()->IsCurpMode()) {
+      curp_witness_.clear_attempt(cmd);
+      return;
+    }
     // Optimization gate: when jetpack_skip_pool_for_original_path is on,
     // original-path-only commands were never pushed to the pool — they
     // were tracked in inflight_original_path_ instead. Erase by cmd_id.
@@ -708,29 +716,6 @@ void TxLogServer::RuleCommandPoolGC(const shared_ptr<Marshallable>& cmd) {
   // command_pool_.remove(cmd);
 }
 
-
-bool TxLogServer::ConflictWithUncommittedRaftLog(const shared_ptr<Marshallable>& cmd) {
-  auto key = SimpleRWCommand::GetKey(cmd);
-  auto cmd_id = SimpleRWCommand::GetCombinedCmdID(cmd);
-  auto* raft_svr = dynamic_cast<RaftServer*>(rep_sched_);
-  if (!raft_svr) return false;  // safety: should not happen in CURP mode
-
-  // Scan uncommitted entries: commitIndex+1 to lastLogIndex
-  // Use find() instead of operator[] to avoid creating spurious map entries.
-  for (uint64_t i = raft_svr->commitIndex + 1; i <= raft_svr->lastLogIndex; i++) {
-    auto it = raft_svr->raft_logs_.find(i);
-    if (it == raft_svr->raft_logs_.end()) continue;
-    auto& sp_instance = it->second;
-    if (sp_instance && sp_instance->log_) {
-      // Skip the command itself (it may already be in the log from the Raft Submit path)
-      auto log_cmd_id = SimpleRWCommand::GetCombinedCmdID(sp_instance->log_);
-      if (log_cmd_id == cmd_id) continue;
-      auto log_key = SimpleRWCommand::GetKey(sp_instance->log_);
-      if (log_key == key) return true;  // conflict: different command on same key
-    }
-  }
-  return false;  // no conflict
-}
 
 void RevoveryCandidates::push_back(uint64_t cmd_id, shared_ptr<Marshallable> cmd, bool is_write) {
   candidates_[cmd_id] = Entry{cmd, is_write};

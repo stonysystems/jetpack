@@ -11,6 +11,7 @@
 #include "classic/tpc_command.h"
 #include "RW_command.h"
 #include "config.h"
+#include "curp/witness.h"
 #include <chrono>
 #include <fstream>
 #include <limits>
@@ -649,6 +650,12 @@ class TxLogServer {
   double GetQueueDepthForRule();
   JetpackCommandPool command_pool_;
 
+  // Per-replica CURP witness, populated on every replica that runs CURP
+  // mode (when Config::IsCurpMode()). Tracks fast-path attempts for
+  // conflict detection on a per-key basis. In Jetpack modes this is
+  // unused.
+  CurpWitness curp_witness_;
+
   // Per-key bucket of in-flight original-path-only commands. Each entry
   // carries just the cmd_id (for erase) and is_write (for the
   // write/write-vs-read conflict rule). No shared_ptr to the cmd is
@@ -678,9 +685,6 @@ class TxLogServer {
   void OriginalPathUnexecutedCmdConflictPlaceHolder(const shared_ptr<Marshallable>& cmd);
 
   void RuleCommandPoolGC(const shared_ptr<Marshallable>& cmd);
-
-  // CURP: check if cmd conflicts with any uncommitted Raft log entry (leader only)
-  bool ConflictWithUncommittedRaftLog(const shared_ptr<Marshallable>& cmd);
 
   // Per-protocol leader-side conflict check against the local
   // uncommitted-and-unapplied log range. Used by OnRuleSpeculativeExecute

@@ -153,7 +153,7 @@ CommunicatorRule::BroadcastRuleSpeculativeExecute(shared_ptr<vector<shared_ptr<S
   // doubles its single-core load. Skip the leader from the spec broadcast
   // and treat only the non-leader replicas as witnesses. This halves the
   // per-request leader work, which is what limits throughput at c50+.
-  bool curp_mode = Config::GetConfig()->jetpack_fastpath_attempt_rate_ == CURP_MODE;
+  bool curp_mode = Config::GetConfig()->IsCurpMode();
   siteid_t skip_site_id = -1;
   int n_rpc = n_total;
   int n_leaders_rpc = n_leaders_total;

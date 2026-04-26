@@ -31,6 +31,46 @@ Documentation produced:
 
 ## Open / Unsolved Items
 
+### Recently completed (2026-04-26)
+
+- **CURP refactor + max-throughput regression suite**.
+  Pre-refactor CURP collapsed at c100 (5,428 cmd/s, p90 = 14.7 s) and
+  crashed at c150+. Root cause: leader called `ConflictWithUncommittedRaftLog`
+  on every fast-path attempt, which iterated the uncommitted Raft log
+  range and ran two full `SimpleRWCommand` parses (each deep-copies the
+  `values_` map) per entry. After this refactor: CURP leader uses a
+  per-replica `CurpWitness` keyed by application key with O(bucket)
+  conflict detection and no deep-copy on the hot path. Each `WitnessSlot`
+  retains the in-flight cmd `shared_ptr`, a dedup `seen_` map, the
+  writer count, and the cmd_id of the slot's first writer — enough state
+  for a future CURP recovery path to be added without changing the
+  witness wire-up.
+
+  | Sweep | Pre-refactor peak | Post-refactor peak | At N |
+  |---|---|---|---|
+  | raft | 16,403 | 15,978 | 80 |
+  | jp-raft-fp100 | 14,414 | 14,778 | 75 |
+  | jp-raft-adaptive | 14,962 | 15,368 | 77 |
+  | **curp** | **9,982 (then collapse)** | **14,455** | **75** |
+
+  CURP now lands within run-to-run noise of jp-raft-fp100 (this batch
+  −2.2 %; an earlier run on a leaner witness was +1.3 %). raft +
+  jp-raft-fp100 + jp-raft-adaptive all unchanged within noise — no
+  regression on the previously-landed `skip_pool_for_original_path`
+  Jetpack optimization.
+
+  New regression script: [scripts/run_max_throughput_regression.sh](scripts/run_max_throughput_regression.sh)
+  runs the four adaptive sweeps in series with per-sweep peak floors,
+  exits non-zero on any miss. Wall time ~35–40 min.
+
+  Source: [src/deptran/curp/witness.{h,cc}](src/deptran/curp/),
+  [src/deptran/scheduler.{h,cc}](src/deptran/scheduler.h),
+  [src/deptran/raft/server.{h,cc}](src/deptran/raft/server.h),
+  [src/deptran/config.{h,cc}](src/deptran/config.h),
+  [config/none_curp.yml](config/none_curp.yml).
+  Full report + reproduction:
+  [results/2026-04-26_curp_witness_refactor.md](results/2026-04-26_curp_witness_refactor.md).
+
 ### Recently completed (2026-04-25 → 2026-04-26)
 
 - **`jetpack_skip_pool_for_original_path` optimization — bug fix + perf gain**.

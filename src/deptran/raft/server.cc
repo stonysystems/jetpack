@@ -290,9 +290,11 @@ void RaftServer::StartJetpackRecoveryLoop() {
 
 void RaftServer::TriggerJetpackRecovery(const char* reason) {
 #ifndef RAFT_TEST_CORO
-	// CURP mode: no Jetpack recovery (fast-path commands may be lost on leader change)
-	if (Config::GetConfig()->jetpack_fastpath_attempt_rate_ == CURP_MODE) {
-		Log_info("[CURP] Skipping Jetpack recovery trigger (%s) — CURP has no recovery",
+	// CURP has no fast-path recovery — an optimistic attempt that the
+	// leader didn't replicate before a view change is dropped. Match
+	// that semantic by short-circuiting the Jetpack recovery trigger.
+	if (Config::GetConfig()->IsCurpMode()) {
+		Log_info("[CURP] Skipping recovery trigger (%s) — CURP does not recover lost fast-path attempts",
 						 reason ? reason : "unspecified");
 		return;
 	}
@@ -553,10 +555,7 @@ void RaftServer::applyLogs() {
   for (slotid_t id = executeIndex + 1; id <= commitIndex; id++) {
     auto next_instance = GetRaftInstance(id);
     if (next_instance && next_instance->log_) {
-      // CURP leader doesn't use command pool, so skip GC for it
-      if (Config::GetConfig()->jetpack_fastpath_attempt_rate_ != CURP_MODE || !IsLeader()) {
-        RuleCommandPoolGC(next_instance->log_);
-      }
+      RuleCommandPoolGC(next_instance->log_);
       app_next_(*next_instance->log_);
       executeIndex = id;
     } else {
@@ -1100,7 +1099,7 @@ void RaftServer::OnAppendEntries(const slotid_t slot_id,
       // -> falls back to locale 0 = zoo1), causing CURP spec broadcasts on
       // every host except the true leader's host to include the real leader
       // as a "witness" that occasionally votes NO, blocking the fast path.
-      if (Config::GetConfig()->jetpack_fastpath_attempt_rate_ == CURP_MODE
+      if (Config::GetConfig()->IsCurpMode()
           && !IsLeader() && leaderSiteId != INVALID_SITEID
           && new_view_.GetLeader() != leaderSiteId) {
           int prev_leader = new_view_.GetLeader();

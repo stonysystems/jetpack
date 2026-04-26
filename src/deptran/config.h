@@ -272,6 +272,14 @@ class Config {
   bool GetJetpackSkipPoolForOriginalPath() const {
     return jetpack_skip_pool_for_original_path_;
   }
+  // True when -m matches the CURP behavior selector (200). CURP is a
+  // protocol mode rather than a Jetpack throttle setting; the value is
+  // squatted on jetpack_fastpath_attempt_rate_ for transport reasons.
+  // Use this accessor instead of comparing the raw int at every call
+  // site so the CURP-distinct branches read consistently.
+  bool IsCurpMode() const {
+    return jetpack_fastpath_attempt_rate_ == CURP_MODE;
+  }
   int NumClients() {
     return par_clients_.size();
   }

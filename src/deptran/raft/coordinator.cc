@@ -85,7 +85,7 @@ void CoordinatorRaft::Submit(shared_ptr<Marshallable>& cmd,
   bool is_recovery_cmd = SimpleRWCommand(cmd).IsRecoveryCommand();
 
   if (!is_recovery_cmd
-      && Config::GetConfig()->jetpack_fastpath_attempt_rate_ != CURP_MODE
+      && !Config::GetConfig()->IsCurpMode()
       && svr_->jetpack_status_ == TxLogServer::JetpackStatus::RECOVERY) {
 #ifdef JETPACK_WRONG_LEADER_DEBUG
     Log_info("[JETPACK-RECOVERY] Server %d rejecting Submit because Jetpack is in RECOVERY",
