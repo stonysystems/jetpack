@@ -239,6 +239,57 @@ bool RaftServer::ConflictWithOriginalUnexecutedLog(
   return false;
 }
 
+bool RaftServer::HasReadLease() {
+  std::lock_guard<std::recursive_mutex> lock(mtx_);
+  if (!is_leader_) return false;
+  int64_t now = MonotonicNowUs();
+  if (now < leader_warmup_until_us_) return false;
+  if (now >= lease_expires_us_) return false;
+  return true;
+}
+
+int64_t RaftServer::MonotonicNowUs() {
+  return std::chrono::duration_cast<std::chrono::microseconds>(
+             std::chrono::steady_clock::now().time_since_epoch())
+      .count();
+}
+
+void RaftServer::RecomputeLeaseLocked() {
+  // Quorum-conservative lease anchor: the (n-1)/2-th most recent
+  // AppendEntries send time. With n_followers = partition_size - 1,
+  // an anchor at this rank means at least quorum-1 followers (plus the
+  // leader = quorum) have definitely received our heartbeat by that
+  // moment. Lease ends at anchor + kReadLeaseDurationUs.
+  const int n_replicas = Config::GetConfig()->GetPartitionSize(partition_id_);
+  if (n_replicas <= 1) {
+    // Single-replica configuration: no followers to be heard from; the
+    // leader is trivially safe to serve reads as long as it is leader.
+    lease_expires_us_ = MonotonicNowUs() + kReadLeaseDurationUs;
+    return;
+  }
+  const int n_followers = n_replicas - 1;
+  // We need quorum = (n_replicas / 2) + 1 acks total; the leader is one
+  // of them, so we need (quorum - 1) followers. The anchor is the
+  // (quorum-1)-th most recent send among the followers.
+  const int quorum_followers = (n_replicas / 2);  // == (n_replicas + 1) / 2 - 1 + 1 - 1
+  std::vector<int64_t> sends;
+  sends.reserve(last_ae_send_us_.size());
+  for (auto& kv : last_ae_send_us_) sends.push_back(kv.second);
+  if ((int)sends.size() < quorum_followers) {
+    // Not enough fresh acks tracked yet to support a lease.
+    lease_expires_us_ = 0;
+    return;
+  }
+  // Sort descending; pick the (quorum_followers - 1)-th index = the
+  // oldest among the most-recent quorum_followers send times.
+  std::sort(sends.begin(), sends.end(), std::greater<int64_t>());
+  int64_t anchor = sends[quorum_followers - 1];
+  int64_t new_expires = anchor + kReadLeaseDurationUs;
+  if (new_expires > lease_expires_us_) {
+    lease_expires_us_ = new_expires;
+  }
+}
+
 void RaftServer::Disconnect(const bool disconnect) {
   std::lock_guard<std::recursive_mutex> lock(mtx_);
   verify(disconnected_ != disconnect);
@@ -473,6 +524,22 @@ void RaftServer::setIsLeader(bool isLeader) {
   // Update the leader state after view handling
   is_leader_ = isLeader;
 
+  // Read-lease bookkeeping. A new leader cannot serve lease-protected
+  // reads until any previously-held lease by the prior leader has
+  // definitely expired; warming up for one full lease duration is the
+  // simplest sufficient condition. A stepping-down leader drops its
+  // lease immediately so subsequent local-state reads fall back to the
+  // Raft-replicated path.
+  if (become_new_leader) {
+    leader_warmup_until_us_ = MonotonicNowUs() + kReadLeaseDurationUs;
+    lease_expires_us_ = 0;
+    last_ae_send_us_.clear();
+  } else if (become_new_follower) {
+    lease_expires_us_ = 0;
+    leader_warmup_until_us_ = 0;
+    last_ae_send_us_.clear();
+  }
+
   Log_info("RaftServer::setIsLeader site_id_ %d become_new_leader %d become_new_follower %d isLeader %d", site_id_, become_new_leader, become_new_follower, isLeader);
 
   // Only update view when transitioning from non-leader to leader
@@ -669,6 +736,10 @@ void RaftServer::HeartbeatLoop(siteid_t follower_site_id) {
     uint64_t ret_status = false;
     uint64_t ret_term = 0;
     uint64_t ret_last_log_index = 0;
+    // Read-lease anchor: the moment we hand the AppendEntries to the
+    // commo layer. Used below on a successful reply to extend the
+    // leader's read lease (anchor + kReadLeaseDurationUs).
+    int64_t ae_send_us = MonotonicNowUs();
     mtx_.unlock();
     auto r = commo()->SendAppendEntries2(follower_site_id,
                                          partition_id,
@@ -725,6 +796,14 @@ void RaftServer::HeartbeatLoop(siteid_t follower_site_id) {
         }
         Log_debug("leader site %d receiving site %ld followerLastLogIndex=%ld followerNextIndex=%ld followerMatchedIndex=%ld",
                   site_id_, follower_site_id, ret_last_log_index, next_index, match_idx);
+      }
+      // Read-lease: anchor on the time we sent this AE, not on the time
+      // we received the ack. The ack only confirms the follower's
+      // observation moment is in [send_us, recv_us]; for lease safety
+      // we use the earliest possible (send_us) as the anchor.
+      if (is_leader_) {
+        last_ae_send_us_[follower_site_id] = ae_send_us;
+        RecomputeLeaseLocked();
       }
     }
     mtx_.unlock();

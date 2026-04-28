@@ -234,6 +234,46 @@ class RaftServer : public TxLogServer {
   std::recursive_mutex ready_for_replication_mtx_{};
   std::unordered_map<siteid_t, shared_ptr<IntEvent>> ready_for_replication_;
 
+  // Read-lease state. Single-shard, leader-only. The lease is a
+  // monotonic-clock deadline: while now < lease_expires_us_ AND
+  // now >= leader_warmup_until_us_, the leader can serve linearizable
+  // reads from its own state machine without a Raft round-trip.
+  //
+  // The lease anchor for a heartbeat round is the moment the leader sent
+  // the AppendEntries to that follower; the conservative upper bound
+  // for the lease is anchor + min_election_timeout - skew_budget. We
+  // track per-follower send timestamps and pick the (n-1)/2-th most
+  // recent (i.e. the time at which a quorum of followers have
+  // definitely seen our heartbeat).
+  std::unordered_map<siteid_t, int64_t> last_ae_send_us_;
+  int64_t lease_expires_us_ = 0;
+  int64_t leader_warmup_until_us_ = 0;
+  // Read-lease duration. Must be larger than the per-AE round-trip so
+  // that the lease window measured at lease-stamp time (which is
+  // RTT after the anchor SEND) still has positive remaining
+  // validity. Must also be smaller than the smallest follower election
+  // timeout minus a clock-skew budget so that no follower can have
+  // started an election by the time the leader is still serving lease
+  // reads.
+  //
+  // Concretely on the Zoo cluster: WAN_DELAY_MS=20 → RTT≈40ms; followers
+  // use locale_id != 1 with _prio=20 in the existing election-timeout
+  // formula, giving 500–1000 ms timeouts. 100 ms is safely above RTT
+  // (so the window is non-empty for ~60 ms after each refresh) and
+  // safely below 500 ms (so the leader can never overlap a follower's
+  // election window). Adjust if WAN_DELAY_MS or _prio change.
+  static constexpr int64_t kReadLeaseDurationUs = 100000;
+  static int64_t MonotonicNowUs();
+  void RecomputeLeaseLocked();   // call with mtx_ held; updates lease_expires_us_
+  // True iff the leader currently holds a valid read lease — i.e. the
+  // warm-up window has elapsed since this server became leader, AND the
+  // most recent quorum-confirmed heartbeat round's anchor + lease
+  // duration has not yet expired. While true, the leader is the
+  // unique leader of the partition (no other replica can have been
+  // elected since the lease anchor), so a read served from local state
+  // is linearizable.
+  bool HasReadLease();
+
   void StartElectionTimer() ;
 #ifdef RAFT_ELECTION_ONLY_INIT_AND_POST_FAILURE_ONCE_PATCH
   void Pause() override;
