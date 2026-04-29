@@ -201,11 +201,13 @@ namespace janus {
 // Allow only one initial election and one post-failure election (jm_signal gated).
 #define RAFT_ELECTION_ONLY_INIT_AND_POST_FAILURE_ONCE_PATCH
 
-// #ifndef RAFT_TEST_CORO   
-// #define RAFT_BATCH_OPTIMIZATION
-// #endif
-
+// RAFT_BATCH_OPTIMIZATION is on by default; pass `--disable-raft-batch` to
+// `waf configure` (or define `RAFT_BATCH_OFF` via CXXFLAGS) to disable it.
+// Used by results/<DATE>-akkio/run.sh to produce both a no_batch and a
+// batch binary without editing this file in-tree on AWS.
+#ifndef RAFT_BATCH_OFF
 #define RAFT_BATCH_OPTIMIZATION
+#endif
 
 // #define JETPACK_RECOVERY_DEBUG
 

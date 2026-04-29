@@ -60,6 +60,9 @@ def options(opt):
                    default=False, action='store_true')
     opt.add_option('','--enable-raft-test',dest='enable_raft_test',
                    default=False, action='store_true')
+    opt.add_option('','--disable-raft-batch', dest='disable_raft_batch',
+                   default=False, action='store_true',
+                   help='Define RAFT_BATCH_OFF so RAFT_BATCH_OPTIMIZATION is not set in constants.h.')
     opt.parse_args();
 
 def configure(conf):
@@ -121,6 +124,9 @@ def configure(conf):
 
     if Options.options.skip_txn_server:
         conf.env.append_value("CXXFLAGS", "-DSKIP_TXN_SERVER")
+
+    if Options.options.disable_raft_batch:
+        conf.env.append_value("CXXFLAGS", "-DRAFT_BATCH_OFF")
     
     # if Options.options.curp_fast_path:
     #     conf.env.append_value("CXXFLAGS", "-DCURP_FAST_PATH")
