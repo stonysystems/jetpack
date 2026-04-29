@@ -186,6 +186,10 @@ void RaftServer::Setup() {
       }
       match_index_[p.first] = 0;
       next_index_[p.first] = 1;
+#ifdef RAFT_PIPELINE_OPTIMIZATION
+      sent_index_[p.first] = 0;
+      in_flight_count_[p.first] = 0;
+#endif
       auto event = CreateReplicationEvent(p.first);
       Coroutine::CreateRun([this, follower=p.first, event]() {
         (void) event;
@@ -520,6 +524,10 @@ void RaftServer::setIsLeader(bool isLeader) {
             match_index_[p.first] = 0;
             // set nextIndex = lastLogIndex + 1
             next_index_[p.first] = lastLogIndex + 1;
+#ifdef RAFT_PIPELINE_OPTIMIZATION
+            sent_index_[p.first] = lastLogIndex;
+            in_flight_count_[p.first] = 0;
+#endif
             Log_info("loc_id_=%d match_index_[%d]=%d, next_index_[%d]=%d", loc_id_, p.first, match_index_[p.first], p.first, next_index_[p.first]);
           }
         }
@@ -613,6 +621,10 @@ void RaftServer::setIsLeader(bool isLeader) {
             match_index_[p.first] = 0;
             // set nextIndex = lastLogIndex + 1
             next_index_[p.first] = lastLogIndex + 1;
+#ifdef RAFT_PIPELINE_OPTIMIZATION
+            sent_index_[p.first] = lastLogIndex;
+            in_flight_count_[p.first] = 0;
+#endif
             Log_info("loc_id_=%d match_index_[%d]=%d, next_index_[%d]=%d", loc_id_, p.first, match_index_[p.first], p.first, next_index_[p.first]);
           }
         }
@@ -692,6 +704,162 @@ void RaftServer::HeartbeatLoop(siteid_t follower_site_id) {
       term = currentTerm;
     }
 
+#ifdef RAFT_PIPELINE_OPTIMIZATION
+    // Pipelined drain: spawn one coroutine per outgoing AE. Each coro
+    // sends an AE async (returns IntEvent), waits for the reply on its
+    // own coroutine stack, then takes mtx_ to apply the reply. Multiple
+    // AEs can be in flight per follower, capped by kMaxInFlightPerFollower.
+    // After each in-flight AE returns, we Notify the heartbeat loop so it
+    // re-drains any newly available slots.
+    bool sent_anything = false;
+    while (true) {
+      uint64_t prev_log_index, prev_log_term, send_term, send_commit;
+      uint64_t cmd_log_term = 0;
+      shared_ptr<Marshallable> cmd = nullptr;
+      bool send_heartbeat = false;
+      int64_t ae_send_us;
+      {
+        std::lock_guard<std::recursive_mutex> lock(mtx_);
+        if (!IsLeader()) break;
+        auto next_it = next_index_.find(follower_site_id);
+        if (next_it == next_index_.end()) break;
+        // Sanity-clamp next_index if it walked past the leader's log
+        // (e.g., after a leader transition that re-init'd lastLogIndex).
+        if (next_it->second > lastLogIndex + 1) {
+          next_it->second = lastLogIndex + 1;
+        }
+        auto& sent = sent_index_[follower_site_id];
+        auto& inflight = in_flight_count_[follower_site_id];
+        if (inflight >= kMaxInFlightPerFollower) break;
+        // Rewind sent if next_index was decremented (after a reject).
+        if (sent + 1 < next_it->second) {
+          sent = next_it->second - 1;
+        }
+        if (sent < lastLogIndex) {
+          uint64_t send_idx = sent + 1;
+#ifdef RAFT_BATCH_OPTIMIZATION
+          // Pipeline + batch: each AE carries a batch from send_idx
+          // through lastLogIndex. sent advances to lastLogIndex.
+          vector<shared_ptr<TpcCommitCommand>> batch_buffer_;
+          for (uint64_t idx = std::max<uint64_t>(send_idx, min_active_slot_);
+               idx <= lastLogIndex; idx++) {
+            auto curInstance = GetRaftInstance(idx);
+            shared_ptr<TpcCommitCommand> curCmd =
+                dynamic_pointer_cast<TpcCommitCommand>(curInstance->log_);
+            curCmd->term = curInstance->term;
+            batch_buffer_.push_back(curCmd);
+          }
+          if (batch_buffer_.empty()) {
+            break;  // nothing to send (entries were trimmed)
+          }
+          auto batch_cmd = std::make_shared<TpcBatchCommand>();
+          batch_cmd->AddCmds(batch_buffer_);
+          cmd = dynamic_pointer_cast<Marshallable>(batch_cmd);
+          sent = lastLogIndex;
+#else
+          auto curInstance = GetRaftInstance(send_idx);
+          cmd = curInstance->log_;
+          cmd_log_term = curInstance->term;
+          sent = send_idx;
+#endif
+          prev_log_index = send_idx - 1;
+        } else {
+          // Caught up. Send one heartbeat per outer loop iteration.
+          if (sent_anything) break;
+          send_heartbeat = true;
+          prev_log_index = lastLogIndex;
+        }
+        if (prev_log_index > lastLogIndex) prev_log_index = lastLogIndex;
+        prev_log_term = GetRaftInstance(prev_log_index)->term;
+        send_term = currentTerm;
+        send_commit = commitIndex;
+        ae_send_us = MonotonicNowUs();
+        inflight++;
+        sent_anything = true;
+      }
+
+      // Spawn the AE-send-and-handle-reply coroutine. It captures by value.
+      Coroutine::CreateRun([this, follower_site_id, partition_id,
+                            send_term, prev_log_index, prev_log_term,
+                            send_commit, cmd, cmd_log_term, ae_send_us,
+                            send_heartbeat]() {
+        uint64_t ret_status = 0, ret_term = 0, ret_last_log_index = 0;
+        auto r = commo()->SendAppendEntries2(follower_site_id, partition_id,
+                                             -1, -1,
+                                             /*isLeader*/ true, site_id_,
+                                             send_term,
+                                             prev_log_index, prev_log_term,
+                                             send_commit,
+                                             cmd, cmd_log_term,
+                                             &ret_status, &ret_term,
+                                             &ret_last_log_index);
+        r->Wait();
+        bool timed_out = (r->status_ == Event::TIMEOUT);
+
+        std::lock_guard<std::recursive_mutex> lock(mtx_);
+        auto in_it = in_flight_count_.find(follower_site_id);
+        if (in_it != in_flight_count_.end() && in_it->second > 0) {
+          in_it->second--;
+        }
+        if (timed_out) {
+          // Conservative: rewind sent_index so the next drain re-sends.
+          sent_index_[follower_site_id] =
+              (next_index_[follower_site_id] > 0)
+                  ? next_index_[follower_site_id] - 1 : 0;
+          NotifyReplicationEvents();
+          return;
+        }
+        auto& next_index = next_index_[follower_site_id];
+        auto& match_index = match_index_[follower_site_id];
+        if (ret_status == 0 && ret_term == 0 && ret_last_log_index == 0) {
+          // RPC error / lost reply: leave state alone, just decrement in_flight.
+        } else if (currentTerm > send_term) {
+          // outdated reply, ignore.
+        } else if (ret_status == 0 && ret_term > send_term) {
+          if (currentTerm == send_term) {
+            setIsLeader(false);
+            auto prev_term = currentTerm;
+            currentTerm = ret_term;
+            LogTermChange("AppendEntries reply reported higher term",
+                          prev_term, currentTerm, follower_site_id);
+          }
+        } else if (ret_status == 0) {
+          // Reject: rewind next_index by 1 and rewind sent_index in lockstep
+          // so the next drain resends starting from the new next_index.
+          if (next_index <= 1) {
+            next_index = 1;
+          } else {
+            --next_index;
+          }
+          sent_index_[follower_site_id] = next_index - 1;
+        } else if (ret_status == 1) {
+          if (!send_heartbeat) {
+            uint64_t match_idx = ret_last_log_index;
+            if (match_idx > lastLogIndex) {
+              Log_info("[MATCH_INDEX_DEBUG] Leader %d: capping match_index "
+                       "from %ld to %ld for follower %d",
+                       site_id_, match_idx, lastLogIndex, follower_site_id);
+              match_idx = lastLogIndex;
+            }
+            // Monotonic advance only — pipelined replies can arrive
+            // out-of-order, so a lagging reply must not undo a leading one.
+            if (ret_last_log_index + 1 > next_index) {
+              next_index = ret_last_log_index + 1;
+            }
+            if (match_idx > match_index) {
+              match_index = match_idx;
+            }
+          }
+          if (is_leader_) {
+            last_ae_send_us_[follower_site_id] = ae_send_us;
+            RecomputeLeaseLocked();
+          }
+        }
+        // Wake the loop in case the in_flight cap was blocking it.
+        NotifyReplicationEvents();
+      });
+    }
+#else  // !RAFT_PIPELINE_OPTIMIZATION — legacy synchronous request→Wait→reply.
     mtx_.lock();
     auto it = next_index_.find(follower_site_id);
     if (it == next_index_.end()) {
@@ -742,17 +910,9 @@ void RaftServer::HeartbeatLoop(siteid_t follower_site_id) {
     }
 #endif
 
-    // if (!cmd) {
-    //   Log_info("[RAFT_HEARTBEAT] site %d (loc %d) -> follower %d send heartbeat AppendEntries prevIdx=%lu prevTerm=%lu commitIdx=%lu nextIdx=%lu",
-    //            site_id_, loc_id_, follower_site_id, prevLogIndex, prevLogTerm, commitIndex, it->second);
-    // }
-
     uint64_t ret_status = false;
     uint64_t ret_term = 0;
     uint64_t ret_last_log_index = 0;
-    // Read-lease anchor: the moment we hand the AppendEntries to the
-    // commo layer. Used below on a successful reply to extend the
-    // leader's read lease (anchor + kReadLeaseDurationUs).
     int64_t ae_send_us = MonotonicNowUs();
     mtx_.unlock();
     auto r = commo()->SendAppendEntries2(follower_site_id,
@@ -811,16 +971,13 @@ void RaftServer::HeartbeatLoop(siteid_t follower_site_id) {
         Log_debug("leader site %d receiving site %ld followerLastLogIndex=%ld followerNextIndex=%ld followerMatchedIndex=%ld",
                   site_id_, follower_site_id, ret_last_log_index, next_index, match_idx);
       }
-      // Read-lease: anchor on the time we sent this AE, not on the time
-      // we received the ack. The ack only confirms the follower's
-      // observation moment is in [send_us, recv_us]; for lease safety
-      // we use the earliest possible (send_us) as the anchor.
       if (is_leader_) {
         last_ae_send_us_[follower_site_id] = ae_send_us;
         RecomputeLeaseLocked();
       }
     }
     mtx_.unlock();
+#endif  // RAFT_PIPELINE_OPTIMIZATION
   }
 }
 RaftServer::~RaftServer() {

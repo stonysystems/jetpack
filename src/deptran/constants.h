@@ -209,6 +209,17 @@ namespace janus {
 #define RAFT_BATCH_OPTIMIZATION
 #endif
 
+// RAFT_PIPELINE_OPTIMIZATION is on by default; pass
+// `--disable-raft-pipeline` to `waf configure` (or define
+// `RAFT_PIPELINE_OFF` via CXXFLAGS) to disable it. When defined, the
+// per-follower HeartbeatLoop fires AppendEntries asynchronously
+// (multiple in-flight per follower, optimistic next_index advance, AE
+// reply handled in the rrr callback) instead of the legacy
+// request→Wait→reply serial loop.
+#ifndef RAFT_PIPELINE_OFF
+#define RAFT_PIPELINE_OPTIMIZATION
+#endif
+
 // #define JETPACK_RECOVERY_DEBUG
 
 // #define MONGODB_STATISTICS

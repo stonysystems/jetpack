@@ -63,6 +63,9 @@ def options(opt):
     opt.add_option('','--disable-raft-batch', dest='disable_raft_batch',
                    default=False, action='store_true',
                    help='Define RAFT_BATCH_OFF so RAFT_BATCH_OPTIMIZATION is not set in constants.h.')
+    opt.add_option('','--disable-raft-pipeline', dest='disable_raft_pipeline',
+                   default=False, action='store_true',
+                   help='Define RAFT_PIPELINE_OFF so RAFT_PIPELINE_OPTIMIZATION is not set in constants.h.')
     opt.parse_args();
 
 def configure(conf):
@@ -127,6 +130,8 @@ def configure(conf):
 
     if Options.options.disable_raft_batch:
         conf.env.append_value("CXXFLAGS", "-DRAFT_BATCH_OFF")
+    if Options.options.disable_raft_pipeline:
+        conf.env.append_value("CXXFLAGS", "-DRAFT_PIPELINE_OFF")
     
     # if Options.options.curp_fast_path:
     #     conf.env.append_value("CXXFLAGS", "-DCURP_FAST_PATH")

@@ -45,6 +45,21 @@ class RaftServer : public TxLogServer {
  private:
   std::map<siteid_t, uint64_t> match_index_{};
   std::map<siteid_t, uint64_t> next_index_{};
+#ifdef RAFT_PIPELINE_OPTIMIZATION
+  // Per-follower in-flight tracking for pipelined AppendEntries.
+  // sent_index_[f]    = highest log index sent to f (optimistic send watermark;
+  //                     advances ahead of next_index_ until the AE is acked).
+  // in_flight_count_[f] = AEs sent to f for which we have not yet
+  //                       processed a reply. Capped at kMaxInFlightPerFollower
+  //                       to bound memory under follower stalls.
+  std::map<siteid_t, uint64_t> sent_index_{};
+  std::map<siteid_t, uint64_t> in_flight_count_{};
+  // Bandwidth-delay product ceiling: cap >= offered_load * RTT. Sized
+  // for AWS-WAN at 20k req/s with 200ms RTT (real round-trip), giving
+  // 4000 + 2x headroom = 8000. The cap is a max, not a preallocation;
+  // memory is only used when slots are actually filled.
+  static constexpr uint64_t kMaxInFlightPerFollower = 8000;
+#endif
   std::vector<std::thread> timer_threads_ = {};
   void timer_thread(bool *vote) ;
   Timer *timer_;
