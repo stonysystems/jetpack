@@ -13,7 +13,6 @@ CONC_CFG="$3"        # e.g. concurrent_1.yml
 LABEL="$4"           # e.g. raft-c1
 RESULT_DIR="$5"      # e.g. results/2026-04-14-raft-jetpack-swiftpaxos-style
 CLIENT_CFG="${6:-30c1s5r5p-zoo.yml}"  # e.g. 60c1s5r5p-zoo.yml (default: 30 clients)
-WORKLOAD_CFG="${7:-rw_1000000.yml}"   # e.g. rw_readonly_1000000.yml (default: 1M-key uniform read+write)
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
@@ -81,7 +80,7 @@ sleep 1  # let monitors start
 # system glibc is newer than the docker_libs glibc (e.g. Debian trixie 2.41 vs
 # our Ubuntu 22.04 2.35). Setting only LD_LIBRARY_PATH is insufficient because
 # the system dynamic linker is what gets invoked first.
-SERVER_CMD="export LD_LIBRARY_PATH=${ZOO_DIR}/build/docker_libs:\${HOME}/local/lib:\${LD_LIBRARY_PATH}; export WAN_DELAY_MS=20; export SERVER_CORE_ID=${SERVER_CORE_ID}; cd $ZOO_DIR && ${ZOO_DIR}/build/docker_libs/ld-linux-x86-64.so.2 build/deptran_server -f config/${PROTOCOL_CFG} -f config/client_open.yml -f config/${CLIENT_CFG} -f config/${WORKLOAD_CFG} -f config/${CONC_CFG} -m ${MODE} -d ${DURATION}"
+SERVER_CMD="export LD_LIBRARY_PATH=${ZOO_DIR}/build/docker_libs:\${HOME}/local/lib:\${LD_LIBRARY_PATH}; export WAN_DELAY_MS=20; export SERVER_CORE_ID=${SERVER_CORE_ID}; cd $ZOO_DIR && ${ZOO_DIR}/build/docker_libs/ld-linux-x86-64.so.2 build/deptran_server -f config/${PROTOCOL_CFG} -f config/client_open.yml -f config/${CLIENT_CFG} -f config/rw_1000000.yml -f config/${CONC_CFG} -m ${MODE} -d ${DURATION}"
 
 echo "[$LABEL] Command: $SERVER_CMD"
 echo "[$LABEL] Starting experiment..."
