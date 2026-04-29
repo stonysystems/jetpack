@@ -793,7 +793,13 @@ void RaftServer::HeartbeatLoop(siteid_t follower_site_id) {
                                              cmd, cmd_log_term,
                                              &ret_status, &ret_term,
                                              &ret_last_log_index);
-        r->Wait();
+        // Bounded wait so spawned coros don't deadlock the binary
+        // shutdown if their RPC reply is lost (the legacy synchronous
+        // path lives on the loop coro, which shuts down cleanly when
+        // looping_=false; pipelined spawns have no lifetime tracking).
+        // 60s is way above any plausible WAN RTT so steady state is
+        // unaffected.
+        r->Wait(60ULL * 1000 * 1000);
         bool timed_out = (r->status_ == Event::TIMEOUT);
 
         std::lock_guard<std::recursive_mutex> lock(mtx_);
