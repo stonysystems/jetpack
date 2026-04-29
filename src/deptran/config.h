@@ -71,6 +71,13 @@ class Config {
   int32_t n_parallel_dispatch_{0};
   bool forwarding_enabled_ = false;
   int timestamp_{TimestampType::CLOCK};
+  // Raft favored-leader locale: the replica with this locale_id gets a
+  // short election timeout (5–10× heartbeat) and reliably wins the
+  // initial election; everyone else uses _prio=20 (~100s, longer than a
+  // typical experiment so they never campaign). Default 0 = first
+  // locale in the host: list. Set top-level `raft_leader_locale: <N>`
+  // in any -f yaml.
+  int raft_leader_locale_ = 0;
 
   // failover configuration
   bool failover_{false};
@@ -317,6 +324,7 @@ class Config {
   int GetEtcdBatchSize() const { return etcd_batch_size_; }
   int GetEtcdBatchTimeoutMs() const { return etcd_batch_timeout_ms_; }
   bool GetEtcdLeaseReads() const { return etcd_lease_reads_; }
+  int GetRaftLeaderLocale() const { return raft_leader_locale_; }
   bool get_batch_start();
   bool do_early_return();
   bool do_logging();

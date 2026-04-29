@@ -355,6 +355,10 @@ void Config::LoadYML(std::string &filename) {
   if (yaml_config_["n_parallel_dispatch"]) {
     n_parallel_dispatch_ = yaml_config_["n_parallel_dispatch"].as<int32_t>();
   }
+  if (yaml_config_["raft_leader_locale"]) {
+    raft_leader_locale_ = yaml_config_["raft_leader_locale"].as<int>();
+    Log_info("[raft] leader_locale = %d", raft_leader_locale_);
+  }
 }
 
 void Config::LoadSiteYML(YAML::Node config) {

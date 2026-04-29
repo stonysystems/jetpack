@@ -1041,7 +1041,7 @@ void RaftServer::StartElectionTimer() {
     // _prio=20 → 100-110s timeout, much longer than the 30s experiment,
     // but within int range (RandomGenerator::rand uses int, so _prio can't
     // go much higher without overflow on the multiplication below).
-    int _prio = (frame_->site_info_->locale_id == 1) ? 1 : 20;
+    int _prio = (frame_->site_info_->locale_id == Config::GetConfig()->GetRaftLeaderLocale()) ? 1 : 20;
 #ifdef AWS
     auto election_timeout = RandomGenerator::rand(_prio * 1000 * HEARTBEAT_INTERVAL,
                                                   _prio * 1100 * HEARTBEAT_INTERVAL);
