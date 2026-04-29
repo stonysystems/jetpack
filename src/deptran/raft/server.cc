@@ -809,16 +809,26 @@ void RaftServer::HeartbeatLoop(siteid_t follower_site_id) {
         }
         if (timed_out) {
           // Conservative: rewind sent_index so the next drain re-sends.
+          // Only wake the loop if we're still actually leading and looping
+          // — at shutdown, looping_=false and we should not perpetuate
+          // failing-RPC resends.
           sent_index_[follower_site_id] =
               (next_index_[follower_site_id] > 0)
                   ? next_index_[follower_site_id] - 1 : 0;
-          NotifyReplicationEvents();
+          if (looping_ && is_leader_) {
+            NotifyReplicationEvents();
+          }
           return;
         }
         auto& next_index = next_index_[follower_site_id];
         auto& match_index = match_index_[follower_site_id];
         if (ret_status == 0 && ret_term == 0 && ret_last_log_index == 0) {
-          // RPC error / lost reply: leave state alone, just decrement in_flight.
+          // RPC error / lost reply: leave state alone, just decrement
+          // in_flight. Skip the wake-loop notify below — at shutdown the
+          // RPC layer is being torn down and these errors come in bursts;
+          // perpetuating the drain loop turns the post-run shutdown into
+          // an infinite resend storm that blocks worker.WaitForShutdown.
+          return;
         } else if (currentTerm > send_term) {
           // outdated reply, ignore.
         } else if (ret_status == 0 && ret_term > send_term) {
