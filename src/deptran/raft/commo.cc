@@ -44,7 +44,16 @@ RaftCommo::SendAppendEntries2(siteid_t site_id,
     FutureAttr fuattr;
     fuattr.callback = [ret,ret_status,ret_term,ret_last_log_index](Future* fu) {
       if (fu->get_error_code() != 0) {
-        Log_info("Get a error message in reply");
+        Log_debug("AppendEntries reply error code: %d", fu->get_error_code());
+        // Must still Set the event so the caller's Wait() returns —
+        // otherwise pipelined spawned coros that get error replies at
+        // shutdown block until their 60s timeout, multiplied by 8000
+        // in-flight, can hang the binary's worker.WaitForShutdown phase
+        // long enough that the binary exits without dumping CSV. Leave
+        // ret_status/term/last_log_index at their zero defaults so the
+        // existing "ret_status == 0 && ret_term == 0 && ret_last_log_index == 0"
+        // branch in HeartbeatLoop handles it as a no-op.
+        ret->Set(1);
         return;
       }
       fu->get_reply() >> *ret_status >> *ret_term >> *ret_last_log_index;
