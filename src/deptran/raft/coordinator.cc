@@ -29,15 +29,7 @@ bool CoordinatorRaft::IsFPGALeader() {
 void CoordinatorRaft::Submit(shared_ptr<Marshallable>& cmd,
                                    const function<void()>& func,
                                    const function<void()>& exe_callback) {
-  static std::atomic<int> dbg_count{0};
-  int my_dbg = dbg_count.fetch_add(1, std::memory_order_relaxed);
-  if (my_dbg < 8) {
-    Log_info("[SUBMIT_DBG2] #%d entry: paused=%d IsLeader=%d jetpack_status=%d cmd_kind=%d",
-             my_dbg, this->svr_->paused_ ? 1 : 0,
-             IsLeader() ? 1 : 0, svr_->jetpack_status_, cmd ? cmd->kind_ : -1);
-  }
   if (this->svr_->paused_) { // [Jetpack] Bad fix for failure recovery. I don't know why server can still receive commands even if Client is paused_
-    if (my_dbg < 8) Log_info("[SUBMIT_DBG2] #%d return paused", my_dbg);
     return;
   }
   auto reject_as_wrong_leader = [&](const char* reason_tag) {
@@ -86,14 +78,11 @@ void CoordinatorRaft::Submit(shared_ptr<Marshallable>& cmd,
   };
 
   if (!IsLeader()) {
-    if (my_dbg < 8) Log_info("[SUBMIT_DBG2] #%d reject !IsLeader", my_dbg);
     reject_as_wrong_leader("Submit to server that is not leader");
     return;
   }
 
   bool is_recovery_cmd = SimpleRWCommand(cmd).IsRecoveryCommand();
-  if (my_dbg < 8) Log_info("[SUBMIT_DBG2] #%d past leader, is_recovery=%d, status=%d",
-                            my_dbg, is_recovery_cmd ? 1 : 0, svr_->jetpack_status_);
 
   if (!is_recovery_cmd
       && !Config::GetConfig()->IsCurpMode()
@@ -118,9 +107,7 @@ void CoordinatorRaft::Submit(shared_ptr<Marshallable>& cmd,
   cmd_ = cmd;
   verify(cmd_->kind_ != MarshallDeputy::UNKNOWN);
   commit_callback_ = func;
-  if (my_dbg < 8) Log_info("[SUBMIT_DBG2] #%d about to GotoNextPhase", my_dbg);
   GotoNextPhase();
-  if (my_dbg < 8) Log_info("[SUBMIT_DBG2] #%d GotoNextPhase returned, committed_=%d", my_dbg, committed_ ? 1 : 0);
 }
 
 void CoordinatorRaft::AppendEntries() {
