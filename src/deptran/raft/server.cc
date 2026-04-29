@@ -298,6 +298,20 @@ void RaftServer::TriggerJetpackRecovery(const char* reason) {
 						 reason ? reason : "unspecified");
 		return;
 	}
+	// Jetpack recovery only makes sense for cc:rule (jp-raft) — it
+	// rebuilds the leader's command_pool / fast-path state. For cc:none
+	// (vanilla raft + ab:raft), there is no fast-path state to recover,
+	// and worse, the recovery process puts the leader into
+	// jetpack_status_ = RECOVERY which makes CoordinatorRaft::Submit
+	// reject every client command as WRONG_LEADER until FinishRecovery
+	// completes — a state cc:none never properly transitions out of for
+	// the *leader* path because the recovery does no useful work and
+	// the rule-layer driver isn't there to drive it. Short-circuit.
+	if (Config::GetConfig()->tx_proto_ != MODE_RULE) {
+		Log_info("[JETPACK_RECOVERY] Skipping recovery trigger (%s) — tx_proto != MODE_RULE (cc:none / cc:rcc / etc. has no fast-path state to recover)",
+						 reason ? reason : "unspecified");
+		return;
+	}
 	StartJetpackRecoveryLoop();
 	const char* why = reason ? reason : "unspecified";
 	std::shared_ptr<IntEvent> ev;
