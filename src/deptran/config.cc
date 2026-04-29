@@ -592,6 +592,10 @@ void Config::LoadModeYML(YAML::Node config) {
     Log_info("[Jetpack] jetpack_skip_pool_for_original_path = %d",
              jetpack_skip_pool_for_original_path_ ? 1 : 0);
   }
+  if (config["raft_read_lease"]) {
+    raft_read_lease_ = config["raft_read_lease"].as<bool>();
+    Log_info("[Raft] read_lease = %d", raft_read_lease_ ? 1 : 0);
+  }
   if (config["etcd_batch_size"]) {
     etcd_batch_size_ = config["etcd_batch_size"].as<int>();
     Log_info("[etcd] etcd_batch_size = %d", etcd_batch_size_);

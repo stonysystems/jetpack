@@ -124,6 +124,15 @@ class Config {
   // and the discussion thread for the design.
   bool jetpack_skip_pool_for_original_path_ = false;
 
+  // Raft read-lease optimization. When enabled, single-key read pieces
+  // arriving at the partition leader are served directly from the
+  // leader's local state machine while the leader holds a valid lease,
+  // skipping the AppendEntries replication round-trip. Reads that miss
+  // the lease (warm-up not elapsed, lease lapsed, or non-leader) fall
+  // back to the standard Raft-replicated path. Independent of cc:rule
+  // / Jetpack / CURP — works with cc:none + ab:raft directly.
+  bool raft_read_lease_ = false;
+
   // etcd client-side batching. When size > 1, the EtcdConnectionThreadPool
   // coalesces up to size_ ops into one etcd Txn, flushing when the buffer
   // hits size_ OR timeout_ms_ elapses since the first enqueue, whichever
@@ -287,6 +296,7 @@ class Config {
   bool IsCurpMode() const {
     return jetpack_fastpath_attempt_rate_ == CURP_MODE;
   }
+  bool IsRaftReadLease() const { return raft_read_lease_; }
   int NumClients() {
     return par_clients_.size();
   }
