@@ -29,17 +29,7 @@ bool CoordinatorRaft::IsFPGALeader() {
 void CoordinatorRaft::Submit(shared_ptr<Marshallable>& cmd,
                                    const function<void()>& func,
                                    const function<void()>& exe_callback) {
-  static thread_local int submit_call_count = 0;
-  if (submit_call_count < 5) {
-    Log_info("[SUBMIT_DEBUG] entry: paused=%d IsLeader=%d jetpack_status=%d cmd_kind=%d",
-             this->svr_->paused_ ? 1 : 0,
-             IsLeader() ? 1 : 0,
-             svr_->jetpack_status_,
-             cmd ? cmd->kind_ : -1);
-    submit_call_count++;
-  }
   if (this->svr_->paused_) { // [Jetpack] Bad fix for failure recovery. I don't know why server can still receive commands even if Client is paused_
-    if (submit_call_count <= 5) Log_info("[SUBMIT_DEBUG] returning early: paused");
     return;
   }
   auto reject_as_wrong_leader = [&](const char* reason_tag) {
@@ -88,19 +78,12 @@ void CoordinatorRaft::Submit(shared_ptr<Marshallable>& cmd,
   };
 
   if (!IsLeader()) {
-    if (submit_call_count <= 5) Log_info("[SUBMIT_DEBUG] reject: !IsLeader");
     reject_as_wrong_leader("Submit to server that is not leader");
     return;
   }
 
   bool is_recovery_cmd = SimpleRWCommand(cmd).IsRecoveryCommand();
 
-  if (submit_call_count <= 5) {
-    Log_info("[SUBMIT_DEBUG] passed leader check: is_recovery_cmd=%d IsCurpMode=%d jetpack_status=%d",
-             is_recovery_cmd ? 1 : 0,
-             Config::GetConfig()->IsCurpMode() ? 1 : 0,
-             svr_->jetpack_status_);
-  }
   if (!is_recovery_cmd
       && !Config::GetConfig()->IsCurpMode()
       && svr_->jetpack_status_ == TxLogServer::JetpackStatus::RECOVERY) {
