@@ -84,8 +84,17 @@ class MongodbServer : public TxLogServer {
     //        the right target. If a future re-election lands the primary
     //        elsewhere, mongod itself will reject the request with a
     //        NotMaster error rather than serve stale state.
-    mongo_uri_ = "mongodb://127.0.0.1:27017/?directConnection=true&"
-                 JANUS_MONGO_LINEARIZABLE_OPTS;
+    // serverSelectionTryOnce=false + 10s timeout — without these, the mongo C
+    // driver defaults serverSelectionTryOnce=true and refuses to retry on the
+    // brief window after `systemctl restart mongod` when 2500 pool connections
+    // open in parallel. Observed empirically: mongosh from the same host
+    // succeeds with this URI but the C++ driver fails ~"connection error
+    // calling hello" without these retry knobs. Mirror the values the original
+    // (replicaSet) URI builder used.
+    mongo_uri_ = "mongodb://127.0.0.1:27017/?directConnection=true"
+                 "&serverSelectionTryOnce=false"
+                 "&serverSelectionTimeoutMS=10000"
+                 "&" JANUS_MONGO_LINEARIZABLE_OPTS;
     Log_info("mongo_uri_:%s, loc_id_:%d, mongodb_connection_:%d", mongo_uri_.c_str(), loc_id_, mongodb_connection_);
     // Only the leader (loc_id_==0) needs actual MongoDB connections for writes.
     // Non-leaders use 0 connections so they don't overwhelm mongod in WAN mode.
