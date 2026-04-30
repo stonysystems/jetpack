@@ -271,13 +271,15 @@ class RaftServer : public TxLogServer {
   // started an election by the time the leader is still serving lease
   // reads.
   //
-  // Concretely on the Zoo cluster: WAN_DELAY_MS=20 → RTT≈40ms; followers
-  // use locale_id != 1 with _prio=20 in the existing election-timeout
-  // formula, giving 500–1000 ms timeouts. 100 ms is safely above RTT
-  // (so the window is non-empty for ~60 ms after each refresh) and
-  // safely below 500 ms (so the leader can never overlap a follower's
-  // election window). Adjust if WAN_DELAY_MS or _prio change.
-  static constexpr int64_t kReadLeaseDurationUs = 100000;
+  // Sized for AWS WAN: 2nd-fastest follower from California is
+  // Frankfurt at ~154ms RTT. We need duration > commit-RTT for the
+  // lease window to have positive overlap with the present after the
+  // anchor's quorum-acks return. 250ms gives ~96ms of useful lease
+  // window per refresh, while staying safely below the 500ms min
+  // election timeout. (Old value 100ms was tuned for the zoo cluster
+  // at ~40ms RTT and produced zero-width windows on AWS, making
+  // HasReadLease() always false → V3-lease degraded to V1-raw.)
+  static constexpr int64_t kReadLeaseDurationUs = 250000;
   static int64_t MonotonicNowUs();
   void RecomputeLeaseLocked();   // call with mtx_ held; updates lease_expires_us_
   // True iff the leader currently holds a valid read lease — i.e. the
