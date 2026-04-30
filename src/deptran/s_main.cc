@@ -1069,16 +1069,26 @@ int main(int argc, char *argv[]) {
   Log_info("Mid throughput is %.2f", cli2cli[5].count() / (Config::GetConfig()->duration_ / 3.0));
   Log_info("Fastpath statistics attempted %d successed %d rate(pct) %.2f efficient_successed %d efficient_rate(pct) %.2f",
     cli2cli[0].count(), cli2cli[1].count(), cli2cli[1].count() * 100.0 / cli2cli[0].count(), cli2cli[2].count(), cli2cli[2].count() * 100.0 / cli2cli[0].count());
-  // If client-side CPU data is empty (none/original mode), fall back to
-  // server-side CPU monitor which runs unconditionally.
+  // If client-side CPU data is empty (none/original mode where the RPC
+  // reply schema doesn't carry cpu_usage), fall back to a direct
+  // /proc/stat 100ms before/after sample. SampleCpuUsage() can't be
+  // used here because its delta state is thread_local — it returns -1
+  // on the first call on a given thread, which is what we'd hit on
+  // the main thread at shutdown.
   if (cpu_usage_leaders.count() == 0) {
+    int core = server_core_id.load(std::memory_order_relaxed);
     for (auto& worker : svr_workers_g) {
-      if (worker.tx_sched_) {
-        double cpu = worker.tx_sched_->SampleCpuUsage();
-        if (cpu >= 0.0) {
-          cpu_usage_leaders.append(cpu);
+      TxLogServer* sv = worker.tx_sched_ ? worker.tx_sched_ : worker.rep_sched_;
+      if (!sv) continue;
+      CpuStatSnapshot s1{}, s2{};
+      if (sv->ReadCpuStats(core, &s1)) {
+        usleep(100000);  // 100ms window for a meaningful delta
+        if (sv->ReadCpuStats(core, &s2)) {
+          double cpu = sv->ComputeCpuUsage(s1, s2);
+          if (cpu >= 0.0) cpu_usage_leaders.append(cpu);
         }
       }
+      break;  // one sample per host's bound core is sufficient
     }
   }
   Log_info("Cpu-usage-leaders ave %.4f count %zu", cpu_usage_leaders.ave(), cpu_usage_leaders.count());
