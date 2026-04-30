@@ -62,32 +62,30 @@ class MongodbServer : public TxLogServer {
   void Setup() override { 
     SimpleRWCommand::SetZeroTime();
 #ifdef JETPACK_MONGODB_RECOVERY
-    // Determine Mongo URI: use only the first 3 replica hosts (matching
-    // the 3-node MongoDB replica set in Docker). The Jetpack config may
-    // list 5 hosts (5 Jetpack replicas), but only 3 run mongod.
-    // Also set serverSelectionTryOnce=false and a generous timeout so
-    // the driver retries on transient topology failures under high
-    // concurrency instead of failing immediately.
-    auto cfg = Config::GetConfig();
-    auto hosts = cfg->GetReplicaHosts(partition_id_);
-    if (!hosts.empty()) {
-      const size_t mongo_nodes = std::min(hosts.size(), static_cast<size_t>(3));
-      std::ostringstream oss;
-      oss << "mongodb://";
-      for (size_t i = 0; i < mongo_nodes; ++i) {
-        if (i > 0) oss << ",";
-        auto pos = hosts[i].find(':');
-        if (pos != std::string::npos) {
-          oss << hosts[i].substr(0, pos) << ":27017";
-        } else {
-          oss << hosts[i] << ":27017";
-        }
-      }
-      oss << "/?replicaSet=jetpack-rs"
-          << "&serverSelectionTryOnce=false"
-          << "&serverSelectionTimeoutMS=10000";
-      mongo_uri_ = oss.str();
-    }
+    // Camera-ready / AWS deployment:
+    //   Each of server0..server4 runs its own mongod, all in one replica set
+    //   (jetpack-rs) with server0 = PRIMARY (enforced by
+    //   start_mongodb_cluster.sh's stepDown loop, plus member[0].priority=2.0
+    //   from init_mongodb_replicaset.sh). Only loc_id_==0 (server0) opens
+    //   driver connections — all replication to followers happens server-side
+    //   via the replica-set channel using public IPs in rs.config.
+    //
+    //   We connect via 127.0.0.1 with directConnection=true because:
+    //     1. AWS EC2 instances cannot reach their own public IP from inside
+    //        the instance (the public IP is NAT'd; binding fails). Connecting
+    //        to "<my_public_ip>:27017" yielded "connection error calling hello"
+    //        on the first prep run.
+    //     2. Replica-set discovery on a multi-host seed list would still
+    //        re-resolve members from rs.config — i.e. back to public IPs that
+    //        the driver tried to reach via its own public IP. Avoiding
+    //        discovery sidesteps this entirely.
+    //     3. The local mongod IS the primary (start_mongodb_cluster.sh enforces
+    //        this), so directConnection=true is safe — we know the seed is
+    //        the right target. If a future re-election lands the primary
+    //        elsewhere, mongod itself will reject the request with a
+    //        NotMaster error rather than serve stale state.
+    mongo_uri_ = "mongodb://127.0.0.1:27017/?directConnection=true&"
+                 JANUS_MONGO_LINEARIZABLE_OPTS;
     Log_info("mongo_uri_:%s, loc_id_:%d, mongodb_connection_:%d", mongo_uri_.c_str(), loc_id_, mongodb_connection_);
     // Only the leader (loc_id_==0) needs actual MongoDB connections for writes.
     // Non-leaders use 0 connections so they don't overwhelm mongod in WAN mode.
