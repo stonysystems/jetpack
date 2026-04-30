@@ -1,0 +1,29 @@
+# Akkio-style latency workload — zipf 0.8 variant:
+#   - 1 M-key population (same as rw_akkio.yml)
+#   - 50/50 read/write mix (same as rw_akkio.yml)
+#   - zipf coefficient 0.8 (more skewed than the uniform rw_akkio.yml's 0)
+#
+# Used by results/2026-04-30-akkio-batch-pipeoff/. The 1 KB write
+# payload is set via the RW_VALUE_SIZE=1024 env var at process launch
+# (see run.sh) — workload.cc adds it to the write request's input map.
+
+bench:
+  workload: rw
+  scale: 1
+  weight:
+    read: 1
+    write: 1
+  population:
+    history: 1000000
+  range: 1000000
+  dist: zipf
+  coefficient: 0.8
+
+schema:
+  - name: history
+    column:
+      - {name: h_key,     type: integer, primary: true}
+      - {name: h_c_id,    type: integer}
+
+sharding:
+  history:    MOD

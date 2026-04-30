@@ -27,6 +27,10 @@ class RwWorkload : public Workload {
   virtual void GetTxRequest(TxRequest* req, uint32_t cid) override;
   std::recursive_mutex mtx_{};
 
+  // 1KB-style write-payload support. Set via env var RW_VALUE_SIZE
+  // (read in the constructor). 0 = no extra payload.
+  size_t value_size_ = 0;
+
   // For Frequency check
   Frequency frequency_;
   ~RwWorkload() {

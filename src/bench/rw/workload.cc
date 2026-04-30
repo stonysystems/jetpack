@@ -59,6 +59,17 @@ RwWorkload::RwWorkload(Config *config) : Workload(config) {
   rand_gen_.seed((uint64_t)(seconds_since_epoch * 10000000000) + (uint64_t)pthread_self());
   // Log_info("seed %d %d %d %.10f", (int)std::time(0), (uint64_t)pthread_self(), (int)std::time(0) + (uint64_t)pthread_self(), seconds_since_epoch);
   Log_info("seed %llu %llu %llu", (uint64_t)(seconds_since_epoch * 10000000000), (uint64_t)pthread_self(), (uint64_t)(seconds_since_epoch * 10000000000) + (uint64_t)pthread_self());
+  // Optional 1KB-style write payload via env var. When set, every write
+  // request carries an extra string of `RW_VALUE_SIZE` bytes in input
+  // map at key 2. The string is opaque to the procedure handler (which
+  // only reads keys 0/1) but inflates the AE wire payload to model
+  // realistic value sizes. RW_VALUE_SIZE=0 (default) keeps the original
+  // small-int payload.
+  const char* vs_env = getenv("RW_VALUE_SIZE");
+  value_size_ = vs_env ? strtoul(vs_env, nullptr, 10) : 0;
+  if (value_size_ > 0) {
+    Log_info("RwWorkload: write payload inflated to %zu bytes via RW_VALUE_SIZE", value_size_);
+  }
 }
 
 void RwWorkload::GetTxRequest(TxRequest* req, uint32_t cid) {
@@ -85,10 +96,21 @@ void RwWorkload::GenerateWriteRequest(
     TxRequest *req, uint32_t cid) {
   auto id = this->GetId(cid);
   req->tx_type_ = RW_BENCHMARK_W_TXN;
-  req->input_ = {
-      {0, Value((i32) id)},
-      {1, Value((i32) RandomGenerator::rand(0, 10000))}
-  };
+  if (value_size_ > 0) {
+    // Inflate write payload via a string at key 2 (procedure handler
+    // ignores keys beyond 1, but the input map is marshalled and
+    // shipped over the wire — so this models a realistic value size).
+    req->input_ = {
+        {0, Value((i32) id)},
+        {1, Value((i32) RandomGenerator::rand(0, 10000))},
+        {2, Value(std::string(value_size_, 'x'))}
+    };
+  } else {
+    req->input_ = {
+        {0, Value((i32) id)},
+        {1, Value((i32) RandomGenerator::rand(0, 10000))}
+    };
+  }
 }
 
 void RwWorkload::GenerateReadRequest(
