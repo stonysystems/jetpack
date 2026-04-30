@@ -946,17 +946,25 @@ int main(int argc, char *argv[]) {
 #ifdef DB_CHECKSUM
   sleep(90); // hopefully servers can finish hanging RPCs in 90 seconds.
 #endif
+  Log_info("[SHUTDOWN-DBG] start sleep(10)");
   sleep(10); // hopefully servers can finish reset of work in 10 seconds
+  Log_info("[SHUTDOWN-DBG] sleep done; entering worker.WaitForShutdown loop (%zu workers)", svr_workers_g.size());
 
-  for (auto& worker : svr_workers_g) {
-    worker.WaitForShutdown();
+  for (size_t wi = 0; wi < svr_workers_g.size(); wi++) {
+    Log_info("[SHUTDOWN-DBG] worker[%zu].WaitForShutdown() start", wi);
+    svr_workers_g[wi].WaitForShutdown();
+    Log_info("[SHUTDOWN-DBG] worker[%zu].WaitForShutdown() done", wi);
   }
 
   Log_info("After worker.WaitForShutdown();");
 
-  for (auto& ft : failover_threads_g) {
-    ft.join();
+  Log_info("[SHUTDOWN-DBG] entering failover_threads_g.join() loop (%zu threads)", failover_threads_g.size());
+  for (size_t fi = 0; fi < failover_threads_g.size(); fi++) {
+    Log_info("[SHUTDOWN-DBG] ft[%zu].join() start", fi);
+    failover_threads_g[fi].join();
+    Log_info("[SHUTDOWN-DBG] ft[%zu].join() done", fi);
   }
+  Log_info("[SHUTDOWN-DBG] all failover threads joined");
 
 #ifdef DB_CHECKSUM
   map<parid_t, vector<int>> checksum_results = {};
@@ -985,8 +993,10 @@ int main(int argc, char *argv[]) {
   // stop profiling
   ProfilerStop();
 #endif // ifdef CPU_PROFILE
+  Log_info("[SHUTDOWN-DBG] before client_shutdown()");
   client_shutdown();
   Log_info("After client_shutdown");
+  Log_info("[SHUTDOWN-DBG] after client_shutdown()");
   
   Log_info("All-fast-path-attempts           statistics %s", cli2cli[0].statistics().c_str());
   Log_info("Success-fast-path-attempts       statistics %s", cli2cli[1].statistics().c_str());
