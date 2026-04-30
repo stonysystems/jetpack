@@ -1,0 +1,15 @@
+mode:
+  cc: rule  # concurrency control: jetpack rule (fast-path + merge_leader_rpc)
+  ab: raft  # atomic broadcast: Raft replication for writes
+  batch: false
+  retry: 20
+  ongoing: 1  # per client
+  # Read-lease optimization stacked on top of jetpack rule. Single-key
+  # read pieces (when the partition leader holds a valid lease) are
+  # served directly from the leader's local state machine — skipping
+  # both the Raft replication round-trip AND the jetpack speculative-
+  # exec round-trip for those reads. Writes still go through the full
+  # jetpack fast-path (or original-path under throttle). See
+  # RaftServer::kReadLeaseDurationUs (250ms on AWS WAN; must stay below
+  # the smallest follower election timeout minus a clock-skew budget).
+  raft_read_lease: true
