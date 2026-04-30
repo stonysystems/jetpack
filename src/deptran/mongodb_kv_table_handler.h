@@ -18,15 +18,28 @@ inline mongocxx::instance& GetMongoInstance() {
   return inst;
 }
 
-#if defined(JETPACK_MONGODB_RECOVERY) 
+// Camera-ready linearizable contract: every operation through these
+// clients carries writeConcern={w:"majority", j:true} +
+// readConcern="linearizable" + readPreference="primary". The mongo-cxx-
+// driver picks these up from the URI and applies them as defaults on
+// the client / database / collection — no per-operation patching needed.
+// See results/2026-04-30-camera-ready-exp0-small/settings.md
+// "MongoDB configuration: linearizable consistency".
+#define JANUS_MONGO_LINEARIZABLE_OPTS \
+  "w=majority&journal=true&readConcernLevel=linearizable&readPreference=primary"
+
+#if defined(JETPACK_MONGODB_RECOVERY)
 // Use local loopback in recovery mode to avoid changing legacy defaults.
-constexpr char kMongoDbUri[] = "mongodb://127.0.0.1:27017";
+constexpr char kMongoDbUri[] =
+    "mongodb://127.0.0.1:27017/?" JANUS_MONGO_LINEARIZABLE_OPTS;
 #else
 #ifdef AWS
-constexpr char kMongoDbUri[] = "mongodb://184.72.49.232:27017";
+constexpr char kMongoDbUri[] =
+    "mongodb://184.72.49.232:27017/?" JANUS_MONGO_LINEARIZABLE_OPTS;
 #endif
 #ifndef AWS
-constexpr char kMongoDbUri[] = "mongodb://130.245.173.103:27017";
+constexpr char kMongoDbUri[] =
+    "mongodb://130.245.173.103:27017/?" JANUS_MONGO_LINEARIZABLE_OPTS;
 #endif
 #endif
 
