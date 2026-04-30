@@ -943,6 +943,58 @@ int main(int argc, char *argv[]) {
     failover_server_quit = true;
   }
   Log_info("Total throughtput is %.2f", total_throughput);
+
+  // CRITICAL: do client stats merge + CSV dump BEFORE the post-run cleanup
+  // (sleep + WaitForShutdown + ft.join). On AWS at high offered load
+  // (≥ 3000 req/s), the leader process intermittently dies during the
+  // cleanup phase — possibly an rrr server thread crash on cascading
+  // client disconnects — and never reaches the original CSV-dump call
+  // site below. By doing the dump first we ensure the per-experiment
+  // data is durably written even if the binary aborts during cleanup.
+  Log_info("[STATS] dumping CSV before post-run cleanup");
+  client_shutdown();
+  Log_info("All-fast-path-attempts           statistics %s", cli2cli[0].statistics().c_str());
+  Log_info("Success-fast-path-attempts       statistics %s", cli2cli[1].statistics().c_str());
+  Log_info("Efficient-fast-path-attempts     statistics %s", cli2cli[2].statistics().c_str());
+  Log_info("All-original-path-attempts       statistics %s", cli2cli[3].statistics().c_str());
+  Log_info("Efficient-original-path-attempts statistics %s", cli2cli[4].statistics().c_str());
+  Log_info("All-efficient-attempts           statistics %s", cli2cli[5].statistics().c_str());
+  Log_info("Mid throughput is %.2f", cli2cli[5].count() / (Config::GetConfig()->duration_ / 3.0));
+  {
+    string dump_file_name = "results/recent_csv/" + Config::GetConfig()->exp_setting_name_ + ".csv";
+    std::ofstream file(dump_file_name);
+    if (file.is_open()) {
+      file << "All-fast-path-attempts" << "," << "Success-fast-path-attempts" << "," << "Efficient-fast-path-attempts" << "," << "All-original-path-attempts" << ","  << "Efficient-original-path-attempts" << ","  << "All-efficient-attempts" << "," << "Start-Time" << "," << "End2End-Latency" << "," << "Dispatch-Time" << "\n";
+      std::sort(commit_time.begin(), commit_time.end(),
+                [](auto const& a, auto const& b) { return a.first < b.first; });
+      size_t max_size = commit_time.size();
+      for (int i = 0; i < 6; i++)
+        if (cli2cli[i].count() > max_size) max_size = cli2cli[i].count();
+      if (dispatch_time_distribution.count() > max_size) max_size = dispatch_time_distribution.count();
+      for (size_t i = 0; i < max_size; ++i) {
+        for (int k = 0; k < 6; k++) {
+          if (i < cli2cli[k].count()) file << cli2cli[k].data_[i];
+          file << ",";
+        }
+        if (i < commit_time.size()) file << std::fixed << commit_time[i].first;
+        file << ",";
+        if (i < commit_time.size()) file << commit_time[i].second;
+        file << ",";
+        if (i < dispatch_time_distribution.count()) file << dispatch_time_distribution.data_[i];
+        file << "\n";
+      }
+      file.flush();
+      file.close();
+      Log_info("Dumped to %s with %d lines data", dump_file_name.c_str(), max_size);
+    } else {
+      Log_info("Failed to open file for writing %s", dump_file_name.c_str());
+    }
+  }
+  // Force flush so any later abort doesn't lose this data.
+  fflush(stderr);
+  fflush(stdout);
+  Log_info("[STATS] CSV dump done; entering post-run cleanup (may abort, that's OK)");
+
 #ifdef DB_CHECKSUM
   sleep(90); // hopefully servers can finish hanging RPCs in 90 seconds.
 #endif
