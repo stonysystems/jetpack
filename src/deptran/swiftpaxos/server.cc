@@ -3,8 +3,16 @@
 #include "../config.h"
 #include "../RW_command.h"
 #include <algorithm>
+#include <chrono>
+#include <sstream>
 
 namespace janus {
+
+uint64_t SwiftPaxosServer::NowUs() {
+  using namespace std::chrono;
+  return duration_cast<microseconds>(
+             steady_clock::now().time_since_epoch()).count();
+}
 
 SwiftPaxosServer::SwiftPaxosServer(Frame* frame)
     : TxLogServer() {
@@ -73,6 +81,16 @@ void SwiftPaxosServer::OnPropose(const shared_ptr<Marshallable>& cmd,
     desc.cmd = cmd;
     desc.cmd_id = cmd_id;
     desc.key = key;
+
+    // Activate profiling for the first kProfTraceLimit cmds we see this
+    // process. The local replica is the one whose timeline matches the
+    // client's wall-clock latency, so this trace anchors at OnPropose
+    // entry on the local replica.
+    if (commit_cb && prof_traced_count_ < kProfTraceLimit) {
+      desc.prof_active = true;
+      desc.t_propose_us = NowUs();
+      prof_traced_count_++;
+    }
   }
   if (commit_cb && !desc.commit_callback) {
     desc.commit_callback = commit_cb;
@@ -96,6 +114,9 @@ void SwiftPaxosServer::OnPropose(const shared_ptr<Marshallable>& cmd,
   ack.seqnum = desc.seqnum;
   ack.is_slow = false;
   OnFastAck(ack);
+  if (desc.prof_active) {
+    desc.t_self_acked_us = NowUs();
+  }
 
   // Broadcast my fast-ack (with dep) to the other replicas. They each
   // collect acks independently and the local replica that hosts the
@@ -124,10 +145,21 @@ void SwiftPaxosServer::OnFastAck(const SwiftAck& ack) {
   // we keep its first vote (the protocol assumes one ack per replica).
   desc.fast_acks_by_replica.emplace(ack.replica, ack.dep);
 
+  if (desc.prof_active && desc.t_propose_us > 0) {
+    uint64_t now = NowUs();
+    desc.ack_arrival_us[ack.replica] = now - desc.t_propose_us;
+    if (desc.t_first_peer_ack_us == 0 && (int32_t)ack.replica != (int32_t)loc_id_) {
+      desc.t_first_peer_ack_us = now - desc.t_propose_us;
+    }
+  }
+
   if ((int32_t)ack.replica == Leader()) {
     desc.leader_acked = true;
     desc.leader_dep = ack.dep;
     if (ack.seqnum > 0) desc.seqnum = ack.seqnum;
+    if (desc.prof_active && desc.t_propose_us > 0 && desc.t_leader_ack_us == 0) {
+      desc.t_leader_ack_us = NowUs() - desc.t_propose_us;
+    }
   }
 
   CheckCommit(desc);
@@ -149,6 +181,34 @@ void SwiftPaxosServer::OnSlowAck(const SwiftAck& ack) {
 void SwiftPaxosServer::CheckCommit(SwiftCmdDesc& desc) {
   if (desc.committed) return;
 
+  auto fire_commit = [&](bool fast) {
+    desc.committed = true;
+    desc.phase = SwiftCmdDesc::COMMIT;
+    if (desc.prof_active && desc.t_propose_us > 0) {
+      desc.t_commit_us = NowUs() - desc.t_propose_us;
+      desc.committed_via_fast_path = fast;
+      // Format: cid=X path=fast/slow leader_loc=L total_us=T leader_ack=A
+      //         self=S first_peer=F  per_replica="r0:dt0,r1:dt1,..."
+      std::ostringstream ss;
+      for (auto& kv : desc.ack_arrival_us) {
+        ss << kv.first << ":" << kv.second << ",";
+      }
+      Log_info("[SP-PROF] cid=%llu loc=%d leader=%d path=%s "
+               "total_us=%llu leader_ack_us=%llu self_us=%llu "
+               "first_peer_us=%llu acks=[%s]",
+               (unsigned long long)desc.cmd_id,
+               (int)loc_id_,
+               (int)Leader(),
+               fast ? "FAST" : "SLOW",
+               (unsigned long long)desc.t_commit_us,
+               (unsigned long long)desc.t_leader_ack_us,
+               (unsigned long long)desc.t_self_acked_us,
+               (unsigned long long)desc.t_first_peer_ack_us,
+               ss.str().c_str());
+    }
+    Deliver(desc);
+  };
+
   // Fast path: 3N/4+1 fast-acks whose dep matches the leader's dep.
   // Requires the leader's fast-ack as the dep anchor.
   if (desc.leader_acked) {
@@ -157,9 +217,7 @@ void SwiftPaxosServer::CheckCommit(SwiftCmdDesc& desc) {
       if (DepsEqual(kv.second, desc.leader_dep)) matching++;
     }
     if (matching >= FastQuorum()) {
-      desc.committed = true;
-      desc.phase = SwiftCmdDesc::COMMIT;
-      Deliver(desc);
+      fire_commit(true);
       return;
     }
   }
@@ -170,9 +228,7 @@ void SwiftPaxosServer::CheckCommit(SwiftCmdDesc& desc) {
   std::set<siteid_t> all_responders = desc.slow_ack_replicas;
   for (auto& kv : desc.fast_acks_by_replica) all_responders.insert(kv.first);
   if ((int)all_responders.size() >= SlowQuorum()) {
-    desc.committed = true;
-    desc.phase = SwiftCmdDesc::COMMIT;
-    Deliver(desc);
+    fire_commit(false);
     return;
   }
 }

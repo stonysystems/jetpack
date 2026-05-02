@@ -54,6 +54,19 @@ struct SwiftCmdDesc {
   bool committed = false;
 
   std::function<void()> commit_callback;
+
+  // ---- profiling (filled by OnPropose / OnFastAck / CheckCommit) ----
+  // All times are microseconds since the local steady_clock epoch. The
+  // start anchor is t_propose_us (OnPropose entry on the LOCAL replica),
+  // so all later fields are deltas from that point.
+  bool prof_active = false;
+  uint64_t t_propose_us = 0;            // OnPropose entry on local replica
+  uint64_t t_self_acked_us = 0;         // After self-ack
+  std::map<siteid_t, uint64_t> ack_arrival_us;  // FastAck arrival per peer
+  uint64_t t_first_peer_ack_us = 0;
+  uint64_t t_leader_ack_us = 0;
+  uint64_t t_commit_us = 0;
+  bool committed_via_fast_path = false;
 };
 
 class SwiftPaxosServer : public TxLogServer {
@@ -124,6 +137,12 @@ class SwiftPaxosServer : public TxLogServer {
   // Compare two dep lists for set-equality. Empty == empty.
   static bool DepsEqual(const std::vector<uint64_t>& a,
                         const std::vector<uint64_t>& b);
+
+  // Diagnostic only: how many local commands have we profile-traced so far?
+  // Cap to keep log volume bounded at c=1 we expect ~120 cmds per host /30s.
+  uint64_t prof_traced_count_ = 0;
+  static constexpr uint64_t kProfTraceLimit = 60;
+  static uint64_t NowUs();
 };
 
 } // namespace janus
