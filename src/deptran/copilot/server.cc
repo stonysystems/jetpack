@@ -6,7 +6,11 @@
 #define WAIT_AT_UNCOMMIT
 #define N_CMD_KEEP (15000)
 // #define USE_TARJAN
-const uint64_t PINGPONG_TIMEOUT_US = 500;
+// 500us was the original; at 60 client sites × c≥75 (4500+ in-flight), the
+// pingpong queue overflowed and pilots desynchronized → "multiple on-going
+// FastAccept" splits per author comment. Bumped to 10 ms to give ample
+// slack while still being well under per-cmd commit time (~150 ms WAN).
+const uint64_t PINGPONG_TIMEOUT_US = 10000;
 
 namespace janus {
 
