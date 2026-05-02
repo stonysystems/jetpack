@@ -11,5 +11,7 @@ mode:
   # (executeIndex, lastLogIndex] in RaftServer::ConflictWithOriginalUnexecutedLog.
   # See docs/2026-04-23_max_throughput_protocols_with_optimized_jetpack.md
   # for the motivation and the design discussion.
-  jetpack_merge_leader_rpc: true
+  # NOTE: jetpack_merge_leader_rpc is unsafe under cc:rule — see commit
+  # 62e1d7db retraction. Force-disabled.
+  jetpack_merge_leader_rpc: false
   jetpack_skip_pool_for_original_path: true

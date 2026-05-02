@@ -4,6 +4,9 @@ mode:
   batch: false
   retry: 20
   ongoing: 1 # per client
-  # Fuse leader-side Dispatch + RuleSpeculativeExecute into a single RPC.
-  # Reduces per-txn leader RPC count from 2 to 1 (total from N+1 to N).
-  jetpack_merge_leader_rpc: true
+  # NOTE: jetpack_merge_leader_rpc is unsafe under cc:rule — it skips the
+  # leader from the spec quorum, which violates the proposing-replica
+  # invariant Jetpack's fast-path recovery depends on (see commit 62e1d7db
+  # and the gate at rule/coordinator.cc). Force-disabled here even though
+  # the gate would also reject it; left explicit for clarity.
+  jetpack_merge_leader_rpc: false

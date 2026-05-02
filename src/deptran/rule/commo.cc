@@ -220,6 +220,12 @@ CommunicatorRule::BroadcastRuleSpeculativeExecute(shared_ptr<vector<shared_ptr<S
 shared_ptr<RuleSpeculativeExecuteQuorumEvent>
 CommunicatorRule::BroadcastRuleSpeculativeExecuteSkipLeader(shared_ptr<vector<shared_ptr<SimpleCommand>>> vec_piece_data) {
   verify(!vec_piece_data->empty());
+  // Hard invariant: only safe under CURP. Under cc:rule (Jetpack)
+  // skipping the leader violates the proposing-replica-in-quorum rule
+  // that fast-path recovery depends on. The coordinator gate at
+  // rule/coordinator.cc must keep this off the hot path under cc:rule;
+  // crash loudly here if it ever leaks through.
+  verify(Config::GetConfig()->IsCurpMode());
   auto par_id = vec_piece_data->at(0)->PartitionId();
 
   shared_ptr<VecPieceData> sp_vpd(new VecPieceData);

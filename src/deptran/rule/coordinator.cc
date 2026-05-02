@@ -190,18 +190,18 @@ void CoordinatorRule::GotoNextPhase() {
       }
 
       {
-        // Merge mode: single-leader protocols with fastpath on send one
-        // fused DispatchWithRuleSpec RPC to the leader (covers both the
-        // normal Dispatch and the spec vote) and spec RPCs to followers.
-        int proto = Config::GetConfig()->replica_proto_;
-        bool single_leader_proto = (proto == MODE_RAFT ||
-                                    proto == MODE_FPGA_RAFT ||
-                                    proto == MODE_MONGODB ||
-                                    proto == MODE_ETCD ||
-                                    proto == MODE_ZOOKEEPER);
+        // Merge mode (fused DispatchWithRuleSpec to leader + spec to
+        // followers) is only sound under CURP semantics. Under cc:rule
+        // (Jetpack) the proposing replica MUST be in the spec quorum —
+        // see docs/jetpack_pseudocode_optimized.tex:81 and recovery's
+        // PullRecovery → Paxos Accept reconstruction. Skipping the leader
+        // here would drop FQ from 4-of-5 to 3-of-4 and silently break
+        // recovery for fast-committed cmds. Commit 62e1d7db acknowledged
+        // this; the gate below makes it impossible to reach the unsafe
+        // path under cc:rule even if the YAML flag is set.
         bool use_merge = go_to_fastpath_ &&
                          Config::GetConfig()->jetpack_merge_leader_rpc_ &&
-                         single_leader_proto;
+                         Config::GetConfig()->IsCurpMode();
         if (use_merge) {
           DispatchAndSpeculativeExecuteFused(phase_cp);
         } else {

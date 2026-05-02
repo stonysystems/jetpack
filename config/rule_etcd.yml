@@ -5,8 +5,8 @@ mode:
   batch: false
   retry: 20
   ongoing: 1 # per client
-  # Jetpack is assumed to always run with the fused leader RPC optimization
-  # going forward (see
-  # docs/2026-04-22_jp-raft-fp100_merge-rpc-and-pool-opts_ab.md for the A/B
-  # result on jp-raft that motivated making this the default).
-  jetpack_merge_leader_rpc: true
+  # NOTE: jetpack_merge_leader_rpc is unsafe under cc:rule — see commit
+  # 62e1d7db retraction and the gate at rule/coordinator.cc. The merge
+  # path skips the leader from the spec quorum, dropping FQ from 4-of-5
+  # to 3-of-4 and breaking fast-path recovery. Force-disabled here.
+  jetpack_merge_leader_rpc: false
