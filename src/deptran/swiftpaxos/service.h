@@ -19,11 +19,8 @@ class SwiftPaxosServiceImplC : public SwiftPaxosServiceService {
                     rrr::DeferredReply* defer) override {
     Coroutine::CreateRun([this, &cmd, res, defer]() {
       auto sp_cmd = const_cast<MarshallDeputy&>(cmd).sp_data_;
-      auto cmd_id = SimpleRWCommand::GetCombinedCmdID(sp_cmd);
-      auto key = SimpleRWCommand::GetKey(sp_cmd);
-      bool has_conflict = svr_->HasConflict(key, cmd_id);
       svr_->OnPropose(sp_cmd, nullptr);
-      *res = has_conflict ? 1 : 0;  // 0=fast ack, 1=slow ack
+      *res = 0;
       defer->reply();
     });
   }
@@ -33,15 +30,16 @@ class SwiftPaxosServiceImplC : public SwiftPaxosServiceService {
                     const rrr::i64& cmd_id,
                     const rrr::i32& key,
                     const rrr::i64& seqnum,
+                    const std::vector<rrr::i64>& dep,
                     rrr::i32* res,
                     rrr::DeferredReply* defer) override {
     SwiftAck ack;
     ack.replica = replica;
     ack.ballot = ballot;
     ack.cmd_id = cmd_id;
-    ack.key = key;
     ack.seqnum = seqnum;
     ack.is_slow = false;
+    ack.dep.assign(dep.begin(), dep.end());
     svr_->OnFastAck(ack);
     *res = 0;
     defer->reply();
@@ -50,6 +48,7 @@ class SwiftPaxosServiceImplC : public SwiftPaxosServiceService {
   void SwiftSlowAck(const siteid_t& replica,
                      const ballot_t& ballot,
                      const rrr::i64& cmd_id,
+                     const std::vector<rrr::i64>& dep,
                      rrr::i32* res,
                      rrr::DeferredReply* defer) override {
     SwiftAck ack;
@@ -57,6 +56,7 @@ class SwiftPaxosServiceImplC : public SwiftPaxosServiceService {
     ack.ballot = ballot;
     ack.cmd_id = cmd_id;
     ack.is_slow = true;
+    ack.dep.assign(dep.begin(), dep.end());
     svr_->OnSlowAck(ack);
     *res = 0;
     defer->reply();

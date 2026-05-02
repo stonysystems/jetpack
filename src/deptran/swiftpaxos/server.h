@@ -4,42 +4,55 @@
 #include "../constants.h"
 #include "../scheduler.h"
 #include "../RW_command.h"
+#include <map>
+#include <set>
+#include <vector>
 
 namespace janus {
 
-// Per-key conflict info: tracks last command on each key
+// Per-key info: mirrors imdea-software/swiftpaxos lightKeyInfo (key.go).
+// Tracks the most recent cmds on each key so OnPropose can compute a
+// dependency list to embed in its FastAck.
 struct SwiftKeyInfo {
-  uint64_t last_write_cmd_id = 0;  // last write on this key
-  uint64_t last_cmd_id = 0;        // last command (read or write) on this key
+  std::vector<uint64_t> last_write;  // last write cmd on this key (size 0 or 1)
+  std::vector<uint64_t> last_cmd;    // last cmd (read or write)    (size 0 or 1)
 };
 
-// Ack from a replica for a command
+// Ack from a replica for a command. Carries the replica's computed
+// dependency list so the receiver can verify all replicas agree on dep
+// (the SwiftPaxos fast-path commit condition).
 struct SwiftAck {
   siteid_t replica;
   ballot_t ballot;
   uint64_t cmd_id;
-  bool is_slow;       // true = slow ack (deps mismatch), false = fast ack
-  key_t key;          // key from the command (for hash comparison)
-  int64_t seqnum;     // leader's sequence number (0 for non-leader)
+  bool is_slow;
+  std::vector<uint64_t> dep;   // dep list this replica computed
+  int64_t seqnum;              // leader-assigned seq (0 for non-leader)
 };
 
-// Per-command descriptor: tracks consensus progress
+// Per-command descriptor: tracks consensus progress + per-replica acks.
 struct SwiftCmdDesc {
   enum Phase { START = 0, PRE_ACCEPT = 1, ACCEPT = 2, COMMIT = 3 };
   Phase phase = START;
   shared_ptr<Marshallable> cmd;
   uint64_t cmd_id = 0;
   key_t key = 0;
-  int64_t seqnum = 0;  // leader-assigned sequence number
+  int64_t seqnum = 0;
 
-  // Ack tracking
-  int fast_ack_count = 0;
-  int slow_ack_count = 0;
+  // Anchor: leader's reported dep (set when leader's FastAck arrives).
+  std::vector<uint64_t> leader_dep;
   bool leader_acked = false;
+
+  // Per-replica acks. fast_acks_by_replica stores each replica's reported
+  // dep — fast-path commit fires when 3N/4+1 of these equal leader_dep.
+  // slow_ack_replicas counts replicas that explicitly slow-acked (after
+  // detecting their dep mismatched the leader's).
+  std::map<siteid_t, std::vector<uint64_t>> fast_acks_by_replica;
+  std::set<siteid_t> slow_ack_replicas;
+
   bool delivered = false;
   bool committed = false;
 
-  // Callback when committed
   std::function<void()> commit_callback;
 };
 
@@ -103,9 +116,14 @@ class SwiftPaxosServer : public TxLogServer {
   // Trigger recovery: called when a replica detects leader failure
   void TriggerRecovery();
 
-  // Conflict detection
-  bool HasConflict(key_t key, uint64_t cmd_id);
+  // Dependency computation (mirrors lightKeyInfo.getConflictCmds in the
+  // reference impl). For a write, returns last_cmd; for a read, last_write.
+  std::vector<uint64_t> GetDep(key_t key, uint64_t cmd_id, bool is_write);
   void TrackKey(key_t key, uint64_t cmd_id, bool is_write);
+
+  // Compare two dep lists for set-equality. Empty == empty.
+  static bool DepsEqual(const std::vector<uint64_t>& a,
+                        const std::vector<uint64_t>& b);
 };
 
 } // namespace janus

@@ -7,22 +7,12 @@
 
 namespace janus {
 
+// SwiftPaxos uses the inherited Communicator's rpc_par_proxies_ directly
+// from OnPropose to broadcast SwiftPropose + SwiftFastAck. No protocol-
+// specific helper methods are needed here.
 class SwiftPaxosCommo : public Communicator {
  public:
   SwiftPaxosCommo(PollMgr* poll = nullptr) : Communicator(poll) {}
-
-  // Broadcast a propose to all replicas in the partition
-  void BroadcastPropose(parid_t par_id,
-                        const shared_ptr<Marshallable>& cmd,
-                        const std::function<void(int fast_acks, int slow_acks, bool leader_acked)>& cb);
-
-  // Broadcast fast ack to all replicas
-  void BroadcastFastAck(parid_t par_id,
-                        siteid_t replica,
-                        ballot_t ballot,
-                        int64_t cmd_id,
-                        key_t key,
-                        int64_t seqnum);
 };
 
 } // namespace janus

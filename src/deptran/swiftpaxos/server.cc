@@ -2,6 +2,7 @@
 #include "commo.h"
 #include "../config.h"
 #include "../RW_command.h"
+#include <algorithm>
 
 namespace janus {
 
@@ -15,18 +16,42 @@ SwiftPaxosServer::SwiftPaxosServer(Frame* frame)
 
 SwiftPaxosServer::~SwiftPaxosServer() {}
 
-bool SwiftPaxosServer::HasConflict(key_t key, uint64_t cmd_id) {
+// Mirrors lightKeyInfo.getConflictCmds in the reference. For a write the dep
+// is "last cmd on this key" (could be a read); for a read it is "last write."
+// Empty result means "no dependency" — fast path will fire trivially when all
+// replicas observe the same state.
+std::vector<uint64_t> SwiftPaxosServer::GetDep(key_t key, uint64_t cmd_id,
+                                                bool is_write) {
+  std::vector<uint64_t> dep;
   auto it = keys_.find(key);
-  if (it == keys_.end()) return false;
-  return it->second.last_write_cmd_id != 0 && it->second.last_write_cmd_id != cmd_id;
+  if (it == keys_.end()) return dep;
+  const auto& info = it->second;
+  if (is_write) {
+    if (!info.last_cmd.empty() && info.last_cmd.front() != cmd_id) {
+      dep = info.last_cmd;
+    }
+  } else {
+    if (!info.last_write.empty() && info.last_write.front() != cmd_id) {
+      dep = info.last_write;
+    }
+  }
+  return dep;
 }
 
 void SwiftPaxosServer::TrackKey(key_t key, uint64_t cmd_id, bool is_write) {
   auto& info = keys_[key];
-  info.last_cmd_id = cmd_id;
-  if (is_write) {
-    info.last_write_cmd_id = cmd_id;
-  }
+  info.last_cmd = {cmd_id};
+  if (is_write) info.last_write = {cmd_id};
+}
+
+bool SwiftPaxosServer::DepsEqual(const std::vector<uint64_t>& a,
+                                  const std::vector<uint64_t>& b) {
+  if (a.size() != b.size()) return false;
+  // Set-equality: dep order is not significant.
+  std::vector<uint64_t> sa(a), sb(b);
+  std::sort(sa.begin(), sa.end());
+  std::sort(sb.begin(), sb.end());
+  return sa == sb;
 }
 
 void SwiftPaxosServer::OnPropose(const shared_ptr<Marshallable>& cmd,
@@ -39,7 +64,6 @@ void SwiftPaxosServer::OnPropose(const shared_ptr<Marshallable>& cmd,
 
   auto& desc = cmd_descs_[cmd_id];
   if (desc.committed || desc.delivered) {
-    // Already done
     if (commit_cb) commit_cb();
     return;
   }
@@ -54,53 +78,40 @@ void SwiftPaxosServer::OnPropose(const shared_ptr<Marshallable>& cmd,
     desc.commit_callback = commit_cb;
   }
 
-  // Check for conflicts
-  bool has_conflict = HasConflict(key, cmd_id);
-
-  // Track this key
+  // Compute this replica's dep BEFORE updating key tracking — the dep is
+  // "what existed prior to this command."
+  auto my_dep = GetDep(key, cmd_id, is_write);
   TrackKey(key, cmd_id, is_write);
 
-  // Assign sequence number if leader
   if (IsSwiftLeader() && desc.seqnum == 0) {
     desc.seqnum = ++seqnum_;
   }
 
-  // Self-ack: this replica's response to the propose
+  // Self-ack with my dep.
   SwiftAck ack;
   ack.replica = loc_id_;
   ack.ballot = ballot_;
   ack.cmd_id = cmd_id;
-  ack.key = key;
+  ack.dep = my_dep;
   ack.seqnum = desc.seqnum;
-  ack.is_slow = has_conflict;
+  ack.is_slow = false;
+  OnFastAck(ack);
 
-  if (has_conflict) {
-    OnSlowAck(ack);
-  } else {
-    OnFastAck(ack);
-  }
-
-  // Broadcast ack to all OTHER replicas via RPC (real inter-replica consensus).
-  // Each replica is responsible for sending its own FastAck/SlowAck to every
-  // other replica in the partition. This is the actual SwiftPaxos protocol —
-  // the coordinator only triggers the propose; the replicas exchange acks.
+  // Broadcast my fast-ack (with dep) to the other replicas. They each
+  // collect acks independently and the local replica that hosts the
+  // coordinator will fire commit_callback when fast or slow quorum is met.
   if (commo()) {
     auto swift_commo = (SwiftPaxosCommo*)commo();
     auto config = Config::GetConfig();
     parid_t par_id = config->SiteById(site_id_).partition_id_;
     auto& proxies = swift_commo->rpc_par_proxies_[par_id];
+    std::vector<rrr::i64> dep_i64(my_dep.begin(), my_dep.end());
     for (auto& p : proxies) {
-      // Don't send to self (self-ack already processed above)
       if ((int32_t)p.first == site_id_) continue;
       auto proxy = (SwiftPaxosServiceProxy*)p.second;
-      if (has_conflict) {
-        auto fu = proxy->async_SwiftSlowAck(loc_id_, ballot_, (int64_t)cmd_id);
-        Future::safe_release(fu);
-      } else {
-        auto fu = proxy->async_SwiftFastAck(loc_id_, ballot_, (int64_t)cmd_id,
-                                             (int32_t)key, desc.seqnum);
-        Future::safe_release(fu);
-      }
+      auto fu = proxy->async_SwiftFastAck(loc_id_, ballot_, (int64_t)cmd_id,
+                                           (int32_t)key, desc.seqnum, dep_i64);
+      Future::safe_release(fu);
     }
   }
 }
@@ -109,9 +120,13 @@ void SwiftPaxosServer::OnFastAck(const SwiftAck& ack) {
   auto& desc = cmd_descs_[ack.cmd_id];
   if (desc.committed || desc.delivered) return;
 
-  desc.fast_ack_count++;
+  // Record this replica's dep. If the same replica was already counted,
+  // we keep its first vote (the protocol assumes one ack per replica).
+  desc.fast_acks_by_replica.emplace(ack.replica, ack.dep);
+
   if ((int32_t)ack.replica == Leader()) {
     desc.leader_acked = true;
+    desc.leader_dep = ack.dep;
     if (ack.seqnum > 0) desc.seqnum = ack.seqnum;
   }
 
@@ -122,10 +137,10 @@ void SwiftPaxosServer::OnSlowAck(const SwiftAck& ack) {
   auto& desc = cmd_descs_[ack.cmd_id];
   if (desc.committed || desc.delivered) return;
 
-  desc.slow_ack_count++;
+  desc.slow_ack_replicas.insert(ack.replica);
   if ((int32_t)ack.replica == Leader()) {
     desc.leader_acked = true;
-    if (ack.seqnum > 0) desc.seqnum = ack.seqnum;
+    desc.leader_dep = ack.dep;
   }
 
   CheckCommit(desc);
@@ -134,18 +149,27 @@ void SwiftPaxosServer::OnSlowAck(const SwiftAck& ack) {
 void SwiftPaxosServer::CheckCommit(SwiftCmdDesc& desc) {
   if (desc.committed) return;
 
-  // Fast path: 3*N/4+1 fast-acks, leader-independent (true SwiftPaxos 1-RTT).
-  if (desc.fast_ack_count >= FastQuorum()) {
-    desc.committed = true;
-    desc.phase = SwiftCmdDesc::COMMIT;
-    Deliver(desc);
-    return;
+  // Fast path: 3N/4+1 fast-acks whose dep matches the leader's dep.
+  // Requires the leader's fast-ack as the dep anchor.
+  if (desc.leader_acked) {
+    int matching = 0;
+    for (auto& kv : desc.fast_acks_by_replica) {
+      if (DepsEqual(kv.second, desc.leader_dep)) matching++;
+    }
+    if (matching >= FastQuorum()) {
+      desc.committed = true;
+      desc.phase = SwiftCmdDesc::COMMIT;
+      Deliver(desc);
+      return;
+    }
   }
 
-  // Slow path: needs leader's ordering before classic majority commit.
+  // Slow path: leader's ack arrived AND a majority of replicas have
+  // contributed any ack (fast or slow). Counts each replica at most once.
   if (!desc.leader_acked) return;
-  int total_acks = desc.fast_ack_count + desc.slow_ack_count;
-  if (total_acks >= SlowQuorum()) {
+  std::set<siteid_t> all_responders = desc.slow_ack_replicas;
+  for (auto& kv : desc.fast_acks_by_replica) all_responders.insert(kv.first);
+  if ((int)all_responders.size() >= SlowQuorum()) {
     desc.committed = true;
     desc.phase = SwiftCmdDesc::COMMIT;
     Deliver(desc);
@@ -171,33 +195,20 @@ void SwiftPaxosServer::Deliver(SwiftCmdDesc& desc) {
 // ============================================================
 
 void SwiftPaxosServer::OnNewLeaderRecv(siteid_t replica, ballot_t ballot) {
-  // A replica is proposing to become the new leader with a higher ballot.
-  if (ballot <= ballot_) {
-    // Stale request, ignore
-    return;
-  }
+  if (ballot <= ballot_) return;
   Log_info("[SwiftPaxos] OnNewLeaderRecv: enter RECOVERING status, new ballot=%ld from replica=%d",
            (long)ballot, (int)replica);
   ballot_ = ballot;
   status_ = RECOVERING;
-  // Stop processing new proposals. Pending commands stay in cmd_descs_
-  // until the new leader sends a Sync message.
 }
 
 void SwiftPaxosServer::OnNewLeaderAckRecv(siteid_t replica, ballot_t ballot, ballot_t cballot) {
-  // This replica (as the new leader candidate) is receiving state from other replicas.
-  if (ballot != ballot_) return;  // stale
-  // In the full SwiftPaxos spec, we would collect cmd_ids+phases+cmds+deps from each ack,
-  // find the highest cballot group, merge, and broadcast Sync.
-  // For the simplified implementation: just track that we received the ack.
-  // When we have majority (SlowQuorum), broadcast Sync.
+  if (ballot != ballot_) return;
   Log_info("[SwiftPaxos] OnNewLeaderAckRecv from replica=%d cballot=%ld",
            (int)replica, (long)cballot);
-  // (Counting logic would be added with full RPC implementation)
 }
 
 void SwiftPaxosServer::OnSyncRecv(siteid_t replica, ballot_t ballot) {
-  // Apply the synced state and return to NORMAL operation.
   if (ballot < ballot_) return;
   ballot_ = ballot;
   cballot_ = ballot;
@@ -206,20 +217,13 @@ void SwiftPaxosServer::OnSyncRecv(siteid_t replica, ballot_t ballot) {
 }
 
 void SwiftPaxosServer::TriggerRecovery() {
-  // This replica proposes itself as the new leader.
-  ballot_t new_ballot = ballot_ + n_replica_;  // ensure new_ballot % n_replica_ == loc_id_
+  ballot_t new_ballot = ballot_ + n_replica_;
   new_ballot = new_ballot - (new_ballot % n_replica_) + loc_id_;
   if (new_ballot <= ballot_) new_ballot += n_replica_;
 
   Log_info("[SwiftPaxos] TriggerRecovery: proposing new_ballot=%ld", (long)new_ballot);
   ballot_ = new_ballot;
   status_ = RECOVERING;
-
-  // In full implementation: broadcast SwiftNewLeader RPC to all replicas.
-  // The service handler will call OnNewLeaderRecv on each receiving replica.
-  // When quorum of NewLeaderAck replies are received, broadcast SwiftSync
-  // and return to NORMAL on all replicas.
-  // For the current simplified implementation, this is a no-op stub.
 }
 
 } // namespace janus

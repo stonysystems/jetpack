@@ -435,12 +435,14 @@ abstract service SwiftPaxosService {
                      ballot_t ballot,
                      i64 cmd_id,
                      i32 key,
-                     i64 seqnum |
+                     i64 seqnum,
+                     vector<i64> dep |
                      i32 res);
 
   defer SwiftSlowAck(siteid_t replica,
                      ballot_t ballot,
-                     i64 cmd_id |
+                     i64 cmd_id,
+                     vector<i64> dep |
                      i32 res);
 
   // Recovery: leader election and state sync
