@@ -71,12 +71,26 @@ void SwiftPaxosServer::OnPropose(const shared_ptr<Marshallable>& cmd,
   bool is_write = SimpleRWCommand(cmd).IsWrite();
 
   auto& desc = cmd_descs_[cmd_id];
+  bool first_arrival = (desc.phase == SwiftCmdDesc::START);
+
+  // Diagnostic: log first few entries per process to see whether OnPropose
+  // sees commit_callback set on this host's local cmds.
+  static thread_local int onp_log_count = 0;
+  if (onp_log_count < 10) {
+    Log_info("[SP-ONPROPOSE] loc_id=%d cmd_id=%llu phase_was=%d "
+             "cb_set=%d commit_cb_arg=%d",
+             (int)loc_id_, (unsigned long long)cmd_id, (int)desc.phase,
+             desc.commit_callback ? 1 : 0,
+             commit_cb ? 1 : 0);
+    onp_log_count++;
+  }
+
   if (desc.committed || desc.delivered) {
     if (commit_cb) commit_cb();
     return;
   }
 
-  if (desc.phase == SwiftCmdDesc::START) {
+  if (first_arrival) {
     desc.phase = SwiftCmdDesc::PRE_ACCEPT;
     desc.cmd = cmd;
     desc.cmd_id = cmd_id;

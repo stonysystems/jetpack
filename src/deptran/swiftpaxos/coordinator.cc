@@ -24,6 +24,14 @@ void SwiftPaxosCoordinator::Submit(shared_ptr<Marshallable>& cmd,
 
   auto cmd_id = SimpleRWCommand::GetCombinedCmdID(cmd);
 
+  // Diagnostic: log first 5 submits per coordinator to confirm path.
+  static thread_local int submit_log_count = 0;
+  if (submit_log_count < 5) {
+    Log_info("[SP-COORD-SUBMIT] coo_id=%d loc_id=%d cmd_id=%llu",
+             (int)coo_id_, (int)loc_id_, (unsigned long long)cmd_id);
+    submit_log_count++;
+  }
+
   // Register commit callback on the local server's descriptor.
   // The local server will commit once it receives enough FastAcks/SlowAcks
   // from the other replicas (real inter-replica ack exchange).
