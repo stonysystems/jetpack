@@ -127,6 +127,16 @@ class EPaxosCServer : public TxLogServer {
 
   // Trigger recovery for a stuck instance
   void StartRecovery(int32_t replica, int32_t instance);
+
+  // ---- Diagnostic counters (logged at intervals) ----
+  // EPaxos is leaderless: every replica should host its own coordinator
+  // and propose roughly an equal share. If our deployment funnels traffic
+  // through one replica (per the SwiftPaxos investigation, deptran's
+  // single-server-side-coordinator pattern routes all clients to server0),
+  // these counters will be non-zero only on that replica.
+  uint64_t propose_count_ = 0;       // calls to OnPropose
+  uint64_t preaccept_in_count_ = 0;  // PreAccept RPCs received from peers
+  uint64_t commit_in_count_ = 0;     // Commit RPCs received from peers
 };
 
 } // namespace janus

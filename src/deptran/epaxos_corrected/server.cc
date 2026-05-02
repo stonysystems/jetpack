@@ -90,6 +90,17 @@ void EPaxosCServer::OnPropose(const shared_ptr<Marshallable>& cmd,
   int32_t inst_id = crt_instance_[my_id];
   crt_instance_[my_id]++;
 
+  // Diagnostic: log propose distribution every 200 cmds.
+  propose_count_++;
+  if (propose_count_ % 200 == 0) {
+    Log_info("[EP-PROPOSE-CNT] loc_id=%d propose=%llu preaccept_in=%llu "
+             "commit_in=%llu",
+             (int)loc_id_,
+             (unsigned long long)propose_count_,
+             (unsigned long long)preaccept_in_count_,
+             (unsigned long long)commit_in_count_);
+  }
+
   auto& inst = GetInstance(my_id, inst_id);
   inst.cmd = cmd;
   inst.ballot = 0;
@@ -179,6 +190,7 @@ void EPaxosCServer::OnPreAccept(siteid_t leader, siteid_t replica, int64_t insta
                                  int32_t seq, const vector<int32_t>& deps,
                                  int32_t* reply_status, ballot_t* reply_ballot,
                                  int32_t* reply_seq, vector<int32_t>* reply_deps) {
+  preaccept_in_count_++;
   auto& inst = GetInstance(replica, instance);
 
   if (ballot < inst.ballot) {
@@ -235,6 +247,7 @@ void EPaxosCServer::OnAcceptReply(siteid_t replica, int64_t instance,
 void EPaxosCServer::OnCommit(siteid_t leader, siteid_t replica, int64_t instance,
                               ballot_t ballot, const shared_ptr<Marshallable>& cmd,
                               int32_t seq, const vector<int32_t>& deps) {
+  commit_in_count_++;
   auto& inst = GetInstance(replica, instance);
   inst.cmd = cmd;
   inst.ballot = ballot;
