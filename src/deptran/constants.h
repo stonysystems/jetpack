@@ -220,6 +220,16 @@ namespace janus {
 #define RAFT_PIPELINE_OPTIMIZATION
 #endif
 
+// Pipeline cap = max in-flight AppendEntries per follower when
+// RAFT_PIPELINE_OPTIMIZATION is on. Default 8000 (effectively unbounded
+// for steady state at 3000 req/s × 200 ms RTT). Override at build time
+// via CXXFLAGS=-DRAFT_PIPELINE_CAP=N or `waf --raft-pipeline-cap=N`.
+// Small caps (1..16) are useful for studying the AE-batching round wait
+// vs CPU-saturation trade-off — see results/2026-05-01-akkio-pipecap-sweep/.
+#ifndef RAFT_PIPELINE_CAP
+#define RAFT_PIPELINE_CAP 8000
+#endif
+
 // #define JETPACK_RECOVERY_DEBUG
 
 // #define MONGODB_STATISTICS

@@ -58,7 +58,8 @@ class RaftServer : public TxLogServer {
   // for AWS-WAN at 20k req/s with 200ms RTT (real round-trip), giving
   // 4000 + 2x headroom = 8000. The cap is a max, not a preallocation;
   // memory is only used when slots are actually filled.
-  static constexpr uint64_t kMaxInFlightPerFollower = 8000;
+  // Default 8000; overridable at build time via -DRAFT_PIPELINE_CAP=N.
+  static constexpr uint64_t kMaxInFlightPerFollower = RAFT_PIPELINE_CAP;
 #endif
   std::vector<std::thread> timer_threads_ = {};
   void timer_thread(bool *vote) ;

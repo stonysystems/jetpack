@@ -66,6 +66,9 @@ def options(opt):
     opt.add_option('','--disable-raft-pipeline', dest='disable_raft_pipeline',
                    default=False, action='store_true',
                    help='Define RAFT_PIPELINE_OFF so RAFT_PIPELINE_OPTIMIZATION is not set in constants.h.')
+    opt.add_option('','--raft-pipeline-cap', dest='raft_pipeline_cap',
+                   default=None, type='int',
+                   help='Override kMaxInFlightPerFollower (default 8000). Defines RAFT_PIPELINE_CAP=N for the build.')
     opt.parse_args();
 
 def configure(conf):
@@ -132,6 +135,9 @@ def configure(conf):
         conf.env.append_value("CXXFLAGS", "-DRAFT_BATCH_OFF")
     if Options.options.disable_raft_pipeline:
         conf.env.append_value("CXXFLAGS", "-DRAFT_PIPELINE_OFF")
+    if Options.options.raft_pipeline_cap is not None:
+        conf.env.append_value("CXXFLAGS",
+                              "-DRAFT_PIPELINE_CAP=%d" % Options.options.raft_pipeline_cap)
     
     # if Options.options.curp_fast_path:
     #     conf.env.append_value("CXXFLAGS", "-DCURP_FAST_PATH")
