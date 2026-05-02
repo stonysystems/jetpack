@@ -82,11 +82,14 @@ void SwiftPaxosServer::OnPropose(const shared_ptr<Marshallable>& cmd,
     desc.cmd_id = cmd_id;
     desc.key = key;
 
-    // Activate profiling for the first kProfTraceLimit cmds we see this
-    // process. The local replica is the one whose timeline matches the
-    // client's wall-clock latency, so this trace anchors at OnPropose
-    // entry on the local replica.
-    if (commit_cb && prof_traced_count_ < kProfTraceLimit) {
+    // Activate profiling on the LOCAL replica only. The local replica is
+    // the one whose Coordinator::Submit ran in this process — so it has
+    // already populated desc.commit_callback before broadcasting, while
+    // remote replicas first see this cmd via the SwiftPropose RPC handler
+    // (which calls OnPropose with commit_cb=nullptr and so leaves
+    // desc.commit_callback empty until/unless this replica is the local
+    // one for some other coordinator).
+    if (desc.commit_callback && prof_traced_count_ < kProfTraceLimit) {
       desc.prof_active = true;
       desc.t_propose_us = NowUs();
       prof_traced_count_++;
