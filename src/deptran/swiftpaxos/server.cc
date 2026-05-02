@@ -133,8 +133,8 @@ void SwiftPaxosServer::OnSlowAck(const SwiftAck& ack) {
 
 void SwiftPaxosServer::CheckCommit(SwiftCmdDesc& desc) {
   if (desc.committed) return;
-  if (!desc.leader_acked) return;
 
+  // Fast path: 3*N/4+1 fast-acks, leader-independent (true SwiftPaxos 1-RTT).
   if (desc.fast_ack_count >= FastQuorum()) {
     desc.committed = true;
     desc.phase = SwiftCmdDesc::COMMIT;
@@ -142,6 +142,8 @@ void SwiftPaxosServer::CheckCommit(SwiftCmdDesc& desc) {
     return;
   }
 
+  // Slow path: needs leader's ordering before classic majority commit.
+  if (!desc.leader_acked) return;
   int total_acks = desc.fast_ack_count + desc.slow_ack_count;
   if (total_acks >= SlowQuorum()) {
     desc.committed = true;
