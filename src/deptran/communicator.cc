@@ -274,9 +274,27 @@ Communicator::LeaderProxyForPartition(parid_t par_id, int idx) const {
     // the target with any client work (every client host is "remote" to
     // zoo2 in the naive_rpc sweep). "zoo2" = 1-indexed display name for
     // locale 1 / IP .102; internally the locale id is unchanged.
-    int target_locale =
-        (config->replica_proto_ == MODE_NAIVE_RPC ||
-         config->replica_proto_ == MODE_NAIVE_RAFT) ? 1 : 0;
+    //
+    // For SwiftPaxos and EPaxos, the protocols are multi-leader / leaderless
+    // by design. Routing all clients through locale 0 (the canonical leader
+    // for raft/etcd/mongodb/zookeeper) defeats their multi-leader pattern:
+    // it funnels every client RPC through one replica's coordinator and
+    // collapses CPU + latency to "single-server-side" behavior. Spread by
+    // hashing the calling process's locale_id mod N_REPLICA — each client
+    // host targets the replica with matching index. server0..4 hosts hit
+    // their own local replica (0 hop); server5..9 distribute across
+    // replicas 0..4 (one extra inter-region hop, but the load balances).
+    int target_locale;
+    if (config->replica_proto_ == MODE_NAIVE_RPC ||
+        config->replica_proto_ == MODE_NAIVE_RAFT) {
+      target_locale = 1;
+    } else if (config->replica_proto_ == MODE_SWIFTPAXOS ||
+               config->replica_proto_ == MODE_EPAXOS_CORRECTED) {
+      int n_replica = config->GetPartitionSize(par_id);
+      target_locale = (n_replica > 0) ? (loc_id_ % n_replica) : 0;
+    } else {
+      target_locale = 0;
+    }
     auto proxy_it = std::find_if(
         partition_proxies.begin(),
         partition_proxies.end(),
