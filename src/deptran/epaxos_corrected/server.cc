@@ -123,12 +123,17 @@ void EPaxosCServer::OnPropose(const shared_ptr<Marshallable>& cmd,
   inst.pre_accept_oks = 0;
   inst.accept_oks = 0;
 
-  // Broadcast PreAccept to all OTHER replicas. Each replica will:
-  //   - compute its own deps/seq via UpdateAttributes
-  //   - update its conflict table
-  //   - reply with its computed deps/seq
-  // For non-conflicting workloads (1M key range), all replicas will
-  // compute the same empty deps, so the fast-commit assumption holds.
+  // Self counts as the first PreAcceptOK.
+  inst.pre_accept_oks = 1;
+
+  // Broadcast PreAccept to all OTHER replicas. Each peer's reply hits
+  // OnPreAcceptReply via the future callback below; once 3N/4 PreAcceptOK
+  // accumulate (FastQuorumSize), we transition to COMMIT and broadcast
+  // EPaxosCCommit. Previously this code SHORTCUT by setting
+  // pre_accept_oks=n_replica_ and committing immediately — that produced
+  // an artificially low latency (no inter-replica RTT) and didn't exercise
+  // the fast-path consensus. The proper fast path requires waiting one
+  // inter-replica RTT for 3N/4-1 peer PreAcceptReplies.
   if (commo()) {
     auto ep_commo = (EPaxosCCommo*)commo();
     auto config = Config::GetConfig();
@@ -136,53 +141,73 @@ void EPaxosCServer::OnPropose(const shared_ptr<Marshallable>& cmd,
     auto& proxies = ep_commo->rpc_par_proxies_[par_id];
 
     for (auto& p : proxies) {
-      // Don't send to self
       if ((int32_t)p.first == site_id_) continue;
       auto proxy = (EPaxosCServiceProxy*)p.second;
       MarshallDeputy md_cmd(cmd);
-      // deps serialized as empty MarshallDeputy — service handler ignores it
-      // and recomputes locally. For a non-empty MarshallDeputy we'd need a
-      // concrete Marshallable subtype; since we don't use it on the receive
-      // side (replica recomputes), we pass the cmd itself as a placeholder.
-      MarshallDeputy md_deps(cmd);  // placeholder (not read by handler)
+      MarshallDeputy md_deps(cmd);  // placeholder (handler recomputes)
+
+      rrr::FutureAttr fuattr;
+      // Capture (my_id, inst_id) by value; HandlePreAcceptReply uses them
+      // to look up the instance in instances_[my_id][inst_id].
+      int32_t cap_my_id = my_id;
+      int32_t cap_inst_id = inst_id;
+      fuattr.callback = [this, cap_my_id, cap_inst_id](rrr::Future* fu) {
+        if (fu->get_error_code() != 0) return;
+        rrr::i32 status; ballot_t ballot; rrr::i32 seq;
+        MarshallDeputy reply_deps;
+        fu->get_reply() >> status >> ballot >> seq >> reply_deps;
+        this->HandlePreAcceptReply(cap_my_id, cap_inst_id, status, ballot, seq);
+      };
+
       auto fu = proxy->async_EPaxosCPreAccept(
+          my_id, my_id, inst_id, inst.ballot,
+          md_cmd, inst.seq, md_deps, fuattr);
+      Future::safe_release(fu);
+    }
+  } else {
+    // Standalone (no peers): commit immediately. Mostly for tests.
+    inst.status = EPaxosInstance::COMMITTED;
+    TryExecute(my_id, inst_id);
+  }
+}
+
+// Reply-counting helper for the EPaxosCPreAccept future callback.
+// When pre_accept_oks reaches FastQuorumSize and all_equal holds, the
+// instance commits, the leader broadcasts EPaxosCCommit, and the local
+// SCC-execute kicks off.
+void EPaxosCServer::HandlePreAcceptReply(int32_t my_id, int32_t inst_id,
+                                          int32_t status, ballot_t ballot,
+                                          int32_t /*seq*/) {
+  auto& inst = GetInstance(my_id, inst_id);
+  if (inst.status >= EPaxosInstance::COMMITTED) return;
+  if (status == 0) {
+    // NACK — peer's ballot is higher. Slow path / recovery would handle
+    // this; for now just log and skip the count.
+    if (ballot > inst.ballot) inst.ballot = ballot;
+    return;
+  }
+  inst.pre_accept_oks++;
+  if (inst.pre_accept_oks < FastQuorumSize() || !inst.all_equal) return;
+
+  // Fast-commit threshold reached: transition to COMMITTED and broadcast.
+  inst.status = EPaxosInstance::COMMITTED;
+  if (commo()) {
+    auto ep_commo = (EPaxosCCommo*)commo();
+    auto config = Config::GetConfig();
+    parid_t par_id = config->SiteById(site_id_).partition_id_;
+    auto& proxies = ep_commo->rpc_par_proxies_[par_id];
+    for (auto& p : proxies) {
+      if ((int32_t)p.first == site_id_) continue;
+      auto proxy = (EPaxosCServiceProxy*)p.second;
+      MarshallDeputy md_cmd(inst.cmd);
+      MarshallDeputy md_deps(inst.cmd);
+      auto fu = proxy->async_EPaxosCCommit(
           my_id, my_id, inst_id, inst.ballot,
           md_cmd, inst.seq, md_deps);
       Future::safe_release(fu);
     }
   }
-
-  // Simplified commit: assume all replicas agree on deps (valid for
-  // non-conflicting workloads). In a full implementation we'd wait for
-  // PreAcceptReply messages and verify all agree before committing.
-  inst.pre_accept_oks = n_replica_;
-  inst.all_equal = true;
-
-  // Fast commit
-  if (inst.pre_accept_oks >= FastQuorumSize() && inst.all_equal) {
-    inst.status = EPaxosInstance::COMMITTED;
-
-    // Broadcast Commit to all replicas so they can update their local state
-    if (commo()) {
-      auto ep_commo = (EPaxosCCommo*)commo();
-      auto config = Config::GetConfig();
-      parid_t par_id = config->SiteById(site_id_).partition_id_;
-      auto& proxies = ep_commo->rpc_par_proxies_[par_id];
-      for (auto& p : proxies) {
-        if ((int32_t)p.first == site_id_) continue;
-        auto proxy = (EPaxosCServiceProxy*)p.second;
-        MarshallDeputy md_cmd(cmd);
-        MarshallDeputy md_deps(cmd);  // placeholder
-        auto fu = proxy->async_EPaxosCCommit(
-            my_id, my_id, inst_id, inst.ballot,
-            md_cmd, inst.seq, md_deps);
-        Future::safe_release(fu);
-      }
-    }
-
-    // Execute locally via Tarjan SCC
-    TryExecute(my_id, inst_id);
-  }
+  TryExecute(my_id, inst_id);
 }
 
 void EPaxosCServer::OnPreAccept(siteid_t leader, siteid_t replica, int64_t instance,

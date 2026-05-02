@@ -85,6 +85,11 @@ class EPaxosCServer : public TxLogServer {
                         int32_t status, ballot_t ballot,
                         int32_t seq, const vector<int32_t>& deps);
 
+  // Future-callback variant: called from the async_EPaxosCPreAccept reply
+  // handler with the (proposing replica, instance) captured by lambda.
+  void HandlePreAcceptReply(int32_t my_id, int32_t inst_id,
+                            int32_t status, ballot_t ballot, int32_t seq);
+
   // Accept handler
   void OnAccept(siteid_t leader, siteid_t replica, int64_t instance,
                 ballot_t ballot, int32_t seq, const vector<int32_t>& deps,
