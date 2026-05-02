@@ -190,12 +190,42 @@ Communicator::RandomProxyForPartition(parid_t par_id) const {
 // @param idx: get the index of servers as the leader
 std::pair<siteid_t, ClassicProxy*>
 Communicator::LeaderProxyForPartition(parid_t par_id, int idx) const {
-  
+
   if (idx > -1) { // Mencius
     auto it = rpc_par_proxies_.find(par_id);
     auto& partition_proxies = it->second;
     verify(partition_proxies.size()>idx);
     return it->second.at(idx);
+  }
+
+  // Per-client routing for SwiftPaxos / EPaxos.
+  // These protocols are multi-leader / leaderless by design. Bypass all
+  // dynamic-leader / view-leader / cache short-circuits that would funnel
+  // every client to locale 0 (the canonical leader for raft etc.). Each
+  // process targets the replica matching its own locale_id mod N_REPLICA.
+  // Done at the very top so the per-process cache cannot lock in a stale
+  // single-leader target.
+  {
+    auto cfg = Config::GetConfig();
+    if (cfg->replica_proto_ == MODE_SWIFTPAXOS ||
+        cfg->replica_proto_ == MODE_EPAXOS_CORRECTED) {
+      auto it = rpc_par_proxies_.find(par_id);
+      verify(it != rpc_par_proxies_.end());
+      auto& partition_proxies = it->second;
+      int n_replica = (int)partition_proxies.size();
+      verify(n_replica > 0);
+      int target_locale = (int)loc_id_ % n_replica;
+      auto proxy_it = std::find_if(
+          partition_proxies.begin(),
+          partition_proxies.end(),
+          [cfg, target_locale](const std::pair<siteid_t, ClassicProxy*>& p) {
+            verify(p.second != nullptr);
+            auto& site = cfg->SiteById(p.first);
+            return site.locale_id == target_locale;
+          });
+      verify(proxy_it != partition_proxies.end());
+      return *proxy_it;
+    }
   }
   
   // Check if we have a dynamic leader callback
