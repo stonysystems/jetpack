@@ -1,18 +1,21 @@
 client:
     type: open
     rate: 1000
-    # max_undone sizing (Little's Law): N ~= throughput (req/s) * latency (s)
-    #   Raft   : 11k req/s * 0.5s  ~= 5500
-    #   Copilot:  5k req/s * 0.55s ~= 2750
-    #   Mencius: 2.5k req/s * 0.4s ~= 1000
-    #   MongoDB:  4k req/s * 0.5s  ~= 2000
-    # Rule of thumb -> max_undone >= 1.5-2x max(lambda_i * L_i) => ~8k-10k globally.
-    # Per-worker cap (with 60 workers/site). The first camera-ready small-test
-    # iteration showed every Group-A protocol plateauing at ~6k req/s before
-    # leader CPU at 100%. Root cause was n_concurrent × per-coro 0.5 req/s
-    # (client_worker.cc:450) capping aggregate attempts below the actual leader
-    # capacity. Bumped to 5000 alongside higher conc points (500/750/1000) so
-    # 60 × 5000 = 300k in-flight cap is well above any realistic leader
-    # ceiling — and so per-worker max_undone never binds even if every coro
-    # has a request outstanding at high latency.
-    max_undone: 5000
+    # max_undone sizing rule: N ≈ peak_throughput × baseline_latency
+    # Per-worker cap (60 workers cluster-wide on 60 client sites).
+    # Sized from 2026-05-02 observed data with 2× safety margin:
+    #   epaxos     @ peak: 30k r/s × 0.181 s / 60 × 2 ≈ 178
+    #   zookeeper  @ peak: 30k r/s × 0.132 s / 60 × 2 ≈ 131
+    #   swiftpaxos @ peak: 18k r/s × 0.209 s / 60 × 2 ≈ 125
+    #   raft       @ peak: 12k r/s × 0.351 s / 60 × 2 ≈ 140
+    #   others     @ peak: 60–90
+    # Picked 200 to cover all (max needed = 178). Cluster cap = 60 × 200 = 12k
+    # outstanding — far above each protocol's working set, but actively caps:
+    #   - latency surge past saturation: worst case 12k / sat_tput
+    #     (mongo 1.8k → 6.7 s; raft 12k → 1.0 s)  vs. observed 30-60 s+ at max=5000
+    #   - post-workload drain time: same bound, 0.4-7 s vs. 30-180 s previously.
+    # The previous setting (5000) gave 60×5000 = 300k cluster cap, well above
+    # what RPC backpressure naturally throttles to (~5/coro × 1800 coros ≈ 9k
+    # active). max_undone=5000 was effectively unbounded; 200 actively bounds
+    # queue depth at saturation while leaving steady-state throughput intact.
+    max_undone: 200
