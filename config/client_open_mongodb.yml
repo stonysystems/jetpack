@@ -1,12 +1,20 @@
 client:
     type: open
-    rate: 1000 
-    # max_undone sizing (Little's Law): N ~= throughput (req/s) * latency (s)
-    #   Raft   : 11k req/s * 0.5s  ~= 5500
-    #   Copilot:  5k req/s * 0.55s ~= 2750
-    #   Mencius: 2.5k req/s * 0.4s ~= 1000
-    #   MongoDB:  4k req/s * 0.5s  ~= 2000
-    # Rule of thumb -> max_undone >= 1.5-2x max(lambda_i * L_i) => ~8k-10k globally.
-    # With ~60 client workers/threads => 8000/60 ~= 133; 10000/60 ~= 166.
-    # Pick 200 per client worker to keep CPU saturated and stay below the global cap.
-    max_undone: 100
+    rate: 1000
+    # mongodb-specific max_undone (2026-05-03 mega rerun diagnosis).
+    #
+    # The default client_open.yml uses max_undone=200, giving a 60-site
+    # cluster cap of 12,000 in-flight. For protocols with sat throughput in
+    # the 12-30k r/s range, that's 0.4-1s latency at saturation — fine. But
+    # mongodb sat tput ≈ 1250 r/s (writeConcern:majority+j is slow), so
+    # Little's Law predicts avg latency at saturation = 12000/1250 = 9.6 s.
+    # Observed exactly 9.3 s on 2026-05-03 c=120 vanilla mongodb, and the
+    # mongodb saturated runs (c=75-200) hit the 180s SSH cap, losing data
+    # on most jp m100/m101 points (only c=1 passed 10/10 cleanly).
+    #
+    # Sizing for mongodb:
+    #   target avg_latency at saturation ≈ 1 s
+    #   max_undone × 60 sites / 1250 r/s = 1 s  →  max_undone = 21
+    # Picked 20 (clean number, ~0.96 s saturation latency).
+    # Cluster cap = 60 × 20 = 1200 outstanding — much tighter than 12k.
+    max_undone: 20
