@@ -148,26 +148,22 @@ CommunicatorRule::BroadcastRuleSpeculativeExecute(shared_ptr<vector<shared_ptr<S
   int n_total = Config::GetConfig()->GetPartitionSize(par_id);
   int n_leaders_total = Config::GetConfig()->get_num_leaders(par_id);
 
-  // In CURP mode the leader already replicates the command via the Raft
-  // slow-path dispatch, so the spec RPC to the leader is redundant and
-  // doubles its single-core load. Skip the leader from the spec broadcast
-  // and treat only the non-leader replicas as witnesses. This halves the
-  // per-request leader work, which is what limits throughput at c50+.
-  bool curp_mode = Config::GetConfig()->IsCurpMode();
-  siteid_t skip_site_id = -1;
+  // CURP fairness fix (2026-05-03): the prior leader-skip optimization
+  // diverged from the CURP paper protocol (which requires the leader to be
+  // in the fast quorum) and gave deptran's CURP an unfair latency advantage
+  // vs jp+raft fp m100. To match the published CURP protocol's FQ rule
+  // (RuleSuperMajority including the leader), we now broadcast to ALL
+  // replicas including the leader and require a supermajority of all N
+  // replicas — same as jp+raft fp m100. The merge-rpc path remains gated
+  // by jetpack_merge_leader_rpc; for fairness rerun, that flag is set to
+  // false in config/none_curp.yml so CURP exercises this code path.
   int n_rpc = n_total;
   int n_leaders_rpc = n_leaders_total;
-  if (curp_mode) {
-    skip_site_id = Communicator::LeaderProxyForPartition(par_id).first;
-    n_rpc = n_total - 1;
-    n_leaders_rpc = 0;  // no leader is contacted, so leader-vote requirement drops
-  }
 
   auto e = Reactor::CreateSpEvent<RuleSpeculativeExecuteQuorumEvent>(
       n_rpc, SimpleRWCommand::RuleSuperMajority(n_rpc), n_leaders_rpc);
   WAN_WAIT;
   for (auto& pair : rpc_par_proxies_[par_id]) {
-    if (curp_mode && pair.first == skip_site_id) continue;
     rrr::FutureAttr fuattr;
     fuattr.callback =
         [e, this](Future* fu) {

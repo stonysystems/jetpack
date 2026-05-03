@@ -4,8 +4,11 @@ mode:
   batch: false
   retry: 20
   ongoing: 1  # per client
-  # Fuse the leader-side Dispatch + RuleSpeculativeExecute into a single
-  # round trip so the CURP leader handles half the per-txn RPC work.
-  # Witnesses receive the spec broadcast separately (with the leader
-  # excluded — see rule/commo.cc CURP path).
-  jetpack_merge_leader_rpc: true
+  # CURP fairness mode (2026-05-03): merge-leader-rpc disabled so CURP
+  # follows the same broadcast geometry as jp+raft fp m100 — spec RPC to
+  # ALL N replicas (incl leader), FQ = RuleSuperMajority(N). The prior
+  # config (merge-rpc=true + leader-skip in commo.cc) gave CURP a ~22ms
+  # unfair advantage at c=1 by excluding the leader from the FQ. See
+  # rule/commo.cc::BroadcastRuleSpeculativeExecute for the matching
+  # code-side fairness fix.
+  jetpack_merge_leader_rpc: false

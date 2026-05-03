@@ -146,20 +146,18 @@ class ZookeeperConnectionThreadPool {
     auto cmd_content = *(((VecPieceData*)(tpc_cmd->cmd_.get()))->sp_vec_piece_data_->begin());
     auto start_time = std::chrono::steady_clock::now();
 
-    // Use async ZooKeeper API: callbacks fire on ZooKeeper's internal I/O
-    // thread (zookeeper_mt), avoiding per-request thread creation overhead.
+    // Sync ZooKeeper API: blocks the calling thread until the leader has
+    // committed via ZAB (majority quorum). Earlier async path (zoo_aset /
+    // zoo_aget) signaled completion before majority commit, giving ZK a
+    // ~149 ms unfair advantage at c=1 vs MongoDB / etcd which both wait
+    // for commit before replying. Switched to sync on 2026-05-03 for
+    // apples-to-apples fairness with the leader-replies-after-commit rule.
     if (parsed_cmd.IsRead()) {
-      handler_->ReadAsync(parsed_cmd.key_,
-          [this, cmd_content, start_time](int rc) {
-            (void)rc;
-            SignalFinished(cmd_content, start_time);
-          });
+      (void)handler_->Read(parsed_cmd.key_);
+      SignalFinished(cmd_content, start_time);
     } else if (parsed_cmd.IsWrite()) {
-      handler_->WriteAsync(parsed_cmd.key_, parsed_cmd.value_,
-          [this, cmd_content, start_time](int rc) {
-            (void)rc;
-            SignalFinished(cmd_content, start_time);
-          });
+      (void)handler_->Write(parsed_cmd.key_, parsed_cmd.value_);
+      SignalFinished(cmd_content, start_time);
     } else {
       Log_warn("[ZOOKEEPER] unsupported command type");
       SignalFinished(cmd_content, start_time);

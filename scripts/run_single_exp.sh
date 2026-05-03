@@ -127,14 +127,13 @@ wait
 sleep 3
 
 # Wait for the per-host .res files to actually contain "Mid throughput is"
-# before the caller parses them. Protocols that take longer to elect a
-# leader (notably Raft with priority-weighted election timeouts) finish
-# the mid-10s window and the final stats log AFTER the 30s duration —
-# the older code sometimes parsed .res a few seconds too early and got
-# 0/-1 placeholders. Cap the extra wait at 30 s per host.
+# before the caller parses them. The line is now written BEFORE s_main's
+# defensive sleep(10) (verified on 2026-05-03 saturated run), so it's
+# usually present immediately when the SSH job exits. Cap at 10s rather
+# than 30s — the previous 30s cap was almost never consumed.
 for i in "${!servers[@]}"; do
     resfile="$RESULT_DIR/${LABEL}-${replicanames[$i]}.res"
-    for _ in $(seq 1 30); do
+    for _ in $(seq 1 10); do
         if [ -f "$resfile" ] && tail -c 102400 "$resfile" | grep -q "Mid throughput is"; then
             break
         fi
