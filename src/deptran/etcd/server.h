@@ -19,7 +19,14 @@ namespace janus {
 class EtcdServer : public TxLogServer {
 
 #ifdef AWS
-  const int etcd_connection_ = 2500;
+  // Pool size for the per-op handler pool (Fix E2). Was 2500 (matched
+  // mongodb's mongodb_connection_), but smoke tests on 2026-05-05
+  // showed 5×2500=12500 simultaneous gRPC connections overwhelming the
+  // etcd leader: c=1 latency regressed from 276 → 642 ms vs. 2026-05-02.
+  // 100 leaves 5×100=500 etcd connections cluster-wide, well within
+  // etcd's grpc-server capacity, while still letting up to 60 ops/host
+  // run in parallel without single-channel serialisation.
+  const int etcd_connection_ = 100;
 #endif
 #ifndef AWS
   const int etcd_connection_ = 80;
