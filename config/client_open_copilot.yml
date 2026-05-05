@@ -1,12 +1,8 @@
 client:
     type: open
-    rate: 1000 
-    # max_undone sizing (Little's Law): N ~= throughput (req/s) * latency (s)
-    #   Raft   : 11k req/s * 0.5s  ~= 5500
-    #   Copilot:  5k req/s * 0.55s ~= 2750
-    #   Mencius: 2.5k req/s * 0.4s ~= 1000
-    #   MongoDB:  4k req/s * 0.5s  ~= 2000
-    # Rule of thumb -> max_undone >= 1.5-2x max(lambda_i * L_i) => ~8k-10k globally.
-    # With ~60 client workers/threads => 8000/60 ~= 133; 10000/60 ~= 166.
-    # Pick 200 per client worker to keep CPU saturated and stay below the global cap.
-    max_undone: 200
+    rate: 1000
+    # Per-protocol max_undone (uniform-yml rule, set 2026-05-05).
+    # Sizing: aggregate offered tput = 60 × min(c, max_undone). Sized to the
+    # protocol's expected sat tput with ~1.5–2× headroom.
+    # Copilot: ~5k r/s sat → 60×150 = 9k cluster cap (~1.8× target).
+    max_undone: 150

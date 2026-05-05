@@ -1,20 +1,11 @@
 client:
     type: open
     rate: 1000
-    # mongodb-specific max_undone (2026-05-03 mega rerun diagnosis).
-    #
-    # The default client_open.yml uses max_undone=200, giving a 60-site
-    # cluster cap of 12,000 in-flight. For protocols with sat throughput in
-    # the 12-30k r/s range, that's 0.4-1s latency at saturation — fine. But
-    # mongodb sat tput ≈ 1250 r/s (writeConcern:majority+j is slow), so
-    # Little's Law predicts avg latency at saturation = 12000/1250 = 9.6 s.
-    # Observed exactly 9.3 s on 2026-05-03 c=120 vanilla mongodb, and the
-    # mongodb saturated runs (c=75-200) hit the 180s SSH cap, losing data
-    # on most jp m100/m101 points (only c=1 passed 10/10 cleanly).
-    #
-    # Sizing for mongodb:
-    #   target avg_latency at saturation ≈ 1 s
-    #   max_undone × 60 sites / 1250 r/s = 1 s  →  max_undone = 21
-    # Picked 20 (clean number, ~0.96 s saturation latency).
-    # Cluster cap = 60 × 20 = 1200 outstanding — much tighter than 12k.
-    max_undone: 20
+    # Per-protocol max_undone (uniform-yml rule, set 2026-05-05).
+    # User override: mongodb sat tput ≈ 1.25k r/s (writeConcern:majority+j is
+    # slow). Default sizing (~1 s sat latency target) would pick max_undone
+    # ≈ 20. Setting 2000 instead intentionally probes whether mongodb can
+    # scale past the apparent 1.25k ceiling under deeper pipelining /
+    # other timing knobs. Cluster cap = 60×2000 = 120k. If sat tput
+    # really is 1.25k, sat latency is ~96 s — accepted tradeoff.
+    max_undone: 2000
