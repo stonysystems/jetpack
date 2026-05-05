@@ -63,6 +63,57 @@ for i in $(seq 0 $((N_REPLICA-1))); do
     IPS+=("$ip")
 done
 
+# Fix B (set 2026-05-05): defensive zoo.cfg assertion. Before starting,
+# read each host's /etc/zookeeper/conf/zoo.cfg and abort if any of:
+#   (i)   it has fewer than 5 voting `server.X=...` lines,
+#   (ii)  any voting line ends with `:observer`,
+#   (iii) `forceSync=yes` is missing,
+#   (iv)  `syncEnabled=yes` is missing.
+# 2026-05-02 ZK runs showed server0 returning at 0.72 ms — far below
+# the 149 ms ZAB-quorum lower bound — meaning the leader was acking on
+# its own without follower replication. The most likely cause is a
+# silently-broken zoo.cfg on one or more hosts (AMI rebake regression,
+# manual edit, etc.). This check makes such a regression abort the run
+# at start time instead of silently corrupting the data.
+echo "[zookeeper] verifying zoo.cfg on all $N_REPLICA hosts..."
+ZOO_CFG="/etc/zookeeper/conf/zoo.cfg"
+fail=0
+for i in $(seq 0 $((N_REPLICA-1))); do
+    out=$(ssh -i "$KEY" -o BatchMode=yes -o ConnectTimeout=5 "${USERNAME}@${IPS[$i]}" \
+        "sudo cat ${ZOO_CFG} 2>/dev/null") || out=""
+    if [[ -z "$out" ]]; then
+        echo "[zookeeper] FATAL: server${i} (${IPS[$i]}): cannot read ${ZOO_CFG}"
+        fail=$((fail+1)); continue
+    fi
+    voting_count=$(echo "$out" | grep -E '^server\.[0-9]+=' | grep -vc ':observer')
+    observer_count=$(echo "$out" | grep -cE '^server\.[0-9]+=.*:observer')
+    has_force=$(echo "$out" | grep -cE '^forceSync\s*=\s*yes')
+    has_sync=$(echo "$out" | grep -cE '^syncEnabled\s*=\s*yes')
+    bad=0
+    if (( voting_count != N_REPLICA )); then
+        echo "[zookeeper] FATAL: server${i} (${IPS[$i]}): zoo.cfg has ${voting_count} voting server lines, expected ${N_REPLICA}"
+        bad=1
+    fi
+    if (( observer_count > 0 )); then
+        echo "[zookeeper] FATAL: server${i} (${IPS[$i]}): zoo.cfg has ${observer_count} :observer line(s) — must be all voting"
+        bad=1
+    fi
+    if (( has_force == 0 )); then
+        echo "[zookeeper] FATAL: server${i} (${IPS[$i]}): zoo.cfg missing 'forceSync=yes'"
+        bad=1
+    fi
+    if (( has_sync == 0 )); then
+        echo "[zookeeper] FATAL: server${i} (${IPS[$i]}): zoo.cfg missing 'syncEnabled=yes'"
+        bad=1
+    fi
+    (( bad )) && fail=$((fail+1))
+done
+if (( fail > 0 )); then
+    echo "[zookeeper] FATAL: ${fail} / ${N_REPLICA} hosts have a bad zoo.cfg — re-run scripts/aws_setup_script.sh on the affected hosts and try again"
+    exit 1
+fi
+echo "[zookeeper] zoo.cfg verified on all hosts (5 voting members, forceSync=yes, syncEnabled=yes, no :observer)"
+
 echo "[zookeeper] (re)starting zookeeper systemd service on server0..server$((N_REPLICA-1))..."
 # 2026-05-02: zkServer.sh is NOT on PATH on these AWS hosts — zookeeper is
 # managed by /etc/init.d/zookeeper via systemd (zookeeper.service, enabled
