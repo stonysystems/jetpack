@@ -26,6 +26,11 @@ void CoordinatorNaiveFastpath::GotoNextPhase() {
       int phase_saved = phase_;
       for (auto& pair : cmds_by_par) {
         auto& cmds = pair.second;
+        // Wire cmd_is_write_ for the mid-10s R/W split (set 2026-05-05).
+        // Free to do here since cmds_by_par was just fetched and the
+        // pieces are still in hand; mirrors rule::Coordinator's pattern.
+        if (cmds.size() > 0)
+          cmd_is_write_ = SimpleRWCommand(cmds[0]).IsWrite();
         auto sp_vec_piece = std::make_shared<vector<shared_ptr<TxPieceData>>>();
         for (auto c : cmds) {
           c->id_ = next_pie_id();
@@ -48,6 +53,8 @@ void CoordinatorNaiveFastpath::GotoNextPhase() {
         client_worker_->cli2cli_[3].append(SimpleRWCommand::GetCurrentMsTime() - dispatch_time_);
         client_worker_->cli2cli_[4].append(SimpleRWCommand::GetCurrentMsTime() - dispatch_time_);
         client_worker_->cli2cli_[5].append(SimpleRWCommand::GetCurrentMsTime() - dispatch_time_);
+        // Mid-10s R/W split (set 2026-05-05).
+        client_worker_->cli2cli_[10 + cmd_is_write_].append(SimpleRWCommand::GetCurrentMsTime() - dispatch_time_);
       }
       if (!aborted_) {
         client_worker_->commit_time_.push_back(

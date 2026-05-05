@@ -24,6 +24,12 @@ void CoordinatorNone::GotoNextPhase() {
       dispatch_time_ = SimpleRWCommand::GetCurrentMsTime();
       dispatch_duration_3_times_ = (dispatch_time_ - clientworker_creation_time_) * 3;
       client_worker_->dispatch_time_distribution_.append(dispatch_time_ - clientworker_creation_time_);
+      // Wire cmd_is_write_ for the mid-10s R/W split (set 2026-05-05).
+      // Use IsReadOnly() (non-destructive — reads txn type_ field) rather
+      // than GetReadyPiecesData (which transitions DISPATCHABLE→DISPATCHED
+      // and would consume the pieces before CoordinatorClassic::DispatchAsync
+      // can see them).
+      cmd_is_write_ = !((TxData*) cmd_)->IsReadOnly();
       DispatchAsync();
       break;
     case Phase::DISPATCH:
@@ -37,6 +43,8 @@ void CoordinatorNone::GotoNextPhase() {
         client_worker_->cli2cli_[3].append(SimpleRWCommand::GetCurrentMsTime() - dispatch_time_);
         client_worker_->cli2cli_[4].append(SimpleRWCommand::GetCurrentMsTime() - dispatch_time_);
         client_worker_->cli2cli_[5].append(SimpleRWCommand::GetCurrentMsTime() - dispatch_time_);
+        // Mid-10s R/W split (set 2026-05-05).
+        client_worker_->cli2cli_[10 + cmd_is_write_].append(SimpleRWCommand::GetCurrentMsTime() - dispatch_time_);
       }
       // Log_info("End");
 #ifdef JETPACK_WRONG_LEADER_DEBUG

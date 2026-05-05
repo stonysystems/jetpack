@@ -76,11 +76,17 @@ class ClientWorker {
   // 5: all efficient attempts (count all faster one) (should equals to category 1 merge category 3)
 
   // All the following statistics count all duration
-  // 6: all success fast path read attempts 
+  // 6: all success fast path read attempts
   // 7: all success fast path write attempts
-  // 8: all original path read attempts 
+  // 8: all original path read attempts
   // 9: all original path write attempts
-  Distribution cli2cli_[10];
+
+  // Mid-10s read/write split (set 2026-05-05). Same gating as slot 5 —
+  // appended next to every existing cli2cli_[5].append, partitioned by
+  // cmd_is_write_. Invariant: count(10) + count(11) == count(5).
+  // 10: mid-10s read latency
+  // 11: mid-10s write latency
+  Distribution cli2cli_[12];
   Distribution dispatch_time_distribution_;
   Distribution cpu_usage_all_;
   Distribution cpu_usage_leaders_;

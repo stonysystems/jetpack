@@ -203,7 +203,10 @@ static void KillEtcdPrimary() {
 // 3: all original path attempts (even slower than fast path), 2 RTTs
 // 4: efficient original path attempts (only faster than fast path, or fast path failed), 2 RTTs
 // 5: all efficient attempts (count all faster one) (should equals to category 2 merge category 4)
-Distribution cli2cli[6];
+// 6: mid-10s read latency  (merged from per-client cli2cli_[10], set 2026-05-05)
+// 7: mid-10s write latency (merged from per-client cli2cli_[11], set 2026-05-05)
+// Invariant: count(6) + count(7) == count(5). Verified at end of client_shutdown().
+Distribution cli2cli[8];
 Distribution dispatch_time_distribution;
 Distribution cpu_usage_leaders;
 Distribution queue_depth;
@@ -413,6 +416,11 @@ void client_shutdown() {
     // client->retrive_statistic();
     for (int i = 0; i < 6; i++)
       cli2cli[i].merge(client->cli2cli_[i]);
+    // Mid-10s read/write split (set 2026-05-05): per-client slots 10/11
+    // → global slots 6/7. Per-client slots 6-9 are full-duration and stay
+    // internal-only (used by JetPack adaptive throttle's recent_100_ave).
+    cli2cli[6].merge(client->cli2cli_[10]);
+    cli2cli[7].merge(client->cli2cli_[11]);
     dispatch_time_distribution.merge(client->dispatch_time_distribution_);
     cpu_usage_leaders.merge(client->cpu_usage_leaders_);
     queue_depth.merge(client->queue_depth_);
@@ -423,6 +431,18 @@ void client_shutdown() {
     client2test_point.merge(client->client2test_point_);
     client2leader_send.merge(client->client2leader_send_);
 #endif
+  }
+  // Mid-10s R/W invariant (set 2026-05-05): every commit that lands in
+  // slot 5 (all-efficient, mid-10s) must also land in exactly one of
+  // slot 10 (read) or slot 11 (write) — those appends are added next to
+  // every existing slot-5 append site. If counts disagree, a coordinator
+  // is appending to slot 5 but missed the matching slot-10/11 append.
+  size_t mid_rw_total = cli2cli[6].count() + cli2cli[7].count();
+  size_t mid_eff_total = cli2cli[5].count();
+  if (mid_rw_total != mid_eff_total) {
+    Log_warn("[CLI2CLI-SANITY] mid-10s read(%zu) + write(%zu) = %zu != all-efficient(%zu) — coordinator missing slot-10/11 R/W append site",
+             cli2cli[6].count(), cli2cli[7].count(), mid_rw_total, mid_eff_total);
+    verify(0);
   }
   client_workers_g.clear();
 }
@@ -959,16 +979,18 @@ int main(int argc, char *argv[]) {
   Log_info("All-original-path-attempts       statistics %s", cli2cli[3].statistics().c_str());
   Log_info("Efficient-original-path-attempts statistics %s", cli2cli[4].statistics().c_str());
   Log_info("All-efficient-attempts           statistics %s", cli2cli[5].statistics().c_str());
+  Log_info("Read-mid-10s                     statistics %s", cli2cli[6].statistics().c_str());
+  Log_info("Write-mid-10s                    statistics %s", cli2cli[7].statistics().c_str());
   Log_info("Mid throughput is %.2f", cli2cli[5].count() / (Config::GetConfig()->duration_ / 3.0));
   {
     string dump_file_name = "results/recent_csv/" + Config::GetConfig()->exp_setting_name_ + ".csv";
     std::ofstream file(dump_file_name);
     if (file.is_open()) {
-      file << "All-fast-path-attempts" << "," << "Success-fast-path-attempts" << "," << "Efficient-fast-path-attempts" << "," << "All-original-path-attempts" << ","  << "Efficient-original-path-attempts" << ","  << "All-efficient-attempts" << "," << "Start-Time" << "," << "End2End-Latency" << "," << "Dispatch-Time" << "\n";
+      file << "All-fast-path-attempts" << "," << "Success-fast-path-attempts" << "," << "Efficient-fast-path-attempts" << "," << "All-original-path-attempts" << ","  << "Efficient-original-path-attempts" << ","  << "All-efficient-attempts" << "," << "Start-Time" << "," << "End2End-Latency" << "," << "Dispatch-Time" << "," << "Mid-Read-Lat" << "," << "Mid-Write-Lat" << "\n";
       std::sort(commit_time.begin(), commit_time.end(),
                 [](auto const& a, auto const& b) { return a.first < b.first; });
       size_t max_size = commit_time.size();
-      for (int i = 0; i < 6; i++)
+      for (int i = 0; i < 8; i++)
         if (cli2cli[i].count() > max_size) max_size = cli2cli[i].count();
       if (dispatch_time_distribution.count() > max_size) max_size = dispatch_time_distribution.count();
       for (size_t i = 0; i < max_size; ++i) {
@@ -981,6 +1003,13 @@ int main(int argc, char *argv[]) {
         if (i < commit_time.size()) file << commit_time[i].second;
         file << ",";
         if (i < dispatch_time_distribution.count()) file << dispatch_time_distribution.data_[i];
+        // Mid-10s R/W columns (set 2026-05-05). Appended at the end so
+        // existing column positions 0-8 stay unchanged for downstream
+        // positional readers (e.g. gen_latency_cdf.py uses col 5).
+        file << ",";
+        if (i < cli2cli[6].count()) file << cli2cli[6].data_[i];
+        file << ",";
+        if (i < cli2cli[7].count()) file << cli2cli[7].data_[i];
         file << "\n";
       }
       file.flush();
@@ -1056,6 +1085,8 @@ int main(int argc, char *argv[]) {
   Log_info("All-original-path-attempts       statistics %s", cli2cli[3].statistics().c_str());
   Log_info("Efficient-original-path-attempts statistics %s", cli2cli[4].statistics().c_str());
   Log_info("All-efficient-attempts           statistics %s", cli2cli[5].statistics().c_str());
+  Log_info("Read-mid-10s                     statistics %s", cli2cli[6].statistics().c_str());
+  Log_info("Write-mid-10s                    statistics %s", cli2cli[7].statistics().c_str());
   Log_info("Dispatch-time                    statistics %s", dispatch_time_distribution.statistics().c_str());
 
   Log_info("All-fast-path-attempts           distribution %s", cli2cli[0].distribution().c_str());
@@ -1064,6 +1095,8 @@ int main(int argc, char *argv[]) {
   Log_info("All-original-path-attempts       distribution %s", cli2cli[3].distribution().c_str());
   Log_info("Efficient-original-path-attempts distribution %s", cli2cli[4].distribution().c_str());
   Log_info("All-efficient-attempts           distribution %s", cli2cli[5].distribution().c_str());
+  Log_info("Read-mid-10s                     distribution %s", cli2cli[6].distribution().c_str());
+  Log_info("Write-mid-10s                    distribution %s", cli2cli[7].distribution().c_str());
   Log_info("Dispatch-time                    distribution %s", dispatch_time_distribution.distribution().c_str());
   
   Log_info("Mid throughput is %.2f", cli2cli[5].count() / (Config::GetConfig()->duration_ / 3.0));
@@ -1111,14 +1144,14 @@ int main(int argc, char *argv[]) {
   if (!file.is_open()) {
     Log_info("Failed to open file for writing %s", dump_file_name.c_str());
   } else {
-    file << "All-fast-path-attempts" << "," << "Success-fast-path-attempts" << "," << "Efficient-fast-path-attempts" << "," << "All-original-path-attempts" << ","  << "Efficient-original-path-attempts" << ","  << "All-efficient-attempts" << "," << "Start-Time" << "," << "End2End-Latency" << "," << "Dispatch-Time" << "\n";
+    file << "All-fast-path-attempts" << "," << "Success-fast-path-attempts" << "," << "Efficient-fast-path-attempts" << "," << "All-original-path-attempts" << ","  << "Efficient-original-path-attempts" << ","  << "All-efficient-attempts" << "," << "Start-Time" << "," << "End2End-Latency" << "," << "Dispatch-Time" << "," << "Mid-Read-Lat" << "," << "Mid-Write-Lat" << "\n";
     size_t max_size = commit_time.size();
     std::sort(commit_time.begin(),
               commit_time.end(),
               [](auto const& a, auto const& b) {
                   return a.first < b.first;
               });
-    for (int i = 0; i < 6; i++)
+    for (int i = 0; i < 8; i++)
       if (cli2cli[i].count() > max_size)
         max_size = cli2cli[i].count();
     if (dispatch_time_distribution.count() > max_size)
@@ -1138,6 +1171,11 @@ int main(int argc, char *argv[]) {
         if (i < dispatch_time_distribution.count()) {
           file << dispatch_time_distribution.data_[i];
         }
+        // Mid-10s R/W columns (set 2026-05-05). See first dump block.
+        file << ",";
+        if (i < cli2cli[6].count()) file << cli2cli[6].data_[i];
+        file << ",";
+        if (i < cli2cli[7].count()) file << cli2cli[7].data_[i];
         file << "\n";
     }
     Log_info("Dumped to %s with %d lines data", dump_file_name.c_str(), max_size);

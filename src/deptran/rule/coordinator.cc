@@ -251,6 +251,8 @@ void CoordinatorRule::GotoNextPhase() {
             client_worker_->cli2cli_[4].append(SimpleRWCommand::GetCurrentMsTime() - dispatch_time_);
           }
           client_worker_->cli2cli_[5].append(SimpleRWCommand::GetCurrentMsTime() - dispatch_time_);
+          // Mid-10s R/W split (set 2026-05-05): partition slot 5 by R/W.
+          client_worker_->cli2cli_[10 + cmd_is_write_].append(SimpleRWCommand::GetCurrentMsTime() - dispatch_time_);
         }
         if (!fast_path_success_ && !skip_latency)
           client_worker_->cli2cli_[8+cmd_is_write_].append(SimpleRWCommand::GetCurrentMsTime() - dispatch_time_);
@@ -281,6 +283,8 @@ void CoordinatorRule::GotoNextPhase() {
       if (latency_window && !skip_latency) {
         client_worker_->cli2cli_[4].append(SimpleRWCommand::GetCurrentMsTime() - dispatch_time_);
         client_worker_->cli2cli_[5].append(SimpleRWCommand::GetCurrentMsTime() - dispatch_time_);
+        // Mid-10s R/W split (set 2026-05-05).
+        client_worker_->cli2cli_[10 + cmd_is_write_].append(SimpleRWCommand::GetCurrentMsTime() - dispatch_time_);
       }
       if (!skip_latency) {
         client_worker_->cli2cli_[8+cmd_is_write_].append(SimpleRWCommand::GetCurrentMsTime() - dispatch_time_);
