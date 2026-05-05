@@ -23,10 +23,13 @@ class EtcdServer : public TxLogServer {
   // mongodb's mongodb_connection_), but smoke tests on 2026-05-05
   // showed 5×2500=12500 simultaneous gRPC connections overwhelming the
   // etcd leader: c=1 latency regressed from 276 → 642 ms vs. 2026-05-02.
-  // 100 leaves 5×100=500 etcd connections cluster-wide, well within
-  // etcd's grpc-server capacity, while still letting up to 60 ops/host
-  // run in parallel without single-channel serialisation.
-  const int etcd_connection_ = 100;
+  // After several tuning passes on 2026-05-05:
+  //   2500: 12500 cluster connections, overwhelms etcd leader; c=1 = 642 ms.
+  //    100: 500 connections, c=1 = 172 ms ✓, but c=100 hits TIMEOUT
+  //         (queue blowup — only 100 workers × 1/0.149 s = 670 r/s/host).
+  //    300: tested next. 1500 cluster connections (3x of 100), 2010
+  //         r/s/host max — should handle the v2 conc range.
+  const int etcd_connection_ = 300;
 #endif
 #ifndef AWS
   const int etcd_connection_ = 80;
