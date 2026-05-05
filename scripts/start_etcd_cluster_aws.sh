@@ -161,55 +161,77 @@ for i in $(seq 0 $((N_REPLICA-1))); do
     [[ -n "$ALL_ENDPOINTS" ]] && ALL_ENDPOINTS+=","
     ALL_ENDPOINTS+="http://${IPS[$i]}:${ETCD_PORT}"
 done
-# Get server0's member ID + the current leader's member ID via etcdctl
-# endpoint status. JSON output: [{Endpoint, Status:{leader, header:{member_id}}}, …]
-status_json=$(ssh -i "$KEY" -o BatchMode=yes -o ConnectTimeout=5 \
+# Fix E1, third try (set 2026-05-05). Two earlier attempts hit two
+# different facets of the same root cause: jq parses 64-bit integers
+# (~1e18) as float64, which can't represent them exactly past 2^53.
+#
+#   try 1: select(member_id == "${cur_leader}")  — string vs number type
+#          mismatch (filter found nothing).
+#   try 2: select(member_id == .Status.leader)   — type-stable filter
+#          finds the right entry, but s0_id passed to move-leader was
+#          extracted via `jq -r .Status.header.member_id`, which prints
+#          a float-rounded string (6578129159743637182 → 6578129159743638000).
+#          etcdctl rejects the rounded value with "strconv.ParseUint:
+#          parsing ...: value out of range" because the rounded number
+#          maps to a member that doesn't exist.
+#
+# Real fix: never let jq touch member IDs. Use `etcdctl member list -w
+# table` which prints IDs in HEX (no float64 trip). Find server0's hex
+# member id by matching its CLIENT URL. Use `endpoint status -w table`
+# to find the leader endpoint via the `IS LEADER` column. Both lookups
+# are precision-clean.
+member_table=$(ssh -i "$KEY" -o BatchMode=yes -o ConnectTimeout=5 \
     "${USERNAME}@${IPS[0]}" \
-    "${ETCDCTL_BIN} --endpoints=${ALL_ENDPOINTS} endpoint status -w json 2>/dev/null") || status_json=""
-if [[ -z "$status_json" ]]; then
-    echo "[etcd] FATAL: could not query endpoint status — leader pin not enforced"
+    "${ETCDCTL_BIN} --endpoints=${ALL_ENDPOINTS} member list -w table 2>/dev/null") || member_table=""
+status_table=$(ssh -i "$KEY" -o BatchMode=yes -o ConnectTimeout=5 \
+    "${USERNAME}@${IPS[0]}" \
+    "${ETCDCTL_BIN} --endpoints=${ALL_ENDPOINTS} endpoint status -w table 2>/dev/null") || status_table=""
+if [[ -z "$member_table" || -z "$status_table" ]]; then
+    echo "[etcd] FATAL: could not query etcd member/endpoint state — leader pin not enforced"
     exit 1
 fi
-s0_id=$(echo "$status_json" | jq -r ".[] | select(.Endpoint==\"${S0_ENDPOINT}\") | .Status.header.member_id")
-cur_leader=$(echo "$status_json" | jq -r ".[] | select(.Endpoint==\"${S0_ENDPOINT}\") | .Status.leader")
-if [[ -z "$s0_id" || -z "$cur_leader" || "$s0_id" == "null" || "$cur_leader" == "null" ]]; then
-    echo "[etcd] FATAL: could not extract member/leader ids from status JSON"
+# member list -w table format (one row per member, 7 cols):
+#   | ID (hex) | STATUS | NAME | PEER ADDRS | CLIENT ADDRS | IS LEARNER | (extra cols) |
+# Field 2 of the | -separated row is the hex ID; field 6 is CLIENT ADDRS.
+s0_id_hex=$(echo "$member_table" \
+    | awk -F'|' -v s0="${S0_ENDPOINT}" '
+        NR > 3 && $0 ~ /^\|/ {
+            cli = $6; gsub(/^[ \t]+|[ \t]+$/, "", cli);
+            if (cli == s0) { id = $2; gsub(/^[ \t]+|[ \t]+$/, "", id); print id; exit }
+        }')
+if [[ -z "$s0_id_hex" ]]; then
+    echo "[etcd] FATAL: could not extract server0's member id from member-list table"
+    echo "$member_table"
     exit 1
 fi
-if [[ "$s0_id" == "$cur_leader" ]]; then
-    echo "[etcd] leader already at server0 (member id=$s0_id)"
+# endpoint status -w table format (10 cols, one row per endpoint):
+#   | ENDPOINT | ID (hex) | VERSION | DB SIZE | IS LEADER | IS LEARNER | RAFT TERM | ... |
+# Find the row where IS LEADER (col 6) is "true"; col 2 is the leader ENDPOINT.
+leader_endpoint=$(echo "$status_table" \
+    | awk -F'|' '
+        NR > 3 && $0 ~ /^\|/ {
+            is_leader = $6; gsub(/^[ \t]+|[ \t]+$/, "", is_leader);
+            if (is_leader == "true") {
+                ep = $2; gsub(/^[ \t]+|[ \t]+$/, "", ep); print ep; exit
+            }
+        }')
+if [[ -z "$leader_endpoint" ]]; then
+    echo "[etcd] FATAL: no IS LEADER=true row in endpoint status table"
+    echo "$status_table"
+    exit 1
+fi
+if [[ "$leader_endpoint" == "$S0_ENDPOINT" ]]; then
+    echo "[etcd] leader already at server0 (id=$s0_id_hex)"
 else
-    # Find which endpoint holds the current leader: the entry whose
-    # OWN member_id matches its OWN leader pointer. Comparing
-    # number-vs-number within the same JSON entry sidesteps two
-    # gotchas seen on first try (2026-05-05):
-    #   (1) JSON-number vs bash-string type mismatch — jq's
-    #       `select(member_id == "${cur_leader}")` returns nothing
-    #       because one side is a number, the other a string.
-    #   (2) Float-precision loss — etcd member_ids are 64-bit
-    #       integers (~1e18), bigger than float64's safe-integer
-    #       range (2^53 ≈ 9e15). jq before 1.7 silently rounds them.
-    #       Comparing two fields parsed identically in the same
-    #       entry is precision-stable; comparing across entries
-    #       isn't.
-    leader_endpoint=$(echo "$status_json" \
-        | jq -r '.[] | select(.Status.header.member_id == .Status.leader) | .Endpoint' \
-        | head -1)
-    if [[ -z "$leader_endpoint" || "$leader_endpoint" == "null" ]]; then
-        echo "[etcd] FATAL: status JSON has cur_leader=${cur_leader} but no entry with that member_id"
-        echo "$status_json" | jq -c '.[] | {Endpoint, member_id: .Status.header.member_id, leader: .Status.leader}'
-        exit 1
-    fi
-    # Strip "http://" and ":${ETCD_PORT}" to recover the IP for ssh.
     leader_ip="${leader_endpoint#http://}"
     leader_ip="${leader_ip%:*}"
     if [[ -z "$leader_ip" ]]; then
         echo "[etcd] FATAL: could not parse IP from leader endpoint '${leader_endpoint}'"
         exit 1
     fi
-    echo "[etcd] current leader=$cur_leader at ${leader_endpoint}, server0 id=$s0_id — moving..."
+    echo "[etcd] current leader at ${leader_endpoint}, moving to server0 (id=$s0_id_hex)..."
     if ssh -i "$KEY" -o BatchMode=yes "${USERNAME}@${leader_ip}" \
-        "${ETCDCTL_BIN} --endpoints=${leader_endpoint} move-leader ${s0_id}"; then
+        "${ETCDCTL_BIN} --endpoints=${leader_endpoint} move-leader ${s0_id_hex}"; then
         echo "[etcd] leader moved to server0"
     else
         echo "[etcd] FATAL: move-leader failed even when targeted at the actual leader endpoint"
