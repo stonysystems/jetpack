@@ -74,8 +74,18 @@ void CoordinatorRule::GotoNextPhase() {
         // fixed percentage
         go_to_fastpath_ = RandomGenerator::rand(0, 99) < Config::GetConfig()->jetpack_fastpath_attempt_rate_;
       } else if (Config::GetConfig()->jetpack_fastpath_attempt_rate_ == 101) {
+        // m=101 attempt gate: attempt fast path if any of —
+        //   (a) warm-up (< 10 attempts so far),
+        //   (b) recent fast-path latency is faster than slow-path latency
+        //       (purely relative; no absolute ms cap — the 500 ms ceiling
+        //       was dropped 2026-05-06 because at saturation cluster latency
+        //       routinely sits above 500 ms while fast path still beats slow
+        //       path, and the cap was forcing the bandit to take over and
+        //       costing ~13 % peak tput vs m=100 at c=200),
+        //   (c) the one-armed bandit votes yes (Beta-prior posterior on
+        //       observed fast-path success rate).
         go_to_fastpath_ = client_worker_->go_to_jetpack_fastpath_cnt_ < 10
-                          || (client_worker_->cli2cli_[6+cmd_is_write_].count() > 0 && client_worker_->cli2cli_[6+cmd_is_write_].recent_100_ave() < std::min(client_worker_->cli2cli_[8+cmd_is_write_].recent_100_ave(), 500.0))
+                          || (client_worker_->cli2cli_[6+cmd_is_write_].count() > 0 && client_worker_->cli2cli_[6+cmd_is_write_].recent_100_ave() < client_worker_->cli2cli_[8+cmd_is_write_].recent_100_ave())
                           || client_worker_->one_armed_bandit_.ConsultAttempt();
         if (Config::GetConfig()->replica_proto_ == MODE_MENCIUS) {
           double avg_all = client_worker_->cpu_usage_all_.recent_100_ave();
