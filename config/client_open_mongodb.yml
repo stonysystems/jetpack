@@ -1,11 +1,13 @@
 client:
     type: open
     rate: 1000
-    # Per-protocol max_undone (uniform-yml rule, set 2026-05-05).
-    # User override: mongodb sat tput ≈ 1.25k r/s (writeConcern:majority+j is
-    # slow). Default sizing (~1 s sat latency target) would pick max_undone
-    # ≈ 20. Setting 2000 instead intentionally probes whether mongodb can
-    # scale past the apparent 1.25k ceiling under deeper pipelining /
-    # other timing knobs. Cluster cap = 60×2000 = 120k. If sat tput
-    # really is 1.25k, sat latency is ~96 s — accepted tradeoff.
-    max_undone: 2000
+    # Per-protocol max_undone (uniform-yml rule, set 2026-05-05; revised 2026-05-06).
+    # MongoDB backend ceiling = 1.72k r/s (YCSB workload A + custom PyMongo
+    # bench, both within 0.5 %; see results/2026-05-05-camera-ready-exp0-fixes-v2/
+    # backend_microbench/). With 60 client coros across 10 hosts the
+    # cluster cap = 60×50 = 3 000 r/s ≈ 1.7× headroom over the 1.72k
+    # backend ceiling — exposes the bottleneck cleanly without forcing
+    # tens-of-seconds sat latency. Earlier 2000 was a deep-probe override
+    # (120k cap → ~70 s sat latency); retired now that the backend
+    # ceiling is firmly measured.
+    max_undone: 50
