@@ -29,6 +29,18 @@ class EtcdConnectionThreadPool {
     Distribution end_to_end_ms;
     uint64_t total_commands{0};
 #endif
+#ifdef ETCD_INNER_DEBUG
+    // E2-redo phase breakdown. spawn_to_run_ms = thread-spawn + scheduler
+    // queueing (t_enqueue → t_dequeue inside the worker). handler_ms = pure
+    // handler->{Read,Write,BatchTxn} call duration (t_pre → t_post). total_ms
+    // = t_enqueue → t_post. Together they answer: queue-wait dominant?
+    // handler dominant? See E2-redo plan in TODO.md.
+    std::mutex inner_mu;
+    Distribution inner_spawn_to_run_ms;
+    Distribution inner_handler_ms;
+    Distribution inner_total_ms;
+    uint64_t inner_samples{0};
+#endif
 
     void RecordQueueDepth(double depth) {
 #ifdef ETCD_STATISTICS
@@ -54,6 +66,21 @@ class EtcdConnectionThreadPool {
 #endif
     }
 
+    void RecordInner(double spawn_to_run_ms, double handler_ms,
+                     double total_ms) {
+#ifdef ETCD_INNER_DEBUG
+      std::lock_guard<std::mutex> lock(inner_mu);
+      inner_spawn_to_run_ms.append(spawn_to_run_ms);
+      inner_handler_ms.append(handler_ms);
+      inner_total_ms.append(total_ms);
+      inner_samples++;
+#else
+      (void)spawn_to_run_ms;
+      (void)handler_ms;
+      (void)total_ms;
+#endif
+    }
+
     void Dump(const char* tag) {
 #ifdef ETCD_STATISTICS
       std::lock_guard<std::mutex> lock(mu);
@@ -72,6 +99,21 @@ class EtcdConnectionThreadPool {
       log_or_empty("ETCD_END_TO_END_MS", end_to_end_ms, "ms");
 #else
       (void)tag;
+#endif
+#ifdef ETCD_INNER_DEBUG
+      std::lock_guard<std::mutex> lock(inner_mu);
+      Log_info("[ETCD-INNER][%s] inner_samples=%" PRIu64, tag, inner_samples);
+      auto inner_log_or_empty = [&](const char* label, Distribution& dist) {
+        if (dist.count() == 0) {
+          Log_info("[ETCD-INNER][%s] %s no samples", tag, label);
+        } else {
+          auto stats = dist.statistics();
+          Log_info("[ETCD-INNER][%s] %s %s (ms)", tag, label, stats.c_str());
+        }
+      };
+      inner_log_or_empty("SPAWN_TO_RUN", inner_spawn_to_run_ms);
+      inner_log_or_empty("HANDLER", inner_handler_ms);
+      inner_log_or_empty("TOTAL", inner_total_ms);
 #endif
     }
   };
@@ -278,6 +320,14 @@ class EtcdConnectionThreadPool {
           } catch (const std::exception& e) {
             Log_warn("[ETCD] read failed: %s", e.what());
           }
+#ifdef ETCD_INNER_DEBUG
+          auto t_post = std::chrono::steady_clock::now();
+          if (metrics_) {
+            auto handler_ms = std::chrono::duration_cast<std::chrono::microseconds>(
+                t_post - start_time).count() / 1000.0;
+            metrics_->RecordInner(0.0, handler_ms, handler_ms);
+          }
+#endif
           SignalFinished(cmd_content, start_time);
         });
       } catch (const std::exception& e) {
@@ -287,7 +337,22 @@ class EtcdConnectionThreadPool {
 #else
       const int key = parsed_cmd.key_;
       std::thread([this, cmd_content, key, start_time]() {
+#ifdef ETCD_INNER_DEBUG
+        auto t_dequeue = std::chrono::steady_clock::now();
+#endif
         handler_->Read(key);
+#ifdef ETCD_INNER_DEBUG
+        auto t_post = std::chrono::steady_clock::now();
+        if (metrics_) {
+          auto spawn_ms = std::chrono::duration_cast<std::chrono::microseconds>(
+              t_dequeue - start_time).count() / 1000.0;
+          auto handler_ms = std::chrono::duration_cast<std::chrono::microseconds>(
+              t_post - t_dequeue).count() / 1000.0;
+          auto total_ms = std::chrono::duration_cast<std::chrono::microseconds>(
+              t_post - start_time).count() / 1000.0;
+          metrics_->RecordInner(spawn_ms, handler_ms, total_ms);
+        }
+#endif
         SignalFinished(cmd_content, start_time);
       }).detach();
 #endif
@@ -307,6 +372,14 @@ class EtcdConnectionThreadPool {
           } catch (const std::exception& e) {
             Log_warn("[ETCD] write failed: %s", e.what());
           }
+#ifdef ETCD_INNER_DEBUG
+          auto t_post = std::chrono::steady_clock::now();
+          if (metrics_) {
+            auto handler_ms = std::chrono::duration_cast<std::chrono::microseconds>(
+                t_post - start_time).count() / 1000.0;
+            metrics_->RecordInner(0.0, handler_ms, handler_ms);
+          }
+#endif
           SignalFinished(cmd_content, start_time);
         });
       } catch (const std::exception& e) {
@@ -317,7 +390,22 @@ class EtcdConnectionThreadPool {
       const int key = parsed_cmd.key_;
       const int value = parsed_cmd.value_;
       std::thread([this, cmd_content, key, value, start_time]() {
+#ifdef ETCD_INNER_DEBUG
+        auto t_dequeue = std::chrono::steady_clock::now();
+#endif
         handler_->Write(key, value);
+#ifdef ETCD_INNER_DEBUG
+        auto t_post = std::chrono::steady_clock::now();
+        if (metrics_) {
+          auto spawn_ms = std::chrono::duration_cast<std::chrono::microseconds>(
+              t_dequeue - start_time).count() / 1000.0;
+          auto handler_ms = std::chrono::duration_cast<std::chrono::microseconds>(
+              t_post - t_dequeue).count() / 1000.0;
+          auto total_ms = std::chrono::duration_cast<std::chrono::microseconds>(
+              t_post - start_time).count() / 1000.0;
+          metrics_->RecordInner(spawn_ms, handler_ms, total_ms);
+        }
+#endif
         SignalFinished(cmd_content, start_time);
       }).detach();
 #endif
@@ -330,7 +418,7 @@ class EtcdConnectionThreadPool {
   }
 
   void DumpStats(const char* tag) {
-#ifdef ETCD_STATISTICS
+#if defined(ETCD_STATISTICS) || defined(ETCD_INNER_DEBUG)
     if (metrics_) {
       metrics_->Dump(tag);
     } else {

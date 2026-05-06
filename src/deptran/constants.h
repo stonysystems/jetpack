@@ -234,6 +234,12 @@ namespace janus {
 
 // #define MONGODB_STATISTICS
 // #define ETCD_STATISTICS
+// E2-redo: per-request inner-pool timing (spawn-to-run vs handler-call vs total).
+// Enable per-build via `CXXFLAGS="-DETCD_INNER_DEBUG" python3 waf configure build`
+// (or uncomment for a default-on local build); emits `[ETCD-INNER]` Distribution
+// dumps per pool Close(). OFF by default to keep v2 sweep numbers free of
+// per-request mutex overhead.
+// #define ETCD_INNER_DEBUG
 // #define JM_SIGNAL_DEBUG
 
 // Feature toggle: enable MongoDB-specific JetPack recovery wiring.
