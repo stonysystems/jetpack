@@ -134,49 +134,40 @@ void CoordinatorRule::GotoNextPhase() {
                      cpu_disabled, go_to_fastpath_,
                      client_worker_->go_to_jetpack_fastpath_cnt_);
           }
-        } else if (Config::GetConfig()->replica_proto_ == MODE_RAFT ||
-                   Config::GetConfig()->replica_proto_ == MODE_FPGA_RAFT) {
-          // Adaptive throttle: at high leader CPU the fast-path spec RPCs
-          // become pure overhead on the pinned leader core — they steal
-          // cycles from the Raft replication loop and DROP peak throughput
-          // below what vanilla Raft would achieve. So as the leader
-          // approaches saturation, ramp down the fast-path attempt rate
-          // so jp-raft-adaptive gracefully degrades to vanilla Raft at
-          // peak load (fp_rate -> 0 when cpu -> 100).
-          //
-          // Linear ramp between FP_LO and FP_HI:
-          //   cpu <= FP_LO -> disable_prob = 0
-          //   cpu >= FP_HI -> disable_prob = 1
-          //   linear in between
-          //
-          // FP_LO = 70%: safely above steady-state "healthy" CPU (~50%),
-          //              so we don't throttle in the sweet spot.
-          // FP_HI = 95%: by the time the leader is near the wall, almost
-          //              every attempt is suppressed.
-          //
-          // Uses instantaneous recent-100-avg rather than a monotone max
-          // so the throttle tracks the current load and releases when
-          // load drops (matches the user's intent that we don't stay
-          // throttled forever after one load spike).
-          constexpr double FP_LO = 70.0;
-          constexpr double FP_HI = 95.0;
-          constexpr double FP_RANGE = FP_HI - FP_LO;
-          double avg_leaders = client_worker_->cpu_usage_leaders_.recent_100_ave();
-          double rand_val = RandomGenerator::rand(0, static_cast<int>(FP_RANGE));
-          bool cpu_disabled = (avg_leaders - FP_LO) > rand_val;
-          if (cpu_disabled) {
-            go_to_fastpath_ = false;
-          }
-          static int raft_log_counter = 0;
-          if (++raft_log_counter % 500 == 1) {
-            Log_info("[CPU-RAFT] avg_leaders=%.2f "
-                     "ramp=[%.0f,%.0f] rand=%.2f cpu_disabled=%d go_fp=%d "
-                     "fp_cnt=%d",
-                     avg_leaders, FP_LO, FP_HI, rand_val,
-                     cpu_disabled, go_to_fastpath_,
-                     client_worker_->go_to_jetpack_fastpath_cnt_);
-          }
         }
+        // CPU-throttle for m=101+raft DISABLED 2026-05-06 by user.
+        //
+        // The block below was the previous adaptive-throttle: at high
+        // leader CPU it would probabilistically suppress fast-path
+        // attempts so jp-raft-adaptive gracefully degrades to vanilla
+        // Raft at peak load. But it was overriding the m=101+raft
+        // hardcode ("strongly attempt fast path") and producing
+        // fp%-attempted = 0 at c=100 (leader CPU saturated above the
+        // FP_LO=70% threshold). Disabling per user request to make
+        // m=101+raft truly fp100 — accepting that c=300 will lose its
+        // graceful-degradation property.
+        //
+        // } else if (Config::GetConfig()->replica_proto_ == MODE_RAFT ||
+        //            Config::GetConfig()->replica_proto_ == MODE_FPGA_RAFT) {
+        //   constexpr double FP_LO = 70.0;
+        //   constexpr double FP_HI = 95.0;
+        //   constexpr double FP_RANGE = FP_HI - FP_LO;
+        //   double avg_leaders = client_worker_->cpu_usage_leaders_.recent_100_ave();
+        //   double rand_val = RandomGenerator::rand(0, static_cast<int>(FP_RANGE));
+        //   bool cpu_disabled = (avg_leaders - FP_LO) > rand_val;
+        //   if (cpu_disabled) {
+        //     go_to_fastpath_ = false;
+        //   }
+        //   static int raft_log_counter = 0;
+        //   if (++raft_log_counter % 500 == 1) {
+        //     Log_info("[CPU-RAFT] avg_leaders=%.2f "
+        //              "ramp=[%.0f,%.0f] rand=%.2f cpu_disabled=%d go_fp=%d "
+        //              "fp_cnt=%d",
+        //              avg_leaders, FP_LO, FP_HI, rand_val,
+        //              cpu_disabled, go_to_fastpath_,
+        //              client_worker_->go_to_jetpack_fastpath_cnt_);
+        //   }
+        // }
       } else {
         verify(0);
       }
