@@ -19,16 +19,7 @@ namespace janus {
 class EtcdServer : public TxLogServer {
 
 #ifdef AWS
-  // E2 retry, set 2026-05-06: per-op handler pool of 8 (matches the
-  // batching path's kBatchHandlerPoolSize=8). Justification: pure
-  // backend benchmarks show etcd cluster sustains 4500 r/s @ ~400 ms
-  // p50; pre-E2 with one shared SyncClient channel caps at ~600 r/s
-  // (HTTP/2 SETTINGS_MAX_CONCURRENT_STREAMS=100 default × 5 Janus
-  // hosts ÷ 1 RTT 181 ms). E2 with 2500 handlers overwhelmed etcd's
-  // gRPC server (12 500 connections). 8 handlers per Janus = 40
-  // cluster-wide gRPC channels — enough to lift the stream cap to
-  // 8×100=800 streams/host without flooding etcd-server-side.
-  const int etcd_connection_ = 8;
+  const int etcd_connection_ = 2500;
 #endif
 #ifndef AWS
   const int etcd_connection_ = 80;
