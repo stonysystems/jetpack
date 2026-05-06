@@ -93,6 +93,18 @@ void CoordinatorRule::GotoNextPhase() {
           // already has the CPU-disable branch below; Copilot has its
           // own knee at c=75-100 that we don't want to override).
           go_to_fastpath_ = true;
+          // Debug-only sanity log. Fires once per coordinator coro on
+          // first call (every ~5000 txns), confirms the hardcode branch
+          // is being executed at runtime.
+          static thread_local bool fp100_hardcode_logged = false;
+          if (!fp100_hardcode_logged) {
+            Log_info("[FP100_HARDCODE_HIT] m=101+raft hardcode branch entered "
+                     "tid=%lu rate=%d replica_proto=0x%x",
+                     (unsigned long)pthread_self(),
+                     Config::GetConfig()->jetpack_fastpath_attempt_rate_,
+                     Config::GetConfig()->replica_proto_);
+            fp100_hardcode_logged = true;
+          }
         } else {
           go_to_fastpath_ = client_worker_->go_to_jetpack_fastpath_cnt_ < 10
                             || (client_worker_->cli2cli_[6+cmd_is_write_].count() > 0 && client_worker_->cli2cli_[6+cmd_is_write_].recent_100_ave() < client_worker_->cli2cli_[8+cmd_is_write_].recent_100_ave())
