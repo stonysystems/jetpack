@@ -1,10 +1,5 @@
 #pragma once
 
-// Temporary profiling — emits per-checkpoint Log_info inside Submit so
-// we can attribute the conc=1→100 latency surge to a specific phase.
-// Remove this define once the bottleneck is identified.
-#define ETCD_DEBUG
-
 #include "__dep__.h"
 #include "constants.h"
 #include "../scheduler.h"
