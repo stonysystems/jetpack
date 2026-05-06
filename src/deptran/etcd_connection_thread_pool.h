@@ -4,7 +4,9 @@
 #include <chrono>
 #include <condition_variable>
 #include <inttypes.h>
+#include <memory>
 #include <mutex>
+#include <queue>
 #include <string>
 #include <thread>
 #include <tuple>
@@ -113,6 +115,69 @@ class EtcdConnectionThreadPool {
   std::atomic<uint32_t> batch_handler_rr_{0};
   static constexpr int kBatchHandlerPoolSize = 8;
 
+  // Fix E2 (set 2026-05-05): per-op pool that mirrors
+  // MongodbConnectionThreadPool's design. When batch_size_ <= 1 (the
+  // default), EtcdRequest pushes into one of N persistent per-thread
+  // queues instead of spawning a fresh std::thread per request that
+  // funnelled into a single shared handler_. Each worker thread owns its
+  // own EtcdKVTableHandler (own gRPC channel), so concurrent writes
+  // don't serialise on a single channel. N = max_inflight_ at
+  // construction time (matches mongodb pool sizing on AWS = 2500).
+  struct PerOpQueuedCommand {
+    bool is_read{false};
+    bool is_write{false};
+    int key{0};
+    int value{0};
+    std::shared_ptr<TxPieceData> cmd_content;
+    std::chrono::steady_clock::time_point start_time;
+    bool stop{false};  // sentinel from Close() to wake the worker
+  };
+  class PerOpQueue {
+   public:
+    void push(PerOpQueuedCommand&& qc) {
+      std::lock_guard<std::mutex> lk(mu_);
+      q_.push(std::move(qc));
+      cv_.notify_one();
+    }
+    PerOpQueuedCommand pop() {
+      std::unique_lock<std::mutex> lk(mu_);
+      cv_.wait(lk, [this] { return !q_.empty(); });
+      PerOpQueuedCommand qc = std::move(q_.front());
+      q_.pop();
+      return qc;
+    }
+   private:
+    std::queue<PerOpQueuedCommand> q_;
+    std::mutex mu_;
+    std::condition_variable cv_;
+  };
+  int per_op_thread_num_{0};
+  std::vector<std::shared_ptr<EtcdKVTableHandler>> per_op_handlers_;
+  std::vector<std::unique_ptr<PerOpQueue>> per_op_queues_;
+  std::vector<std::thread> per_op_threads_;
+  std::atomic<uint32_t> per_op_dispatch_rr_{0};
+
+  void PerOpWorker(int thread_id) {
+    auto& q = per_op_queues_[thread_id];
+    auto& handler = per_op_handlers_[thread_id];
+    while (true) {
+      PerOpQueuedCommand qc = q->pop();
+      if (qc.stop) break;
+      try {
+        if (qc.is_read) {
+          handler->Read(qc.key);
+        } else if (qc.is_write) {
+          handler->Write(qc.key, qc.value);
+        } else {
+          Log_warn("[ETCD][POOL] worker %d: unsupported queued command type", thread_id);
+        }
+      } catch (const std::exception& e) {
+        Log_warn("[ETCD][POOL] worker %d: handler call threw: %s", thread_id, e.what());
+      }
+      SignalFinished(qc.cmd_content, qc.start_time);
+    }
+  }
+
   // Caller must hold batch_mu_. Moves the pending buffer out and spawns a
   // detached thread that runs the Txn and signals every waiter.
   void FlushLocked() {
@@ -190,14 +255,19 @@ class EtcdConnectionThreadPool {
 #ifdef ETCD_STATISTICS
     Log_info("[ETCD][POOL] init max_inflight=%d uri=%s", max_inflight_, uri.c_str());
 #endif
-    if (max_inflight_ > 0) {
-      handler_ = std::make_shared<EtcdKVTableHandler>(uri);
-    }
     auto* cfg = Config::GetConfig();
     if (cfg != nullptr) {
       batch_size_ = cfg->GetEtcdBatchSize();
       batch_timeout_ms_ = cfg->GetEtcdBatchTimeoutMs();
     }
+
+    // The legacy shared handler_ is kept around only because the
+    // batching path's FlushLocked falls back to it when batch_handlers_
+    // is empty. The per-op path NEVER uses it under Fix E2.
+    if (max_inflight_ > 0) {
+      handler_ = std::make_shared<EtcdKVTableHandler>(uri);
+    }
+
     if (batch_size_ > 1) {
       Log_info("[ETCD][POOL] client-side batching enabled: size=%d timeout_ms=%d handler_pool=%d",
                batch_size_, batch_timeout_ms_, kBatchHandlerPoolSize);
@@ -208,12 +278,50 @@ class EtcdConnectionThreadPool {
       if (batch_timeout_ms_ > 0) {
         batch_timeout_thread_ = std::thread([this]() { BatchTimeoutLoop(); });
       }
+    } else if (max_inflight_ > 0) {
+      // Fix E2: spawn N persistent worker threads, each with its own
+      // EtcdKVTableHandler (own gRPC channel). N = max_inflight_ matches
+      // MongodbConnectionThreadPool's mongodb_connection_=2500 sizing.
+      // Each request enqueues into one of N round-robin queues; the
+      // matching worker pops and runs the request through its own
+      // handler. No more single-channel serialisation.
+      per_op_thread_num_ = max_inflight_;
+      Log_info("[ETCD][POOL] per-op pool: thread_num=%d (one handler/queue per worker)", per_op_thread_num_);
+      per_op_handlers_.reserve(per_op_thread_num_);
+      per_op_queues_.reserve(per_op_thread_num_);
+      // Create handlers in parallel (each opens a gRPC channel; doing
+      // 2500 sequentially would serialise on TCP setup). Mirrors
+      // MongodbConnectionThreadPool::createHandlers.
+      std::vector<std::thread> create_threads;
+      per_op_handlers_.assign(per_op_thread_num_, nullptr);
+      for (int i = 0; i < per_op_thread_num_; ++i) {
+        per_op_queues_.push_back(std::make_unique<PerOpQueue>());
+        create_threads.emplace_back([this, i, uri]() {
+          per_op_handlers_[i] = std::make_shared<EtcdKVTableHandler>(uri);
+        });
+      }
+      for (auto& t : create_threads) t.join();
+      per_op_threads_.reserve(per_op_thread_num_);
+      for (int i = 0; i < per_op_thread_num_; ++i) {
+        per_op_threads_.emplace_back([this, i]() { PerOpWorker(i); });
+      }
     }
   }
 
   ~EtcdConnectionThreadPool() {
     batch_shutdown_.store(true, std::memory_order_relaxed);
     if (batch_timeout_thread_.joinable()) batch_timeout_thread_.join();
+    // Wake every per-op worker with a stop sentinel and join. Safe to
+    // call even if Close() already drained — workers will just exit
+    // immediately on the second sentinel.
+    for (auto& q : per_op_queues_) {
+      PerOpQueuedCommand stop_qc;
+      stop_qc.stop = true;
+      q->push(std::move(stop_qc));
+    }
+    for (auto& t : per_op_threads_) {
+      if (t.joinable()) t.join();
+    }
   }
 
   size_t EtcdRequest(const shared_ptr<Marshallable>& cmd) {
@@ -262,65 +370,25 @@ class EtcdConnectionThreadPool {
       return static_cast<size_t>(depth);
     }
 
-    if (parsed_cmd.IsRead()) {
-#if JANUS_ETCD_HAS_PPLX
-      try {
-        handler_->ReadAsync(parsed_cmd.key_).then([
-            this,
-            cmd_content,
-            cmd,
-            start_time
-          ](pplx::task<etcd::Response> response_task) {
-          (void)cmd;
-          try {
-            auto response = response_task.get();
-            (void)response;
-          } catch (const std::exception& e) {
-            Log_warn("[ETCD] read failed: %s", e.what());
-          }
-          SignalFinished(cmd_content, start_time);
-        });
-      } catch (const std::exception& e) {
-        Log_warn("[ETCD] read enqueue failed: %s", e.what());
-        SignalFinished(cmd_content, start_time);
-      }
-#else
-      const int key = parsed_cmd.key_;
-      std::thread([this, cmd_content, key, start_time]() {
-        handler_->Read(key);
-        SignalFinished(cmd_content, start_time);
-      }).detach();
-#endif
-    } else if (parsed_cmd.IsWrite()) {
-#if JANUS_ETCD_HAS_PPLX
-      try {
-        handler_->WriteAsync(parsed_cmd.key_, parsed_cmd.value_).then([
-            this,
-            cmd_content,
-            cmd,
-            start_time
-          ](pplx::task<etcd::Response> response_task) {
-          (void)cmd;
-          try {
-            auto response = response_task.get();
-            (void)response;
-          } catch (const std::exception& e) {
-            Log_warn("[ETCD] write failed: %s", e.what());
-          }
-          SignalFinished(cmd_content, start_time);
-        });
-      } catch (const std::exception& e) {
-        Log_warn("[ETCD] write enqueue failed: %s", e.what());
-        SignalFinished(cmd_content, start_time);
-      }
-#else
-      const int key = parsed_cmd.key_;
-      const int value = parsed_cmd.value_;
-      std::thread([this, cmd_content, key, value, start_time]() {
-        handler_->Write(key, value);
-        SignalFinished(cmd_content, start_time);
-      }).detach();
-#endif
+    // Fix E2 (set 2026-05-05): per-op pool dispatch. The previous
+    // implementation spawned `std::thread([..](){ handler_->Read/Write; }).detach()`
+    // per request, all funnelling into the single shared handler_'s gRPC
+    // channel — that channel serialised concurrent calls and produced
+    // the etcd-only conc-1→100 surge (276 → 1788 ms p50). Now: build a
+    // queued op, push round-robin across N per-thread queues; the
+    // matching worker pops and runs through its OWN handler.
+    if (parsed_cmd.IsRead() || parsed_cmd.IsWrite()) {
+      verify(per_op_thread_num_ > 0);
+      verify(static_cast<int>(per_op_queues_.size()) == per_op_thread_num_);
+      PerOpQueuedCommand qc;
+      qc.is_read = parsed_cmd.IsRead();
+      qc.is_write = parsed_cmd.IsWrite();
+      qc.key = parsed_cmd.key_;
+      qc.value = parsed_cmd.value_;
+      qc.cmd_content = cmd_content;
+      qc.start_time = start_time;
+      uint32_t idx = per_op_dispatch_rr_.fetch_add(1, std::memory_order_relaxed) % per_op_thread_num_;
+      per_op_queues_[idx]->push(std::move(qc));
     } else {
       Log_warn("[ETCD] unsupported command type");
       SignalFinished(cmd_content, start_time);
@@ -347,8 +415,28 @@ class EtcdConnectionThreadPool {
       std::unique_lock<std::mutex> blk(batch_mu_);
       FlushLocked();
     }
-    std::unique_lock<std::mutex> lock(inflight_mu_);
-    inflight_cv_.wait(lock, [this] { return inflight_.load() == 0; });
+    // Wait for every in-flight per-op request to be picked up by a
+    // worker AND signalled (SignalFinished decrements inflight_ to 0
+    // and notifies). Per-op queues drain naturally since EtcdRequest
+    // increments inflight_ before pushing and SignalFinished
+    // decrements after the request completes.
+    {
+      std::unique_lock<std::mutex> lock(inflight_mu_);
+      inflight_cv_.wait(lock, [this] { return inflight_.load() == 0; });
+    }
+    // Stop the per-op workers cleanly so the destructor doesn't have
+    // to send sentinels under racing teardown. Idempotent — destructor
+    // also pushes sentinels and joins; a second sentinel after
+    // shutdown is harmless because workers exit on the first one.
+    for (auto& q : per_op_queues_) {
+      PerOpQueuedCommand stop_qc;
+      stop_qc.stop = true;
+      q->push(std::move(stop_qc));
+    }
+    for (auto& t : per_op_threads_) {
+      if (t.joinable()) t.join();
+    }
+    per_op_threads_.clear();
     DumpStats("FINAL");
   }
 
