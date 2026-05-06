@@ -74,19 +74,30 @@ void CoordinatorRule::GotoNextPhase() {
         // fixed percentage
         go_to_fastpath_ = RandomGenerator::rand(0, 99) < Config::GetConfig()->jetpack_fastpath_attempt_rate_;
       } else if (Config::GetConfig()->jetpack_fastpath_attempt_rate_ == 101) {
-        // m=101 attempt gate: attempt fast path if any of —
-        //   (a) warm-up (< 10 attempts so far),
-        //   (b) recent fast-path latency is faster than slow-path latency
-        //       (purely relative; no absolute ms cap — the 500 ms ceiling
-        //       was dropped 2026-05-06 because at saturation cluster latency
-        //       routinely sits above 500 ms while fast path still beats slow
-        //       path, and the cap was forcing the bandit to take over and
-        //       costing ~13 % peak tput vs m=100 at c=200),
-        //   (c) the one-armed bandit votes yes (Beta-prior posterior on
-        //       observed fast-path success rate).
-        go_to_fastpath_ = client_worker_->go_to_jetpack_fastpath_cnt_ < 10
-                          || (client_worker_->cli2cli_[6+cmd_is_write_].count() > 0 && client_worker_->cli2cli_[6+cmd_is_write_].recent_100_ave() < client_worker_->cli2cli_[8+cmd_is_write_].recent_100_ave())
-                          || client_worker_->one_armed_bandit_.ConsultAttempt();
+        if (Config::GetConfig()->replica_proto_ == MODE_RAFT) {
+          // m=101 + Raft (set 2026-05-06 by user): strongly attempt fast path.
+          //
+          // The adaptive gate (warmup OR fp-latency<sp-latency OR bandit)
+          // self-locked at saturation in v2 data (2026-05-06): on
+          // rule_raft, fp%-attempted dropped from 97 % at c=50 to 0.9 %
+          // at c=100 to 0 % at c≥150. Cluster-avg latency consequently
+          // jumped from 161 ms to 394 ms between c=50 and c=100. Root
+          // cause was the bandit-record bug (line 249, see below) feeding
+          // fake "fail" signals on un-attempted transactions, cascading
+          // into a closed gate. Hardcoding go_to_fastpath_=true makes
+          // m=101+raft attempt-rate-equivalent to m=100 while keeping
+          // all stat tracking intact.
+          //
+          // Scope: ONLY raft. Copilot / Mencius keep the adaptive gate
+          // because their saturation behaviour is different (Mencius
+          // already has the CPU-disable branch below; Copilot has its
+          // own knee at c=75-100 that we don't want to override).
+          go_to_fastpath_ = true;
+        } else {
+          go_to_fastpath_ = client_worker_->go_to_jetpack_fastpath_cnt_ < 10
+                            || (client_worker_->cli2cli_[6+cmd_is_write_].count() > 0 && client_worker_->cli2cli_[6+cmd_is_write_].recent_100_ave() < client_worker_->cli2cli_[8+cmd_is_write_].recent_100_ave())
+                            || client_worker_->one_armed_bandit_.ConsultAttempt();
+        }
         if (Config::GetConfig()->replica_proto_ == MODE_MENCIUS) {
           double avg_all = client_worker_->cpu_usage_all_.recent_100_ave();
           double avg_leaders = client_worker_->cpu_usage_leaders_.recent_100_ave();
@@ -246,7 +257,17 @@ void CoordinatorRule::GotoNextPhase() {
         phase_++;
         verify(phase_ % n_phase == Phase::INIT_END);
         // Log_info("CoordinatorRule coo_id=%d thread_id=%d cmd_ver_=%d current_phase=%d [before dispatch end] fast_path_success_=%d dispatch_ack_=%d", coo_id_, thread_id_, cmd_ver_, current_phase, fast_path_success_, dispatch_ack_);
-        client_worker_->one_armed_bandit_.Record(fast_path_success_); // record succee only when efficient fast path success
+        // Defense-in-depth: only feed the bandit on transactions that
+        // actually attempted fast path. Without this gate, an unattempted
+        // transaction (go_to_fastpath_=false → no spec broadcast →
+        // fast_path_success_ stays at its initialiser of false) would feed
+        // the bandit a fake "fail" signal, which is exactly the death-spiral
+        // observed for m=101 in 2026-05-06 v2 data (fp%-attempted=0 at
+        // c≥150). Moot under the current m=101 = always-true gate but kept
+        // correct so any future m∈[1,100] adaptive variant can't relapse.
+        if (go_to_fastpath_) {
+          client_worker_->one_armed_bandit_.Record(fast_path_success_);
+        }
         // if (skip_latency) {
         //   Log_info("[CLIENT-LATENCY] Skip cli2cli logging due to %s (res=%d, aborted=%d)",
         //            txn->reply_.res_ == WRONG_LEADER ? "WRONG_LEADER" : "ABORTED",
