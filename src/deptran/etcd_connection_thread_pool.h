@@ -190,6 +190,28 @@ class EtcdConnectionThreadPool {
   std::atomic<uint32_t> batch_handler_rr_{0};
   static constexpr int kBatchHandlerPoolSize = 8;
 
+  // Same idea, applied to the non-batching async path (PPLX
+  // ReadAsync/WriteAsync). Set 2026-05-07 to fix the cpprestsdk
+  // single-channel queueing pathology localised by ETCD_INNER_DEBUG: at
+  // c=50 with one handler, per-request PHASE_B was 466-615 ms vs the
+  // 154 ms 1-RTT floor — 3-4× tax purely from in-channel queueing.
+  // 256 handlers ≫ the v2 sweep's per-host max in-flight (~300), so each
+  // handler carries ~1 in-flight at peak, eliminating the queue. Each
+  // handler is one always-live gRPC channel (one TCP conn to etcd
+  // endpoint) so 256 means 256 TCP connections per Janus process to
+  // etcd — etcd's default listen-backlog easily handles that.
+  std::vector<std::shared_ptr<EtcdKVTableHandler>> async_handlers_;
+  std::atomic<uint32_t> async_handler_rr_{0};
+  static constexpr int kAsyncHandlerPoolSize = 256;
+
+  // Round-robin pick into async_handlers_; falls back to handler_ if the
+  // pool failed to populate (e.g. in tests).
+  std::shared_ptr<EtcdKVTableHandler> pick_async_handler() {
+    if (async_handlers_.empty()) return handler_;
+    uint32_t idx = async_handler_rr_.fetch_add(1, std::memory_order_relaxed);
+    return async_handlers_[idx % async_handlers_.size()];
+  }
+
   // Caller must hold batch_mu_. Moves the pending buffer out and spawns a
   // detached thread that runs the Txn and signals every waiter.
   void FlushLocked() {
@@ -269,6 +291,15 @@ class EtcdConnectionThreadPool {
 #endif
     if (max_inflight_ > 0) {
       handler_ = std::make_shared<EtcdKVTableHandler>(uri);
+      // Populate the async-path handler pool. See kAsyncHandlerPoolSize
+      // comment above for sizing rationale.
+      async_handlers_.reserve(kAsyncHandlerPoolSize);
+      for (int i = 0; i < kAsyncHandlerPoolSize; ++i) {
+        async_handlers_.push_back(std::make_shared<EtcdKVTableHandler>(uri));
+      }
+      Log_info("[ETCD][POOL] async-path handler pool size=%d (multi-channel "
+               "fix for cpprestsdk single-channel queueing)",
+               kAsyncHandlerPoolSize);
     }
     auto* cfg = Config::GetConfig();
     if (cfg != nullptr) {
@@ -342,7 +373,11 @@ class EtcdConnectionThreadPool {
     if (parsed_cmd.IsRead()) {
 #if JANUS_ETCD_HAS_PPLX
       try {
-        handler_->ReadAsync(parsed_cmd.key_).then([
+        // Multi-handler round-robin (set 2026-05-07): each request picks
+        // a handler from a 256-channel pool to avoid serialising through
+        // one cpprestsdk gRPC channel. See kAsyncHandlerPoolSize.
+        auto async_h = pick_async_handler();
+        async_h->ReadAsync(parsed_cmd.key_).then([
             this,
             cmd_content,
             cmd,
@@ -394,7 +429,9 @@ class EtcdConnectionThreadPool {
     } else if (parsed_cmd.IsWrite()) {
 #if JANUS_ETCD_HAS_PPLX
       try {
-        auto write_task = handler_->WriteAsync(parsed_cmd.key_, parsed_cmd.value_);
+        // Multi-handler round-robin (set 2026-05-07): see read branch.
+        auto async_h = pick_async_handler();
+        auto write_task = async_h->WriteAsync(parsed_cmd.key_, parsed_cmd.value_);
 #ifdef ETCD_INNER_DEBUG
         // Time WriteAsync returned and continuation registered. Used as the
         // phase A end / phase B start boundary inside the .then() callback.
