@@ -202,7 +202,7 @@ class EtcdConnectionThreadPool {
   // etcd — etcd's default listen-backlog easily handles that.
   std::vector<std::shared_ptr<EtcdKVTableHandler>> async_handlers_;
   std::atomic<uint32_t> async_handler_rr_{0};
-  static constexpr int kAsyncHandlerPoolSize = 4096;
+  static constexpr int kAsyncHandlerPoolSize = 256;
 
   // Round-robin pick into async_handlers_; falls back to handler_ if the
   // pool failed to populate (e.g. in tests).
