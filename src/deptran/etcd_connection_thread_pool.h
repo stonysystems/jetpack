@@ -40,6 +40,21 @@ class EtcdConnectionThreadPool {
     Distribution inner_handler_ms;
     Distribution inner_total_ms;
     uint64_t inner_samples{0};
+    // EtcdRequest phase breakdown (PPLX async path only). Three phases:
+    //   submit_a_enqueue_ms: EtcdRequest entry → WriteAsync(...).then() returned
+    //                        (synchronous Janus-side enqueue overhead)
+    //   submit_b_response_wait_ms: .then() registered → callback entry
+    //                              (gRPC channel queue + etcd RTT as seen by
+    //                              etcd-cpp-apiv3)
+    //   submit_c_callback_ms: callback entry → SignalFinished done
+    //                         (response decode + signaling etcd_finished)
+    // If B ≫ direct-bench RTT (e.g. 152 ms at low conc, 270 ms at conc=2000),
+    // there's queueing inside etcd-cpp-apiv3 / gRPC. If A or C dominates,
+    // Janus-side. See results/2026-05-07-backend-direct-comparison/.
+    Distribution submit_a_enqueue_ms;
+    Distribution submit_b_response_wait_ms;
+    Distribution submit_c_callback_ms;
+    uint64_t submit_phase_samples{0};
 #endif
 
     void RecordQueueDepth(double depth) {
@@ -81,6 +96,21 @@ class EtcdConnectionThreadPool {
 #endif
     }
 
+    void RecordSubmitPhases(double a_enqueue_ms, double b_response_wait_ms,
+                            double c_callback_ms) {
+#ifdef ETCD_INNER_DEBUG
+      std::lock_guard<std::mutex> lock(inner_mu);
+      submit_a_enqueue_ms.append(a_enqueue_ms);
+      submit_b_response_wait_ms.append(b_response_wait_ms);
+      submit_c_callback_ms.append(c_callback_ms);
+      submit_phase_samples++;
+#else
+      (void)a_enqueue_ms;
+      (void)b_response_wait_ms;
+      (void)c_callback_ms;
+#endif
+    }
+
     void Dump(const char* tag) {
 #ifdef ETCD_STATISTICS
       std::lock_guard<std::mutex> lock(mu);
@@ -114,6 +144,11 @@ class EtcdConnectionThreadPool {
       inner_log_or_empty("SPAWN_TO_RUN", inner_spawn_to_run_ms);
       inner_log_or_empty("HANDLER", inner_handler_ms);
       inner_log_or_empty("TOTAL", inner_total_ms);
+      Log_info("[ETCD-SUBMIT][%s] submit_phase_samples=%" PRIu64,
+               tag, submit_phase_samples);
+      inner_log_or_empty("PHASE_A_ENQUEUE", submit_a_enqueue_ms);
+      inner_log_or_empty("PHASE_B_RESPONSE_WAIT", submit_b_response_wait_ms);
+      inner_log_or_empty("PHASE_C_CALLBACK", submit_c_callback_ms);
 #endif
     }
   };
@@ -359,13 +394,25 @@ class EtcdConnectionThreadPool {
     } else if (parsed_cmd.IsWrite()) {
 #if JANUS_ETCD_HAS_PPLX
       try {
-        handler_->WriteAsync(parsed_cmd.key_, parsed_cmd.value_).then([
+        auto write_task = handler_->WriteAsync(parsed_cmd.key_, parsed_cmd.value_);
+#ifdef ETCD_INNER_DEBUG
+        // Time WriteAsync returned and continuation registered. Used as the
+        // phase A end / phase B start boundary inside the .then() callback.
+        auto t_post_writeasync = std::chrono::steady_clock::now();
+#endif
+        write_task.then([
             this,
             cmd_content,
             cmd,
             start_time
+#ifdef ETCD_INNER_DEBUG
+            , t_post_writeasync
+#endif
           ](pplx::task<etcd::Response> response_task) {
           (void)cmd;
+#ifdef ETCD_INNER_DEBUG
+          auto t_callback_entry = std::chrono::steady_clock::now();
+#endif
           try {
             auto response = response_task.get();
             (void)response;
@@ -375,9 +422,20 @@ class EtcdConnectionThreadPool {
 #ifdef ETCD_INNER_DEBUG
           auto t_post = std::chrono::steady_clock::now();
           if (metrics_) {
-            auto handler_ms = std::chrono::duration_cast<std::chrono::microseconds>(
-                t_post - start_time).count() / 1000.0;
+            auto us = [](auto a, auto b) {
+              return std::chrono::duration_cast<std::chrono::microseconds>(
+                  a - b).count() / 1000.0;
+            };
+            // A: enqueue (sync EtcdRequest entry → WriteAsync returned).
+            // B: response wait (.then() registered → callback entry).
+            // C: callback work (entry → SignalFinished done; signal happens
+            //    just below this block, so we sample t_post here).
+            double phase_a = us(t_post_writeasync, start_time);
+            double phase_b = us(t_callback_entry, t_post_writeasync);
+            double phase_c = us(t_post, t_callback_entry);
+            double handler_ms = us(t_post, start_time);
             metrics_->RecordInner(0.0, handler_ms, handler_ms);
+            metrics_->RecordSubmitPhases(phase_a, phase_b, phase_c);
           }
 #endif
           SignalFinished(cmd_content, start_time);
