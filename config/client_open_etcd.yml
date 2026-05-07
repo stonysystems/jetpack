@@ -1,8 +1,11 @@
 client:
     type: open
     rate: 1000
-    # Per-protocol max_undone (uniform-yml rule, set 2026-05-05).
-    # Sizing: aggregate offered tput = 60 × min(c, max_undone). Sized to the
-    # protocol's expected sat tput with ~1.5–2× headroom.
-    # Etcd: ~12k r/s sat → 60×300 = 18k cluster cap.
-    max_undone: 300
+    # Per-protocol max_undone (uniform-yml rule, set 2026-05-05; revised 2026-05-07).
+    # Etcd: 2026-05-06 v2 sweep showed peak ~5 966 r/s @ c=100 with high-conc
+    # latency surge (1.2 s → 3.0 s → 3.5 s avg at c=100/200/300) under the
+    # prior max_undone=300 cap (60×300 = 18k r/s). User-requested
+    # tightening to 100 → 60×100 = 6 000 r/s cluster cap, just above the
+    # observed peak. Backpressure prevents queue blowup at high conc;
+    # post-knee latencies should look cleaner without affecting the peak.
+    max_undone: 100
