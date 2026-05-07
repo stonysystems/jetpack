@@ -439,11 +439,23 @@ abstract service SwiftPaxosService {
                      vector<i64> dep |
                      i32 res);
 
+  // Light slow-ack: matches IMDEA's MLightSlowAck. Carries no dep — the
+  // leader's SwiftFastAck already supplies the authoritative dep; this
+  // message just votes "I adopt the leader's dep on the slow path." The IDL
+  // name stays SwiftSlowAck for backwards compatibility with existing tooling.
   defer SwiftSlowAck(siteid_t replica,
                      ballot_t ballot,
-                     i64 cmd_id,
-                     vector<i64> dep |
+                     i64 cmd_id |
                      i32 res);
+
+  // Batched ack envelope (mirrors IMDEA's MAcks/MOptAcks). The MarshallDeputy
+  // payload is a SwiftBatchedAcks carrying any number of FastAcks and
+  // LightSlowAcks coalesced from one sender's per-cmd queue. Used only when
+  // `batch: true` is set in the mode YAML; per-cmd SwiftFastAck/SwiftSlowAck
+  // are still defined for the unbatched path (and for the slow-path adopt
+  // wire) so toggling is a one-line config change.
+  defer SwiftAcks(MarshallDeputy batched_acks |
+                  i32 res);
 
   // Recovery: leader election and state sync
   defer SwiftNewLeader(siteid_t replica,

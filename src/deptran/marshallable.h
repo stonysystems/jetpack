@@ -48,6 +48,8 @@ class MarshallDeputy {
     CMD_VIEW_DATA = 14,
     CMD_KEY_CMD_BATCH = 15,
     CMD_KEY_CMD_ID_BATCH = 16,
+    CMD_SWIFT_RECOVERY_STATE = 17,
+    CMD_SWIFT_BATCHED_ACKS = 18,
   };
   /**
    * This should be called by the rpc layer.
