@@ -52,9 +52,8 @@ echo "$server0_pub"
 echo "=== END PUBLIC KEY ==="
 echo
 
-read -p "After you add the above key to GitHub, press Enter to verify and continue..."
-
 # 3) Verify SERVER_0 can authenticate to GitHub over SSH
+# (If this is the first run, expect failure; add the key above to GitHub then re-run.)
 # GitHub returns exit code 1 on successful auth banner, 255 on failure.
 if ssh -o StrictHostKeyChecking=accept-new -T ubuntu@"$server_0_ip" 'ssh -T git@github.com' 2>&1 | tee /dev/tty | grep -q "successfully authenticated"; then
   echo "GitHub auth looks good."

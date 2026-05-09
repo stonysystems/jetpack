@@ -14,7 +14,7 @@ CONFIG_FILE_5="concurrent_2.yml"
 CONFIG_MODE="100"
 CONFIG_DURATION="30"
 
-AWS_CONFIG_FILE_1="rule_copilot.yml"
+AWS_CONFIG_FILE_1="none_raft.yml"
 AWS_CONFIG_FILE_2="client_open.yml"  # Added client_closed.yml for AWS
 AWS_CONFIG_FILE_3="60c1s5r10p.yml"
 AWS_CONFIG_FILE_4="rw_1000000.yml"

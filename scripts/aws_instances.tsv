@@ -1,0 +1,11 @@
+# index	city	region		instance_id		eip
+00	california	us-west-1	i-0f70dec7655081bf1	50.18.6.110
+01	oregon		us-west-2	i-09cf9833a0b7996f8	16.147.179.18
+02	mumbai		ap-south-1	i-0528cfb3b73fc8059	13.204.39.150
+03	frankfurt	eu-central-1	i-0621a2385bc6702ea	18.194.81.161
+04	stockholm	eu-north-1	i-02ea9823bac3fc360	13.62.22.60
+05	london		eu-west-2	i-0eea3649466e2ff12	18.135.149.143
+06	hongkong	ap-east-1	i-0295e6aaf846eb023	18.167.57.88
+07	singapore	ap-southeast-1	i-00cb17ed925b96898	54.179.153.233
+08	ireland		eu-west-1	i-0192dc7663754d41c	34.240.22.11
+09	paris		eu-west-3	i-06e598140b4b512d8	13.39.208.170
