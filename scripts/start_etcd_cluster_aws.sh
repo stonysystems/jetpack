@@ -43,6 +43,15 @@ ETCDCTL_BIN="${ETCDCTL_BIN:-\$HOME/.local/bin/etcdctl}"
 ETCD_PORT="${ETCD_PORT:-2379}"
 ETCD_PEER_PORT="${ETCD_PEER_PORT:-2380}"
 BACKEND_CORE="${BACKEND_CORE:-1}"
+# Set ETCD_UNSAFE_NO_FSYNC=1 to launch etcd with --unsafe-no-fsync, so WAL
+# writes skip fsync. Used to isolate disk-fsync contribution from the
+# observed Janus etcd latency surge. Default OFF (fsync enabled).
+ETCD_UNSAFE_NO_FSYNC="${ETCD_UNSAFE_NO_FSYNC:-0}"
+ETCD_NO_FSYNC_FLAG=""
+if [[ "$ETCD_UNSAFE_NO_FSYNC" == "1" ]]; then
+    ETCD_NO_FSYNC_FLAG="--unsafe-no-fsync"
+    echo "[etcd] WARNING: launching with --unsafe-no-fsync (durability disabled)"
+fi
 
 if [[ "$ENV" != "aws" ]]; then
     echo "[etcd] AWS-specific script (setup.json says env=$ENV); use start_etcd_cluster.sh for zoo"; exit 1
@@ -103,6 +112,7 @@ for i in $(seq 0 $((N_REPLICA-1))); do
             --initial-cluster-token=jetpack-etcd-aws \
             --initial-cluster=${CLUSTER} \
             --initial-cluster-state=new \
+            ${ETCD_NO_FSYNC_FLAG} \
             --logger=zap --log-level=warn \
             > /tmp/etcd-${NAMES[$i]}.log 2>&1 &" \
         >/dev/null 2>&1 &
