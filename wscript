@@ -72,6 +72,9 @@ def options(opt):
     opt.add_option('','--enable-jetpack-prof', dest='enable_jetpack_prof',
                    default=False, action='store_true',
                    help='Define JETPACK_PROF=1 to enable per-stage timing counters in scheduler / service / coordinator hot paths. Production builds should leave this off (zero overhead when undefined).')
+    opt.add_option('','--enable-mongodb-no-journal', dest='enable_mongodb_no_journal',
+                   default=False, action='store_true',
+                   help='Define MONGODB_NO_JOURNAL=1 so the mongocxx client URI carries journal=false instead of journal=true. Mongodb 7+ requires journal at the server, so this is the only fsync-off-equivalent knob: writes ack before the server has flushed the journal.')
     opt.parse_args();
 
 def configure(conf):
@@ -143,6 +146,8 @@ def configure(conf):
                               "-DRAFT_PIPELINE_CAP=%d" % Options.options.raft_pipeline_cap)
     if Options.options.enable_jetpack_prof:
         conf.env.append_value("CXXFLAGS", "-DJETPACK_PROF=1")
+    if Options.options.enable_mongodb_no_journal:
+        conf.env.append_value("CXXFLAGS", "-DMONGODB_NO_JOURNAL=1")
 
     # if Options.options.curp_fast_path:
     #     conf.env.append_value("CXXFLAGS", "-DCURP_FAST_PATH")

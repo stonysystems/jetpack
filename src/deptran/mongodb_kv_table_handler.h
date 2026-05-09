@@ -25,8 +25,19 @@ inline mongocxx::instance& GetMongoInstance() {
 // the client / database / collection — no per-operation patching needed.
 // See results/2026-04-30-camera-ready-exp0-small/settings.md
 // "MongoDB configuration: linearizable consistency".
+//
+// `--enable-mongodb-no-journal` flips `journal=true` to `journal=false`
+// in the URI so writes ack before the server has flushed the journal.
+// This is the only fsync-off-equivalent knob since mongodb 7+ removed
+// `storage.journal.enabled` server-side (journal is mandatory for
+// WiredTiger). Used by 2026-05-09 task 5 (mongodb fsync-off rerun).
+#ifdef MONGODB_NO_JOURNAL
+#define JANUS_MONGO_LINEARIZABLE_OPTS \
+  "w=majority&journal=false&readConcernLevel=linearizable&readPreference=primary"
+#else
 #define JANUS_MONGO_LINEARIZABLE_OPTS \
   "w=majority&journal=true&readConcernLevel=linearizable&readPreference=primary"
+#endif
 
 #if defined(JETPACK_MONGODB_RECOVERY)
 // Use local loopback in recovery mode to avoid changing legacy defaults.
