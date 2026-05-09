@@ -1,0 +1,12 @@
+mode:
+  cc: rule # concurrency control
+  ab: etcd # atomic broadcast
+  # read_only: occ
+  batch: false
+  retry: 20
+  ongoing: 1 # per client
+  # NOTE: jetpack_merge_leader_rpc is unsafe under cc:rule — see commit
+  # 62e1d7db retraction and the gate at rule/coordinator.cc. The merge
+  # path skips the leader from the spec quorum, dropping FQ from 4-of-5
+  # to 3-of-4 and breaking fast-path recovery. Force-disabled here.
+  jetpack_merge_leader_rpc: false

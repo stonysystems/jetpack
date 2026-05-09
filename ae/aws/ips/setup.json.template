@@ -1,0 +1,17 @@
+{
+  "environment": "aws",
+  "server_username": "ubuntu",
+  "n_server": "10",
+  "servers": [
+    { "server_0_ip": "REPLACE_ME", "server_0_key": "REPLACE_ME_KEY" },
+    { "server_1_ip": "REPLACE_ME", "server_1_key": "REPLACE_ME_KEY" },
+    { "server_2_ip": "REPLACE_ME", "server_2_key": "REPLACE_ME_KEY" },
+    { "server_3_ip": "REPLACE_ME", "server_3_key": "REPLACE_ME_KEY" },
+    { "server_4_ip": "REPLACE_ME", "server_4_key": "REPLACE_ME_KEY" },
+    { "server_5_ip": "REPLACE_ME", "server_5_key": "REPLACE_ME_KEY" },
+    { "server_6_ip": "REPLACE_ME", "server_6_key": "REPLACE_ME_KEY" },
+    { "server_7_ip": "REPLACE_ME", "server_7_key": "REPLACE_ME_KEY" },
+    { "server_8_ip": "REPLACE_ME", "server_8_key": "REPLACE_ME_KEY" },
+    { "server_9_ip": "REPLACE_ME", "server_9_key": "REPLACE_ME_KEY" }
+  ]
+}

@@ -1,0 +1,615 @@
+namespace janus;
+
+abstract service MultiPaxos {
+
+  defer Forward(MarshallDeputy cmd,
+                uint64_t dep_id |
+                uint64_t coro_id);
+
+  defer Prepare(uint64_t slot,
+                ballot_t ballot |
+                ballot_t max_ballot,
+                uint64_t coro_id);
+
+  defer Accept(uint64_t slot,
+               uint64_t time,
+               ballot_t ballot,
+               MarshallDeputy cmd |
+               ballot_t max_ballot,
+               uint64_t coro_id);
+
+  defer Decide(uint64_t slot,
+               ballot_t ballot,
+               MarshallDeputy cmd);
+	       
+}
+
+
+abstract service Mongodb {
+  defer Commit(MarshallDeputy cmd);
+}
+
+abstract service Etcd {
+  defer Commit(MarshallDeputy cmd);
+}
+
+abstract service Zookeeper {
+  defer Commit(MarshallDeputy cmd);
+}
+
+abstract service Mencius {
+
+  defer Prepare(uint64_t slot,
+                ballot_t ballot |
+                ballot_t max_ballot,
+                uint64_t coro_id);
+
+  defer Suggest(uint64_t slot,
+               uint64_t time,
+               ballot_t ballot,
+               uint64_t sender,
+               vector<uint64_t> skip_commits,
+               vector<uint64_t> skip_potentials,
+               MarshallDeputy cmd |
+               ballot_t max_ballot,
+               uint64_t coro_id);
+
+  defer Decide(uint64_t slot,
+               ballot_t ballot,
+               MarshallDeputy cmd);
+}
+
+abstract service FpgaRaft {
+	defer Heartbeat(uint64_t leaderPrevLogIndex,
+									DepId dep_id |
+									uint64_t followerPrevLogIndex);
+
+  defer Forward(MarshallDeputy cmd |
+                uint64_t cmt_idx );
+
+  defer Vote(uint64_t lst_log_idx,
+                ballot_t lst_log_term,
+                parid_t par_id,
+                ballot_t cur_term|
+                ballot_t max_ballot,
+                bool_t vote_granted );
+
+  defer Vote2FPGA(uint64_t lst_log_idx,
+                ballot_t lst_log_term,
+                parid_t par_id,
+                ballot_t cur_term |
+                ballot_t max_ballot,
+                bool_t vote_granted );
+
+  defer AppendEntries(uint64_t slot,
+                      ballot_t ballot,
+                      uint64_t leaderCurrentTerm,
+                      uint64_t leaderPrevLogIndex,
+                      uint64_t leaderPrevLogTerm,
+                      uint64_t leaderCommitIndex,
+											DepId dep_id,
+                      MarshallDeputy cmd |
+                      uint64_t followerAppendOK,
+                      uint64_t followerCurrentTerm,
+                      uint64_t followerLastLogIndex);
+ 
+	defer AppendEntries2(uint64_t slot,
+                      ballot_t ballot,
+                      uint64_t leaderCurrentTerm,
+                      uint64_t leaderPrevLogIndex,
+                      uint64_t leaderPrevLogTerm,
+                      uint64_t leaderCommitIndex,
+											DepId dep_id,
+                      MarshallDeputy cmd |
+                      uint64_t followerAppendOK,
+                      uint64_t followerCurrentTerm,
+                      uint64_t followerLastLogIndex);
+
+  defer Decide(uint64_t slot,
+               ballot_t ballot,
+							 DepId dep_id,
+               MarshallDeputy cmd);
+}
+
+abstract service Raft {  
+
+  defer Vote(uint64_t lst_log_idx,
+                ballot_t lst_log_term,
+                siteid_t site_id,
+                ballot_t cur_term|
+                ballot_t max_ballot,
+                bool_t vote_granted );
+
+  defer AppendEntries(uint64_t slot,
+                      ballot_t ballot,
+                      uint64_t leaderCurrentTerm,
+                      siteid_t leaderSiteId,
+                      uint64_t leaderPrevLogIndex,
+                      uint64_t leaderPrevLogTerm,
+                      uint64_t leaderCommitIndex,
+                      MarshallDeputy cmd,
+                      uint64_t leaderNextLogTerm |
+                      uint64_t followerAppendOK,
+                      uint64_t followerCurrentTerm,
+                      uint64_t followerLastLogIndex);
+
+  defer EmptyAppendEntries(uint64_t slot,
+                           ballot_t ballot,
+                           uint64_t leaderCurrentTerm,
+                           siteid_t leaderSiteId,
+                           uint64_t leaderPrevLogIndex,
+                           uint64_t leaderPrevLogTerm,
+                           uint64_t leaderCommitIndex |
+                           uint64_t followerAppendOK,
+                           uint64_t followerCurrentTerm,
+                           uint64_t followerLastLogIndex);
+                    
+}
+
+abstract service Copilot {
+  defer Forward(MarshallDeputy cmd);
+
+  defer Prepare(uint8_t is_pilot,
+                uint64_t slot,
+                ballot_t ballot,
+                DepId dep_id |
+                MarshallDeputy ret_cmd,
+                ballot_t max_ballot,
+                uint64_t dep,
+                status_t status);
+
+  defer FastAccept(uint8_t is_pilot,
+                   uint64_t slot,
+                   ballot_t ballot,
+                   uint64_t dep,
+                   MarshallDeputy cmd,
+                   DepId dep_id |
+                   ballot_t max_ballot,
+                   uint64_t ret_dep);
+
+  defer Accept(uint8_t is_pilot,
+               uint64_t slot,
+               ballot_t ballot,
+               uint64_t dep,
+               MarshallDeputy cmd,
+               DepId dep_id |
+               ballot_t max_ballot);
+
+  defer Commit(uint8_t is_pilot,
+               uint64_t slot,
+               uint64_t dep,
+               MarshallDeputy cmd);
+}
+
+// below is for 2PL and OCC
+abstract service Classic {
+  defer MsgString(string arg | string ret);
+
+  defer MsgMarshall(MarshallDeputy arg | MarshallDeputy ret);
+
+//  defer Dispatch(vector<SimpleCommand> cmd |
+//                 i32 res,
+//                 TxnOutput output);
+
+	defer ReElect(| bool_t success);
+  defer RuleSpeculativeExecute(MarshallDeputy md |
+                               bool_t accepted,
+                               int32_t result,
+                               bool_t is_leader,
+                               double cpu_usage,
+                               double queue_depth);
+  defer Dispatch(i64 tid, DepId dep_id, MarshallDeputy cmd |
+                 i32 res, TxnOutput output, uint64_t coro_id, MarshallDeputy view_data);
+  defer DispatchWithRuleSpec(i64 tid, DepId dep_id, MarshallDeputy cmd |
+                             i32 res, TxnOutput output, uint64_t coro_id, MarshallDeputy view_data,
+                             bool_t accepted, int32_t spec_result, bool_t is_leader,
+                             double cpu_usage, double queue_depth);
+  defer Prepare(i64 tid, 
+                vector<i32> sids,
+                DepId dep_id | 
+                i32 res,
+								bool_t slow,
+                uint64_t coro_id);
+
+  defer Commit(i64 tid, DepId dep_id | i32 res, bool_t slow, uint64_t coro_id, Profiling profile, MarshallDeputy view_data);
+
+  defer Abort(i64 tid, DepId dep_id | i32 res, bool_t slow, uint64_t coro_id, Profiling profile, MarshallDeputy view_data);
+
+  defer EarlyAbort(i64 tid | i32 res);
+
+  defer UpgradeEpoch(uint32_t curr_epoch |
+                     int32_t res);
+
+  defer TruncateEpoch(uint32_t old_epoch);
+  
+  defer IsLeader(locid_t cur_pause| bool_t is_leader );
+  defer IsFPGALeader(locid_t cur_pause| bool_t is_leader );
+  defer SimpleCmd( SimpleCommand cmd| i32 res);
+  defer FailoverPauseSocketOut(| i32 res);
+  defer FailoverResumeSocketOut(| i32 res);
+   
+  // input: contains many pieces, each piece consist of
+  // | <i32 p_type> <i64 pid> <i32 input_size> <i32 max_output_size> 
+  // <input_0> <input_1> ... |
+  // output: contains many pieces, each piece consist of
+  // | <i32 res> <i32 output_size> <output_0> <output_1> ... |
+  // below is for what?
+
+  defer rpc_null( | );
+  //  defer Prepare();
+  defer TapirAccept(uint64_t cmd_id,
+                    int64_t ballot,
+	                int32_t decision);
+  // works as 2PC prepare on a paxos fast-accept
+  defer TapirFastAccept(uint64_t cmd_id,
+                        vector<SimpleCommand> txn_cmds |
+                        i32 res);
+  // works as a 2PC commit/abort with a paxos decision
+  defer TapirDecide(uint64_t cmd_id, i32 commit);
+  
+  defer CarouselReadAndPrepare(i64 tid, MarshallDeputy cmd, bool_t leader |
+                 i32 res, TxnOutput output);
+
+  defer CarouselAccept(uint64_t cmd_id,
+                    int64_t ballot,
+	                int32_t decision);
+  // works as 2PC prepare on a paxos fast-accept
+  defer CarouselFastAccept(uint64_t cmd_id,
+                        vector<SimpleCommand> txn_cmds |
+                        i32 res);
+  // works as a 2PC commit/abort with a paxos decision
+  defer CarouselDecide(uint64_t cmd_id, i32 commit);  
+
+  defer RccDispatch(vector<SimpleCommand> cmd |
+                    i32 res,
+                    TxnOutput output,
+                    MarshallDeputy md_graph);
+
+  defer RccFinish(cmdid_t id,
+                  MarshallDeputy md_graph |
+                  map<uint32_t, map<int32_t, Value>> outputs);
+
+  // defer RccInquire(epoch_t epoch,
+  //                  txnid_t txn_id |
+  //                  MarshallDeputy md_res_graph);
+
+  defer RccInquire(txnid_t txn_id, int32_t rank |
+                   map<uint64_t, parent_set_t>);
+
+  defer RccDispatchRo(SimpleCommand cmd |
+                      map<i32, Value> output);
+
+  defer RccInquireValidation(txid_t tx_id, int32_t rank | int32_t res);
+
+  defer RccNotifyGlobalValidation(txid_t tx_id, int32_t rank, int32_t res |);
+
+  defer JanusDispatch(vector<SimpleCommand> cmd |
+                      i32 res,
+                      TxnOutput output,
+                      MarshallDeputy ret_graph);
+
+  defer RccCommit(cmdid_t id,
+                  rank_t rank,
+                  int32_t need_validation,
+                  parent_set_t  parents |
+                  int32_t res,
+                  TxnOutput output);
+
+  defer JanusCommit(cmdid_t id,
+                    rank_t rank,
+                    int32_t need_validation,
+                    MarshallDeputy graph |
+                    int32_t res,
+                    TxnOutput output);
+
+  defer JanusCommitWoGraph(cmdid_t id,
+                           rank_t rank,
+                           int32_t need_validation |
+                           int32_t res,
+                           TxnOutput output);
+
+  defer JanusInquire(epoch_t epoch, 
+                     txnid_t txn_id |
+                     MarshallDeputy ret_graph);
+
+  defer RccPreAccept(cmdid_t txn_id,
+                     rank_t rank,
+                     vector<SimpleCommand> cmd |
+                     i32 res,
+                     parent_set_t x );
+
+  defer JanusPreAccept(cmdid_t txn_id,
+                       rank_t rank,
+                       vector<SimpleCommand> cmd,
+                       MarshallDeputy graph |
+                       i32 res,
+                       MarshallDeputy ret_graph);
+
+  defer JanusPreAcceptWoGraph(cmdid_t txn_id,
+                              rank_t rank,
+                              vector<SimpleCommand> cmd |
+                              i32 res,
+                              MarshallDeputy ret_graph);
+
+  defer RccAccept(cmdid_t txn_id,
+                  i32 rank,
+                  ballot_t ballot,
+                  parent_set_t p  |
+                  i32 res);
+
+  defer JanusAccept(cmdid_t txn_id,
+                    i32 rank,
+                    ballot_t ballot,
+                    MarshallDeputy graph |
+                    i32 res);
+
+  defer PreAcceptFebruus(txid_t tx_id |
+                         i32 ret,
+                         uint64_t timestamp);
+
+  defer AcceptFebruus(txid_t tx_id,
+                      ballot_t ballot,
+                      uint64_t timestamp |
+                      i32 ret);
+
+  defer CommitFebruus(txid_t tx_id, uint64_t timestamp | i32 ret);
+
+  defer JetpackPullRecovery(MarshallDeputy old_view,
+                            MarshallDeputy new_view,
+                            epoch_t jepoch,
+                            epoch_t oepoch |
+                            bool_t ok,
+                            epoch_t reply_jepoch,
+                            epoch_t reply_oepoch,
+                            MarshallDeputy reply_old_view,
+                            MarshallDeputy reply_new_view,
+                            MarshallDeputy key_id_batch);
+
+  defer JetpackPullIdSet(epoch_t jepoch,
+                         epoch_t oepoch |
+                         bool_t ok,
+                         epoch_t reply_jepoch,
+                         epoch_t reply_oepoch,
+                         MarshallDeputy reply_old_view,
+                         MarshallDeputy reply_new_view,
+                         MarshallDeputy id_set);
+  
+  defer JetpackPullCmd(epoch_t jepoch,
+                       epoch_t oepoch,
+                       MarshallDeputy key_batch |
+                       bool_t ok,
+                       epoch_t reply_jepoch,
+                       epoch_t reply_oepoch,
+                       MarshallDeputy reply_old_view,
+                       MarshallDeputy reply_new_view,
+                       MarshallDeputy cmd_batch);
+  
+  defer JetpackRecordCmd(epoch_t jepoch,
+                         epoch_t oepoch,
+                         int32_t sid,
+                         MarshallDeputy record_id_batch,
+                         MarshallDeputy missing_id_batch |
+                         bool_t ok,
+                         epoch_t reply_jepoch,
+                         epoch_t reply_oepoch,
+                         MarshallDeputy reply_old_view,
+                         MarshallDeputy reply_new_view,
+                         MarshallDeputy cmd_batch);
+
+  defer JetpackPrepare(epoch_t jepoch,
+                       epoch_t oepoch,
+                       ballot_t max_seen_ballot |
+                       bool_t ok,
+                       epoch_t reply_jepoch,
+                       epoch_t reply_oepoch,
+                       MarshallDeputy reply_old_view,
+                       MarshallDeputy reply_new_view,
+                       ballot_t reply_max_seen_ballot,
+                       ballot_t accepted_ballot,
+                       int32_t replied_sid);
+
+  defer JetpackAccept(epoch_t jepoch,
+                      epoch_t oepoch,
+                      ballot_t max_seen_ballot,
+                      int32_t sid |
+                      bool_t ok,
+                      epoch_t reply_jepoch,
+                      epoch_t reply_oepoch,
+                      MarshallDeputy reply_old_view,
+                      MarshallDeputy reply_new_view,
+                      ballot_t reply_max_seen_ballot);
+
+  defer JetpackCommit(epoch_t jepoch,
+                      epoch_t oepoch,
+                      int32_t sid);
+
+  defer JetpackFinishRecovery(epoch_t oepoch);
+}
+
+abstract service SwiftPaxosService {
+  // Normal path: client proposes, replicas respond with fast/slow acks
+  defer SwiftPropose(MarshallDeputy cmd |
+                     i32 res);
+
+  defer SwiftFastAck(siteid_t replica,
+                     ballot_t ballot,
+                     i64 cmd_id,
+                     i32 key,
+                     i64 seqnum,
+                     vector<i64> dep |
+                     i32 res);
+
+  // Light slow-ack: matches IMDEA's MLightSlowAck. Carries no dep — the
+  // leader's SwiftFastAck already supplies the authoritative dep; this
+  // message just votes "I adopt the leader's dep on the slow path." The IDL
+  // name stays SwiftSlowAck for backwards compatibility with existing tooling.
+  defer SwiftSlowAck(siteid_t replica,
+                     ballot_t ballot,
+                     i64 cmd_id |
+                     i32 res);
+
+  // Batched ack envelope (mirrors IMDEA's MAcks/MOptAcks). The MarshallDeputy
+  // payload is a SwiftBatchedAcks carrying any number of FastAcks and
+  // LightSlowAcks coalesced from one sender's per-cmd queue. Used only when
+  // `batch: true` is set in the mode YAML; per-cmd SwiftFastAck/SwiftSlowAck
+  // are still defined for the unbatched path (and for the slow-path adopt
+  // wire) so toggling is a one-line config change.
+  defer SwiftAcks(MarshallDeputy batched_acks |
+                  i32 res);
+
+  // Recovery: leader election and state sync
+  defer SwiftNewLeader(siteid_t replica,
+                       ballot_t ballot |
+                       i32 res);
+
+  defer SwiftNewLeaderAck(siteid_t replica,
+                          ballot_t ballot,
+                          ballot_t cballot,
+                          MarshallDeputy cmd_states |
+                          i32 res);
+
+  defer SwiftSync(siteid_t replica,
+                  ballot_t ballot,
+                  MarshallDeputy cmd_states |
+                  i32 res);
+}
+
+abstract service EPaxosCService {
+  // Phase 1: PreAccept (fast path)
+  defer EPaxosCPreAccept(siteid_t leader,
+                         siteid_t replica,
+                         i64 instance,
+                         ballot_t ballot,
+                         MarshallDeputy cmd,
+                         i32 seq,
+                         MarshallDeputy deps |
+                         i32 status,
+                         ballot_t reply_ballot,
+                         i32 reply_seq,
+                         MarshallDeputy reply_deps);
+
+  // Phase 2: Accept (slow path)
+  defer EPaxosCAccept(siteid_t leader,
+                      siteid_t replica,
+                      i64 instance,
+                      ballot_t ballot,
+                      i32 seq,
+                      MarshallDeputy deps |
+                      i32 status,
+                      ballot_t reply_ballot);
+
+  // Phase 3: Commit
+  defer EPaxosCCommit(siteid_t leader,
+                      siteid_t replica,
+                      i64 instance,
+                      ballot_t ballot,
+                      MarshallDeputy cmd,
+                      i32 seq,
+                      MarshallDeputy deps);
+
+  // Recovery: Prepare
+  defer EPaxosCPrepare(siteid_t leader,
+                       siteid_t replica,
+                       i64 instance,
+                       ballot_t ballot |
+                       i32 status,
+                       ballot_t reply_ballot,
+                       ballot_t reply_vbal,
+                       MarshallDeputy reply_cmd,
+                       i32 reply_seq,
+                       MarshallDeputy reply_deps);
+
+  // Recovery: TryPreAccept
+  defer EPaxosCTryPreAccept(siteid_t leader,
+                            siteid_t replica,
+                            i64 instance,
+                            ballot_t ballot,
+                            MarshallDeputy cmd,
+                            i32 seq,
+                            MarshallDeputy deps |
+                            i32 status,
+                            ballot_t reply_ballot,
+                            ballot_t reply_vbal,
+                            siteid_t conflict_replica,
+                            i64 conflict_instance,
+                            i32 conflict_status);
+}
+
+// Below is for statistics
+
+struct ValueTimesPair {
+    i64 value;
+    i64 times;
+}
+
+struct DepId {
+	string str;
+	i64 id;
+}
+
+struct TxnInfoRes {
+    i32 start_txn;  // total number of started txns
+    i32 total_txn;  // total number of finished txns
+    i32 total_try;  // total number of tries finished
+    i32 commit_txn; // number of commit transactions
+    i32 num_exhausted; // number of txns that reached the retry limit
+    vector<double> this_latency; // latencies started  finish in this period
+    vector<double> last_latency; // latencies started in last period, finish in this period
+    vector<double> attempt_latency; // interval latencies for each attempts
+    vector<double> interval_latency; // latencies finish in this period
+    vector<double> all_interval_latency; // latencies finish in this period include txn's with exhausted retries
+    vector<i32> num_try;
+}
+
+struct ServerResponse {
+    map<string, ValueTimesPair> statistics;
+    double cpu_util;
+    i64 r_cnt_sum;
+    i64 r_cnt_num;
+    i64 r_sz_sum;
+    i64 r_sz_num;
+}
+
+struct ClientResponse  {
+    map<i32, TxnInfoRes> txn_info; // statistics for each txn
+    i64 run_sec;    // running time in seconds
+    i64 run_nsec;   // running time in nano seconds
+    i64 period_sec;    // running time in seconds
+    i64 period_nsec;   // running time in nano seconds
+    i32 is_finish;  // if client finishs
+    i64 n_asking;   // asking finish request count
+}
+
+struct Profiling {
+    double cpu_util;
+    double tx_util;
+    double rx_util;
+		double mem_util;
+}
+
+abstract service ServerControl {
+    defer server_shutdown ( | );
+    defer server_ready ( | i32 res);
+    defer server_heart_beat_with_data ( | ServerResponse res);
+    defer server_heart_beat ( | );
+}
+
+struct TxDispatchRequest {
+    i32 id;
+    i32 tx_type;
+    vector<Value> input;
+}
+
+struct TxnDispatchResponse {
+}
+
+abstract service ClientControl {
+    defer client_get_txn_names( | map<i32, string> txn_names);
+    defer client_shutdown ( | );
+    defer client_force_stop ( | );
+    defer client_response ( DepId dep_id | ClientResponse res);
+    defer client_ready ( | i32 res);
+    defer client_ready_block ( | i32 res);
+    defer client_start ( | );
+    defer DispatchTxn(TxDispatchRequest req | TxReply result);
+}

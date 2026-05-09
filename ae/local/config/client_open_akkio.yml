@@ -1,0 +1,9 @@
+client:
+    # Open-loop Akkio-style latency configuration. Each client site emits
+    # requests at an average rate of 'rate' per second, capped at
+    # 'max_undone' concurrently outstanding. Combined with
+    # config/concurrent_20.yml (n_concurrent: 20) this bounds each site to
+    # ~20 in-flight ops; total in-flight across 100 sites ~= 2000.
+    type: open
+    rate: 1000
+    max_undone: 20

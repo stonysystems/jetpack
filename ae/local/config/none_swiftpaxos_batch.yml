@@ -1,0 +1,6 @@
+mode:
+  cc: none
+  ab: swiftpaxos
+  batch: true
+  retry: 20
+  ongoing: 1 # per client

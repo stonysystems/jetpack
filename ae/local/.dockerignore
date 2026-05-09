@@ -1,0 +1,52 @@
+states/
+tla/
+.git
+**/.git
+**/.gitignore
+
+# Big build outputs / caches
+**/target
+**/build
+# Keep mongo-c-driver CMake modules required by third_party/mongo-c-driver/CMakeLists.txt.
+!third_party/mongo-c-driver/build
+!third_party/mongo-c-driver/build/cmake
+!third_party/mongo-c-driver/build/cmake/**
+**/dist
+**/.cache
+**/__pycache__
+**/*.log
+
+# Node / Python
+**/node_modules
+**/.venv
+**/venv
+
+# Common “huge stuff” (adjust to your repo)
+data/
+datasets/
+results/
+artifacts/
+tmp/
+out/
+logs/
+
+# Large data directories not needed for builds
+old_scripts/
+curp_scripts/
+data_processing/
+dependencies/
+scripts/*-failure-recovery-data*/
+scripts/*-failure-recovery-data*/
+docs/sweep_*/logs/
+**/*.csv
+**/*.res
+
+# Large archives/images
+**/*.tar
+**/*.tar.gz
+**/*.tgz
+**/*.zip
+**/*.7z
+**/*.iso
+**/*.img
+**/*.qcow2

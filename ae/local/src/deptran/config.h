@@ -1,0 +1,355 @@
+#ifndef CONFIG_H_
+#define CONFIG_H_
+
+#include "__dep__.h"
+#include "constants.h"
+#include "sharding.h"
+
+namespace janus {
+
+class Config {
+ public:
+  static const int BASE_CLIENT_CTRL_PORT = 5555;
+  typedef enum {
+    SS_DISABLED,
+    SS_THREAD_SINGLE,
+    SS_PROCESS_SINGLE
+  } single_server_t;
+
+  std::map<string, mdb::symbol_t> tbl_types_map_ = {
+      {"sorted", mdb::TBL_SORTED},
+      {"unsorted", mdb::TBL_UNSORTED},
+      {"snapshot", mdb::TBL_SNAPSHOT}
+  };
+
+  enum ClientType { Open, Closed };
+  enum TimestampType {CLOCK=0, COUNTER=1};
+
+ public:
+
+  static Config *config_s;
+  void init_hostsmap(const char *hostspath);
+  std::string site2host_addr(std::string &name);
+  std::string site2host_name(std::string &addr);
+  std::vector<std::string> GetReplicaHosts(parid_t par_id);
+
+  bool heart_beat_;
+  // configuration for trial controller.
+  char *ctrl_hostname_;
+  uint32_t ctrl_port_;
+  uint32_t ctrl_timeout_;
+  char *ctrl_key_;
+  char *ctrl_init_;
+  uint32_t duration_;
+  int tot_req_num_;
+  vector<string> config_paths_;
+
+  // common configuration
+  ClientType client_type_ = Closed;
+  int client_rate_ = -1;
+  int32_t client_max_undone_ = -1;
+  int32_t tx_proto_ = 0; // transaction protocol
+  int32_t replica_proto_ = 0; // replication protocol
+  uint32_t proc_id_;
+  int32_t benchmark_; // workload
+  uint32_t scale_factor_ = 1; // currently disabled
+  std::vector<double> txn_weight_;
+  map<string, double> txn_weights_;
+  std::string proc_name_;
+  std::string exp_setting_name_;
+  bool batch_start_;
+  bool early_return_;
+  bool retry_wait_;
+  string logging_path_;
+  single_server_t single_server_;
+  uint16_t n_concurrent_;
+  int32_t max_retry_;
+  string dist_ = "uniform";
+  int32_t range_ = -1;
+  float coeffcient_ = 0; // "uniform"
+  int32_t rotate_{3};
+  int32_t n_parallel_dispatch_{0};
+  bool forwarding_enabled_ = false;
+  int timestamp_{TimestampType::CLOCK};
+  // Raft favored-leader locale: the replica with this locale_id gets a
+  // short election timeout (5–10× heartbeat) and reliably wins the
+  // initial election; everyone else uses _prio=20 (~100s, longer than a
+  // typical experiment so they never campaign). Default 0 = first
+  // locale in the host: list. Set top-level `raft_leader_locale: <N>`
+  // in any -f yaml.
+  int raft_leader_locale_ = 0;
+
+  // failover configuration
+  bool failover_{false};
+  bool failover_soft_{false};
+  bool failover_random_{false};
+  bool failover_leader_{false};
+  int32_t failover_srv_idx_{-1};
+  int32_t failover_run_int_{0};
+  int32_t failover_stop_int_{0};
+
+  // TODO remove, will cause problems.
+  uint32_t num_site_;
+  uint32_t start_coordinator_id_;
+  vector<string> site_;
+  vector<uint32_t> site_threads_;
+  uint32_t num_coordinator_threads_;
+  uint32_t sid_;
+  uint32_t cid_;
+
+  // carousel mode choice
+  bool carousel_basic_mode_ = false;
+
+  // Jetpack fast path mode
+  int jetpack_fastpath_attempt_rate_ = 0;
+  int jetpack_recovery_batch_size_ = 1000;
+  // When true and fastpath is active for a txn, the leader's Dispatch RPC and
+  // RuleSpeculativeExecute RPC are fused into a single DispatchWithRuleSpec
+  // RPC. Reduces per-txn leader-side RPC dispatch overhead (total RPCs drops
+  // from N+1 to N, leader handles 1 RPC instead of 2).
+  bool jetpack_merge_leader_rpc_ = false;
+
+  // Optimization for the throttled-jp-raft-adaptive case. With this off
+  // (default), every original-path command goes through
+  // OriginalPathUnexecutedCmdConflictPlaceHolder -> command_pool_.push_back
+  // (and RuleCommandPoolGC -> remove on commit). With this on, those
+  // calls are skipped for original-path-only commands; the leader's
+  // fast-path conflict check then has to walk its own uncommitted
+  // raft_logs_ range to detect conflicts with logged-but-unapplied
+  // original-path commands. The pool ends up tracking ONLY fast-path
+  // attempts, which removes ~30k unordered_map ops/sec from the
+  // saturated leader at peak load and lets jp-raft-adaptive close most
+  // of the gap to vanilla raft when the throttle drives fp_rate -> 0.
+  // See docs/2026-04-23_max_throughput_protocols_with_optimized_jetpack.md
+  // and the discussion thread for the design.
+  bool jetpack_skip_pool_for_original_path_ = false;
+
+  // Raft read-lease optimization. When enabled, single-key read pieces
+  // arriving at the partition leader are served directly from the
+  // leader's local state machine while the leader holds a valid lease,
+  // skipping the AppendEntries replication round-trip. Reads that miss
+  // the lease (warm-up not elapsed, lease lapsed, or non-leader) fall
+  // back to the standard Raft-replicated path. Independent of cc:rule
+  // / Jetpack / CURP — works with cc:none + ab:raft directly.
+  bool raft_read_lease_ = false;
+
+  // etcd client-side batching. When size > 1, the EtcdConnectionThreadPool
+  // coalesces up to size_ ops into one etcd Txn, flushing when the buffer
+  // hits size_ OR timeout_ms_ elapses since the first enqueue, whichever
+  // first. Default (size=1, timeout_ms=0) disables batching entirely.
+  int etcd_batch_size_ = 1;
+  int etcd_batch_timeout_ms_ = 0;
+
+  // Mirror the etcd server's ETCD_READ_ONLY_OPTION=lease setting into the
+  // deptran client/server latency model. When true, read-only ops served
+  // by the leader no longer need a cross-host Raft round (lease-based
+  // linearizable reads), so the simulated WAN delays around the etcd
+  // Submit path are skipped for reads. Writes still pay the full cost
+  // (they need Raft commit regardless). Default false matches stock
+  // etcd's ReadOnlySafe / ReadIndex path.
+  bool etcd_lease_reads_ = false;
+
+  enum SiteInfoType { CLIENT, SERVER };
+  struct SiteInfo {
+    siteid_t id; // unique site id
+    uint32_t locale_id; // represents a group of servers, such as those located in same datacenter
+    string name;        // site name
+    string proc_name;   // proc name
+    string host;
+    uint32_t port = 0;
+    uint32_t n_thread;   // should be 1 for now
+    SiteInfoType type_; 
+    uint32_t partition_id_=0;
+
+    SiteInfo() = delete;
+    SiteInfo(uint32_t id) : id(id) {}
+    SiteInfo(uint32_t id, std::string &site_addr) :
+      id(id) {
+      auto pos = site_addr.find(':');
+      verify(pos != std::string::npos);
+      name = site_addr.substr(0, pos);
+      std::string port_str = site_addr.substr(pos + 1);
+      port = std::stoi(port_str);
+    }
+
+    string GetBindAddress() {
+      string ret("0.0.0.0:");
+      ret = ret.append(std::to_string(port));
+      return ret;
+    }
+
+    string GetHostAddr() {
+      if (proc_name.empty())
+        proc_name = name;
+      if (host.empty())
+        host = proc_name;
+      string ret;
+      ret = ret.append(host).append(":").append(std::to_string(port));
+      return ret;
+    }
+  };
+
+  
+  struct ReplicaGroup {
+    parid_t partition_id = 0;
+    std::vector<SiteInfo*> replicas;
+    ReplicaGroup(parid_t id) : partition_id(id) {}
+  };
+
+  uint32_t next_site_id_;
+  vector<ReplicaGroup> replica_groups_;
+  vector<SiteInfo> sites_;
+  vector<SiteInfo> par_clients_;
+  map<string, string> proc_host_map_;
+  map<string, string> site_proc_map_;
+
+  Sharding* sharding_;
+  
+  // Store the raw YAML configuration
+  YAML::Node yaml_config_;
+
+ protected:
+
+  Config() = default;
+
+  Config(char *ctrl_hostname,
+         uint32_t ctrl_port,
+         uint32_t ctrl_timeout,
+         char *ctrl_key,
+         char *ctrl_init,
+         int32_t tot_req_num,
+         int16_t n_concurrent,
+         uint32_t duration,
+         bool heart_beat,
+         single_server_t single_server,
+         string logging_path,
+         int jetpack_fastpath_attempt_rate
+  );
+  int GetClientPort(std::string site_name);
+
+ public:
+  static int CreateConfig(int argc,
+                          char **argv);
+  static Config* GetConfig();
+  static void DestroyConfig();
+
+  void InitTPCCD();
+
+  void Load();
+
+  void LoadYML(std::string &);
+  void LoadSiteYML(YAML::Node config);
+  void LoadProcYML(YAML::Node config);
+  void LoadHostYML(YAML::Node config);
+  void LoadModeYML(YAML::Node config);
+  void LoadBenchYML(YAML::Node config);
+  void LoadShardingYML(YAML::Node config);
+  void LoadClientYML(YAML::Node client);
+  void LoadSchemaYML(YAML::Node config);
+  void LoadFailoverYML(YAML::Node config);
+  void LoadSchemaTableColumnYML(Sharding::tb_info_t &tb_info,
+                                YAML::Node column);
+  void UpdateWeights(YAML::Node config);
+
+  void InitMode(std::string&cc_name, string&ab_name);
+  void InitBench(std::string &);
+
+  uint32_t get_site_id();
+  uint32_t get_client_id();
+  uint32_t get_ctrl_port();
+  uint32_t get_ctrl_timeout();
+  const char *get_ctrl_hostname();
+  const char *get_ctrl_key();
+  const char *get_ctrl_init();
+
+  int GetProfilePath(char *prof_file);
+
+  // const char *get_ctrl_run();
+  uint32_t get_duration();
+  bool do_heart_beat();
+  int32_t get_all_site_addr(std::vector<std::string> &servers);
+  int32_t get_site_addr(uint32_t sid,
+                        std::string &server);
+
+  int NumSites(SiteInfoType type=SERVER);
+  const SiteInfo& SiteById(uint32_t id);
+  vector<SiteInfo> SitesByPartitionId(parid_t partition_id);
+  vector<int> SiteIdsByPartitionId(parid_t partition_id);
+  vector<SiteInfo> SitesByLocaleId(uint32_t locale_id, SiteInfoType type=SERVER);
+  vector<SiteInfo> SitesByProcessName(string proc_name, SiteInfoType type=SERVER);
+  SiteInfo* SiteByName(std::string name);
+  int GetPartitionSize(parid_t par_id);
+  vector<SiteInfo> GetMyServers() { return SitesByProcessName(this->proc_name_, SERVER); }
+  vector<SiteInfo> GetMyClients() { return SitesByProcessName(this->proc_name_, CLIENT); }
+  // Is the given site_id on the same physical host as this process? Used
+  // by the colocation-aware WAN_WAIT_TO macro to skip simulated WAN delay
+  // when caller and peer are on the same zoo host.
+  bool IsSiteLocal(siteid_t site_id);
+  bool GetJetpackSkipPoolForOriginalPath() const {
+    return jetpack_skip_pool_for_original_path_;
+  }
+  // True when -m matches the CURP behavior selector (200). CURP is a
+  // protocol mode rather than a Jetpack throttle setting; the value is
+  // squatted on jetpack_fastpath_attempt_rate_ for transport reasons.
+  // Use this accessor instead of comparing the raw int at every call
+  // site so the CURP-distinct branches read consistently.
+  bool IsCurpMode() const {
+    return jetpack_fastpath_attempt_rate_ == CURP_MODE;
+  }
+  bool IsRaftReadLease() const { return raft_read_lease_; }
+  int NumClients() {
+    return par_clients_.size();
+  }
+
+  vector<parid_t> GetAllPartitionIds() {
+    vector<parid_t> ret;
+    for(int i = 0; i < replica_groups_.size(); i++) {
+      ret.push_back(i);
+    }
+    return ret;
+  }
+
+  int32_t get_threads(uint32_t &threads);
+  int32_t get_mode();
+  uint32_t get_num_threads();
+  uint32_t get_start_coordinator_id();
+  int32_t benchmark();
+  uint32_t GetNumPartition();
+  int32_t get_num_leaders(parid_t partition_id);
+  uint32_t get_scale_factor();
+  int32_t get_max_retry();
+  single_server_t get_single_server();
+  uint32_t get_concurrent_txn();
+  int GetJetpackRecoveryBatchSize() const { return jetpack_recovery_batch_size_; }
+  int GetEtcdBatchSize() const { return etcd_batch_size_; }
+  int GetEtcdBatchTimeoutMs() const { return etcd_batch_timeout_ms_; }
+  bool GetEtcdLeaseReads() const { return etcd_lease_reads_; }
+  int GetRaftLeaderLocale() const { return raft_leader_locale_; }
+  bool get_batch_start();
+  bool do_early_return();
+  bool do_logging();
+  bool IsReplicated();
+  int32_t get_tot_req();
+  bool get_failover() { return failover_; }
+  int32_t get_failover_stop_interval() { return failover_stop_int_; }
+  int32_t get_failover_run_interval() { return failover_run_int_; }
+  int32_t get_failover_srv_idx() { return failover_srv_idx_; }
+  bool get_failover_random() { return failover_random_; }
+  bool get_failover_leader() { return failover_leader_; }
+  bool carousel_basic_mode() { return carousel_basic_mode_; }
+
+  const char *log_path();
+
+  bool retry_wait();
+
+  std::vector<double> &get_txn_weight();
+
+  ~Config();
+
+    map<string, double> &get_txn_weights();
+
+  void BuildSiteProcMap(YAML::Node node);
+};
+} // namespace janus
+
+#endif // ifndef CONFIG_H_

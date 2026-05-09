@@ -1,0 +1,16 @@
+mode:
+  cc: none     # concurrency control: no distributed tx
+  ab: naive_rpc # "atomic broadcast" set to MODE_NONE alias — no replication
+  batch: false
+  retry: 20
+  ongoing: 1
+
+# naive_rpc is the simplest possible "consensus" protocol:
+#   client sends one Dispatch RPC to the configured target (locale_id=1,
+#   IP .102, displayed as zoo2 in 1-indexed naming)
+#   server executes the R/W command locally (SchedulerNone::Dispatch) and
+#   replies immediately. No replication, no quorum, no ordering.
+#
+# Measures: pure RPC framework overhead + 1 WAN RTT for non-target-host
+# clients. Serves as a baseline for how much the consensus path costs on
+# top of a single round-trip.

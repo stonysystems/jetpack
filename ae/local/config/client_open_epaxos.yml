@@ -1,0 +1,12 @@
+client:
+    type: open
+    rate: 1000
+    # Per-protocol max_undone (uniform-yml rule, set 2026-05-05; revised 2026-05-06).
+    # Sizing: aggregate offered tput = 60 × min(c, max_undone).
+    # EPaxos: 2026-05-06 v2 sweep showed tput plateau at 17.7k r/s (98% of
+    # the prior 60×300=18k cap) with avg latency only ~330ms at c=1000 —
+    # the cap was binding, not the cluster. Bumped to 1000 (60k cluster
+    # cap = ~3.4× the prior peak) so the next sweep can find the real
+    # knee. If c=1000 still doesn't show latency surge with the new cap,
+    # add c=1500 / c=2000 to the sweep.
+    max_undone: 1000

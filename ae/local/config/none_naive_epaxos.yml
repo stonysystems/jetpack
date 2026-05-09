@@ -1,0 +1,19 @@
+mode:
+  cc: none          # concurrency control: no distributed tx
+  ab: naive_epaxos  # "atomic broadcast": EPaxos-shaped per-site leader, no log
+  batch: false
+  retry: 20
+  ongoing: 1
+
+# naive_epaxos is an EPaxos-shaped broadcast without any of the bookkeeping:
+#   1. client sends one Dispatch RPC to its co-located server (every server
+#      is a potential leader for its own local clients)
+#   2. that server broadcasts Dispatch to the 4 remote servers with
+#      dep_id.str "ne_replicate" so followers recognize the replication path
+#   3. followers execute the R/W command locally and ack unconditionally
+#   4. leader counts itself as 1 and waits for 2 follower replies (3/5
+#      simple majority), executes locally, then replies to the client
+#
+# No log, no election, no dep tracking. Baseline for the CPU/latency cost
+# of the per-site-leader + majority-quorum shape (i.e. EPaxos-style request
+# routing) without any of the EPaxos bookkeeping.

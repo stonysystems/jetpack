@@ -1,0 +1,20 @@
+
+site:
+  server: # 5-replica raft group
+    - ["s101:38000", "s201:38001", "s301:38002", "s401:38003", "s501:38004"]
+  client: # single client process
+    - ["c01"]
+
+process:
+  s101: zoo1
+  s201: zoo2
+  s301: zoo3
+  s401: zoo4
+  s501: zoo2    # colocated with s201 on zoo-002 (avoiding zoo-005)
+  c01:  zoo1    # client on leader host
+
+host:
+  zoo1: 130.245.173.101
+  zoo2: 130.245.173.102
+  zoo3: 130.245.173.103
+  zoo4: 130.245.173.104

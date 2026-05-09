@@ -1,0 +1,1049 @@
+#include "__dep__.h"
+#include "benchmark_control_rpc.h"
+#include "carousel/scheduler.h"
+#include "classic/scheduler.h"
+#include "classic/tpc_command.h"
+#include "classic/tx.h"
+#include "command.h"
+#include "command_marshaler.h"
+#include "communicator.h"
+#include "config.h"
+#include "coordinator.h"
+#include "februus/scheduler.h"
+#include "janus/scheduler.h"
+#include "procedure.h"
+#include "rcc/dep_graph.h"
+#include "service.h"
+#include "rcc/server.h"
+#include "scheduler.h"
+#include "tapir/scheduler.h"
+#include "naive_raft/commo.h"
+#include "naive_epaxos/commo.h"
+#include "../bench/rw/workload.h" //<copilot+ kv debug>
+
+namespace janus {
+
+namespace {
+
+static cmdid_t ExtractCmdIdFromVecPiece(const std::shared_ptr<Marshallable>& cmd) {
+  if (!cmd) {
+    return 0;
+  }
+  if (cmd->kind_ == MarshallDeputy::CMD_VEC_PIECE) {
+    auto vec_piece_data = std::dynamic_pointer_cast<VecPieceData>(cmd);
+    if (vec_piece_data && vec_piece_data->sp_vec_piece_data_ &&
+        !vec_piece_data->sp_vec_piece_data_->empty()) {
+      return vec_piece_data->sp_vec_piece_data_->at(0)->root_id_;
+    }
+  }
+  return 0;
+}
+
+}  // namespace
+
+ClassicServiceImpl::ClassicServiceImpl(TxLogServer* sched,
+                                       rrr::PollMgr* poll_mgr,
+                                       ServerControlServiceImpl* scsi) : scsi_(
+    scsi), dtxn_sched_(sched), poll_mgr_(poll_mgr) {
+
+#ifdef PIECE_COUNT
+  piece_count_timer_.start();
+  piece_count_prepare_fail_ = 0;
+  piece_count_prepare_success_ = 0;
+#endif
+
+  if (Config::GetConfig()->do_logging()) {
+    verify(0); // TODO disable logging for now.
+    auto path = Config::GetConfig()->log_path();
+//    recorder_ = new Recorder(path);
+//    poll_mgr->add(recorder_);
+  }
+
+  this->RegisterStats();
+}
+
+void ClassicServiceImpl::ReElect(bool_t* success,
+																 rrr::DeferredReply* defer) {
+	for(int i = 0; i < 100000; i++) Log_info("loop loop loop");
+	*success = dtxn_sched()->RequestVote();
+	defer->reply();
+}
+
+void ClassicServiceImpl::RuleSpeculativeExecute(const MarshallDeputy& md,
+                                                bool_t* accepted,
+                                                int32_t* result,
+                                                bool_t* is_leader,
+                                                double* cpu_usage,
+                                                double* queue_depth,
+                                                rrr::DeferredReply* defer) {
+  shared_ptr<Marshallable> sp = md.sp_data_;
+  dtxn_sched()->OnRuleSpeculativeExecute(sp, accepted, result, is_leader, cpu_usage, queue_depth);
+  if (!dtxn_sched()->paused_)
+    defer->reply();
+}
+
+void ClassicServiceImpl::Dispatch(const i64& cmd_id,
+																	const DepId& dep_id,
+                                  const MarshallDeputy& md,
+                                  int32_t* res,
+                                  TxnOutput* output,
+                                  uint64_t* coro_id,
+                                  MarshallDeputy* view_data,
+                                  rrr::DeferredReply* defer) {
+  DispatchInner(cmd_id, dep_id, md, res, output, coro_id, view_data);
+  defer->reply();
+}
+
+void ClassicServiceImpl::DispatchWithRuleSpec(const i64& cmd_id,
+                                              const DepId& dep_id,
+                                              const MarshallDeputy& md,
+                                              int32_t* res,
+                                              TxnOutput* output,
+                                              uint64_t* coro_id,
+                                              MarshallDeputy* view_data,
+                                              bool_t* accepted,
+                                              int32_t* spec_result,
+                                              bool_t* is_leader,
+                                              double* cpu_usage,
+                                              double* queue_depth,
+                                              rrr::DeferredReply* defer) {
+  // Fused leader-side handler: run the speculative vote first (it observes
+  // pre-dispatch state, same as the split-RPC ordering when fastpath is on),
+  // then drive the normal Dispatch replication pipeline. Single coroutine,
+  // single reply — halves the per-txn RPC dispatch cost on the leader.
+  shared_ptr<Marshallable> sp = md.sp_data_;
+  dtxn_sched()->OnRuleSpeculativeExecute(sp, accepted, spec_result, is_leader,
+                                         cpu_usage, queue_depth);
+  // Always drive dispatch and always reply. If paused, OnRuleSpeculativeExecute
+  // already set accepted=false, which the client's spec quorum will treat as a
+  // rejection — the dispatch half still needs to ack so the protocol (Raft
+  // etc.) is not held up.
+  DispatchInner(cmd_id, dep_id, md, res, output, coro_id, view_data);
+  defer->reply();
+}
+
+void ClassicServiceImpl::DispatchInner(const i64& cmd_id,
+                                       const DepId& dep_id,
+                                       const MarshallDeputy& md,
+                                       int32_t* res,
+                                       TxnOutput* output,
+                                       uint64_t* coro_id,
+                                       MarshallDeputy* view_data) {
+#ifdef JETPACK_PROF
+  auto prof_t0 = std::chrono::steady_clock::now();
+#endif
+  // usleep(20000);
+
+#ifdef LATENCY_LOG_DEBUG
+  Log_info("!!!!!!!!!!!!! cmd %d enter ClassicServiceImpl::Dispatch (after client RPC) at loc_id %d", cmd_id, dtxn_sched()->loc_id_);
+#endif
+
+#ifdef FULL_LOG_DEBUG
+  if (md.sp_data_ && md.sp_data_->kind_ == MarshallDeputy::CMD_TPC_BATCH) {
+    auto batch = std::dynamic_pointer_cast<TpcBatchCommand>(md.sp_data_);
+    if (batch && !batch->cmds_.empty()) {
+      auto first_cmd = batch->cmds_.front();
+      auto first_id = SimpleRWCommand::GetCmdID(first_cmd);
+      Log_info("[Jetpack] batch cmd<%d, %d> size=%zu entered ClassicServiceImpl::Dispatch",
+               first_id.first,
+               first_id.second,
+               batch->Size());
+    } else {
+      Log_info("[Jetpack] empty batch entered ClassicServiceImpl::Dispatch");
+    }
+  } else {
+    Log_info("[Jetpack] cmd<%d, %d> entered ClassicServiceImpl::Dispatch",
+             SimpleRWCommand::GetCmdID(md.sp_data_).first,
+             SimpleRWCommand::GetCmdID(md.sp_data_).second);
+  }
+#endif
+
+#ifdef COPILOT_TIME_DEBUG
+  struct timeval tp;
+  gettimeofday(&tp, NULL);
+  Log_info("[Jetpack] [C+] Received Dispatch %.3f", tp.tv_sec * 1000 + tp.tv_usec / 1000.0);
+#endif
+
+  Log_debug("The server side receives a message from the client worker");
+  // Log_info("[copilot+] [1+] enter ClassicServiceImpl::Dispatch");
+
+#ifdef PIECE_COUNT
+  piece_count_key_t piece_count_key =
+      (piece_count_key_t){header.t_type, header.p_type};
+  std::map<piece_count_key_t, uint64_t>::iterator pc_it =
+      piece_count_.find(piece_count_key);
+
+  if (pc_it == piece_count_.end())
+      piece_count_[piece_count_key] = 1;
+  else
+      piece_count_[piece_count_key]++;
+  piece_count_tid_.insert(header.tid);
+#endif
+  shared_ptr<Marshallable> sp = md.sp_data_;
+  std::shared_ptr<ViewData> latest_view;
+
+  // naive_raft leader path: kick off the follower broadcast before running
+  // local execution so the two overlap. Followers receive the marker
+  // dep_id.str == "nr_replicate" and skip this branch (fall straight to
+  // local execution + reply, per the default flow below).
+  shared_ptr<QuorumEvent> nr_event;
+  if (Config::GetConfig()->replica_proto_ == MODE_NAIVE_RAFT &&
+      dtxn_sched()->loc_id_ == 1 &&
+      dep_id.str != "nr_replicate") {
+    nr_event = NaiveRaftStartReplicate(dtxn_sched()->commo_,
+                                       dtxn_sched()->partition_id_,
+                                       dtxn_sched()->loc_id_,
+                                       cmd_id,
+                                       md);
+  }
+
+  // naive_epaxos per-site-leader path: every server acts as a leader for
+  // its co-located clients. Clients route to their own locale (see
+  // GetLeaderForPartition), and the receiving server broadcasts to the 4
+  // others. Followers see dep_id.str == "ne_replicate" and skip this
+  // branch.
+  shared_ptr<QuorumEvent> ne_event;
+  if (Config::GetConfig()->replica_proto_ == MODE_NAIVE_EPAXOS &&
+      dep_id.str != "ne_replicate") {
+    ne_event = NaiveEpaxosStartReplicate(dtxn_sched()->commo_,
+                                         dtxn_sched()->partition_id_,
+                                         dtxn_sched()->loc_id_,
+                                         cmd_id,
+                                         md);
+  }
+
+  auto dispatch_single_command =
+      [&](cmdid_t single_cmd_id, const shared_ptr<Marshallable>& single_cmd) -> int {
+        if (!single_cmd) {
+          return REJECT;
+        }
+#ifndef ZERO_OVERHEAD
+        dtxn_sched()->OriginalPathUnexecutedCmdConflictPlaceHolder(single_cmd);
+#endif
+        std::shared_ptr<ViewData> single_view;
+        int single_res = dtxn_sched()->Dispatch(single_cmd_id, single_cmd, *output, single_view);
+        if (single_view) {
+          latest_view = single_view;
+        }
+        return single_res;
+      };
+
+  int overall_res = SUCCESS;
+  if (sp && sp->kind_ == MarshallDeputy::CMD_TPC_BATCH) {
+    auto batch_cmd = std::dynamic_pointer_cast<TpcBatchCommand>(sp);
+    if (!batch_cmd || batch_cmd->cmds_.empty()) {
+      overall_res = REJECT;
+    } else {
+      for (auto& commit_cmd : batch_cmd->cmds_) {
+        if (!commit_cmd || !commit_cmd->cmd_) {
+          continue;
+        }
+        cmdid_t derived_cmd_id = commit_cmd->tx_id_;
+        if (derived_cmd_id == 0) {
+          derived_cmd_id = ExtractCmdIdFromVecPiece(commit_cmd->cmd_);
+        }
+        if (derived_cmd_id == 0) {
+          Log_error("[JETPACK-RECOVERY] Unable to determine cmd_id for batched command");
+          overall_res = REJECT;
+          break;
+        }
+        overall_res = dispatch_single_command(derived_cmd_id, commit_cmd->cmd_);
+        if (overall_res != SUCCESS) {
+          break;
+        }
+      }
+    }
+  } else {
+    cmdid_t derived_cmd_id = ExtractCmdIdFromVecPiece(sp);
+    if (derived_cmd_id == 0) {
+      derived_cmd_id = cmd_id;
+    }
+    overall_res = dispatch_single_command(derived_cmd_id, sp);
+  }
+
+  *res = overall_res;
+  if (latest_view) {
+    view_data->SetMarshallable(latest_view);
+  } else {
+    view_data->SetMarshallable(std::make_shared<ViewData>());
+  }
+
+  // naive_raft leader: block until 2 followers have replied (3/5 simple
+  // majority counting self) before acking the client.
+  if (nr_event) {
+    nr_event->Wait();
+  }
+  // naive_epaxos: same 2-follower quorum gate before replying.
+  if (ne_event) {
+    ne_event->Wait();
+  }
+
+  *coro_id = Coroutine::CurrentCoroutine()->id;
+#ifdef JETPACK_PROF
+  auto prof_t1 = std::chrono::steady_clock::now();
+  dtxn_sched_->prof_dispatch_calls_.fetch_add(1, std::memory_order_relaxed);
+  dtxn_sched_->prof_dispatch_ns_.fetch_add(
+      std::chrono::duration_cast<std::chrono::nanoseconds>(prof_t1 - prof_t0).count(),
+      std::memory_order_relaxed);
+#endif
+  // defer->reply() is called by the outer handler (Dispatch or
+  // DispatchWithRuleSpec) after any additional work is done.
+  // }, __FILE__, cmd_id);
+  // auto func = [cmd_id, sp, output, dep_id, res, coro_id, this, defer]() {
+  //   *res = SUCCESS;
+  //   auto sched = (SchedulerClassic*) dtxn_sched_;
+  //   if (!sched->Dispatch(cmd_id, dep_id, sp, *output)) {
+  //     *res = REJECT;
+  //   }
+  //   *coro_id = Coroutine::CurrentCoroutine()->id;
+  //   defer->reply();
+  // };
+
+  // auto sched = (SchedulerClassic*) dtxn_sched_;
+  // auto tx = dynamic_pointer_cast<TxClassic>(sched->GetOrCreateTx(cmd_id));
+	// func();
+  // Log_info("[copilot+] [1-] exit ClassicServiceImpl::Dispatch");
+}
+
+
+void ClassicServiceImpl::FailoverPauseSocketOut(
+    rrr::i32* res, rrr::DeferredReply* defer) {
+#ifdef FAILOVER_DEBUG
+  Log_info("!!!!!!!!!!!!!! ClassicServiceImpl::FailoverPauseSocketOut");
+#endif
+  if (pause && clt_cnt_ == 0) {
+    // TODO temp solution yidawu
+    auto client_infos = Config::GetConfig()->GetMyClients();
+    unordered_set<string> clt_set;
+    for (auto c : client_infos) {
+      clt_set.insert(c.host);
+    }
+
+    clt_cnt_.store(clt_set.size());
+  }
+
+  Coroutine::CreateRun([&]() {
+    // TODO: yidawu need to test with multi clients in diff machines
+    int wait_int = 50 * 1000; // 50ms
+    while (clt_cnt_.load() == 0) {
+      auto e = Reactor::CreateSpEvent<NeverEvent>();
+      e->Wait(wait_int);
+    }
+    clt_cnt_--;
+    while (clt_cnt_.load() != 0) {
+      auto e = Reactor::CreateSpEvent<NeverEvent>();
+      e->Wait(wait_int);
+    }
+    dtxn_sched_->rep_sched_->Pause();
+    poll_mgr_->pause();
+    *res = SUCCESS;
+    defer->reply();
+  });
+}
+
+void ClassicServiceImpl::FailoverResumeSocketOut(
+    rrr::i32* res, rrr::DeferredReply* defer) {
+#ifdef FAILOVER_DEBUG
+  Log_info("!!!!!!!!!!!!!! ClassicServiceImpl::FailoverResumeSocketOut");
+#endif
+  if (pause && clt_cnt_ == 0) {
+    // TODO temp solution yidawu
+    auto client_infos = Config::GetConfig()->GetMyClients();
+    unordered_set<string> clt_set;
+    for (auto c : client_infos) {
+      clt_set.insert(c.host);
+    }
+
+    clt_cnt_.store(clt_set.size());
+  }
+
+  Coroutine::CreateRun([&]() {
+    poll_mgr_->resume();
+    dtxn_sched_->rep_sched_->Resume();
+    *res = SUCCESS;
+    defer->reply();
+  });
+}
+
+void ClassicServiceImpl::SimpleCmd(
+    const SimpleCommand& cmd, rrr::i32* res, rrr::DeferredReply* defer) {
+  Coroutine::CreateRun([res, defer, this]() {
+    auto empty_cmd = std::make_shared<TpcEmptyCommand>();
+    verify(empty_cmd->kind_ == MarshallDeputy::CMD_TPC_EMPTY);
+    auto sp_m = dynamic_pointer_cast<Marshallable>(empty_cmd);
+    auto sched = (SchedulerClassic*)dtxn_sched_;
+    sched->CreateRepCoord(0)->Submit(sp_m);
+    empty_cmd->Wait();
+    *res = SUCCESS;
+    defer->reply();
+  });
+}
+
+void ClassicServiceImpl::IsLeader(
+    const locid_t& can_id, bool_t* is_leader, rrr::DeferredReply* defer) {
+  auto sched = (SchedulerClassic*)dtxn_sched_;
+  *is_leader = sched->IsLeader();
+  defer->reply();
+}
+
+void ClassicServiceImpl::IsFPGALeader(
+    const locid_t& can_id, bool_t* is_leader, rrr::DeferredReply* defer) {
+  auto sched = (SchedulerClassic*)dtxn_sched_;
+  *is_leader = sched->IsFPGALeader();
+  defer->reply();
+}
+void ClassicServiceImpl::Prepare(const rrr::i64& tid,
+                                 const std::vector<i32>& sids,
+                                 const DepId& dep_id,
+                                 rrr::i32* res,
+																 bool_t* slow,
+                                 uint64_t* coro_id,
+                                 rrr::DeferredReply* defer) {
+//  std::lock_guard<std::mutex> guard(mtx_);
+  const auto& func = [res, slow, coro_id, defer, tid, sids, dep_id, this]() {
+    auto sched = (SchedulerClassic*) dtxn_sched_;
+		bool null_cmd = false;
+    bool ret = sched->OnPrepare(tid, sids, dep_id, null_cmd);
+		//Log_info("slow1: %d", sched->slow_);
+		*slow = sched->slow_;
+    *res = ret ? SUCCESS : REJECT;
+		if(null_cmd) *res = REPEAT;
+    *coro_id = Coroutine::CurrentCoroutine()->id;
+    if (defer != nullptr) defer->reply();
+  };
+
+	//Log_info("CreateRunning2");
+	func();
+  //auto coro = Coroutine::CreateRun(func);
+  //Log_info("coro id on service side: %d", coro->id);
+// TODO move the stat to somewhere else.
+#ifdef PIECE_COUNT
+  std::map<piece_count_key_t, uint64_t>::iterator pc_it;
+  if (*res != SUCCESS)
+      piece_count_prepare_fail_++;
+  else
+      piece_count_prepare_success_++;
+  if (piece_count_timer_.elapsed() >= 5.0) {
+      Log::info("PIECE_COUNT: txn served: %u", piece_count_tid_.size());
+      Log::info("PIECE_COUNT: prepare success: %llu, failed: %llu",
+        piece_count_prepare_success_, piece_count_prepare_fail_);
+      for (pc_it = piece_count_.begin(); pc_it != piece_count_.end(); pc_it++)
+          Log::info("PIECE_COUNT: t_type: %d, p_type: %d, started: %llu",
+            pc_it->first.t_type, pc_it->first.p_type, pc_it->second);
+      piece_count_timer_.start();
+  }
+#endif
+}
+
+void ClassicServiceImpl::Commit(const rrr::i64& tid,
+                                const DepId& dep_id,
+                                rrr::i32* res,
+																bool_t* slow,
+                                uint64_t* coro_id,
+																Profiling* profile,
+                                MarshallDeputy* view_data,
+                                rrr::DeferredReply* defer) {
+  //std::lock_guard<std::mutex> guard(mtx_);
+  const auto& func = [tid, res, slow, coro_id, dep_id, profile, view_data, defer, this]() {
+    auto sched = (SchedulerClassic*) dtxn_sched_;
+    int ret = sched->OnCommit(tid, dep_id, SUCCESS);
+    
+    std::vector<double> result = rrr::CPUInfo::cpu_stat();
+    *profile = {result[0], result[1], result[2], result[3]};
+		//*profile = {0.0, 0.0, 0.0, 0.0};
+		//Log_info("slow2: %d", sched->slow_);
+		*slow = sched->slow_;
+    *coro_id = Coroutine::CurrentCoroutine()->id;
+    
+    if (ret == WRONG_LEADER) {
+      *res = WRONG_LEADER;
+#ifdef JETPACK_WRONG_LEADER_DEBUG
+      Log_info("[WRONG_LEADER] ServiceImpl::Commit returning WRONG_LEADER for tx_id: %lu", tid);
+#endif
+      // Get view data from the transaction or command
+      auto sp_tx = dynamic_pointer_cast<TxClassic>(sched->GetTx(tid));
+      if (sp_tx && sp_tx->cmd_) {
+        auto tx_data = dynamic_cast<TxData*>(sp_tx->cmd_.get());
+        if (tx_data && tx_data->reply_.sp_view_data_) {
+          view_data->SetMarshallable(tx_data->reply_.sp_view_data_);
+          Log_info("[WRONG_LEADER] ServiceImpl::Commit attached view data: %s", 
+                   tx_data->reply_.sp_view_data_->ToString().c_str());
+        }
+      }
+    } else {
+      *res = SUCCESS;
+      // Set view data from replication scheduler if available
+      if (sched->rep_sched_ != nullptr) {
+        view_data->SetMarshallable(std::make_shared<ViewData>(sched->rep_sched_->new_view_));
+      } else {
+        // If no replication scheduler, set an empty ViewData
+        view_data->SetMarshallable(std::make_shared<ViewData>());
+      }
+    }
+    
+    defer->reply();
+  };
+	//Log_info("CreateRunning2");
+  //Coroutine::CreateRun(func);
+	func();
+}
+
+void ClassicServiceImpl::Abort(const rrr::i64& tid,
+                               const DepId& dep_id,
+                               rrr::i32* res,
+															 bool_t* slow,
+                               uint64_t* coro_id,
+															 Profiling* profile,
+                               MarshallDeputy* view_data,
+                               rrr::DeferredReply* defer) {
+  Log_debug("get abort_txn: tid: %ld", tid);
+  //std::lock_guard<std::mutex> guard(mtx_);
+  const auto& func = [tid, res, slow, coro_id, dep_id, profile, view_data, defer, this]() {
+    auto sched = (SchedulerClassic*) dtxn_sched_;
+    sched->OnCommit(tid, dep_id, REJECT);
+    std::vector<double> result = rrr::CPUInfo::cpu_stat();
+    *profile = {result[0], result[1], result[2]};
+		Log_info("slow3: %d", sched->slow_);
+		*slow = sched->slow_;
+    *res = SUCCESS;
+    *coro_id = Coroutine::CurrentCoroutine()->id;
+    // Set view data from replication scheduler if available
+    if (sched->rep_sched_ != nullptr) {
+      view_data->SetMarshallable(std::make_shared<ViewData>(sched->rep_sched_->new_view_));
+    } else {
+      // If no replication scheduler, set an empty ViewData
+      view_data->SetMarshallable(std::make_shared<ViewData>());
+    }
+    defer->reply();
+  };
+	//Log_info("CreateRunning2");
+  //Coroutine::CreateRun(func);
+	func();
+}
+
+void ClassicServiceImpl::EarlyAbort(const rrr::i64& tid,
+                                    rrr::i32* res,
+                                    rrr::DeferredReply* defer) {
+  Log_debug("get abort_txn: tid: %ld", tid);
+//  std::lock_guard<std::mutex> guard(mtx_);
+//  const auto& func = [tid, res, defer, this]() {
+  auto sched = (SchedulerClassic*) dtxn_sched_;
+  sched->OnEarlyAbort(tid);
+  *res = SUCCESS;
+  defer->reply();
+//  };
+//  Coroutine::CreateRun(func);
+}
+
+void ClassicServiceImpl::rpc_null(rrr::DeferredReply* defer) {
+  defer->reply();
+}
+
+void ClassicServiceImpl::UpgradeEpoch(const uint32_t& curr_epoch,
+                                      int32_t* res,
+                                      DeferredReply* defer) {
+  *res = dtxn_sched()->OnUpgradeEpoch(curr_epoch);
+  defer->reply();
+}
+
+void ClassicServiceImpl::TruncateEpoch(const uint32_t& old_epoch,
+                                       DeferredReply* defer) {
+  verify(0);
+}
+
+void ClassicServiceImpl::TapirAccept(const cmdid_t& cmd_id,
+                                     const ballot_t& ballot,
+                                     const int32_t& decision,
+                                     rrr::DeferredReply* defer) {
+  verify(0);
+}
+
+void ClassicServiceImpl::TapirFastAccept(const txid_t& tx_id,
+                                         const vector<SimpleCommand>& txn_cmds,
+                                         rrr::i32* res,
+                                         rrr::DeferredReply* defer) {
+  SchedulerTapir* sched = (SchedulerTapir*) dtxn_sched_;
+  *res = sched->OnFastAccept(tx_id, txn_cmds);
+  defer->reply();
+}
+
+void ClassicServiceImpl::TapirDecide(const cmdid_t& cmd_id,
+                                     const rrr::i32& decision,
+                                     rrr::DeferredReply* defer) {
+  SchedulerTapir* sched = (SchedulerTapir*) dtxn_sched_;
+  sched->OnDecide(cmd_id, decision, [defer]() { defer->reply(); });
+}
+
+void ClassicServiceImpl::CarouselReadAndPrepare(const i64& cmd_id,
+    const MarshallDeputy& md, const bool_t& leader, int32_t* res, TxnOutput* output,
+    rrr::DeferredReply* defer) {
+  // TODO: yidawu
+  shared_ptr<Marshallable> sp = md.sp_data_;
+  *res = SUCCESS;
+  auto sched = (SchedulerCarousel*)dtxn_sched();
+	DepId di;
+	di.str = "dep";
+	di.id = 0;
+  *res = sched->Dispatch(cmd_id, di, sp, *output);
+  if (*res == SUCCESS) {
+    std::vector<i32> sids;
+    if (leader) {
+      *res = sched->OnPrepare(cmd_id) ? SUCCESS : REJECT;
+    } else {
+      // Followers try to do prepare directly.
+      bool ret = sched->DoPrepare(cmd_id);
+      if (!ret) {
+        const auto& func = [res, defer, cmd_id, sids, sched, this]() {
+          auto sp_tx = dynamic_pointer_cast<TxClassic>(sched->GetOrCreateTx(cmd_id));
+          sp_tx->prepare_result->Wait();
+          bool ret2 = sp_tx->prepare_result->Get();
+          *res = ret2 ? SUCCESS : REJECT;
+          defer->reply();
+        };
+        Coroutine::CreateRun(func);
+        return;
+      }
+    }
+  }
+  defer->reply();
+}
+
+void ClassicServiceImpl::CarouselAccept(const cmdid_t& cmd_id, const ballot_t& ballot,
+    const int32_t& decision, rrr::DeferredReply* defer) {
+  verify(0);
+}
+
+void ClassicServiceImpl::CarouselFastAccept(const txid_t& tx_id,
+    const vector<SimpleCommand>& txn_cmds, rrr::i32* res, rrr::DeferredReply* defer) {
+  /*SchedulerCarousel* sched = (SchedulerCarousel*) dtxn_sched_;
+  *res = sched->OnFastAccept(tx_id, txn_cmds);
+  defer->reply();*/
+}
+
+void ClassicServiceImpl::CarouselDecide(
+    const cmdid_t& cmd_id, const rrr::i32& decision, rrr::DeferredReply* defer) {
+  SchedulerCarousel* sched = (SchedulerCarousel*)dtxn_sched_;
+  sched->OnDecide(cmd_id, decision, [defer]() { defer->reply(); });
+}
+
+void ClassicServiceImpl::RccDispatch(const vector<SimpleCommand>& cmd,
+                                     int32_t* res,
+                                     TxnOutput* output,
+                                     MarshallDeputy* p_md_graph,
+                                     DeferredReply* defer) {
+//  std::lock_guard<std::mutex> guard(this->mtx_);
+  RccServer* sched = (RccServer*) dtxn_sched_;
+  p_md_graph->SetMarshallable(std::make_shared<RccGraph>());
+  auto p = dynamic_pointer_cast<RccGraph>(p_md_graph->sp_data_);
+  *res = sched->OnDispatch(cmd, output, p);
+  defer->reply();
+}
+
+void ClassicServiceImpl::RccFinish(const cmdid_t& cmd_id,
+                                   const MarshallDeputy& md_graph,
+                                   TxnOutput* output,
+                                   DeferredReply* defer) {
+  const RccGraph& graph = dynamic_cast<const RccGraph&>(*md_graph.sp_data_);
+  verify(graph.size() > 0);
+  verify(0);
+//  std::lock_guard<std::mutex> guard(mtx_);
+  RccServer* sched = (RccServer*) dtxn_sched_;
+//  sched->OnCommit(cmd_id, RANK_UNDEFINED, graph, output, [defer]() { defer->reply(); });
+
+  stat_sz_gra_commit_.sample(graph.size());
+}
+
+void ClassicServiceImpl::RccInquire(const txnid_t& tid,
+                                    const int32_t& rank,
+                                    map<txid_t, parent_set_t>* ret,
+                                    rrr::DeferredReply* defer) {
+//  verify(IS_MODE_RCC || IS_MODE_RO6);
+//  std::lock_guard<std::mutex> guard(mtx_);
+  RccServer* p_sched = (RccServer*) dtxn_sched_;
+//  p_md_graph->SetMarshallable(std::make_shared<RccGraph>());
+//  p_sched->OnInquire(epoch,
+//                     tid,
+//                     dynamic_pointer_cast<RccGraph>(p_md_graph->sp_data_));
+  p_sched->OnInquire(tid, rank, ret);
+  defer->reply();
+}
+
+
+void ClassicServiceImpl::RccDispatchRo(const SimpleCommand& cmd,
+                                       map<int32_t, Value>* output,
+                                       rrr::DeferredReply* defer) {
+//  std::lock_guard<std::mutex> guard(mtx_);
+  verify(0);
+  auto tx = dtxn_sched_->GetOrCreateTx(cmd.root_id_, true);
+  auto dtxn = dynamic_pointer_cast<RccTx>(tx);
+  dtxn->start_ro(cmd, *output, defer);
+}
+
+void ClassicServiceImpl::RccInquireValidation(
+    const txid_t& txid,
+    const int32_t& rank,
+    int32_t* ret,
+    DeferredReply* defer) {
+  auto* s = (RccServer*) dtxn_sched_;
+  *ret = s->OnInquireValidation(txid, rank);
+  defer->reply();
+}
+
+void ClassicServiceImpl::RccNotifyGlobalValidation(
+    const txid_t& txid, const int32_t& rank, const int32_t& res, DeferredReply* defer) {
+  auto* s = (RccServer*) dtxn_sched_;
+  s->OnNotifyGlobalValidation(txid, rank, res);
+  defer->reply();
+}
+
+void ClassicServiceImpl::JanusDispatch(const vector<SimpleCommand>& cmd,
+                                       int32_t* p_res,
+                                       TxnOutput* p_output,
+                                       MarshallDeputy* p_md_res_graph,
+                                       DeferredReply* p_defer) {
+//    std::lock_guard<std::mutex> guard(this->mtx_); // TODO remove the lock.
+    auto sp_graph = std::make_shared<RccGraph>();
+    auto* sched = (SchedulerJanus*) dtxn_sched_;
+    *p_res = sched->OnDispatch(cmd, p_output, sp_graph);
+    if (sp_graph->size() <= 1) {
+      p_md_res_graph->SetMarshallable(std::make_shared<EmptyGraph>());
+    } else {
+      p_md_res_graph->SetMarshallable(sp_graph);
+    }
+    verify(p_md_res_graph->kind_ != MarshallDeputy::UNKNOWN);
+    p_defer->reply();
+}
+
+void ClassicServiceImpl::JanusCommit(const cmdid_t& cmd_id,
+                                     const rank_t& rank,
+                                     const int32_t& need_validation,
+                                     const MarshallDeputy& graph,
+                                     int32_t* res,
+                                     TxnOutput* output,
+                                     DeferredReply* defer) {
+//  std::lock_guard<std::mutex> guard(mtx_);
+  verify(0);
+  auto sp_graph = dynamic_pointer_cast<RccGraph>(graph.sp_data_);
+  auto p_sched = (RccServer*) dtxn_sched_;
+  *res = p_sched->OnCommit(cmd_id, rank, need_validation, sp_graph, output);
+  defer->reply();
+}
+
+void ClassicServiceImpl::RccCommit(const cmdid_t& cmd_id,
+                                   const rank_t& rank,
+                                   const int32_t& need_validation,
+                                   const parent_set_t& parents,
+                                   int32_t* res,
+                                   TxnOutput* output,
+                                   DeferredReply* defer) {
+//  std::lock_guard<std::mutex> guard(mtx_);
+  auto p_sched = (RccServer*) dtxn_sched_;
+  *res = p_sched->OnCommit(cmd_id, rank, need_validation, parents, output);
+  defer->reply();
+}
+
+void ClassicServiceImpl::JanusCommitWoGraph(const cmdid_t& cmd_id,
+                                            const rank_t& rank,
+                                            const int32_t& need_validation,
+                                            int32_t* res,
+                                            TxnOutput* output,
+                                            DeferredReply* defer) {
+//  std::lock_guard<std::mutex> guard(mtx_);
+  verify(0);
+  auto sched = (SchedulerJanus*) dtxn_sched_;
+  *res = sched->OnCommit(cmd_id, rank, need_validation, nullptr, output);
+  defer->reply();
+}
+
+void ClassicServiceImpl::JanusInquire(const epoch_t& epoch,
+                                      const cmdid_t& tid,
+                                      MarshallDeputy* p_md_graph,
+                                      rrr::DeferredReply* defer) {
+  verify(0);
+//  std::lock_guard<std::mutex> guard(mtx_);
+//  p_md_graph->SetMarshallable(std::make_shared<RccGraph>());
+//  auto p_sched = (SchedulerJanus*) dtxn_sched_;
+//  p_sched->OnInquire(epoch,
+//                     tid,
+//                     dynamic_pointer_cast<RccGraph>(p_md_graph->sp_data_));
+//  defer->reply();
+}
+
+void ClassicServiceImpl::RccPreAccept(const cmdid_t& txnid,
+                                      const rank_t& rank,
+                                      const vector<SimpleCommand>& cmds,
+                                      int32_t* res,
+                                      parent_set_t* res_parents,
+                                      DeferredReply* defer) {
+//  std::lock_guard<std::mutex> guard(mtx_);
+  auto sched = (RccServer*) dtxn_sched_;
+  *res = sched->OnPreAccept(txnid, rank, cmds, *res_parents);
+  defer->reply();
+}
+
+void ClassicServiceImpl::JanusPreAccept(const cmdid_t& txnid,
+                                        const rank_t& rank,
+                                        const vector<SimpleCommand>& cmds,
+                                        const MarshallDeputy& md_graph,
+                                        int32_t* res,
+                                        MarshallDeputy* p_md_res_graph,
+                                        DeferredReply* defer) {
+//  std::lock_guard<std::mutex> guard(mtx_);
+  p_md_res_graph->SetMarshallable(std::make_shared<RccGraph>());
+  auto sp_graph = dynamic_pointer_cast<RccGraph>(md_graph.sp_data_);
+  auto ret_sp_graph = dynamic_pointer_cast<RccGraph>(p_md_res_graph->sp_data_);
+  verify(sp_graph);
+  verify(ret_sp_graph);
+  auto sched = (SchedulerJanus*) dtxn_sched_;
+  *res = sched->OnPreAccept(txnid, rank, cmds, sp_graph, ret_sp_graph);
+  defer->reply();
+}
+
+void ClassicServiceImpl::JanusPreAcceptWoGraph(const cmdid_t& txnid,
+                                               const rank_t& rank,
+                                               const vector<SimpleCommand>& cmds,
+                                               int32_t* res,
+                                               MarshallDeputy* res_graph,
+                                               DeferredReply* defer) {
+//  std::lock_guard<std::mutex> guard(mtx_);
+  res_graph->SetMarshallable(std::make_shared<RccGraph>());
+  auto* p_sched = (SchedulerJanus*) dtxn_sched_;
+  auto sp_ret_graph = dynamic_pointer_cast<RccGraph>(res_graph->sp_data_);
+  *res = p_sched->OnPreAccept(txnid, rank, cmds, nullptr, sp_ret_graph);
+  defer->reply();
+}
+
+void ClassicServiceImpl::RccAccept(const cmdid_t& txnid,
+                                   const rank_t& rank,
+                                   const ballot_t& ballot,
+                                   const parent_set_t& parents,
+                                   int32_t* res,
+                                   DeferredReply* defer) {
+  auto sched = (RccServer*) dtxn_sched_;
+  *res = sched->OnAccept(txnid, rank, ballot, parents);
+  defer->reply();
+}
+
+void ClassicServiceImpl::JanusAccept(const cmdid_t& txnid,
+                                     const int32_t& rank,
+                                     const ballot_t& ballot,
+                                     const MarshallDeputy& md_graph,
+                                     int32_t* res,
+                                     DeferredReply* defer) {
+  auto graph = dynamic_pointer_cast<RccGraph>(md_graph.sp_data_);
+  verify(graph);
+  verify(md_graph.kind_ == MarshallDeputy::RCC_GRAPH);
+  auto sched = (SchedulerJanus*) dtxn_sched_;
+  sched->OnAccept(txnid, rank, ballot, graph, res);
+  defer->reply();
+}
+
+void ClassicServiceImpl::PreAcceptFebruus(const txid_t& tx_id,
+                                          int32_t* res,
+                                          uint64_t* timestamp,
+                                          DeferredReply* defer) {
+  SchedulerFebruus* sched = (SchedulerFebruus*) dtxn_sched_;
+  *res = sched->OnPreAccept(tx_id, *timestamp);
+  defer->reply();
+}
+
+void ClassicServiceImpl::AcceptFebruus(const txid_t& tx_id,
+                                       const ballot_t& ballot,
+                                       const uint64_t& timestamp,
+                                       int32_t* res,
+                                       DeferredReply* defer) {
+  SchedulerFebruus* sched = (SchedulerFebruus*) dtxn_sched_;
+  *res = sched->OnAccept(tx_id, timestamp, ballot);
+  defer->reply();
+
+}
+
+void ClassicServiceImpl::CommitFebruus(const txid_t& tx_id,
+                                       const uint64_t& timestamp,
+                                       int32_t* res,
+                                       DeferredReply* defer) {
+  SchedulerFebruus* sched = (SchedulerFebruus*) dtxn_sched_;
+  *res = sched->OnCommit(tx_id, timestamp);
+  defer->reply();
+}
+
+
+void ClassicServiceImpl::JetpackPullRecovery(const MarshallDeputy& old_view,
+                                             const MarshallDeputy& new_view,
+                                             const epoch_t& jepoch,
+                                             const epoch_t& oepoch,
+                                             bool_t* ok,
+                                             epoch_t* reply_jepoch,
+                                             epoch_t* reply_oepoch,
+                                             MarshallDeputy* reply_old_view,
+                                             MarshallDeputy* reply_new_view,
+                                             MarshallDeputy* id_batch,
+                                             rrr::DeferredReply* defer) {
+  auto batch_result = std::make_shared<KeyCmdIdBatchData>();
+  dtxn_sched()->OnJetpackPullRecovery(old_view, new_view, jepoch, oepoch, ok, reply_jepoch, reply_oepoch, reply_old_view, reply_new_view, batch_result);
+  id_batch->SetMarshallable(batch_result);
+  defer->reply();
+}
+
+void ClassicServiceImpl::JetpackPullIdSet(const epoch_t& jepoch,
+                                          const epoch_t& oepoch,
+                                          bool_t* ok, 
+                                          epoch_t* reply_jepoch, 
+                                          epoch_t* reply_oepoch,
+                                          MarshallDeputy* reply_old_view,
+                                          MarshallDeputy* reply_new_view,
+                                          MarshallDeputy* id_set, 
+                                          rrr::DeferredReply* defer) {
+  id_set->SetMarshallable(std::make_shared<VecRecData>());
+  shared_ptr<VecRecData> sp_ret_id_set = dynamic_pointer_cast<VecRecData>(id_set->sp_data_);
+  dtxn_sched()->OnJetpackPullIdSet(jepoch, oepoch, ok, reply_jepoch, reply_oepoch, reply_old_view, reply_new_view, sp_ret_id_set);
+  defer->reply();
+}
+
+void ClassicServiceImpl::JetpackPullCmd(const epoch_t& jepoch,
+                                        const epoch_t& oepoch, 
+                                        const MarshallDeputy& key_batch, 
+                                        bool_t* ok, 
+                                        epoch_t* reply_jepoch, 
+                                        epoch_t* reply_oepoch,
+                                        MarshallDeputy* reply_old_view,
+                                        MarshallDeputy* reply_new_view,
+                                        MarshallDeputy* cmd_batch, 
+                                        rrr::DeferredReply* defer) {
+  auto vec_keys = std::dynamic_pointer_cast<VecRecData>(key_batch.sp_data_);
+  std::vector<key_t> keys;
+  if (vec_keys && vec_keys->key_data_) {
+    keys.assign(vec_keys->key_data_->begin(), vec_keys->key_data_->end());
+  }
+  auto batch_result = std::make_shared<KeyCmdBatchData>();
+  dtxn_sched()->OnJetpackPullCmd(jepoch, oepoch, keys, ok, reply_jepoch, reply_oepoch, reply_old_view, reply_new_view, batch_result);
+  cmd_batch->SetMarshallable(batch_result);
+  defer->reply();
+
+}
+
+void ClassicServiceImpl::JetpackRecordCmd(const epoch_t& jepoch,
+                                          const epoch_t& oepoch,
+                                          const int32_t& sid,
+                                          const MarshallDeputy& record_id_md,
+                                          const MarshallDeputy& missing_id_md, 
+                                          bool_t* ok,
+                                          epoch_t* reply_jepoch,
+                                          epoch_t* reply_oepoch,
+                                          MarshallDeputy* reply_old_view,
+                                          MarshallDeputy* reply_new_view,
+                                          MarshallDeputy* cmd_md, 
+                                          rrr::DeferredReply* defer) {
+  auto record_batch = std::dynamic_pointer_cast<KeyCmdIdBatchData>(record_id_md.sp_data_);
+  if (!record_batch) {
+    record_batch = std::make_shared<KeyCmdIdBatchData>();
+  }
+  auto missing_batch = std::dynamic_pointer_cast<KeyCmdIdBatchData>(missing_id_md.sp_data_);
+  if (!missing_batch) {
+    missing_batch = std::make_shared<KeyCmdIdBatchData>();
+  }
+  auto cmd_batch = std::make_shared<KeyCmdBatchData>();
+  dtxn_sched()->OnJetpackRecordCmd(jepoch, oepoch, sid, record_batch, missing_batch, cmd_batch);
+  *ok = 1;
+  *reply_jepoch = dtxn_sched()->jepoch_;
+  *reply_oepoch = dtxn_sched()->oepoch_;
+  reply_old_view->SetMarshallable(std::make_shared<ViewData>(dtxn_sched()->old_view_));
+  reply_new_view->SetMarshallable(std::make_shared<ViewData>(dtxn_sched()->new_view_));
+  cmd_md->SetMarshallable(cmd_batch);
+  defer->reply();
+}
+
+void ClassicServiceImpl::JetpackPrepare(const epoch_t& jepoch, 
+                                        const epoch_t& oepoch, 
+                                        const ballot_t& max_seen_ballot, 
+                                        bool_t* ok, 
+                                        epoch_t* reply_jepoch,
+                                        epoch_t* reply_oepoch,
+                                        MarshallDeputy* reply_old_view,
+                                        MarshallDeputy* reply_new_view,
+                                        ballot_t* reply_max_seen_ballot,
+                                        ballot_t* accepted_ballot, 
+                                        int32_t* replied_sid, 
+                                        rrr::DeferredReply* defer) {
+  dtxn_sched()->OnJetpackPrepare(jepoch, oepoch, max_seen_ballot, ok, reply_jepoch, reply_oepoch, reply_old_view, reply_new_view, reply_max_seen_ballot, accepted_ballot, replied_sid);
+  defer->reply();
+}
+
+void ClassicServiceImpl::JetpackAccept(const epoch_t& jepoch, 
+                                       const epoch_t& oepoch, 
+                                       const ballot_t& max_seen_ballot, 
+                                       const int32_t& sid, 
+                                       bool_t* ok, 
+                                       epoch_t* reply_jepoch,
+                                       epoch_t* reply_oepoch,
+                                       MarshallDeputy* reply_old_view,
+                                       MarshallDeputy* reply_new_view,
+                                       ballot_t* reply_max_seen_ballot,
+                                       rrr::DeferredReply* defer) {
+  dtxn_sched()->OnJetpackAccept(jepoch, oepoch, max_seen_ballot, sid, ok, reply_jepoch, reply_oepoch, reply_old_view, reply_new_view, reply_max_seen_ballot);
+  defer->reply();
+}
+
+void ClassicServiceImpl::JetpackCommit(const epoch_t& jepoch,
+                                       const epoch_t& oepoch, 
+                                       const int32_t& sid, 
+                                       rrr::DeferredReply* defer) {
+  dtxn_sched()->OnJetpackCommit(jepoch, oepoch, sid);
+  defer->reply();
+}
+
+ void ClassicServiceImpl::JetpackFinishRecovery(const epoch_t& oepoch,
+                                                rrr::DeferredReply* defer) {
+  dtxn_sched()->OnJetpackFinishRecovery(oepoch);
+  defer->reply();
+}
+
+
+void ClassicServiceImpl::RegisterStats() {
+  if (scsi_) {
+    scsi_->set_recorder(recorder_);
+    scsi_->set_recorder(recorder_);
+    scsi_->set_stat(ServerControlServiceImpl::STAT_SZ_SCC, &stat_sz_scc_);
+    scsi_->set_stat(ServerControlServiceImpl::STAT_SZ_GRAPH_START,
+                    &stat_sz_gra_start_);
+    scsi_->set_stat(ServerControlServiceImpl::STAT_SZ_GRAPH_COMMIT,
+                    &stat_sz_gra_commit_);
+    scsi_->set_stat(ServerControlServiceImpl::STAT_SZ_GRAPH_ASK,
+                    &stat_sz_gra_ask_);
+    scsi_->set_stat(ServerControlServiceImpl::STAT_N_ASK, &stat_n_ask_);
+    scsi_->set_stat(ServerControlServiceImpl::STAT_RO6_SZ_VECTOR,
+                    &stat_ro6_sz_vector_);
+  }
+}
+
+void ClassicServiceImpl::MsgString(const string& arg,
+                                   string* ret,
+                                   rrr::DeferredReply* defer) {
+
+  verify(comm_ != nullptr);
+  for (auto& f : comm_->msg_string_handlers_) {
+    if (f(arg, *ret)) {
+      defer->reply();
+      return;
+    }
+  }
+  verify(0);
+  return;
+}
+
+void ClassicServiceImpl::MsgMarshall(const MarshallDeputy& arg,
+                                     MarshallDeputy* ret,
+                                     rrr::DeferredReply* defer) {
+
+  verify(comm_ != nullptr);
+  for (auto& f : comm_->msg_marshall_handlers_) {
+    if (f(arg, *ret)) {
+      defer->reply();
+      return;
+    }
+  }
+  verify(0);
+  return;
+}
+
+} // namespace janus

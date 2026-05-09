@@ -1,0 +1,148 @@
+
+site:
+  server: # each line is a partition, the first is the master site_name:port
+    - ["s101:38000", "s201:38001", "s301:38002", "s401:38003", "s501:38004"]
+  client: # each line is a partition
+    - ["c001", "c002", "c003", "c004", "c005", 
+       "c006", "c007", "c008", "c009", "c010", 
+       "c011", "c012", "c013", "c014", "c015", 
+       "c016", "c017", "c018", "c019", "c020", 
+       "c021", "c022", "c023", "c024", "c025", 
+       "c026", "c027", "c028", "c029", "c030", 
+       "c031", "c032", "c033", "c034", "c035", 
+       "c036", "c037", "c038", "c039", "c040", 
+       "c041", "c042", "c043", "c044", "c045", 
+       "c046", "c047", "c048", "c049", "c050", 
+       "c051", "c052", "c053", "c054", "c055", 
+       "c056", "c057", "c058", "c059", "c060", 
+       "c061", "c062", "c063", "c064", "c065", 
+       "c066", "c067", "c068", "c069", "c070", 
+       "c071", "c072", "c073", "c074", "c075", 
+       "c076", "c077", "c078", "c079", "c080", 
+       "c081", "c082", "c083", "c084", "c085", 
+       "c086", "c087", "c088", "c089", "c090", 
+       "c091", "c092", "c093", "c094", "c095", 
+       "c096", "c097", "c098", "c099", "c100", 
+       "c101", "c102", "c103", "c104", "c105", 
+       "c106"]
+
+
+process:
+  s101: zoo1
+  s201: zoo2
+  s301: zoo3
+  s401: zoo4
+  s501: zoo5
+  c001: zoo1
+  c002: zoo2
+  c003: zoo3
+  c004: zoo4
+  c005: zoo5
+  c006: zoo1
+  c007: zoo2
+  c008: zoo3
+  c009: zoo4
+  c010: zoo5
+  c011: zoo1
+  c012: zoo2
+  c013: zoo3
+  c014: zoo4
+  c015: zoo5
+  c016: zoo1
+  c017: zoo2
+  c018: zoo3
+  c019: zoo4
+  c020: zoo5
+  c021: zoo1
+  c022: zoo2
+  c023: zoo3
+  c024: zoo4
+  c025: zoo5
+  c026: zoo1
+  c027: zoo2
+  c028: zoo3
+  c029: zoo4
+  c030: zoo5
+  c031: zoo1
+  c032: zoo2
+  c033: zoo3
+  c034: zoo4
+  c035: zoo5
+  c036: zoo1
+  c037: zoo2
+  c038: zoo3
+  c039: zoo4
+  c040: zoo5
+  c041: zoo1
+  c042: zoo2
+  c043: zoo3
+  c044: zoo4
+  c045: zoo5
+  c046: zoo1
+  c047: zoo2
+  c048: zoo3
+  c049: zoo4
+  c050: zoo5
+  c051: zoo1
+  c052: zoo2
+  c053: zoo3
+  c054: zoo4
+  c055: zoo5
+  c056: zoo1
+  c057: zoo2
+  c058: zoo3
+  c059: zoo4
+  c060: zoo5
+  c061: zoo1
+  c062: zoo2
+  c063: zoo3
+  c064: zoo4
+  c065: zoo5
+  c066: zoo1
+  c067: zoo2
+  c068: zoo3
+  c069: zoo4
+  c070: zoo5
+  c071: zoo1
+  c072: zoo2
+  c073: zoo3
+  c074: zoo4
+  c075: zoo5
+  c076: zoo1
+  c077: zoo2
+  c078: zoo3
+  c079: zoo4
+  c080: zoo5
+  c081: zoo1
+  c082: zoo2
+  c083: zoo3
+  c084: zoo4
+  c085: zoo5
+  c086: zoo1
+  c087: zoo2
+  c088: zoo3
+  c089: zoo4
+  c090: zoo5
+  c091: zoo1
+  c092: zoo2
+  c093: zoo3
+  c094: zoo4
+  c095: zoo5
+  c096: zoo1
+  c097: zoo2
+  c098: zoo3
+  c099: zoo4
+  c100: zoo5
+  c101: zoo1
+  c102: zoo2
+  c103: zoo3
+  c104: zoo4
+  c105: zoo5
+  c106: zoo1
+
+host:
+  zoo1: 130.245.173.101
+  zoo2: 130.245.173.102
+  zoo3: 130.245.173.103
+  zoo4: 130.245.173.104
+  zoo5: 130.245.173.105

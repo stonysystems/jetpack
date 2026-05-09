@@ -1,0 +1,36 @@
+
+# 5-replica local topology for CI regression tests with tc/netem latency.
+# Each server runs on a separate loopback IP so tc/netem can add per-IP delay.
+#
+# Usage:
+#   LATENCY_MS=20 scripts/ci_regression.sh --lane tc
+#
+# Latency model (with LATENCY_MS=20):
+#   h1 (127.0.0.1): no added delay (reference)
+#   h2-h5 (127.0.0.2-5): 20ms one-way delay via tc/netem
+#   RTT between any two delayed hosts = 40ms
+
+site:
+  server:
+    - ["s101:38100", "s201:38101", "s301:38102", "s401:38103", "s501:38104"]
+  client:
+    - ["c101", "c201", "c301", "c401", "c501"]
+
+process:
+  s101: h1
+  s201: h2
+  s301: h3
+  s401: h4
+  s501: h5
+  c101: h1
+  c201: h2
+  c301: h3
+  c401: h4
+  c501: h5
+
+host:
+  h1: 127.0.0.1
+  h2: 127.0.0.2
+  h3: 127.0.0.3
+  h4: 127.0.0.4
+  h5: 127.0.0.5

@@ -1,0 +1,19 @@
+
+bench:
+  workload: rw
+  scale: 1
+  weight:
+    read: 1
+    write: 0
+  population: # intial number of records in each table
+    history: 1000000
+  range: 1000000
+
+schema: # table information
+  - name: history
+    column:
+      - {name: h_key,     type: integer, primary: true}
+      - {name: h_c_id,    type: integer}
+
+sharding:
+  history:    MOD

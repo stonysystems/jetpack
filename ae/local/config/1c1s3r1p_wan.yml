@@ -1,0 +1,29 @@
+
+# 3-replica recovery config with different loopback IPs for tc/netem latency simulation.
+# Use with RECOVERY_LATENCY_MS=20 to run the recovery test with WAN-level RTT (40ms).
+#
+# Servers run on separate IPs so tc/netem can add inter-replica latency:
+#   s101 on h1 (127.0.0.1) — no delay (local)
+#   s201 on h2 (127.0.0.2) — 20ms one-way delay via tc/netem
+#   s301 on h3 (127.0.0.3) — 20ms one-way delay via tc/netem
+# RTT between h1 and h2/h3 = 40ms (same as benchmark WAN setup).
+#
+# Usage (with each test script):
+#   RECOVERY_LATENCY_MS=20 ./docker/etcd/run-etcd-test.sh recovery
+
+site:
+  server:
+    - ["s101:38200", "s201:38201", "s301:38202"]
+  client:
+    - ["c01"]
+
+process:
+  s101: h1
+  s201: h2
+  s301: h3
+  c01: h1
+
+host:
+  h1: 127.0.0.1
+  h2: 127.0.0.2
+  h3: 127.0.0.3

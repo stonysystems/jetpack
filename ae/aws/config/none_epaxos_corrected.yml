@@ -1,0 +1,6 @@
+mode:
+  cc: none
+  ab: epaxos_corrected
+  batch: false
+  retry: 20
+  ongoing: 1 # per client

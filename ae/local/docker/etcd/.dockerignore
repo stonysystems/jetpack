@@ -1,0 +1,10 @@
+# Exclude build artifacts and large directories from Docker context
+build/
+.git/
+old-test/
+tla/
+doc/
+*.o
+*.pyc
+__pycache__
+.apas

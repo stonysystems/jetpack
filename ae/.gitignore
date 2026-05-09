@@ -1,0 +1,15 @@
+# Reviewer-side runtime artefacts
+output/
+tla/log/
+tla/states/
+tla/*.log
+**/__pycache__/
+
+# Reviewer-filled IP configs (templates only are tracked)
+local/ips/cluster_ips.json
+local/ips/setup.json
+aws/ips/aws_ips.json
+aws/ips/setup.json
+
+# Build outputs (reviewers build their own)
+local/build/

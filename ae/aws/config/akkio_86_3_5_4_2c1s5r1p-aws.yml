@@ -1,0 +1,141 @@
+# Akkio client layout: 86/3/5/4/2 sites on server0..server4 (total 100).
+# AWS variant of the canonical zoo Akkio site map.
+
+site:
+  server: # each line is a partition, the first is the master site_name:port
+    - ["s101:38000", "s201:38001", "s301:38002", "s401:38003", "s501:38004"]
+  client: # each line is a partition
+    - ["c001", "c002", "c003", "c004", "c005", 
+       "c006", "c007", "c008", "c009", "c010", 
+       "c011", "c012", "c013", "c014", "c015", 
+       "c016", "c017", "c018", "c019", "c020", 
+       "c021", "c022", "c023", "c024", "c025", 
+       "c026", "c027", "c028", "c029", "c030", 
+       "c031", "c032", "c033", "c034", "c035", 
+       "c036", "c037", "c038", "c039", "c040", 
+       "c041", "c042", "c043", "c044", "c045", 
+       "c046", "c047", "c048", "c049", "c050", 
+       "c051", "c052", "c053", "c054", "c055", 
+       "c056", "c057", "c058", "c059", "c060", 
+       "c061", "c062", "c063", "c064", "c065", 
+       "c066", "c067", "c068", "c069", "c070", 
+       "c071", "c072", "c073", "c074", "c075", 
+       "c076", "c077", "c078", "c079", "c080", 
+       "c081", "c082", "c083", "c084", "c085", 
+       "c086", "c087", "c088", "c089", "c090", 
+       "c091", "c092", "c093", "c094", "c095", 
+       "c096", "c097", "c098", "c099", "c100"]
+
+process:
+  s101: server0
+  s201: server1
+  s301: server2
+  s401: server3
+  s501: server4
+  c001: server0
+  c002: server0
+  c003: server0
+  c004: server0
+  c005: server0
+  c006: server0
+  c007: server0
+  c008: server0
+  c009: server0
+  c010: server0
+  c011: server0
+  c012: server0
+  c013: server0
+  c014: server0
+  c015: server0
+  c016: server0
+  c017: server0
+  c018: server0
+  c019: server0
+  c020: server0
+  c021: server0
+  c022: server0
+  c023: server0
+  c024: server0
+  c025: server0
+  c026: server0
+  c027: server0
+  c028: server0
+  c029: server0
+  c030: server0
+  c031: server0
+  c032: server0
+  c033: server0
+  c034: server0
+  c035: server0
+  c036: server0
+  c037: server0
+  c038: server0
+  c039: server0
+  c040: server0
+  c041: server0
+  c042: server0
+  c043: server0
+  c044: server0
+  c045: server0
+  c046: server0
+  c047: server0
+  c048: server0
+  c049: server0
+  c050: server0
+  c051: server0
+  c052: server0
+  c053: server0
+  c054: server0
+  c055: server0
+  c056: server0
+  c057: server0
+  c058: server0
+  c059: server0
+  c060: server0
+  c061: server0
+  c062: server0
+  c063: server0
+  c064: server0
+  c065: server0
+  c066: server0
+  c067: server0
+  c068: server0
+  c069: server0
+  c070: server0
+  c071: server0
+  c072: server0
+  c073: server0
+  c074: server0
+  c075: server0
+  c076: server0
+  c077: server0
+  c078: server0
+  c079: server0
+  c080: server0
+  c081: server0
+  c082: server0
+  c083: server0
+  c084: server0
+  c085: server0
+  c086: server0
+  c087: server1
+  c088: server1
+  c089: server1
+  c090: server2
+  c091: server2
+  c092: server2
+  c093: server2
+  c094: server2
+  c095: server3
+  c096: server3
+  c097: server3
+  c098: server3
+  c099: server4
+  c100: server4
+
+host:
+  server0: 50.18.6.110
+  server1: 16.147.179.18
+  server2: 13.204.39.150
+  server3: 18.194.81.161
+  server4: 13.62.22.60

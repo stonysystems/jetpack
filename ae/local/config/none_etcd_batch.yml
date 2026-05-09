@@ -1,0 +1,13 @@
+mode:
+  cc: none # concurrency control
+  ab: etcd # atomic broadcast
+  # read_only: occ
+  batch: false
+  retry: 20
+  ongoing: 1 # per client
+  # Akkio etcd experiment, variant (2): raw etcd with client-side batching.
+  # The EtcdConnectionThreadPool coalesces up to etcd_batch_size ops into a
+  # single etcd Txn; it flushes on size OR when etcd_batch_timeout_ms
+  # elapses since the first enqueue, whichever happens first.
+  etcd_batch_size: 16
+  etcd_batch_timeout_ms: 5

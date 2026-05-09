@@ -1,0 +1,1864 @@
+
+#include "communicator.h"
+#include "coordinator.h"
+#include "classic/coordinator.h"
+#include "rcc/graph.h"
+#include "rcc/graph_marshaler.h"
+#include "command.h"
+#include "command_marshaler.h"
+#include "classic/tpc_command.h"
+#include "procedure.h"
+#include "rcc_rpc.h"
+#include <typeinfo>
+#include "RW_command.h"
+#include "misc/marshal.hpp"
+
+namespace janus {
+
+// Runtime WAN delay in microseconds. 0 = disabled.
+std::atomic<uint64_t> wan_delay_us{0};
+
+// Runtime server-thread pinning core. 1 = legacy default.
+std::atomic<int> server_core_id{1};
+
+// Static member definitions
+std::map<parid_t, View> Communicator::partition_views_;
+std::mutex Communicator::partition_views_mutex_;
+
+namespace {
+size_t GetKeyCmdBatchSize(const std::shared_ptr<KeyCmdBatchData>& batch) {
+  if (!batch) {
+    return 0;
+  }
+  rrr::Marshal m;
+  batch->ToMarshal(m);
+  return m.content_size();
+}
+} // namespace
+
+/************************RULE begin*********************************/
+
+void RuleSpeculativeExecuteQuorumEvent::FeedResponse(bool y, value_t result, bool is_leader, double cpu_usage, double queue_depth) {
+  if (cpu_usage >= 0.0) {
+    total_cpu_usage_ += cpu_usage;
+    cpu_samples_++;
+    if (is_leader) {
+      leader_cpu_usage_ += cpu_usage;
+      leader_cpu_samples_++;
+    }
+  }
+  if (queue_depth >= 0.0 && is_leader) {
+    leader_queue_depth_sum_ += queue_depth;
+    leader_queue_samples_++;
+  }
+  if (y) {
+    if (has_result_) {
+      verify(result == result_);
+    } else {
+      has_result_ = true;
+      result_ = result;
+    }
+    if (is_leader)
+      n_leader_yes_++;
+    VoteYes();
+  } else {
+    if (is_leader)
+      n_leader_no_++;
+    VoteNo();
+  }
+}
+
+bool RuleSpeculativeExecuteQuorumEvent::Yes() {
+  // Log_info("Yes condition: n_voted_yes_(%d) >= quorum_(%d) && n_leader_yes_(%d) >= num_leader_(%d)", n_voted_yes_, quorum_, n_leader_yes_, num_leader_);
+  return n_voted_yes_ >= quorum_ && n_leader_yes_ >= num_leader_;
+}
+
+bool RuleSpeculativeExecuteQuorumEvent::No() {
+  // if ((n_voted_no_ > (n_total_ - quorum_)) || (n_leader_no_ > 0))
+  //   Log_info("RuleSpeculativeExecuteQuorumEventNo: %d %d", n_voted_no_, n_leader_no_);
+  return (n_voted_no_ > (n_total_ - quorum_)) || (n_leader_no_ > 0);
+}
+
+value_t RuleSpeculativeExecuteQuorumEvent::GetResult() {
+  return result_;
+}
+
+/************************RULE end*********************************/
+
+uint64_t Communicator::global_id = 0;
+
+Communicator::Communicator(PollMgr* poll_mgr) {
+  vector<string> addrs;
+  if (poll_mgr == nullptr)
+    rpc_poll_ = new PollMgr(1);
+  else
+    rpc_poll_ = poll_mgr;
+  auto config = Config::GetConfig();
+  auto my_servers = config->GetMyServers();
+  if (!my_servers.empty() && !my_servers[0].host.empty()) {
+    local_host_ = my_servers[0].host;
+  } else {
+    auto my_clients = config->GetMyClients();
+    if (!my_clients.empty() && !my_clients[0].host.empty()) {
+      local_host_ = my_clients[0].host;
+    }
+  }
+  vector<parid_t> partitions = config->GetAllPartitionIds();
+  for (auto& par_id : partitions) {
+    auto site_infos = config->SitesByPartitionId(par_id);
+    vector<std::pair<siteid_t, ClassicProxy*>> proxies;
+    for (auto& si : site_infos) {
+      auto result = ConnectToSite(si, std::chrono::milliseconds
+          (CONNECT_TIMEOUT_MS));
+      verify(result.first == SUCCESS);
+      proxies.push_back(std::make_pair(si.id, result.second));
+    }
+    rpc_par_proxies_.insert(std::make_pair(par_id, proxies));
+  }
+  client_leaders_connected_.store(false);
+  if (config->forwarding_enabled_) {
+    threads.push_back(std::thread(&Communicator::ConnectClientLeaders, this));
+  } else {
+    client_leaders_connected_.store(true);
+  }
+}
+
+void Communicator::ConnectClientLeaders() {
+  auto config = Config::GetConfig();
+  if (config->forwarding_enabled_) {
+    Log_info("%s: connect to client sites", __FUNCTION__);
+    auto client_leaders = config->SitesByLocaleId(0, Config::CLIENT);
+    for (Config::SiteInfo leader_site_info : client_leaders) {
+      verify(leader_site_info.locale_id == 0);
+      Log_info("client @ leader %d", leader_site_info.id);
+      auto result = ConnectToClientSite(leader_site_info,
+                                        std::chrono::milliseconds
+                                            (CONNECT_TIMEOUT_MS));
+      verify(result.first == SUCCESS);
+      verify(result.second != nullptr);
+      Log_info("connected to client leader site: %d, %d, %p",
+               leader_site_info.id,
+               leader_site_info.locale_id,
+               result.second);
+      client_leaders_.push_back(std::make_pair(leader_site_info.id,
+                                               result.second));
+    }
+  }
+  client_leaders_connected_.store(true);
+}
+
+void Communicator::WaitConnectClientLeaders() {
+  bool connected;
+  do {
+    connected = client_leaders_connected_.load();
+  } while (!connected);
+  Log_info("Done waiting to connect to client leaders.");
+}
+
+void Communicator::ResetProfiles(){
+	index = 0;
+	total = 0;
+	for(int i = 0; i < 100; i++){
+		window[i] = 0;
+	}
+	window_time = 0;
+	total_time = 0;
+	window_avg = 0;
+	total_avg = 0;
+}
+Communicator::~Communicator() {
+  verify(rpc_clients_.size() > 0);
+  for (auto& pair : rpc_clients_) {
+    auto rpc_cli = pair.second;
+    rpc_cli->close_and_release();
+  }
+  rpc_clients_.clear();
+}
+
+std::pair<siteid_t, ClassicProxy*>
+Communicator::RandomProxyForPartition(parid_t par_id) const {
+  auto it = rpc_par_proxies_.find(par_id);
+  verify(it != rpc_par_proxies_.end());
+  auto& par_proxies = it->second;
+  int index = rrr::RandomGenerator::rand(0, par_proxies.size() - 1);
+  return par_proxies[index];
+}
+
+// for most protocol, e.g., Paxos or Raft, the client always 
+//      tries to issue the request to the fixed leader (the first one) (idx is -1 by default)
+// but, for Mencius, it uses round robin to rotate the leader (idx > -1)
+// @param idx: get the index of servers as the leader
+std::pair<siteid_t, ClassicProxy*>
+Communicator::LeaderProxyForPartition(parid_t par_id, int idx) const {
+
+  if (idx > -1) { // Mencius
+    auto it = rpc_par_proxies_.find(par_id);
+    auto& partition_proxies = it->second;
+    verify(partition_proxies.size()>idx);
+    return it->second.at(idx);
+  }
+
+  // Per-client routing for SwiftPaxos / EPaxos.
+  // These protocols are multi-leader / leaderless by design. Bypass all
+  // dynamic-leader / view-leader / cache short-circuits that would funnel
+  // every client to locale 0 (the canonical leader for raft etc.). Each
+  // process targets the replica matching its own locale_id mod N_REPLICA.
+  // Done at the very top so the per-process cache cannot lock in a stale
+  // single-leader target.
+  {
+    auto cfg = Config::GetConfig();
+    if (cfg->replica_proto_ == MODE_SWIFTPAXOS ||
+        cfg->replica_proto_ == MODE_EPAXOS_CORRECTED) {
+      auto it = rpc_par_proxies_.find(par_id);
+      verify(it != rpc_par_proxies_.end());
+      auto& partition_proxies = it->second;
+      int n_replica = (int)partition_proxies.size();
+      verify(n_replica > 0);
+      int target_locale = (int)loc_id_ % n_replica;
+      auto proxy_it = std::find_if(
+          partition_proxies.begin(),
+          partition_proxies.end(),
+          [cfg, target_locale](const std::pair<siteid_t, ClassicProxy*>& p) {
+            verify(p.second != nullptr);
+            auto& site = cfg->SiteById(p.first);
+            return site.locale_id == target_locale;
+          });
+      verify(proxy_it != partition_proxies.end());
+      return *proxy_it;
+    }
+  }
+  
+  // Check if we have a dynamic leader callback
+  if (leader_callback_) {
+    locid_t dynamic_leader = leader_callback_(par_id);
+    
+    if (dynamic_leader >= 0) {
+      // Find the proxy for this leader
+      auto it = rpc_par_proxies_.find(par_id);
+      if (it != rpc_par_proxies_.end()) {
+        auto& partition_proxies = it->second;
+        auto config = Config::GetConfig();
+        
+        
+        auto proxy_it = std::find_if(
+            partition_proxies.begin(),
+            partition_proxies.end(),
+            [config, dynamic_leader](const std::pair<siteid_t, ClassicProxy*>& p) {
+              verify(p.second != nullptr);
+              auto& site = config->SiteById(p.first);
+              return site.locale_id == dynamic_leader;
+            });
+        if (proxy_it != partition_proxies.end()) {
+          // Update cache and return
+          const_cast<Communicator*>(this)->leader_cache_[par_id] = *proxy_it;
+          return *proxy_it;
+        } else {
+        }
+      }
+    } else {
+    }
+  }
+
+  // If no dynamic leader, first check partition views for updated leader info
+  locid_t view_leader = GetLeaderForPartition(par_id);
+  if (view_leader > 0) {
+    // We have a leader from the view, find the proxy for it
+    auto it = rpc_par_proxies_.find(par_id);
+    if (it != rpc_par_proxies_.end()) {
+      auto& partition_proxies = it->second;
+      auto config = Config::GetConfig();
+      
+      // Find the proxy for this leader locale_id
+      auto proxy_it = std::find_if(
+          partition_proxies.begin(),
+          partition_proxies.end(),
+          [config, view_leader](const std::pair<siteid_t, ClassicProxy*>& p) {
+            verify(p.second != nullptr);
+            auto& site = config->SiteById(p.first);
+            return site.locale_id == view_leader;
+          });
+      
+      if (proxy_it != partition_proxies.end()) {
+        // Update cache and return
+        const_cast<Communicator*>(this)->leader_cache_[par_id] = *proxy_it;
+        return *proxy_it;
+      } else {
+      }
+    }
+  }
+  
+  // Check the leader cache
+  auto leader_cache =
+      const_cast<map<parid_t, SiteProxyPair>&>(this->leader_cache_);
+  auto leader_it = leader_cache.find(par_id);
+  if (leader_it != leader_cache.end()) {
+    return leader_it->second;
+  } else {
+    auto it = rpc_par_proxies_.find(par_id);
+    verify(it != rpc_par_proxies_.end());
+    auto& partition_proxies = it->second;
+    auto config = Config::GetConfig();
+    // naive_rpc routes all clients to locale_id=1 (zoo2 / .102) by design,
+    // not locale 0. Lets us saturate an isolated server without clobbering
+    // the zoo1 measurement with local-client noise and without co-locating
+    // the target with any client work (every client host is "remote" to
+    // zoo2 in the naive_rpc sweep). "zoo2" = 1-indexed display name for
+    // locale 1 / IP .102; internally the locale id is unchanged.
+    //
+    // For SwiftPaxos and EPaxos, the protocols are multi-leader / leaderless
+    // by design. Routing all clients through locale 0 (the canonical leader
+    // for raft/etcd/mongodb/zookeeper) defeats their multi-leader pattern:
+    // it funnels every client RPC through one replica's coordinator and
+    // collapses CPU + latency to "single-server-side" behavior. Spread by
+    // hashing the calling process's locale_id mod N_REPLICA — each client
+    // host targets the replica with matching index. server0..4 hosts hit
+    // their own local replica (0 hop); server5..9 distribute across
+    // replicas 0..4 (one extra inter-region hop, but the load balances).
+    int target_locale;
+    if (config->replica_proto_ == MODE_NAIVE_RPC ||
+        config->replica_proto_ == MODE_NAIVE_RAFT) {
+      target_locale = 1;
+    } else if (config->replica_proto_ == MODE_SWIFTPAXOS ||
+               config->replica_proto_ == MODE_EPAXOS_CORRECTED) {
+      int n_replica = config->GetPartitionSize(par_id);
+      target_locale = (n_replica > 0) ? (loc_id_ % n_replica) : 0;
+    } else {
+      target_locale = 0;
+    }
+    auto proxy_it = std::find_if(
+        partition_proxies.begin(),
+        partition_proxies.end(),
+        [config, target_locale](const std::pair<siteid_t, ClassicProxy*>& p) {
+          verify(p.second != nullptr);
+          auto& site = config->SiteById(p.first);
+          return site.locale_id == target_locale;
+        });
+    if (proxy_it == partition_proxies.end()) {
+      Log_fatal("could not find leader for partition %d", par_id);
+    } else {
+      leader_cache[par_id] = *proxy_it;
+    }
+    verify(proxy_it->second != nullptr);
+    return *proxy_it;
+  }
+}
+
+ClientSiteProxyPair
+Communicator::ConnectToClientSite(Config::SiteInfo& site,
+                                  std::chrono::milliseconds timeout) {
+  auto config = Config::GetConfig();
+  char addr[1024];
+  snprintf(addr, sizeof(addr), "%s:%d", site.host.c_str(), site.port);
+
+  auto start = std::chrono::steady_clock::now();
+  rrr::Client* rpc_cli = new rrr::Client(rpc_poll_);
+  double elapsed;
+  int attempt = 0;
+  do {
+    Log_debug("connect to client site: %s (attempt %d)", addr, attempt++);
+    auto connect_result = rpc_cli->connect(addr, false,
+        local_host_.empty() ? nullptr : local_host_.c_str());
+    if (connect_result == SUCCESS) {
+      ClientControlProxy* rpc_proxy = new ClientControlProxy(rpc_cli);
+      rpc_clients_.insert(std::make_pair(site.id, rpc_cli));
+      Log_debug("connect to client site: %s success!", addr);
+      return std::make_pair(SUCCESS, rpc_proxy);
+    } else {
+      std::this_thread::sleep_for(std::chrono::milliseconds(CONNECT_SLEEP_MS));
+    }
+    auto end = std::chrono::steady_clock::now();
+    elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(end - start)
+        .count();
+  } while (elapsed < timeout.count());
+  Log_info("timeout connecting to client %s", addr);
+  rpc_cli->close_and_release();
+  return std::make_pair(FAILURE, nullptr);
+}
+
+std::pair<int, ClassicProxy*>
+Communicator::ConnectToSite(Config::SiteInfo& site,
+                            std::chrono::milliseconds timeout) {
+  string addr = site.GetHostAddr();
+  auto start = std::chrono::steady_clock::now();
+  auto rpc_cli = std::make_shared<rrr::Client>(rpc_poll_);
+  double elapsed;
+  int attempt = 0;
+  do {
+    Log_debug("connect to site: %s (attempt %d)", addr.c_str(), attempt++);
+    auto connect_result = rpc_cli->connect(addr.c_str(), false,
+        local_host_.empty() ? nullptr : local_host_.c_str());
+    if (connect_result == SUCCESS) {
+      ClassicProxy* rpc_proxy = new ClassicProxy(rpc_cli.get());
+      rpc_clients_.insert(std::make_pair(site.id, rpc_cli));
+      rpc_proxies_.insert(std::make_pair(site.id, rpc_proxy));
+
+			auto it = Reactor::clients_.find(rpc_cli->host());
+			if (it == Reactor::clients_.end()) {
+				std::vector<std::shared_ptr<rrr::Pollable>> clients{};
+				Reactor::clients_[rpc_cli->host()] = clients;
+			}
+
+			Reactor::clients_[rpc_cli->host()].push_back(rpc_cli);
+      Log_info("connect to site: %s success! (bind_addr=%s)", addr.c_str(),
+               local_host_.empty() ? "none" : local_host_.c_str());
+      return std::make_pair(SUCCESS, rpc_proxy);
+    } else {
+      std::this_thread::sleep_for(std::chrono::milliseconds(CONNECT_SLEEP_MS));
+    }
+    auto end = std::chrono::steady_clock::now();
+    elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(end - start)
+        .count();
+  } while (elapsed < timeout.count());
+  Log_info("timeout connecting to %s", addr.c_str());
+  rpc_cli->close_and_release();
+  return std::make_pair(FAILURE, nullptr);
+}
+
+std::pair<siteid_t, ClassicProxy*>
+Communicator::NearestProxyForPartition(parid_t par_id) const {
+  // TODO Fix me.
+  auto it = rpc_par_proxies_.find(par_id);
+  verify(it != rpc_par_proxies_.end());
+  auto& partition_proxies = it->second;
+  verify(partition_proxies.size() > loc_id_);
+  int index = loc_id_;
+  return partition_proxies[index];
+};
+
+void Communicator::Pause() {
+  for (auto it = rpc_clients_.begin(); it != rpc_clients_.end(); it++) {
+    it->second->pause();
+  }
+}
+
+void Communicator::Resume() {
+  for (auto it = rpc_clients_.begin(); it != rpc_clients_.end(); it++) {
+    it->second->resume();
+  }
+}
+
+std::shared_ptr<QuorumEvent> Communicator::SendReelect(){
+	//paused = true;
+	//sleep(10);
+	int total = rpc_par_proxies_[0].size() - 1;
+  std::shared_ptr<QuorumEvent> e = Reactor::CreateSpEvent<QuorumEvent>(total, 1);
+	auto pair_leader_proxy = LeaderProxyForPartition(0);
+	int new_leader = (pair_leader_proxy.first + 1) % total;
+
+	for(auto& pair: rpc_par_proxies_[0]){
+		rrr::FutureAttr fuattr;
+		int id = pair.first;
+		if(id != 1) continue;
+		fuattr.callback = 
+			[e, this, id] (Future* fu) {
+        if (fu->get_error_code() != 0) {
+          Log_info("Get a error message in reply");
+          return;
+        }
+				bool_t success = false;
+				fu->get_reply() >> success;
+				
+				if(success){
+					e->VoteYes();
+					this->SetNewLeaderProxy(0, id);
+				}
+			};
+		auto f = pair.second->async_ReElect(fuattr);
+		Future::safe_release(f);
+	}
+	return e;
+
+}
+
+void Communicator::BroadcastDispatch(
+    shared_ptr<vector<shared_ptr<TxPieceData>>> sp_vec_piece,
+    Coordinator* coo,
+    const function<void(int, TxnOutput&)> & callback,
+    std::shared_ptr<TpcBatchCommand> batch_cmd) {
+
+  Log_debug("Do a dispatch on client worker");
+  cmdid_t cmd_id = 0;
+  parid_t par_id = 0;
+  std::shared_ptr<VecPieceData> sp_vpd = nullptr;
+  bool using_batch = (batch_cmd != nullptr);
+
+  if (using_batch) {
+    verify(!batch_cmd->cmds_.empty());
+    auto first_cmd = batch_cmd->cmds_.front();
+    verify(first_cmd && first_cmd->cmd_);
+    auto first_vec = dynamic_pointer_cast<VecPieceData>(first_cmd->cmd_);
+    verify(first_vec && first_vec->sp_vec_piece_data_ && !first_vec->sp_vec_piece_data_->empty());
+    cmd_id = first_vec->sp_vec_piece_data_->at(0)->root_id_;
+    par_id = first_vec->sp_vec_piece_data_->at(0)->PartitionId();
+  } else {
+    verify(sp_vec_piece && !sp_vec_piece->empty());
+    cmd_id = sp_vec_piece->at(0)->root_id_;
+    par_id = sp_vec_piece->at(0)->PartitionId();
+    sp_vpd = std::make_shared<VecPieceData>();
+    sp_vpd->sp_vec_piece_data_ = sp_vec_piece;
+    // Record Time
+    sp_vpd->time_sent_from_client_ = SimpleRWCommand::GetCurrentMsTime();
+  }
+  
+  rrr::FutureAttr fuattr;
+  fuattr.callback =
+      [coo, this, callback, par_id](Future* fu) {
+        if (fu->get_error_code() != 0) {
+          Log_info("Get a error message in reply");
+          return;
+        }
+        int32_t ret;
+        TxnOutput outputs;
+        uint64_t coro_id = 0;
+        MarshallDeputy view_md;
+        fu->get_reply() >> ret >> outputs >> coro_id >> view_md;
+        
+        // Handle WRONG_LEADER response with view data
+        if (ret == WRONG_LEADER && view_md.sp_data_ != nullptr) {
+          auto sp_view_data = dynamic_pointer_cast<ViewData>(view_md.sp_data_);
+          if (sp_view_data) {
+            UpdatePartitionView(par_id, sp_view_data);
+          }
+        }
+        callback(ret, outputs);
+      };
+  
+  std::pair<siteid_t, ClassicProxy*> pair_leader_proxy;
+  if (Config::GetConfig()->replica_proto_==MODE_MENCIUS) {
+    // The logic here is: Mencius have multiple proposor, if the client is co-locate with a proposer, it give all commands to this proposor.
+    // If not, round-robin with all proposors.
+    auto server_infos = Config::GetConfig()->GetMyServers();
+    if (server_infos.size() == 1) {
+      int n = rpc_par_proxies_.find(par_id)->second.size();
+      pair_leader_proxy = LeaderProxyForPartition(par_id, server_infos[0].id);
+    } else {
+      int n = rpc_par_proxies_.find(par_id)->second.size();
+      pair_leader_proxy = LeaderProxyForPartition(par_id, coo->coo_id_ % n);
+    }
+  } else {
+    pair_leader_proxy = LeaderProxyForPartition(par_id);
+  }
+  
+  SetLeaderCache(par_id, pair_leader_proxy);
+  auto proxy = pair_leader_proxy.second;
+  MarshallDeputy md;
+  if (using_batch) {
+    md.SetMarshallable(batch_cmd);
+  } else {
+    md.SetMarshallable(sp_vpd);
+  }
+
+	DepId di;
+	di.str = "dep";
+	di.id = Communicator::global_id++;
+
+#ifdef COPILOT_TIME_DEBUG
+  struct timeval tp;
+  gettimeofday(&tp, NULL);
+  Log_info("[Jetpack] [C-] BroadcastDispatch at Communicator %.3f", tp.tv_sec * 1000 + tp.tv_usec / 1000.0);
+#endif
+
+  // Simulated WAN hop from this process to the leader. Skipped when the
+  // leader site is colocated with this process.
+  WAN_WAIT_TO(pair_leader_proxy.first);
+#ifdef FULL_LOG_DEBUG
+  Log_info("[Jetpack] cmd<%d, %d> before async_Dispatch", SimpleRWCommand::GetCmdID(md.sp_data_).first, SimpleRWCommand::GetCmdID(md.sp_data_).second);
+#endif
+#ifdef LATENCY_LOG_DEBUG
+  Log_info("!!!!!!!! Before proxy->async_Dispatch(cmd_id, di, md, fuattr);");
+#endif
+	auto future = proxy->async_Dispatch(cmd_id, di, md, fuattr);
+  Future::safe_release(future);
+}
+
+void Communicator::SyncBroadcastDispatch(
+    shared_ptr<vector<shared_ptr<TxPieceData>>> sp_vec_piece,
+    Coordinator* coo,
+    const function<void(int, TxnOutput&)> & callback) {
+
+  Log_debug("Do a dispatch on client worker");
+  cmdid_t cmd_id = sp_vec_piece->at(0)->root_id_;
+  verify(!sp_vec_piece->empty());
+  auto par_id = sp_vec_piece->at(0)->PartitionId();
+  
+  std::pair<siteid_t, ClassicProxy*> pair_leader_proxy;
+  if (Config::GetConfig()->replica_proto_==MODE_MENCIUS) {
+    // The logic here is: Mencius have multiple proposor, if the client is co-locate with a proposer, it give all commands to this proposor.
+    // If not, round-robin with all proposors.
+    auto server_infos = Config::GetConfig()->GetMyServers();
+    if (server_infos.size() == 1) {
+      int n = rpc_par_proxies_.find(par_id)->second.size();
+      pair_leader_proxy = LeaderProxyForPartition(par_id, server_infos[0].id);
+    } else {
+      int n = rpc_par_proxies_.find(par_id)->second.size();
+      pair_leader_proxy = LeaderProxyForPartition(par_id, coo->coo_id_ % n);
+    }
+  } else {
+    pair_leader_proxy = LeaderProxyForPartition(par_id);
+  }
+  
+  SetLeaderCache(par_id, pair_leader_proxy);
+  auto proxy = pair_leader_proxy.second;
+  shared_ptr<VecPieceData> sp_vpd(new VecPieceData);
+  sp_vpd->sp_vec_piece_data_ = sp_vec_piece;
+
+  // Record Time
+  sp_vpd->time_sent_from_client_ = SimpleRWCommand::GetCurrentMsTime();
+
+  MarshallDeputy md(sp_vpd); // ????
+
+	DepId di;
+	di.str = "dep";
+	di.id = Communicator::global_id++;
+
+#ifdef COPILOT_TIME_DEBUG
+  struct timeval tp;
+  gettimeofday(&tp, NULL);
+  Log_info("[Jetpack] [C-] BroadcastDispatch at Communicator %.3f", tp.tv_sec * 1000 + tp.tv_usec / 1000.0);
+#endif
+
+  // Simulated WAN hop from this process to the leader. Skipped when the
+  // leader site is colocated with this process (SyncBroadcastDispatch
+  // variant of the pattern in BroadcastDispatch above).
+  WAN_WAIT_TO(pair_leader_proxy.first);
+#ifdef FULL_LOG_DEBUG
+  Log_info("[Jetpack] cmd<%d, %d> before async_Dispatch", SimpleRWCommand::GetCmdID(md.sp_data_).first, SimpleRWCommand::GetCmdID(md.sp_data_).second);
+#endif
+  int32_t ret;
+  TxnOutput outputs;
+  uint64_t coro_id;
+  MarshallDeputy view_md;
+  int32_t dispatch_error_code = proxy->Dispatch(cmd_id, di, md, &ret, &outputs, &coro_id, &view_md);
+	verify(dispatch_error_code == 0);
+  
+  // Handle WRONG_LEADER response with view data
+  if (ret == WRONG_LEADER && view_md.sp_data_ != nullptr) {
+    auto sp_view_data = dynamic_pointer_cast<ViewData>(view_md.sp_data_);
+    if (sp_view_data) {
+      UpdatePartitionView(par_id, sp_view_data);
+    }
+  }
+  
+  callback(ret, outputs);
+}
+
+
+//need to change this code to solve the quorum info in the graphs
+//either create another event here or inside the coordinator.
+std::shared_ptr<IntEvent> Communicator::BroadcastDispatch(
+    ReadyPiecesData cmds_by_par,
+    Coordinator* coo,
+    TxData* txn) {
+  int total = cmds_by_par.size();
+  //std::shared_ptr<AndEvent> e = Reactor::CreateSpEvent<AndEvent>();
+  std::shared_ptr<IntEvent> e = Reactor::CreateSpEvent<IntEvent>();
+	e->value_ = 0;
+	e->target_ = total;
+  std::unordered_set<int> leaders{};
+  auto src_coroid = e->GetCoroId();
+  coo->coro_id_ = src_coroid;
+  Log_info("The size of cmds_by_par is %d", cmds_by_par.size());
+
+  for(auto& pair: cmds_by_par){
+    bool first = false;
+    auto& cmds = pair.second;
+    auto sp_vec_piece = std::make_shared<vector<shared_ptr<TxPieceData>>>();
+    for(auto c: cmds){
+      c->id_ = coo->next_pie_id();
+      coo->dispatch_acks_[c->inn_id_] = false;
+      sp_vec_piece->push_back(c);
+    }
+    cmdid_t cmd_id = sp_vec_piece->at(0)->root_id_;
+    verify(sp_vec_piece->size() > 0);
+    auto par_id = sp_vec_piece->at(0)->PartitionId();
+    auto pair_leader_proxy = LeaderProxyForPartition(par_id);
+    auto leader_id = pair_leader_proxy.first;
+
+    phase_t phase = coo->phase_;
+    rrr::FutureAttr fuattr;
+    fuattr.callback =
+        [e, coo, this, phase, txn, src_coroid, leader_id, par_id](Future* fu) {
+          if (fu->get_error_code() != 0) {
+            Log_info("Get a error message in reply");
+            return;
+          }
+          int32_t ret;
+          TxnOutput outputs;
+          uint64_t coro_id = 0;
+          MarshallDeputy view_md;
+	  			double cpu = 0.0;
+	  			double net = 0.0;
+          fu->get_reply() >> ret >> outputs >> coro_id >> view_md;
+
+          e->value_++;
+          if(phase != coo->phase_){
+						verify(0);
+	    			e->Test();
+	  			}
+          else{
+            // Handle WRONG_LEADER response with view data
+            if (ret == WRONG_LEADER && view_md.sp_data_ != nullptr) {
+              auto sp_view_data = dynamic_pointer_cast<ViewData>(view_md.sp_data_);
+              if (sp_view_data) {
+                UpdatePartitionView(par_id, sp_view_data);
+              }
+              coo->aborted_ = true;
+              txn->commit_.store(false);
+              e->value_ = e->target_;
+              e->Test();
+              return;
+            }
+            
+            if(ret == REJECT){
+              coo->aborted_ = true;
+              txn->commit_.store(false);
+
+							e->value_ = e->target_;
+							e->Test();
+							return;
+            }
+            coo->n_dispatch_ack_ += outputs.size();
+            for(auto& pair: outputs){
+              const uint32_t& inn_id = pair.first;
+              coo->dispatch_acks_[inn_id] = true;
+              txn->Merge(pair.first, pair.second);
+            }
+	  
+	    			CoordinatorClassic* classic_coo = (CoordinatorClassic*)coo;
+	    			//classic_coo->debug_cnt--;
+            if(txn->HasMoreUnsentPiece()){
+              classic_coo->DispatchAsync(false);
+            }
+              //e->add_dep(coo->cli_id_, src_coroid, leader_id, coro_id);
+            coo->ids_.push_back(leader_id);
+            e->Test();
+	  			}
+      };
+    
+    Log_debug("send dispatch to site %ld",
+              pair_leader_proxy.first);
+    auto proxy = pair_leader_proxy.second;
+    shared_ptr<VecPieceData> sp_vpd(new VecPieceData);
+    sp_vpd->sp_vec_piece_data_ = sp_vec_piece;
+    MarshallDeputy md(sp_vpd); // ????
+    CoordinatorClassic* classic_coo = (CoordinatorClassic*) coo;
+    //classic_coo->debug_cnt++;
+
+    struct timespec start_;
+    clock_gettime(CLOCK_REALTIME, &start_);
+
+    outbound_[src_coroid] = make_pair((rrr::i64)start_.tv_sec, (rrr::i64)start_.tv_nsec);
+
+		DepId di;
+		di.str = "dep";
+		di.id = Communicator::global_id++;
+    
+		auto future = proxy->async_Dispatch(cmd_id, di, md, fuattr);
+    Future::safe_release(future);
+    if(!broadcasting_to_leaders_only_){
+      for (auto& pair : rpc_par_proxies_[par_id]) {
+        if (pair.first != pair_leader_proxy.first) {
+          //if(first) curr->n_total_++;
+          auto follower_id = pair.first;
+          rrr::FutureAttr fuattr;
+          fuattr.callback =
+              [e, coo, this, src_coroid, follower_id](Future* fu) {
+                if (fu->get_error_code() != 0) {
+                  Log_info("Get a error message in reply");
+                  return;
+                }
+                int32_t ret;
+                TxnOutput outputs;
+                uint64_t coro_id = 0;
+                MarshallDeputy view_md;
+                fu->get_reply() >> ret >> outputs >> coro_id >> view_md;
+                //e->add_dep(coo->cli_id_, src_coroid, follower_id, coro_id);
+                //coo->ids_.push_back(follower_id);
+                // do nothing
+              };
+					DepId di2;
+					di2.str = "dep";
+					di2.id = Communicator::global_id++;
+          
+					Future::safe_release(pair.second->async_Dispatch(cmd_id, di2, md, fuattr));
+        }
+      }
+    }
+  }
+  //probably should modify the data structure here.
+  return e;
+}
+
+
+void Communicator::SendStart(SimpleCommand& cmd,
+                             int32_t output_size,
+                             std::function<void(Future* fu)>& callback) {
+  verify(0);
+}
+
+shared_ptr<AndEvent>
+Communicator::SendPrepare(Coordinator* coo,
+                          txnid_t tid,
+                          std::vector<int32_t>& sids){
+	int32_t res_ = 10;
+  TxData* cmd = (TxData*) coo->cmd_;
+  auto n = cmd->partition_ids_.size();
+  auto e = Reactor::CreateSpEvent<AndEvent>();
+  auto phase = coo->phase_;
+  int n_total = 1;
+  int quorum_id = 0;
+  for(auto& partition_id : cmd->partition_ids_){
+    auto leader_id = LeaderProxyForPartition(partition_id).first;
+    auto site_id = leader_id;
+    auto proxies = rpc_par_proxies_[partition_id];
+    if(follower_forwarding) n_total = 3;
+    auto qe = Reactor::CreateSpEvent<QuorumEvent>(n_total, 1);
+    e->AddEvent(qe);
+    auto src_coroid = qe->GetCoroId();
+      
+    qe->id_ = Communicator::global_id;
+    qe->par_id_ = quorum_id++;
+    FutureAttr fuattr;
+    fuattr.callback = [this, e, qe, src_coroid, site_id, coo, phase, cmd, tid](Future* fu) {
+      if (fu->get_error_code() != 0) {
+        Log_info("Get a error message in reply");
+        return;
+      }
+      int32_t res;
+			bool_t slow;
+      uint64_t coro_id = 0;
+      fu->get_reply() >> res >> slow >>coro_id;
+			
+			this->slow = slow;
+      // qe->add_dep(coo->cli_id_, src_coroid, site_id, coro_id); 
+      
+      if(phase != coo->phase_){
+        return;
+      }
+
+      if(res == REJECT){
+				Log_info("REJECT in prepare");
+        cmd->commit_.store(false);
+        coo->aborted_ = true;
+      }
+      qe->n_voted_yes_++;
+      e->Test();
+    };
+    
+    ClassicProxy* proxy = LeaderProxyForPartition(partition_id).second;
+    Log_debug("SendPrepare to %ld sites gid:%ld, tid:%ld\n",
+              sids.size(),
+              partition_id,
+              tid);
+		DepId di;
+		di.str = "dep";
+		di.id = Communicator::global_id++;
+    
+		Future::safe_release(proxy->async_Prepare(tid, sids, di, fuattr));
+    if(follower_forwarding){
+      for(auto& pair : rpc_par_proxies_[partition_id]){
+        if(pair.first != leader_id){
+          site_id = pair.first;
+          proxy = pair.second;
+					
+					DepId di2;
+					di2.str = "dep";
+					di2.id = Communicator::global_id++;
+          
+					Future::safe_release(proxy->async_Prepare(tid, sids, di2, fuattr));  
+        }
+      }
+    }
+  }
+  return e;
+}
+
+/*void Communicator::SendPrepare(groupid_t gid,
+                               txnid_t tid,
+                               std::vector<int32_t>& sids,
+                               const function<void(int)>& callback) {
+  FutureAttr fuattr;
+  std::function<void(Future*)> cb =
+      [this, callback](Future* fu) {
+        int res;
+        fu->get_reply() >> res;
+        callback(res);
+      };
+  fuattr.callback = cb;
+  // ClassicProxy* proxy = LeaderProxyForPartition(gid).second;
+  auto pair_proxies = PilotProxyForPartition(gid);
+  verify(pair_proxies.size() == 2);
+  Log_debug("SendPrepare to %ld sites gid:%ld, tid:%ld\n",
+            sids.size(),
+            gid,
+            tid);
+  for (auto& p : pair_proxies)
+    Future::safe_release(p.second->async_Prepare(tid, sids, fuattr));
+}*/
+
+void Communicator::___LogSent(parid_t pid, txnid_t tid) {
+  auto value = std::make_pair(pid, tid);
+  auto it = phase_three_sent_.find(value);
+  if (it != phase_three_sent_.end()) {
+    Log_fatal("phase 3 sent exists: %d %x", it->first, it->second);
+  } else {
+    phase_three_sent_.insert(value);
+    Log_debug("phase 3 sent: pid: %d; tid: %x", value.first, value.second);
+  }
+}
+
+shared_ptr<AndEvent>
+Communicator::SendCommit(Coordinator* coo,
+                              txnid_t tid) {
+#ifdef LOG_LEVEL_AS_DEBUG
+//  ___LogSent(pid, tid);
+#endif
+	TxData* cmd = (TxData*) coo->cmd_;
+  int n_total = 1;
+  auto n = cmd->GetPartitionIds().size();
+  auto e = Reactor::CreateSpEvent<AndEvent>();
+  
+  for(auto& rp : cmd->partition_ids_){
+    auto leader_id = LeaderProxyForPartition(rp).first;
+    auto site_id = leader_id;
+    auto proxies = rpc_par_proxies_[rp];
+    if(follower_forwarding) n_total = 3;
+    auto qe = Reactor::CreateSpEvent<QuorumEvent>(n_total, 1);
+    qe->id_ = Communicator::global_id;
+    auto src_coroid = qe->GetCoroId();
+
+    e->AddEvent(qe);
+
+    coo->n_finish_req_++;
+    FutureAttr fuattr;
+    auto phase = coo->phase_;
+    fuattr.callback = [this, e, qe, src_coroid, site_id, coo, phase, cmd, tid](Future* fu) {
+      if (fu->get_error_code() != 0) {
+        Log_info("Get a error message in reply");
+        return;
+      }
+      int32_t res;
+			bool_t slow;
+      uint64_t coro_id = 0;
+			Profiling profile;
+      MarshallDeputy view_md;
+      fu->get_reply() >> res >> slow >> coro_id >> profile >> view_md;
+			this->slow = slow;
+			if(profile.cpu_util >= 0.0){
+				cpu = profile.cpu_util;
+				//Log_info("cpu: %f and network: %f and memory: %f", profile.cpu_util, profile.tx_util, profile.mem_util);
+			}
+      // Propagate the result status (including WRONG_LEADER) back to the coordinator
+      cmd->reply_.res_ = res;
+      
+      // Extract and attach view data if present
+      if (view_md.sp_data_ != nullptr) {
+        auto sp_view_data = dynamic_pointer_cast<ViewData>(view_md.sp_data_);
+        if (sp_view_data) {
+          cmd->reply_.sp_view_data_ = sp_view_data;
+          Log_info("[VIEW_PROPAGATE] Received view data in Commit response for tx_id=%lu: %s", 
+                   tid, sp_view_data->ToString().c_str());
+        }
+      }
+
+      struct timespec end_;
+	  	clock_gettime(CLOCK_REALTIME,&end_);
+
+	  	rrr::i64 start_sec = this->outbound_[src_coroid].first;
+	  	rrr::i64 start_nsec = this->outbound_[src_coroid].second;
+
+	  	rrr::i64 curr = ((rrr::i64)end_.tv_sec - start_sec)*1000000000 + ((rrr::i64)end_.tv_nsec - start_nsec);
+	  	curr /= 1000;
+	  	this->total_time += curr;
+	  	this->total++;
+      if(this->index < 200){
+	    	this->window[this->index] = curr;
+	    	this->index++;
+	    	this->window_time = this->total_time;
+	  	}
+      else{
+	    	this->window_time = 0;
+	    	for(int i = 0; i < 199; i++){
+	      	this->window[i] = this->window[i+1];
+	      	this->window_time += this->window[i];
+	    	}
+	    	this->window[199] = curr;
+	    	this->window_time += curr;
+	  	}
+			this->window_avg = this->window_time/this->index;
+			this->total_avg = this->total_time/this->total;
+
+      // qe->add_dep(coo->cli_id_, src_coroid, site_id, coro_id);
+
+      if(coo->phase_ != phase) return;
+      qe->n_voted_yes_++;
+      e->Test();
+    };
+
+		DepId di;
+		di.str = "dep";
+		di.id = Communicator::global_id++;
+    ClassicProxy* proxy = LeaderProxyForPartition(rp).second;
+    Log_debug("SendCommit to %ld tid:%ld\n", rp, tid);
+    Future::safe_release(proxy->async_Commit(tid, di, fuattr));
+    
+    if(follower_forwarding){
+      for(auto& pair : rpc_par_proxies_[rp]){
+        if(pair.first != leader_id){
+					DepId di2;
+					di2.str = "dep";
+					di2.id = Communicator::global_id++;
+          
+					site_id = pair.first;
+          proxy = pair.second;
+          Future::safe_release(proxy->async_Commit(tid, di2, fuattr));  
+        }
+      }
+    }
+
+    coo->site_commit_[rp]++;
+
+  }
+  return e;
+}
+
+/*void Communicator::SendCommit(parid_t pid,
+                              txnid_t tid,
+                              const function<void()>& callback) {
+#ifdef LOG_LEVEL_AS_DEBUG
+  ___LogSent(pid, tid);
+#endif
+  FutureAttr fuattr;
+  fuattr.callback = [callback](Future*) { callback(); };
+  auto proxy_pair = LeaderProxyForPartition(pid);
+  ClassicProxy* proxy = proxy_pair.second;
+  SetLeaderCache(pid, proxy_pair) ;
+  Log_debug("SendCommit to %ld tid:%ld\n", pid, tid);
+  Future::safe_release(proxy->async_Commit(tid, 0, fuattr));
+}*/
+shared_ptr<AndEvent>
+Communicator::SendAbort(Coordinator* coo,
+                              txnid_t tid) {
+#ifdef LOG_LEVEL_AS_DEBUG
+//  ___LogSent(pid, tid);
+#endif
+	TxData* cmd = (TxData*) coo->cmd_;
+  int n_total = 1;
+  auto n = cmd->GetPartitionIds().size();
+  auto e = Reactor::CreateSpEvent<AndEvent>();
+  for(auto& rp : cmd->partition_ids_){
+    auto proxies = rpc_par_proxies_[rp];
+    auto leader_id = LeaderProxyForPartition(rp).first;
+    auto site_id = leader_id;
+    if(follower_forwarding) n_total = 3;
+    auto qe = Reactor::CreateSpEvent<QuorumEvent>(n_total, 1);
+    qe->id_ = Communicator::global_id;
+    auto src_coroid = qe->GetCoroId();
+
+    e->AddEvent(qe);
+
+    coo->n_finish_req_++;
+    FutureAttr fuattr;
+    auto phase = coo->phase_;
+    fuattr.callback = [this, e, qe, coo, src_coroid, site_id, phase, cmd, tid](Future* fu) {
+      if (fu->get_error_code() != 0) {
+        Log_info("Get a error message in reply");
+        return;
+      }
+      int32_t res;
+			bool_t slow;
+      uint64_t coro_id = 0;
+			Profiling profile;
+      MarshallDeputy view_md;
+      fu->get_reply() >> res >> slow >> coro_id >> profile >> view_md;
+			this->slow = slow;
+      
+      // Propagate the result status (including WRONG_LEADER) back to the coordinator
+      cmd->reply_.res_ = res;
+      
+      // Extract and attach view data if present
+      if (view_md.sp_data_ != nullptr) {
+        auto sp_view_data = dynamic_pointer_cast<ViewData>(view_md.sp_data_);
+        if (sp_view_data) {
+          cmd->reply_.sp_view_data_ = sp_view_data;
+          Log_info("[VIEW_PROPAGATE] Received view data in Abort response for tx_id=%lu: %s", 
+                   tid, sp_view_data->ToString().c_str());
+        }
+      }
+
+	  	if(profile.cpu_util != -1.0){
+				Log_info("cpu: %f and network: %f", profile.cpu_util, profile.tx_util);
+				this->cpu = profile.cpu_util;
+				this->tx = profile.tx_util;
+			}
+
+      struct timespec end_;
+	  	clock_gettime(CLOCK_REALTIME,&end_);
+
+	  	rrr::i64 start_sec = this->outbound_[src_coroid].first;
+	  	rrr::i64 start_nsec = this->outbound_[src_coroid].second;
+
+	  	rrr::i64 curr = ((rrr::i64)end_.tv_sec - start_sec)*1000000000 + ((rrr::i64)end_.tv_nsec - start_nsec);
+	  	curr /= 1000;
+	  	this->total_time += curr;
+	  	this->total++;
+      if(this->index < 100){
+	    	this->window[this->index];
+	    	this->index++;
+	    	this->window_time = this->total_time;
+	  	}
+      else{
+	    	this->window_time = 0;
+	    	for(int i = 0; i < 99; i++){
+	      	this->window[i] = this->window[i+1];
+	      	this->window_time += this->window[i];
+	    	}
+	    	this->window[99] = curr;
+	    	this->window_time += curr;
+	  	}
+	  	//Log_info("average time of RPC is: %d", this->total_time/this->total);
+	 		//Log_info("window time of RPC is: %d", this->window_time/this->index);
+
+      // qe->add_dep(coo->cli_id_, src_coroid, site_id, coro_id); 
+
+      if(coo->phase_ != phase) return;
+      qe->n_voted_yes_++;
+      e->Test();
+    };
+
+		DepId di;
+		di.str = "dep";
+		di.id = Communicator::global_id++;
+    ClassicProxy* proxy = LeaderProxyForPartition(rp).second;
+    Log_debug("SendAbort to %ld tid:%ld\n", rp, tid);
+    Future::safe_release(proxy->async_Abort(tid, di, fuattr));
+
+    if(follower_forwarding){
+      for(auto& pair : rpc_par_proxies_[rp]){
+        if(pair.first != leader_id){
+					DepId di2;
+					di2.str = "dep";
+					di2.id = Communicator::global_id++;
+          
+					site_id = pair.first;
+          proxy = pair.second;
+          Future::safe_release(proxy->async_Abort(tid, di2, fuattr));  
+        }
+      }
+
+    }
+    coo->site_abort_[rp]++;
+  }
+  return e;
+}
+
+void Communicator::SendEarlyAbort(parid_t pid,
+                                  txnid_t tid) {
+#ifdef LOG_LEVEL_AS_DEBUG
+  ___LogSent(pid, tid);
+#endif
+  FutureAttr fuattr;
+  fuattr.callback = [](Future*) {};
+  ClassicProxy* proxy = LeaderProxyForPartition(pid).second;
+  Log_debug("SendAbort to %ld tid:%ld\n", pid, tid);
+  Future::safe_release(proxy->async_EarlyAbort(tid, fuattr));
+}
+
+/*void Communicator::SendAbort(parid_t pid, txnid_t tid,
+                             const function<void()>& callback) {
+#ifdef LOG_LEVEL_AS_DEBUG
+  ___LogSent(pid, tid);
+#endif
+  FutureAttr fuattr;
+  fuattr.callback = [callback](Future*) { callback(); };
+  // ClassicProxy* proxy = LeaderProxyForPartition(pid).second;
+  auto pair_proxies = PilotProxyForPartition(pid);
+  Log_debug("SendAbort to %ld tid:%ld\n", pid, tid);
+  for (auto& p : pair_proxies)
+    Future::safe_release(p.second->async_Abort(tid, fuattr));
+}*/
+
+void Communicator::SendUpgradeEpoch(epoch_t curr_epoch,
+                                    const function<void(parid_t,
+                                                        siteid_t,
+                                                        int32_t&)>& callback) {
+  for (auto& pair: rpc_par_proxies_) {
+    auto& par_id = pair.first;
+    auto& proxies = pair.second;
+    for (auto& pair: proxies) {
+      FutureAttr fuattr;
+      auto& site_id = pair.first;
+      function<void(Future*)> cb = [callback, par_id, site_id](Future* fu) {
+        if (fu->get_error_code() != 0) {
+          Log_info("Get a error message in reply");
+          return;
+        }
+        int32_t res;
+        fu->get_reply() >> res;
+        callback(par_id, site_id, res);
+      };
+      fuattr.callback = cb;
+      auto proxy = (ClassicProxy*) pair.second;
+      Future::safe_release(proxy->async_UpgradeEpoch(curr_epoch, fuattr));
+    }
+  }
+}
+
+void Communicator::SendTruncateEpoch(epoch_t old_epoch) {
+  for (auto& pair: rpc_par_proxies_) {
+    auto& par_id = pair.first;
+    auto& proxies = pair.second;
+    for (auto& pair: proxies) {
+      FutureAttr fuattr;
+      fuattr.callback = [](Future*) {};
+      auto proxy = (ClassicProxy*) pair.second;
+      Future::safe_release(proxy->async_TruncateEpoch(old_epoch));
+    }
+  }
+}
+
+void Communicator::SendForwardTxnRequest(
+    TxRequest& req,
+    Coordinator* coo,
+    std::function<void(const TxReply&)> callback) {
+  Log_info("%s: %d, %d", __FUNCTION__, coo->coo_id_, coo->par_id_);
+  verify(client_leaders_.size() > 0);
+  auto idx = rrr::RandomGenerator::rand(0, client_leaders_.size() - 1);
+  auto p = client_leaders_[idx];
+  auto leader_site_id = p.first;
+  auto leader_proxy = p.second;
+  Log_debug("%s: send to client site %d", __FUNCTION__, leader_site_id);
+  TxDispatchRequest dispatch_request;
+  dispatch_request.id = coo->coo_id_;
+  for (size_t i = 0; i < req.input_.size(); i++) {
+    dispatch_request.input.push_back(req.input_[i]);
+  }
+  dispatch_request.tx_type = req.tx_type_;
+
+  FutureAttr future;
+  future.callback = [callback](Future* fu) {
+    if (fu->get_error_code() != 0) {
+      Log_info("Get a error message in reply");
+      return;
+    }
+    TxReply reply;
+    fu->get_reply() >> reply;
+    callback(reply);
+  };
+  Future::safe_release(leader_proxy->async_DispatchTxn(dispatch_request,
+                                                       future));
+}
+
+vector<shared_ptr<MessageEvent>>
+Communicator::BroadcastMessage(shardid_t shard_id,
+                               svrid_t svr_id,
+                               string& msg) {
+  verify(0);
+  // TODO
+  vector<shared_ptr<MessageEvent>> events;
+
+  for (auto& p : rpc_par_proxies_[shard_id]) {
+    auto site_id = p.first;
+    auto proxy = (p.second);
+    verify(proxy != nullptr);
+    FutureAttr fuattr;
+    auto msg_ev = std::make_shared<MessageEvent>(shard_id, site_id);
+    events.push_back(msg_ev);
+    fuattr.callback = [msg_ev] (Future* fu) {
+      if (fu->get_error_code() != 0) {
+        Log_info("Get a error message in reply");
+        return;
+      }
+      auto& marshal = fu->get_reply();
+      marshal >> msg_ev->msg_;
+      msg_ev->Set(1);
+    };
+    Future* f = nullptr;
+    Future::safe_release(f);
+    return events;
+  }
+}
+
+shared_ptr<MessageEvent>
+Communicator::SendMessage(siteid_t site_id,
+                          string& msg) {
+  verify(0);
+  // TODO
+  auto ev = std::make_shared<MessageEvent>(site_id);
+  return ev;
+}
+
+
+void Communicator::AddMessageHandler(
+    function<bool(const MarshallDeputy&, MarshallDeputy&)> f) {
+   msg_marshall_handlers_.push_back(f);
+}
+
+shared_ptr<GetLeaderQuorumEvent> Communicator::BroadcastGetLeader(
+    parid_t par_id, locid_t cur_pause) {
+  int n = Config::GetConfig()->GetPartitionSize(par_id);
+  auto e = Reactor::CreateSpEvent<GetLeaderQuorumEvent>(n - 1, 1);
+  auto proxies = rpc_par_proxies_[par_id];
+  WAN_WAIT;
+  for (auto& p : proxies) {
+    if (p.first == cur_pause) continue;
+    auto proxy = p.second;
+    FutureAttr fuattr;
+    fuattr.callback = [e, p](Future* fu) {
+      if (fu->get_error_code() != 0) {
+        Log_info("Get a error message in reply");
+        return;
+      }
+      bool_t is_leader = false;
+      fu->get_reply() >> is_leader;
+      e->FeedResponse(is_leader, p.first);
+    };
+    Future::safe_release(proxy->async_IsFPGALeader(par_id, fuattr));
+  }
+  return e;
+}
+
+shared_ptr<QuorumEvent> Communicator::FailoverPauseSocketOut(
+    parid_t par_id, locid_t loc_id) {
+#ifdef FAILOVER_DEBUG
+  Log_info("!!!!!!!!!!!!!! enter Communicator::FailoverPauseSocketOut");
+#endif
+  int n = Config::GetConfig()->GetPartitionSize(par_id);
+  auto e = Reactor::CreateSpEvent<QuorumEvent>(1, 1);
+  auto proxies = rpc_par_proxies_[par_id];
+  // sleep(1);
+  // WAN_WAIT;
+#ifdef FAILOVER_DEBUG
+  Log_info("!!!!!!!!!!!!!! after Communicator::FailoverPauseSocketOut WAN_WAIT");
+#endif
+  for (auto& p : proxies) {
+    if (p.first != loc_id) continue;
+    auto proxy = p.second;
+    FutureAttr fuattr;
+    fuattr.callback = [e](Future* fu) {
+      if (fu->get_error_code() != 0) {
+        Log_info("Get a error message in reply");
+        return;
+      }
+      int res;
+      fu->get_reply() >> res;
+      if (res == 0)
+        e->VoteYes();
+      else
+        e->VoteNo();
+    };
+#ifdef FAILOVER_DEBUG
+    Log_info("!!!!!!!!!!!! Communicator::FailoverPauseSocketOut");
+#endif
+    Future::safe_release(proxy->async_FailoverPauseSocketOut(fuattr));
+  }
+  return e;
+}
+
+shared_ptr<QuorumEvent> Communicator::FailoverResumeSocketOut(
+    parid_t par_id, locid_t loc_id) {
+#ifdef FAILOVER_DEBUG
+  Log_info("!!!!!!!!!!!!!! enter Communicator::FailoverResumeSocketOut");
+#endif
+  int n = Config::GetConfig()->GetPartitionSize(par_id);
+  auto e = Reactor::CreateSpEvent<QuorumEvent>(1, 1);
+  auto proxies = rpc_par_proxies_[par_id];
+  // sleep(1);
+  // WAN_WAIT;
+#ifdef FAILOVER_DEBUG
+  Log_info("!!!!!!!!!!!!!! after Communicator::FailoverResumeSocketOut WAN_WAIT");
+#endif
+  for (auto& p : proxies) {
+    if (p.first != loc_id) continue;
+    auto proxy = p.second;
+    FutureAttr fuattr;
+    fuattr.callback = [e](Future* fu) {
+      if (fu->get_error_code() != 0) {
+        Log_info("Get a error message in reply");
+        return;
+      }
+      int res;
+      fu->get_reply() >> res;
+      if (res == 0)
+        e->VoteYes();
+      else
+        e->VoteNo();
+    };
+#ifdef FAILOVER_DEBUG
+    Log_info("!!!!!!!!!!!! Communicator::FailoverResumeSocketOut");
+#endif
+    Future::safe_release(proxy->async_FailoverResumeSocketOut(fuattr));
+  }
+  return e;
+}
+
+void Communicator::SetNewLeaderProxy(parid_t par_id, locid_t loc_id) {
+  bool found = false;
+  auto proxies = rpc_par_proxies_[par_id];
+  for (auto& p : proxies) {
+    if (p.first == loc_id) {
+      leader_cache_[par_id] = p;
+      found = true;
+      break;
+    }
+  }
+
+  verify(found);
+
+  /*  auto it = rpc_par_proxies_.find(par_id);
+    verify(it != rpc_par_proxies_.end());
+    auto& partition_proxies = it->second;
+    auto config = Config::GetConfig();
+    auto proxy_it = std::find_if(
+        partition_proxies.begin(),
+        partition_proxies.end(),
+        [config, loc_id](const std::pair<siteid_t, ClassicProxy*>& p) {
+          verify(p.second != nullptr);
+          auto& site = config->SiteById(p.first);
+          return site.locale_id == loc_id ;
+        });
+     verify (proxy_it != partition_proxies.end()) ;
+     leader_cache_[par_id] = *proxy_it;*/
+  Log_debug("set leader porxy for parition %d is %d", par_id, loc_id);
+}
+
+void Communicator::SendSimpleCmd(groupid_t gid, SimpleCommand& cmd,
+    std::vector<int32_t>& sids, const function<void(int)>& callback) {
+  FutureAttr fuattr;
+  std::function<void(Future*)> cb = [this, callback](Future* fu) {
+    if (fu->get_error_code() != 0) {
+      Log_info("Get a error message in reply");
+      return;
+    }
+    int res;
+    fu->get_reply() >> res;
+    callback(res);
+  };
+  fuattr.callback = cb;
+  ClassicProxy* proxy = LeaderProxyForPartition(gid).second;
+  Log_debug("SendEmptyCmd to %ld sites gid:%ld\n", sids.size(), gid);
+  Future::safe_release(proxy->async_SimpleCmd(cmd, fuattr));
+}
+
+
+shared_ptr<JetpackPullRecoveryQuorumEvent> Communicator::JetpackBroadcastPullRecovery(parid_t par_id, locid_t loc_id,
+                                                                                  const View& old_view,
+                                                                                  const View& new_view,
+                                                                                  epoch_t jepoch,
+                                                                                  epoch_t oepoch) {
+  int n = Config::GetConfig()->GetPartitionSize(par_id);
+  auto e = Reactor::CreateSpEvent<JetpackPullRecoveryQuorumEvent>(n, n/2+1);
+  auto proxies = rpc_par_proxies_[par_id];
+  vector<Future*> fus;
+	WAN_WAIT;
+
+  MarshallDeputy old_view_deputy, new_view_deputy;
+  old_view_deputy.SetMarshallable(std::make_shared<ViewData>(old_view));
+  new_view_deputy.SetMarshallable(std::make_shared<ViewData>(new_view));
+
+  for (auto& p : proxies) {
+    auto proxy = (ClassicProxy*) p.second;
+    FutureAttr fuattr;
+    fuattr.callback = [e](Future* fu) {
+      if (fu->get_error_code() != 0) {
+        Log_info("Get a error message in reply");
+        return;
+      }
+      bool_t ok;
+      epoch_t reply_jepoch, reply_oepoch;
+      MarshallDeputy reply_old_view, reply_new_view, key_id_batch;
+      fu->get_reply() >> ok >> reply_jepoch >> reply_oepoch >> reply_old_view >> reply_new_view >> key_id_batch;
+      auto batch = std::dynamic_pointer_cast<KeyCmdIdBatchData>(key_id_batch.sp_data_);
+      Log_info("[JETPACK-RECOVERY] PullRecovery response ok=%d entries=%zu", ok, batch ? batch->Size() : 0);
+      e->FeedResponse(ok, reply_jepoch, reply_oepoch, key_id_batch);
+    };
+    auto fu = proxy->async_JetpackPullRecovery(old_view_deputy, new_view_deputy, jepoch, oepoch, fuattr);
+    fus.push_back(fu);
+  }
+
+  return e;
+}
+
+shared_ptr<JetpackPullIdSetQuorumEvent> Communicator::JetpackBroadcastPullIdSet(parid_t par_id, locid_t loc_id,
+                                                                           epoch_t jepoch, epoch_t oepoch) {
+  int n = Config::GetConfig()->GetPartitionSize(par_id);
+  auto e = Reactor::CreateSpEvent<JetpackPullIdSetQuorumEvent>(n, n/2+1);
+  auto proxies = rpc_par_proxies_[par_id];
+  vector<Future*> fus;
+	WAN_WAIT;
+  for (auto& p : proxies) {
+    // TODO: Local call optimization temporarily commented out
+    // if (p.first == loc_id) {
+    //     // Local call - call OnJetpackPullIdSet directly
+    //     bool_t ok;
+    //     epoch_t reply_jepoch, reply_oepoch;
+    //     MarshallDeputy reply_old_view, reply_new_view;
+    //     auto id_set = std::make_shared<VecRecData>();
+    //     dtxn_sched_->OnJetpackPullIdSet(jepoch, oepoch, &ok, &reply_jepoch, &reply_oepoch, 
+    //                                    &reply_old_view, &reply_new_view, id_set);
+    //     MarshallDeputy id_set_deputy;
+    //     id_set_deputy.SetMarshallable(id_set);
+    //     e->FeedResponse(ok, reply_jepoch, reply_oepoch, id_set_deputy);
+    //     continue;
+    // }
+    auto proxy = (ClassicProxy*) p.second;
+    FutureAttr fuattr;
+    fuattr.callback = [e](Future* fu) {
+      if (fu->get_error_code() != 0) {
+        Log_info("Get a error message in reply");
+        return;
+      }
+      bool_t ok;
+      epoch_t reply_jepoch, reply_oepoch;
+      MarshallDeputy reply_old_view, reply_new_view, id_set;
+      fu->get_reply() >> ok >> reply_jepoch >> reply_oepoch >> reply_old_view >> reply_new_view >> id_set;
+      e->FeedResponse(ok, reply_jepoch, reply_oepoch, id_set);
+    };
+    auto fu = proxy->async_JetpackPullIdSet(jepoch, oepoch, fuattr);
+    fus.push_back(fu);
+  }
+  return e;
+}
+
+shared_ptr<JetpackPullCmdQuorumEvent> Communicator::JetpackBroadcastPullCmd(parid_t par_id, locid_t loc_id, 
+                                                                        const std::vector<key_t>& keys, epoch_t jepoch, epoch_t oepoch) {
+  // Log_info("[JETPACK-DEBUG] JetpackBroadcastPullCmd called with par_id=%d, loc_id=%d, key=%d", par_id, loc_id, key);
+  
+  int n = Config::GetConfig()->GetPartitionSize(par_id);
+  // Log_info("[JETPACK-DEBUG] Partition size n=%d", n);
+  
+  auto e = Reactor::CreateSpEvent<JetpackPullCmdQuorumEvent>(n, n/2+1, keys);
+  // if (!e) {
+  //   Log_info("[JETPACK-DEBUG] ERROR: Failed to create JetpackPullCmdQuorumEvent!");
+  // }
+  
+  // if (rpc_par_proxies_.find(par_id) == rpc_par_proxies_.end()) {
+  //   Log_info("[JETPACK-DEBUG] ERROR: No proxies found for partition %d!", par_id);
+  // }
+  
+  auto proxies = rpc_par_proxies_[par_id];
+  // Log_info("[JETPACK-DEBUG] Found %zu proxies for partition %d", proxies.size(), par_id);
+  
+  vector<Future*> fus;
+  auto key_batch = std::make_shared<VecRecData>();
+  key_batch->key_data_ = std::make_shared<vector<key_t>>(keys.begin(), keys.end());
+  MarshallDeputy key_batch_md;
+  key_batch_md.SetMarshallable(key_batch);
+	WAN_WAIT;
+  for (auto& p : proxies) {
+    // TODO: Local call optimization temporarily commented out
+    // if (p.first == loc_id) {
+    //     // Local call - call OnJetpackPullCmd directly
+    //     bool_t ok;
+    //     epoch_t reply_jepoch, reply_oepoch;
+    //     MarshallDeputy reply_old_view, reply_new_view;
+    //     auto cmd = std::make_shared<TpcCommitCommand>();
+    //     dtxn_sched_->OnJetpackPullCmd(jepoch, oepoch, key, &ok, &reply_jepoch, &reply_oepoch, 
+    //                                  &reply_old_view, &reply_new_view, cmd);
+    //     MarshallDeputy cmd_deputy;
+    //     cmd_deputy.SetMarshallable(cmd);
+    //     e->FeedResponse(ok, reply_jepoch, reply_oepoch, cmd_deputy);
+    //     continue;
+    // }
+    auto proxy = (ClassicProxy*) p.second;
+    // if (!proxy) {
+    //   Log_info("[JETPACK-DEBUG] ERROR: Proxy is NULL for site %d!", p.first);
+    // }
+    // Log_info("[JETPACK-DEBUG] Sending JetpackPullCmd to site %d", p.first);
+    
+    FutureAttr fuattr;
+    fuattr.callback = [e](Future* fu) {
+      if (fu->get_error_code() != 0) {
+        Log_info("Get a error message in reply");
+        return;
+      }
+      bool_t ok;
+      epoch_t reply_jepoch, reply_oepoch;
+      MarshallDeputy reply_old_view, reply_new_view, cmd;
+      fu->get_reply() >> ok >> reply_jepoch >> reply_oepoch >> reply_old_view >> reply_new_view >> cmd;
+      e->FeedResponse(ok, reply_jepoch, reply_oepoch, cmd);
+    };
+    
+    // Log_info("[JETPACK-DEBUG] About to call async_JetpackPullCmd");
+    auto fu = proxy->async_JetpackPullCmd(jepoch, oepoch, key_batch_md, fuattr);
+    // if (!fu) {
+    //   Log_info("[JETPACK-DEBUG] ERROR: async_JetpackPullCmd returned NULL Future!");
+    // }
+    // Log_info("[JETPACK-DEBUG] async_JetpackPullCmd returned Future, adding to list");
+    fus.push_back(fu);
+  }
+  // Log_info("[JETPACK-DEBUG] JetpackBroadcastPullCmd returning event with %zu futures", fus.size());
+  return e;
+}
+
+shared_ptr<JetpackRecordCmdQuorumEvent> Communicator::JetpackBroadcastRecordCmd(parid_t par_id, locid_t loc_id,
+                                                               epoch_t jepoch, epoch_t oepoch, 
+                                                               int sid, 
+                                                               const std::vector<std::pair<key_t, uint64_t>>& record_key_ids,
+                                                               const std::vector<std::pair<key_t, uint64_t>>& missing_key_ids) {
+  // Log_info("[JETPACK-DEBUG] JetpackBroadcastRecordCmd called: par_id=%d, loc_id=%d, sid=%d, , 
+  //          par_id, loc_id, sid);
+  
+  int n = Config::GetConfig()->GetPartitionSize(par_id);
+  auto e = Reactor::CreateSpEvent<JetpackRecordCmdQuorumEvent>(n, n/2+1);
+  auto proxies = rpc_par_proxies_[par_id];
+  vector<Future*> fus;
+	WAN_WAIT;
+  
+  auto record_batch = std::make_shared<KeyCmdIdBatchData>();
+  for (const auto& entry : record_key_ids) {
+    record_batch->AddEntry(entry.first, entry.second);
+  }
+  auto missing_batch = std::make_shared<KeyCmdIdBatchData>();
+  for (const auto& entry : missing_key_ids) {
+    missing_batch->AddEntry(entry.first, entry.second);
+  }
+  Log_info("[JETPACK-RECOVERY] RecordCmd batch entries=%zu missing=%zu sid=%d",
+           record_batch->Size(), missing_batch->Size(), sid);
+  MarshallDeputy record_md, missing_md;
+  record_md.SetMarshallable(record_batch);
+  missing_md.SetMarshallable(missing_batch);
+  
+  // Log_info("[JETPACK-DEBUG] Broadcasting RecordCmd to %zu sites, need %d votes", proxies.size(), n/2+1);
+  
+  for (auto& p : proxies) {
+    // TODO: Local call optimization temporarily commented out
+    // if (p.first == loc_id) {
+    //     // Local call - call OnJetpackRecordCmd directly
+    //     dtxn_sched_->OnJetpackRecordCmd(jepoch, oepoch, sid, rid, cmd);
+    //     e->VoteYes();
+    //     continue;
+    // }
+    auto proxy = (ClassicProxy*) p.second;
+    FutureAttr fuattr;
+    fuattr.callback = [e, p](Future* fu) {
+      if (fu->get_error_code() != 0) {
+        // Log_info("[JETPACK-DEBUG] RecordCmd error from site %d: error_code=%d", 
+        //          p.first, fu->get_error_code());
+        e->VoteNo();  // Vote no on error to prevent hanging
+        return;
+      }
+      bool_t ok;
+      epoch_t reply_jepoch, reply_oepoch;
+      MarshallDeputy reply_old_view, reply_new_view, cmd_batch;
+      fu->get_reply() >> ok >> reply_jepoch >> reply_oepoch >> reply_old_view >> reply_new_view >> cmd_batch;
+      e->FeedResponse(ok, reply_jepoch, reply_oepoch, cmd_batch);
+    };
+    // Log_info("[JETPACK-DEBUG] Sending RecordCmd to site %d", p.first);
+    auto fu = proxy->async_JetpackRecordCmd(jepoch, oepoch, sid, record_md, missing_md, fuattr);
+    fus.push_back(fu);
+  }
+  return e;
+}
+
+shared_ptr<JetpackPrepareQuorumEvent> Communicator::JetpackBroadcastPrepare(parid_t par_id, locid_t loc_id, 
+                                                                      epoch_t jepoch, epoch_t oepoch, 
+                                                                      ballot_t max_seen_ballot) {
+  int n = Config::GetConfig()->GetPartitionSize(par_id);
+  auto e = Reactor::CreateSpEvent<JetpackPrepareQuorumEvent>(n, n/2+1);
+  auto proxies = rpc_par_proxies_[par_id];
+  vector<Future*> fus;
+	WAN_WAIT;
+  for (auto& p : proxies) {
+    // TODO: Local call optimization temporarily commented out
+    // if (p.first == loc_id) {
+    //     // Local call - call OnJetpackPrepare directly
+    //     bool_t ok;
+    //     epoch_t reply_jepoch, reply_oepoch;
+    //     MarshallDeputy reply_old_view, reply_new_view;
+    //     ballot_t accepted_ballot;
+    //     int replied_sid, replied_set_size;
+    //     dtxn_sched_->OnJetpackPrepare(jepoch, oepoch, max_seen_ballot, &ok, &reply_jepoch, &reply_oepoch,
+    //                                  &reply_old_view, &reply_new_view, &accepted_ballot, &replied_sid, &replied_set_size);
+    //     e->FeedResponse(ok, reply_jepoch, reply_oepoch, accepted_ballot, replied_sid, replied_set_size, max_seen_ballot);
+    //     continue;
+    // }
+    auto proxy = (ClassicProxy*) p.second;
+    FutureAttr fuattr;
+    fuattr.callback = [e](Future* fu) {
+      if (fu->get_error_code() != 0) {
+        Log_info("Get a error message in reply");
+        return;
+      }
+      bool_t ok;
+      epoch_t reply_jepoch, reply_oepoch;
+      MarshallDeputy reply_old_view, reply_new_view;
+      ballot_t reply_max_seen_ballot;
+      ballot_t accepted_ballot;
+      int replied_sid;
+      fu->get_reply() >> ok >> reply_jepoch >> reply_oepoch >> reply_old_view >> reply_new_view 
+                     >> reply_max_seen_ballot >> accepted_ballot >> replied_sid;
+      e->FeedResponse(ok, reply_jepoch, reply_oepoch, accepted_ballot, replied_sid, reply_max_seen_ballot);
+    };
+    auto fu = proxy->async_JetpackPrepare(jepoch, oepoch, max_seen_ballot, fuattr);
+    fus.push_back(fu);
+  }
+  return e;
+}
+
+shared_ptr<JetpackAcceptQuorumEvent> Communicator::JetpackBroadcastAccept(parid_t par_id, locid_t loc_id, 
+                                                                          epoch_t jepoch, epoch_t oepoch, 
+                                                                          ballot_t max_seen_ballot, int sid) {
+  int n = Config::GetConfig()->GetPartitionSize(par_id);
+  auto e = Reactor::CreateSpEvent<JetpackAcceptQuorumEvent>(n, n/2+1);
+  auto proxies = rpc_par_proxies_[par_id];
+  vector<Future*> fus;
+	WAN_WAIT;
+  for (auto& p : proxies) {
+    auto proxy = (ClassicProxy*) p.second;
+    FutureAttr fuattr;
+    fuattr.callback = [e](Future* fu) {
+      if (fu->get_error_code() != 0) {
+        Log_info("Get a error message in reply");
+        return;
+      }
+      bool_t ok;
+      epoch_t reply_jepoch, reply_oepoch;
+      MarshallDeputy reply_old_view, reply_new_view;
+      ballot_t reply_max_seen_ballot;
+      fu->get_reply() >> ok;
+      fu->get_reply() >> reply_jepoch;
+      fu->get_reply() >> reply_oepoch;
+      fu->get_reply() >> reply_old_view;
+      fu->get_reply() >> reply_new_view;
+      fu->get_reply() >> reply_max_seen_ballot;
+      e->FeedResponse(ok, reply_jepoch, reply_oepoch, reply_max_seen_ballot);
+    };
+    auto fu = proxy->async_JetpackAccept(jepoch, oepoch, max_seen_ballot, sid, fuattr);
+    fus.push_back(fu);
+  }
+  return e;
+}
+
+shared_ptr<QuorumEvent> Communicator::JetpackBroadcastCommit(parid_t par_id, locid_t loc_id, epoch_t jepoch, epoch_t oepoch, int sid) {
+  int n = Config::GetConfig()->GetPartitionSize(par_id);
+  auto e = Reactor::CreateSpEvent<QuorumEvent>(n, n/2+1);
+  auto proxies = rpc_par_proxies_[par_id];
+  vector<Future*> fus;
+	WAN_WAIT;
+  for (auto& p : proxies) {
+    auto proxy = (ClassicProxy*) p.second;
+    FutureAttr fuattr;
+    fuattr.callback = [e](Future* fu) {
+      if (fu->get_error_code() != 0) {
+        Log_info("Get a error message in reply");
+        return;
+      }
+      e->VoteYes();
+    };
+    auto fu = proxy->async_JetpackCommit(jepoch, oepoch, sid, fuattr);
+    fus.push_back(fu);
+  }
+  return e;
+}
+
+shared_ptr<QuorumEvent> Communicator::JetpackBroadcastFinishRecovery(parid_t par_id, locid_t loc_id, epoch_t oepoch) {
+  int n = Config::GetConfig()->GetPartitionSize(par_id);
+  auto e = Reactor::CreateSpEvent<QuorumEvent>(n, n/2+1);
+  auto proxies = rpc_par_proxies_[par_id];
+  vector<Future*> fus;
+	WAN_WAIT;
+  for (auto& p : proxies) {
+    auto proxy = (ClassicProxy*) p.second;
+    FutureAttr fuattr;
+    fuattr.callback = [e](Future* fu) {
+      if (fu->get_error_code() != 0) {
+        Log_info("Get a error message in reply");
+        return;
+      }
+      e->VoteYes();
+    };
+    auto fu = proxy->async_JetpackFinishRecovery(oepoch, fuattr);
+    fus.push_back(fu);
+  }
+  return e;
+}
+
+void Communicator::UpdatePartitionView(parid_t partition_id, const std::shared_ptr<ViewData>& view_data) {
+  if (!view_data) {
+    Log_info("[COMMUNICATOR_VIEW] Received null view_data for partition %d", partition_id);
+    return;
+  }
+  
+  View view = view_data->view_;
+  
+  // Lock the mutex for thread-safe access
+  std::lock_guard<std::mutex> lock(partition_views_mutex_);
+  
+  // Check if we have an existing view
+  auto it = partition_views_.find(partition_id);
+  if (it != partition_views_.end()) {
+    // Only update if the new view has a higher view_id
+    if (view.view_id_ > it->second.view_id_) {
+      partition_views_[partition_id] = view;
+    } else {
+      // Log_info("[VIEW_DEBUG] partition %d ignoring stale view_id=%d (current=%d)",
+      //          partition_id, view.view_id_, it->second.view_id_);
+    }
+  } else {
+    // First view for this partition
+    Log_info("[VIEW_DEBUG] partition %d initial view %s", partition_id, view.ToString().c_str());
+    partition_views_[partition_id] = view;
+  }
+  
+  // Note: We no longer update leader_cache_ here since each communicator instance
+  // should look up the leader from the global partition_views_ when needed
+}
+
+View Communicator::GetPartitionView(parid_t partition_id) {
+  std::lock_guard<std::mutex> lock(partition_views_mutex_);
+  auto it = partition_views_.find(partition_id);
+  if (it != partition_views_.end()) {
+    return it->second;
+  }
+  // Return empty view if not found
+  return View();
+}
+
+locid_t Communicator::GetLeaderForPartition(parid_t partition_id) const {
+  // naive_rpc: no consensus, no view updates. Route every client RPC to
+  // locale_id=1 (zoo2 / .102) so we can saturate a single isolated server
+  // for a CPU ceiling measurement. Must be checked before the view path
+  // because ClientWorker sets a dynamic leader_callback_ that funnels into
+  // this function on every dispatch.
+  if (Config::GetConfig()->replica_proto_ == MODE_NAIVE_RPC) {
+    return 1;
+  }
+  // naive_raft: all clients send the initial Dispatch RPC to the fixed
+  // leader at locale_id=1 (zoo2 / .102). The leader-side broadcast to the
+  // 4 followers happens server-side in ClassicServiceImpl::Dispatch.
+  if (Config::GetConfig()->replica_proto_ == MODE_NAIVE_RAFT) {
+    return 1;
+  }
+  // Raft / Jetpack+Raft: the Raft election prefers the locale configured
+  // by `raft_leader_locale` in any -f yaml (default 0 = first locale in
+  // the host: list). Route clients to the same locale up front so the
+  // first Dispatch doesn't hit a follower and get redirected. Once the
+  // leader is elected the view callback will keep returning the same
+  // locale — this is a static hint for the first few ticks before the
+  // view is set. Used to be hardcoded `return 1`; the hardcode broke
+  // any deployment where the leader was placed elsewhere (e.g., the
+  // 2026-04-29 Akkio AWS run with leader on server0).
+  if (Config::GetConfig()->replica_proto_ == MODE_RAFT ||
+      Config::GetConfig()->replica_proto_ == MODE_FPGA_RAFT) {
+    return Config::GetConfig()->GetRaftLeaderLocale();
+  }
+  // naive_epaxos: client sends to its co-located server. Resolution is
+  // done in the client-side leader callback (client_worker.cc) because
+  // that's where we can consult the client's Config::SiteInfo to look up
+  // the server on the same host — commo_->loc_id_ alone is the client's
+  // own locale_id (which is NOT the same as any server's locale_id).
+  View view = GetPartitionView(partition_id);
+
+  if (!view.IsEmpty()) {
+    int leader = view.GetLeader();
+    if (leader >= 0) {
+      return leader;
+    }
+  }
+  
+  // Fall back to static leader if no view or invalid leader
+  return 0;
+}
+
+} // namespace janus

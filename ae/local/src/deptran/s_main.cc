@@ -1,0 +1,1207 @@
+#include "__dep__.h"
+#include "frame.h"
+#include "client_worker.h"
+#include "procedure.h"
+#include "command_marshaler.h"
+#include "benchmark_control_rpc.h"
+#include "server_worker.h"
+#include "../rrr/reactor/event.h"
+#include "scheduler.h"
+#include "config.h"
+#include "communicator.h"
+#include <chrono>
+#include <cstdlib>
+#include <thread>
+
+#if defined(JETPACK_MONGODB_RECOVERY) || defined(JETPACK_ETCD_RECOVERY)
+#include "../jm_file_signal.h"
+#endif
+#ifdef JETPACK_MONGODB_RECOVERY
+#include "mongodb_leader_watcher.h"
+#endif
+#ifdef JETPACK_ETCD_RECOVERY
+#include "etcd_leader_watcher.h"
+#endif
+
+// #define CPU_PROFILE 1
+
+#ifdef CPU_PROFILE
+# include <gperftools/profiler.h>
+#endif // ifdef CPU_PROFILE
+
+using namespace janus;
+
+static ClientControlServiceImpl *ccsi_g = nullptr;
+static rrr::PollMgr *cli_poll_mgr_g = nullptr;
+static rrr::Server *cli_hb_server_g = nullptr;
+
+static vector<ServerWorker> svr_workers_g = {};
+vector<unique_ptr<ClientWorker>> client_workers_g = {};
+static std::vector<std::thread> client_threads_g = {}; // TODO remove this?
+static std::vector<std::thread> failover_threads_g = {};
+bool* volatile failover_triggers;
+volatile bool failover_server_quit = false;
+volatile locid_t failover_server_idx;
+volatile double total_throughput = 0;
+#ifdef JETPACK_MONGODB_RECOVERY
+static std::shared_ptr<janus::MongodbLeaderWatcher> mongodb_leader_watcher_g;
+
+static void KillMongodbPrimary() {
+  // Kill only the local mongod bound to this host on the default port.
+  std::string host = "127.0.0.1";
+  if (!svr_workers_g.empty() && svr_workers_g[0].site_info_) {
+    if (!svr_workers_g[0].site_info_->host.empty()) {
+      host = svr_workers_g[0].site_info_->host;
+    } else if (!svr_workers_g[0].site_info_->proc_name.empty()) {
+      host = svr_workers_g[0].site_info_->proc_name;
+    } else if (!svr_workers_g[0].site_info_->name.empty()) {
+      host = svr_workers_g[0].site_info_->name;
+    }
+  }
+  const int mongo_port = 27017;
+#ifdef AWS
+  host = "0.0.0.0"; // ALWAYS 0.0.0.0 online
+#endif
+  std::string kill_cmd =
+      "pkill -KILL -f \"mongod.*--port " + std::to_string(mongo_port) +
+      ".*--bind_ip " + host + "\"";
+  Log_info("[MONGODB-FAILOVER] Executing primary kill: %s", kill_cmd.c_str());
+  std::system(kill_cmd.c_str());
+
+#ifdef JETPACK_MONGODB_SIMULATION
+  // Simulate MongoDB electing a new primary (server1) after a short delay.
+  std::this_thread::sleep_for(std::chrono::milliseconds(100));
+  auto cfg = Config::GetConfig();
+  auto hosts = cfg->GetReplicaHosts(0);
+  if (hosts.size() > 1) {
+    std::string new_primary_host = hosts[1];
+    auto pos = new_primary_host.find(':');
+    if (pos != std::string::npos) {
+      new_primary_host = new_primary_host.substr(0, pos);
+    }
+    jm_signal::set_key("mongo", "primary_elected", new_primary_host);
+    Log_info("[MONGODB-FAILOVER] Simulated new mongo primary: %s", new_primary_host.c_str());
+  }
+#else
+  // Start real MongoDB leader watcher to detect when replica set elects a new
+  // primary. The watcher uses mongocxx APM topology_changed callbacks; the
+  // driver's SDAM background thread monitors the replica set and fires the
+  // callback when a new primary is detected.
+  auto cfg = Config::GetConfig();
+  auto hosts = cfg->GetReplicaHosts(0);
+  std::string mongo_uri = std::string(janus::kMongoDbUri);
+  if (hosts.size() > 1) {
+    // Build replica set URI connecting to surviving nodes (not the killed primary).
+    std::ostringstream oss;
+    oss << "mongodb://";
+    bool first = true;
+    for (size_t i = 1; i < hosts.size(); ++i) {
+      if (!first) oss << ",";
+      first = false;
+      auto pos = hosts[i].find(':');
+      if (pos != std::string::npos) {
+        oss << hosts[i].substr(0, pos) << ":27017";
+      } else {
+        oss << hosts[i] << ":27017";
+      }
+    }
+    mongo_uri = oss.str();
+  }
+  // Determine the local hostname that Jetpack replicas are polling for.
+  std::string signal_host = host;
+  if (hosts.size() > 1) {
+    auto pos = hosts[1].find(':');
+    if (pos != std::string::npos) {
+      signal_host = hosts[1].substr(0, pos);
+    } else {
+      signal_host = hosts[1];
+    }
+  }
+  mongodb_leader_watcher_g = std::make_shared<janus::MongodbLeaderWatcher>(
+      mongo_uri, signal_host);
+  mongodb_leader_watcher_g->Start();
+#endif
+}
+#endif
+#ifdef JETPACK_ETCD_RECOVERY
+static std::shared_ptr<janus::EtcdLeaderWatcher> etcd_leader_watcher_g;
+
+static void KillEtcdPrimary() {
+  std::string host = "127.0.0.1";
+  if (!svr_workers_g.empty() && svr_workers_g[0].site_info_) {
+    if (!svr_workers_g[0].site_info_->host.empty()) {
+      host = svr_workers_g[0].site_info_->host;
+    } else if (!svr_workers_g[0].site_info_->proc_name.empty()) {
+      host = svr_workers_g[0].site_info_->proc_name;
+    } else if (!svr_workers_g[0].site_info_->name.empty()) {
+      host = svr_workers_g[0].site_info_->name;
+    }
+  }
+#ifdef AWS
+  host = "0.0.0.0"; // ALWAYS 0.0.0.0 online
+#endif
+  const int etcd_port = 2379;
+  std::string kill_cmd =
+      "pkill -KILL -f \"etcd.*--listen-client-urls .*:" +
+      std::to_string(etcd_port) + "\"";
+  Log_info("[ETCD-FAILOVER] Executing primary kill (host=%s): %s",
+           host.c_str(), kill_cmd.c_str());
+  std::system(kill_cmd.c_str());
+
+#ifdef JETPACK_ETCD_SIMULATION
+  // Simulate etcd electing a new primary after a short delay.
+  std::this_thread::sleep_for(std::chrono::milliseconds(100));
+  auto cfg = Config::GetConfig();
+  auto hosts = cfg->GetReplicaHosts(0);
+  if (hosts.size() > 1) {
+    std::string new_primary_host = hosts[1];
+    auto pos = new_primary_host.find(':');
+    if (pos != std::string::npos) {
+      new_primary_host = new_primary_host.substr(0, pos);
+    }
+    jm_signal::set_key("etcd", "primary_elected", new_primary_host);
+    Log_info("[ETCD-FAILOVER] Simulated new etcd primary: %s",
+             new_primary_host.c_str());
+  }
+#else
+  // Start real etcd leader watcher to detect when etcd elects a new leader.
+  // The watcher monitors the JetPack/leader key in etcd; when a new leader
+  // writes to it, the watcher signals Jetpack via jm_file_signal.
+  auto cfg = Config::GetConfig();
+  auto hosts = cfg->GetReplicaHosts(0);
+  std::string etcd_uri = std::string(janus::kEtcdUri);
+  if (hosts.size() > 1) {
+    // Connect to a surviving etcd node (not the killed primary).
+    auto pos = hosts[1].find(':');
+    if (pos != std::string::npos) {
+      etcd_uri = "http://" + hosts[1].substr(0, pos) + ":2379";
+    } else {
+      etcd_uri = "http://" + hosts[1] + ":2379";
+    }
+  }
+  // Determine the local hostname that Jetpack replicas are polling for.
+  std::string signal_host = host;
+  if (hosts.size() > 1) {
+    auto pos = hosts[1].find(':');
+    if (pos != std::string::npos) {
+      signal_host = hosts[1].substr(0, pos);
+    } else {
+      signal_host = hosts[1];
+    }
+  }
+  etcd_leader_watcher_g = std::make_shared<janus::EtcdLeaderWatcher>(
+      etcd_uri, signal_host);
+  etcd_leader_watcher_g->Start();
+#endif
+}
+#endif
+// All the following statistics only count mid 1/3 duration
+// 2 \subseteq 1 \subseteq 0, 4 \subseteq 3, 5 = 2 \cup 4, 2 \cap 4 = \emptyset
+// 0: all fast path attempts (even fail or slower than original path), 1 RTT
+// 1: success fast path attempts (success only, may slower than original path), 1 RTT
+// 2: efficient fast path attempts (only success and faster than original path), 1 RTT
+// 3: all original path attempts (even slower than fast path), 2 RTTs
+// 4: efficient original path attempts (only faster than fast path, or fast path failed), 2 RTTs
+// 5: all efficient attempts (count all faster one) (should equals to category 2 merge category 4)
+// 6: mid-10s read latency  (merged from per-client cli2cli_[10], set 2026-05-05)
+// 7: mid-10s write latency (merged from per-client cli2cli_[11], set 2026-05-05)
+// Invariant: count(6) + count(7) == count(5). Verified at end of client_shutdown().
+Distribution cli2cli[8];
+Distribution dispatch_time_distribution;
+Distribution cpu_usage_leaders;
+Distribution queue_depth;
+// commit_time for all (default 30s) duration
+vector<std::pair<double, double>> commit_time; // <dispatch_time, duration>
+Frequency frequency;
+#ifdef LATENCY_DEBUG
+  Distribution client2leader, client2leader_send, client2test_point;
+#endif
+
+void client_setup_heartbeat(int num_clients) {
+  Log_info("%s", __FUNCTION__);
+  std::map<int32_t, std::string> txn_types;
+  Frame* f = Frame::GetFrame(Config::GetConfig()->tx_proto_);
+  f->GetTxTypes(txn_types);
+  delete f;
+  bool hb = Config::GetConfig()->do_heart_beat();
+  if (hb) {
+    // setup controller rpc server
+    ccsi_g = new ClientControlServiceImpl(num_clients, txn_types);
+    int n_io_threads = 1;
+    cli_poll_mgr_g = new rrr::PollMgr(n_io_threads);
+    base::ThreadPool *thread_pool = new base::ThreadPool(1);
+    cli_hb_server_g = new rrr::Server(cli_poll_mgr_g, thread_pool);
+    cli_hb_server_g->reg(ccsi_g);
+    auto ctrl_port = std::to_string(Config::GetConfig()->get_ctrl_port());
+    std::string server_address = std::string("0.0.0.0:").append(ctrl_port);
+    Log_info("Start control server on port %s", ctrl_port.c_str());
+    cli_hb_server_g->start(server_address.c_str());
+  }
+}
+
+void client_launch_workers(vector<Config::SiteInfo> &client_sites) {
+  // load some common configuration
+  // start client workers in new threads.
+  Log_info("client enabled, number of sites: %d", client_sites.size());
+  vector<ClientWorker*> workers;
+
+  failover_triggers = new bool[client_sites.size()]() ;
+#ifdef SIMULATE_WAN
+  int core_id = 10; // [JetPack] usually run within 5 replicas, 5 + 3 cores are enough for aws test
+#endif
+#ifndef SIMULATE_WAN
+  int core_id = 0; // [JetPack] usually run 1 replica on each process on cloud setting
+#endif
+  for (uint32_t client_id = 0; client_id < client_sites.size(); client_id++) {
+    ClientWorker* worker = new ClientWorker(client_id,
+                                            client_sites[client_id],
+                                            Config::GetConfig(),
+                                            ccsi_g, nullptr, 
+                                            &(failover_triggers[client_id]),
+                                            &failover_server_quit,
+                                            &failover_server_idx,
+                                            &total_throughput);
+    workers.push_back(worker);
+    auto th_ = std::thread(&ClientWorker::Work, worker);
+#ifdef AWS
+    //in AWS test, distrubute client workers on different cores except physical core 1(core_id == 1 || 5), which is the server worker core
+    cpu_set_t cpuset;
+    CPU_ZERO(&cpuset);
+    CPU_SET(core_id, &cpuset);
+    int rc = pthread_setaffinity_np(th_.native_handle(),
+                                    sizeof(cpu_set_t), &cpuset);
+    if (rc != 0) {
+      std::cerr << "Error calling pthread_setaffinity_np: " << rc << "\n";
+    } else {
+      Log_info("start a client thread on core %d, client-id:%d", core_id, client_id);
+    }
+    core_id ++;
+    if(core_id % 4 == 1){
+      core_id++;
+    }
+#endif
+#ifndef AWS
+    cpu_set_t cpuset;
+    CPU_ZERO(&cpuset);
+    CPU_SET(core_id, &cpuset);
+    int rc = pthread_setaffinity_np(th_.native_handle(),
+                                    sizeof(cpu_set_t), &cpuset);
+    if (rc != 0) {
+      std::cerr << "Error calling pthread_setaffinity_np: " << rc << "\n";
+    } else {
+      Log_info("start a client thread on core %d, client-id:%d", core_id, client_id);
+    }
+    core_id ++;
+    // Skip the server core (SERVER_CORE_ID, default 1) and core 4 (another
+    // process). Re-read server core every iteration in case env was updated.
+    {
+      int server_core = server_core_id.load(std::memory_order_relaxed);
+      while (core_id == server_core || core_id == 4) {
+        core_id++;
+      }
+    }
+#endif
+    client_threads_g.push_back(std::move(th_));
+    client_workers_g.push_back(std::unique_ptr<ClientWorker>(worker));
+  }
+
+}
+
+// start servers in new threads.
+void server_launch_worker(vector<Config::SiteInfo>& server_sites) {
+  auto config = Config::GetConfig();
+  Log_info("server enabled, number of sites: %d", server_sites.size());
+  svr_workers_g.resize(server_sites.size(), ServerWorker());
+  int i=0;
+  vector<std::thread> setup_ths;
+  int core_id = server_core_id.load(std::memory_order_relaxed);
+#ifdef SIMULATE_WAN
+  core_id = 5; //
+#endif
+  for (auto& site_info : server_sites) {
+    auto th_ = std::thread([&site_info, &i, &config] () {
+      Log_info("launching site: %x, bind address %s",
+               site_info.id,
+               site_info.GetBindAddress().c_str());
+      auto& worker = svr_workers_g[i++];
+      worker.site_info_ = const_cast<Config::SiteInfo*>(&config->SiteById(site_info.id));
+      Log_info("start SetupBase");
+      worker.SetupBase();
+      // register txn piece logic
+      Log_info("start RegisterWorkload");
+      worker.RegisterWorkload();
+      // populate table according to benchmarks
+      worker.PopTable();
+      Log_info("table popped for site %d", (int)worker.site_info_->id);
+#ifdef DB_CHECKSUM
+      worker.DbChecksum();
+#endif
+      // start server service
+#ifdef RAFT_TEST_CORO
+      // In test mode, only initialize replication services
+      if (worker.rep_sched_)
+        worker.rep_sched_->svr_workers_g = &svr_workers_g;
+#else
+      worker.tx_sched_->svr_workers_g = &svr_workers_g;
+      if (worker.rep_sched_)
+        worker.rep_sched_->svr_workers_g = &svr_workers_g;
+#endif
+      worker.SetupService();
+      Log_info("start communication for site %d", (int)worker.site_info_->id);
+      worker.SetupCommo();
+      Log_info("site %d launched!", (int)site_info.id);
+      worker.launched_ = true;
+    });
+#ifdef AWS
+    // for better performance, bind each server thread to a cpu core
+    // in AWS test, each instance has at most one server worker
+    cpu_set_t cpuset;
+    CPU_ZERO(&cpuset);
+    CPU_SET(core_id, &cpuset);
+    int rc = pthread_setaffinity_np(th_.native_handle(),
+                                    sizeof(cpu_set_t), &cpuset);
+    if (rc != 0) {
+      std::cerr << "Error calling pthread_setaffinity_np: " << rc << "\n";
+    } else {
+      Log_info("start a server thread on core %d, site-id:%d", core_id, site_info.id);
+    }
+#endif
+#ifndef AWS
+    // for better performance, bind each server thread to a cpu core
+    cpu_set_t cpuset;
+    CPU_ZERO(&cpuset);
+    CPU_SET(core_id, &cpuset);
+    int rc = pthread_setaffinity_np(th_.native_handle(),
+                                    sizeof(cpu_set_t), &cpuset);
+    if (rc != 0) {
+      std::cerr << "Error calling pthread_setaffinity_np: " << rc << "\n";
+    } else {
+      Log_info("start a server thread on core %d, site-id:%d", core_id, site_info.id);
+    }
+    core_id ++;
+#endif
+    setup_ths.push_back(std::move(th_));
+  }
+
+  for (auto& worker : svr_workers_g) {
+    while (!worker.launched_) {
+      sleep(1);
+    }
+  }
+
+  Log_info("waiting for server setup threads.");
+  for (auto& th: setup_ths) {
+    th.join();
+  }
+  Log_info("done waiting for server setup threads.");
+
+  for (ServerWorker& worker : svr_workers_g) {
+    // start communicator after all servers are running
+    // setup communication between controller script
+    worker.SetupHeartbeat();
+  }
+  Log_info("server workers' communicators setup");
+
+  // Start CPU monitor on all servers unconditionally so original (none) mode
+  // has CPU metrics available at summary time.
+  for (ServerWorker& worker : svr_workers_g) {
+    if (worker.tx_sched_) {
+      worker.tx_sched_->StartCpuMonitorIfNeeded();
+    }
+  }
+}
+
+void client_shutdown() {
+  for (const unique_ptr<ClientWorker>& client: client_workers_g) {
+    // client->retrive_statistic();
+    for (int i = 0; i < 6; i++)
+      cli2cli[i].merge(client->cli2cli_[i]);
+    // Mid-10s read/write split (set 2026-05-05): per-client slots 10/11
+    // → global slots 6/7. Per-client slots 6-9 are full-duration and stay
+    // internal-only (used by JetPack adaptive throttle's recent_100_ave).
+    cli2cli[6].merge(client->cli2cli_[10]);
+    cli2cli[7].merge(client->cli2cli_[11]);
+    dispatch_time_distribution.merge(client->dispatch_time_distribution_);
+    cpu_usage_leaders.merge(client->cpu_usage_leaders_);
+    queue_depth.merge(client->queue_depth_);
+    frequency.merge(client->frequency_);
+    commit_time.insert(commit_time.end(), client->commit_time_.begin(), client->commit_time_.end());
+#ifdef LATENCY_DEBUG
+    client2leader.merge(client->client2leader_);
+    client2test_point.merge(client->client2test_point_);
+    client2leader_send.merge(client->client2leader_send_);
+#endif
+  }
+  // Mid-10s R/W invariant (set 2026-05-05): every commit that lands in
+  // slot 5 (all-efficient, mid-10s) must also land in exactly one of
+  // slot 10 (read) or slot 11 (write) — those appends are added next to
+  // every existing slot-5 append site. If counts disagree, a coordinator
+  // is appending to slot 5 but missed the matching slot-10/11 append.
+  size_t mid_rw_total = cli2cli[6].count() + cli2cli[7].count();
+  size_t mid_eff_total = cli2cli[5].count();
+  if (mid_rw_total != mid_eff_total) {
+    Log_warn("[CLI2CLI-SANITY] mid-10s read(%zu) + write(%zu) = %zu != all-efficient(%zu) — coordinator missing slot-10/11 R/W append site",
+             cli2cli[6].count(), cli2cli[7].count(), mid_rw_total, mid_eff_total);
+    verify(0);
+  }
+  client_workers_g.clear();
+}
+
+void server_shutdown() {
+  Log_info("server_shutdown");
+#ifdef JETPACK_PROF
+  // Profiling: print accumulated timing counters from Jetpack hot paths.
+  // Only compiled in when -DJETPACK_PROF is set; the counter declarations
+  // themselves are also gated so production builds pay zero cost.
+  auto fmt_avg = [](uint64_t n, uint64_t ns) -> double {
+    return n ? (double)ns / n / 1000.0 : 0.0;  // microseconds
+  };
+  for (auto &worker : svr_workers_g) {
+    TxLogServer* tx = worker.tx_sched_;
+    TxLogServer* rep = worker.rep_sched_;
+    if (!tx && !rep) continue;
+    uint64_t spec_n = tx ? tx->prof_spec_calls_.load() : 0;
+    uint64_t spec_ns = tx ? tx->prof_spec_ns_.load() : 0;
+    uint64_t disp_n = tx ? tx->prof_dispatch_calls_.load() : 0;
+    uint64_t disp_ns = tx ? tx->prof_dispatch_ns_.load() : 0;
+    if (rep && rep != tx) {
+      spec_n += rep->prof_spec_calls_.load();
+      spec_ns += rep->prof_spec_ns_.load();
+      disp_n += rep->prof_dispatch_calls_.load();
+      disp_ns += rep->prof_dispatch_ns_.load();
+    }
+    uint64_t pool_n = rep ? rep->prof_pool_push_calls_.load() : 0;
+    uint64_t pool_ns = rep ? rep->prof_pool_push_ns_.load() : 0;
+    uint64_t ae_n = rep ? rep->prof_append_entries_calls_.load() : 0;
+    uint64_t ae_ns = rep ? rep->prof_append_entries_ns_.load() : 0;
+    uint64_t pool_ext_ns = rep ? rep->prof_pool_extract_ns_.load() : 0;
+    uint64_t pool_out_ns = rep ? rep->prof_pool_outer_lookup_ns_.load() : 0;
+    uint64_t pool_in_ns = rep ? rep->prof_pool_inner_insert_ns_.load() : 0;
+    uint64_t pool_rm_n = rep ? rep->prof_pool_remove_calls_.load() : 0;
+    uint64_t pool_rm_ns = rep ? rep->prof_pool_remove_ns_.load() : 0;
+    uint64_t pool_ha_n = rep ? rep->prof_pool_has_appeared_calls_.load() : 0;
+    uint64_t pool_ha_ns = rep ? rep->prof_pool_has_appeared_ns_.load() : 0;
+    uint64_t pool_peak_keys = rep ? rep->prof_pool_peak_keys_.load() : 0;
+    uint64_t pool_peak_cmds = rep ? rep->prof_pool_peak_cmds_.load() : 0;
+    locid_t loc = rep ? rep->loc_id_ : (tx ? tx->loc_id_ : -1);
+    Log_info("[PROF] loc=%d spec_calls=%lu spec_avg_us=%.2f spec_total_ms=%.2f | "
+             "dispatch_calls=%lu dispatch_avg_us=%.2f dispatch_total_ms=%.2f | "
+             "pool_push_calls=%lu pool_push_avg_us=%.2f pool_push_total_ms=%.2f | "
+             "append_entries_calls=%lu append_entries_avg_us=%.2f append_entries_total_ms=%.2f",
+             loc,
+             spec_n, fmt_avg(spec_n, spec_ns), spec_ns / 1e6,
+             disp_n, fmt_avg(disp_n, disp_ns), disp_ns / 1e6,
+             pool_n, fmt_avg(pool_n, pool_ns), pool_ns / 1e6,
+             ae_n, fmt_avg(ae_n, ae_ns), ae_ns / 1e6);
+    Log_info("[PROF-POOL] loc=%d peak_keys=%lu peak_cmds=%lu | "
+             "push_breakdown extract_ms=%.2f outer_lookup_ms=%.2f inner_insert_ms=%.2f | "
+             "remove_calls=%lu remove_avg_us=%.2f remove_total_ms=%.2f | "
+             "has_appeared_calls=%lu has_appeared_avg_us=%.2f has_appeared_total_ms=%.2f",
+             loc, pool_peak_keys, pool_peak_cmds,
+             pool_ext_ns / 1e6, pool_out_ns / 1e6, pool_in_ns / 1e6,
+             pool_rm_n, fmt_avg(pool_rm_n, pool_rm_ns), pool_rm_ns / 1e6,
+             pool_ha_n, fmt_avg(pool_ha_n, pool_ha_ns), pool_ha_ns / 1e6);
+  }
+#endif  // JETPACK_PROF
+  for (auto &worker : svr_workers_g) {
+    worker.ShutDown();
+  }
+}
+
+void check_current_path() {
+  auto path = boost::filesystem::current_path();
+  Log_info("PWD : ", path.string().c_str());
+}
+
+void wait_for_clients() {
+  Log_info("%s: wait for client threads to exit.", __FUNCTION__);
+  for (auto &th: client_threads_g) {
+    th.join();
+  }
+}
+
+int find_current_leader() {
+    for (int i = 0; i < svr_workers_g.size(); i++) {
+        if (svr_workers_g[i].rep_sched_) {
+            // Cast to RaftServer to access IsLeader()
+            if (TxLogServer* server = dynamic_cast<TxLogServer*>(svr_workers_g[i].rep_sched_)) {
+                if (server->IsLeader()) {
+                    Log_info("Current leader found: index %d, site_id %d, locale_id %d",
+                              i, svr_workers_g[i].site_info_->id, svr_workers_g[i].site_info_->locale_id);
+                    return i;
+                }
+            }
+        }
+    }
+    Log_info("No current leader found");
+    return -1;
+}
+
+void server_failover_co(bool random, bool leader, int srv_idx)
+{
+#ifdef FAILOVER_DEBUG
+    Log_info("!!!!!!!!!!!!!!!enter server_failover_co");
+#endif
+    int idx = -1 ;
+    int expected_idx = -1 ;
+    auto cfg = Config::GetConfig();
+    int run_int = cfg->get_failover_run_interval() ;
+    int stop_int = cfg->get_failover_stop_interval() ;
+
+    if (srv_idx != -1)
+    {
+        expected_idx = srv_idx ;
+    }
+    else if(!random)
+    {
+        // temporary solution, assign id 0 as leader, id 1 as follower
+        if(leader)
+        {
+            expected_idx = 0 ;
+        }
+        else
+        {
+            expected_idx = 1 ;
+        }
+    }
+    else
+    {
+        // do nothing
+    }
+
+    for(int i=0;i<svr_workers_g.size();i++)
+    {
+      Log_debug("failover at index %d, id %d, loc id %d part id %d", 
+        i, svr_workers_g[i].site_info_->id,
+        svr_workers_g[i].site_info_->locale_id,  
+        svr_workers_g[i].site_info_->partition_id_ );
+    }
+
+    for(int i=0;i<svr_workers_g.size();i++)
+    {
+        if(svr_workers_g[i].site_info_->locale_id == expected_idx )
+        {
+            idx = i ;
+            break ;
+        }
+    }    
+#ifdef FAILOVER_DEBUG
+    Log_info("!!!!!!!!!!!!!!!!! failover_server_quit %d", failover_server_quit);
+#endif
+    while(!failover_server_quit)
+    {
+        if(random)
+        {
+            idx = rand() % svr_workers_g.size() ;
+        }
+        failover_server_idx = idx ;
+#ifdef FAILOVER_DEBUG
+        Log_info("!!!!!!!!!!!!!!!!!!!! before run_int wait %d s", run_int);
+#endif
+        sleep(run_int) ;
+        // auto r = Reactor::CreateSpEvent<TimeoutEvent>(run_int * 1000 * 1000);
+        // r->Wait();
+#ifdef FAILOVER_DEBUG
+        Log_info("!!!!!!!!!!!!!!!!!!!! after run_int wait");
+#endif
+        if(idx == -1) 
+        {
+          // TODO other types
+          if (!leader) break ;
+          idx = 0 ;
+        }        
+        if(failover_server_quit)
+        {
+#ifdef FAILOVER_DEBUG
+          Log_info("!!!!!!!!!!!!!!!!!!!! quit here");
+#endif
+          break ;
+        }
+        for (int i = 0; i < client_workers_g.size() ; ++i)
+        {
+          failover_triggers[i] = true ;
+        }
+        // for (int i = 0; i < client_workers_g.size() ; ++i)
+        // {
+        //   while(failover_triggers[i]) {
+        //     if (failover_server_quit) {
+        //       Log_info("!!!!!!!!!!!!!!!!!!!! quit here");
+        //       return ;
+        //     }
+        //   }
+        // }
+        // TODO the idx of client
+        idx = find_current_leader();
+        try {
+          jm_signal::set_key("failure", "failure_triggered", "failure_triggered");
+          Log_info("[JM_SIGNAL] wrote failure_triggered for host %s", "failure_triggered");
+        } catch (const std::exception& e) {
+          Log_warn("[JM_SIGNAL] failed to write failure_triggered for host %s: %s",
+                    "failure_triggered", e.what());
+        }
+        if (idx == -1) break; // [Jetpack] If no leader found, do not need to pause.
+#ifdef FAILOVER_DEBUG
+        Log_info("@@@@@@@@@@@@@@@@@@@@@@@@ before pause %d", svr_workers_g[idx].site_info_->id);
+        // Log_info("client_workers_g size: %d", client_workers_g.size());
+#endif
+        // client_workers_g[0]->Pause(idx) ;
+        // Log_info("@@@@@@@@@@@@@@@@@@@@@@@@ client_workers_g paused");
+        svr_workers_g[idx].Pause() ;
+#ifdef JETPACK_MONGODB_RECOVERY
+        if (cfg->replica_proto_ == MODE_MONGODB) {
+          KillMongodbPrimary();
+        }
+#endif
+#ifdef JETPACK_ETCD_RECOVERY
+        if (cfg->replica_proto_ == MODE_ETCD) {
+          KillEtcdPrimary();
+        }
+#endif
+        struct timeval pause_tv;
+        gettimeofday(&pause_tv, nullptr);
+        double pause_time_ms = static_cast<double>(pause_tv.tv_sec) * 1000.0 +
+                               static_cast<double>(pause_tv.tv_usec) / 1000.0;
+        Log_info("@@@@@@@@@@@@@@@@@@@@@@@@ svr_workers_g %d paused time=%.6fms", idx, pause_time_ms);
+        for (int i = 0; i < client_workers_g.size() ; ++i)
+        {
+          failover_triggers[i] = true ;
+        }
+#ifdef FAILOVER_DEBUG
+        Log_info("!!!!!!!!!!!!!! before stop_int wait");
+#endif
+        Log_info("server %d paused for failover test", idx);
+        sleep(stop_int) ;
+        // auto s = Reactor::CreateSpEvent<TimeoutEvent>(stop_int * 1000 * 1000);
+        // s->Wait() ;      
+#ifdef FAILOVER_DEBUG  
+        Log_info("!!!!!!!!!!!!!! after stop_int wait");
+#endif
+        // for (int i = 0; i < client_workers_g.size() ; ++i)
+        // {
+        //   while(failover_triggers[i]) {
+        //     if (failover_server_quit) return ;
+        //   }
+        // }        
+#ifdef FAILOVER_DEBUG
+        // Log_info("@@@@@@@@@@@@@@@@@@@@@@@@ before resume %d", svr_workers_g[idx].site_info_->id);
+#endif
+        // client_workers_g[0]->Resume(idx) ;
+        // Log_info("@@@@@@@@@@@@@@@@@@@@@@@@ failover resumed");
+        // svr_workers_g[idx].Resume() ;
+#ifdef FAILOVER_DEBUG
+        // Log_info("server %d resumed for failover test", idx);
+#endif
+        if(leader)
+        {
+          // get current leader
+          idx = failover_server_idx ;
+        }
+        break; // [Jetpack] Only simulate failure once
+    }
+
+}
+
+void server_failover_thread(bool random, bool leader, int srv_idx) {
+#ifdef AWS
+    sleep(15); // [JetPack] This is add for aws server test, this place need to wait the same time as client_launch_workers
+#endif
+#ifdef FAILOVER_DEBUG
+  Log_info("!!!!!!!!!!!!!!!enter server_failover_thread");
+#endif
+  Coroutine::CreateRun([&, random, leader, srv_idx]() { 
+    server_failover_co(random, leader, srv_idx) ;
+  }) ;
+}
+
+void server_failover()
+{
+    bool failover = Config::GetConfig()->get_failover();
+    bool random = Config::GetConfig()->get_failover_random() ;
+    bool leader = Config::GetConfig()->get_failover_leader() ;
+    int idx = Config::GetConfig()->get_failover_srv_idx() ;
+    if(failover)
+    {
+      /*Coroutine::CreateRun([&, random, leader, idx]() { 
+        server_failover_co(random, leader, idx) ;
+      }) ;*/
+      // TODO only consider the partition 0 now
+      failover_threads_g.push_back(
+          std::thread(&server_failover_thread, random, leader, idx)) ;
+    }
+}
+
+void setup_ulimit() {
+  struct rlimit limit;
+  /* Get max number of files. */
+  if (getrlimit(RLIMIT_NOFILE, &limit) != 0) {
+    Log_fatal("getrlimit() failed with errno=%d", errno);
+  }
+  Log_info("ulimit -n is %d", (int)limit.rlim_cur);
+}
+double getMemoryUsageMB() {
+    std::ifstream status_file("/proc/self/status");
+    std::string line;
+    double rss_kb = 0.0;
+
+    if (!status_file.is_open()) {
+        std::cerr << "Error: Could not open /proc/self/status" << std::endl;
+        return -1.0;
+    }
+
+    while (std::getline(status_file, line)) {
+        // Find the line that starts with "VmRSS:"
+        if (line.rfind("VmRSS:", 0) == 0) {
+            std::istringstream iss(line);
+            std::string key;
+            double value;
+            std::string unit;
+            iss >> key >> value >> unit;
+
+            if (unit == "kB") {
+                rss_kb = value;
+            }
+            break;
+        }
+    }
+
+    status_file.close();
+
+    // Convert from kilobytes to megabytes
+    return rss_kb / 1024.0;
+}
+//for AWS test cpu usage monitoring
+struct CPUStats { 
+    unsigned long long user, nice, system, idle, iowait, irq, softirq, steal;
+
+    unsigned long long total() const {
+        return user + nice + system + idle + iowait + irq + softirq + steal;
+    }
+
+    unsigned long long idleTime() const {
+        return idle + iowait;
+    }
+};
+//for AWS test cpu usage monitoring
+CPUStats getCPUStats(int core) {
+    std::ifstream file("/proc/stat");
+    std::string line;
+    CPUStats stats;
+
+    // Skip to the line corresponding to the specified core (e.g., "cpu0", "cpu1", etc.)
+    for (int i = 0; i <= core + 1; ++i) {
+        std::getline(file, line);
+    }
+    
+    std::istringstream iss(line);
+    std::string cpuLabel;
+    iss >> cpuLabel >> stats.user >> stats.nice >> stats.system >> stats.idle
+        >> stats.iowait >> stats.irq >> stats.softirq >> stats.steal;
+
+    return stats;
+}
+//for AWS test cpu usage monitoring
+double calculateCPUUsage(const CPUStats& oldStats, const CPUStats& newStats) {
+    unsigned long long totalDiff = newStats.total() - oldStats.total();
+    unsigned long long idleDiff = newStats.idleTime() - oldStats.idleTime();
+    // Log_info("idlediff : %.4f, totaldiff : %.4f",static_cast<double>(idleDiff) ,static_cast<double>(totalDiff));
+    return 100.0 * (1.0 - static_cast<double>(idleDiff) / totalDiff);
+}
+double median(std::vector<double> values) {
+    // Ensure the vector is not empty
+    if (values.empty()) {
+        throw std::invalid_argument("Cannot compute the median of an empty vector.");
+    }
+
+    // Sort the vector
+    std::sort(values.begin(), values.end());
+
+    size_t size = values.size();
+    if (size % 2 == 0) {
+        // If even number of elements, return the average of the two middle elements
+        return (values[size / 2 - 1] + values[size / 2]) / 2.0;
+    } else {
+        // If odd number of elements, return the middle element
+        return values[size / 2];
+    }
+}
+//for AWS test cpu usage monitoring
+vector<double> getUsage(int core_id, int duration){
+  // Get initial CPU stats
+  int first_phase = duration / 3;
+  int second_phase = 2 * (duration / 3);
+   
+  std::vector<double> cpu_usages;
+  //addition: add memory usage to this function
+  std::vector<double> memory_usage;
+  for (int i = 0; i < duration; ++i) {
+      // Measure CPU usage if within the middle third of the duration
+      if (i >= first_phase && i < second_phase) {
+          CPUStats oldStats = getCPUStats(core_id);
+          std::this_thread::sleep_for(std::chrono::seconds(1)); // Wait 1 second
+          memory_usage.push_back(getMemoryUsageMB());
+          CPUStats newStats = getCPUStats(core_id);
+          double cpuUsage = calculateCPUUsage(oldStats, newStats);
+          cpu_usages.push_back(cpuUsage);
+          continue;
+      }
+      std::this_thread::sleep_for(std::chrono::seconds(1));
+  }
+  cpu_usages.push_back(median(memory_usage));
+  return cpu_usages;
+
+}
+
+int main(int argc, char *argv[]) {
+  check_current_path();
+  Log_info("starting process %ld", getpid());
+  setup_ulimit();
+
+  // read configuration
+  int ret = Config::CreateConfig(argc, argv);
+  if (ret == SUCCESS) {
+    Log_info("Read config finish");
+  } else {
+    Log_fatal("Read config failed");
+    return ret;
+  }
+
+  // Initialize runtime WAN delay from environment or compile-time flag.
+  {
+    const char* wan_env = getenv("WAN_DELAY_MS");
+    if (wan_env != nullptr) {
+      uint64_t ms = strtoull(wan_env, nullptr, 10);
+      wan_delay_us.store(ms * 1000, std::memory_order_relaxed);
+      Log_info("WAN delay enabled via WAN_DELAY_MS=%s (%lu us)", wan_env, ms * 1000);
+    }
+#ifdef SIMULATE_WAN
+    else {
+      wan_delay_us.store(20 * 1000, std::memory_order_relaxed);
+      Log_info("WAN delay enabled via SIMULATE_WAN compile flag (20ms)");
+    }
+#endif
+  }
+
+  // Initialize server-thread pinning core from environment (default 1).
+  {
+    const char* core_env = getenv("SERVER_CORE_ID");
+    if (core_env != nullptr) {
+      int c = atoi(core_env);
+      server_core_id.store(c, std::memory_order_relaxed);
+      Log_info("server core pinning set via SERVER_CORE_ID=%s (core %d)", core_env, c);
+    }
+  }
+
+
+
+  auto client_infos = Config::GetConfig()->GetMyClients();
+  Log_info("!!!!!!!!!!!! client_infos size %d", client_infos.size());
+  if (client_infos.size() > 0) {
+    client_setup_heartbeat(client_infos.size());
+  }
+
+#ifdef CPU_PROFILE
+  char prof_file[1024];
+  Config::GetConfig()->GetProfilePath(prof_file);
+  // start to profile
+  ProfilerStart(prof_file);
+  Log_info("started to profile cpu");
+#endif // ifdef CPU_PROFILE
+  auto server_infos = Config::GetConfig()->GetMyServers();
+  // std::cout << "!!!!!!!!!!!!!!!" << server_infos[0].id << " " << server_infos[0].locale_id << std::endl;
+  if (!server_infos.empty()) {
+    server_launch_worker(server_infos);
+    server_failover() ;
+  } else {
+    Log_info("no servers on this process");
+  }
+
+  if (!client_infos.empty()) {
+    //client_setup_heartbeat(client_infos.size());
+#ifdef AWS
+    sleep(15); // [JetPack] This is add for aws server test, otherwise client may start when server not ready (like *** verify failed: commo_ != nullptr at ../src/deptran/copilot/frame.cc, line 82)
+#endif
+    Log_info("!!!!!!!!!!!!! before client_launch_workers(client_infos);");
+    client_launch_workers(client_infos);
+
+    // Monitor CPU usage of the server thread's pinned core during the mid-third
+    // of the experiment. getUsage() sleeps for the full duration, sampling
+    // /proc/stat for core_id every second during the middle third only.
+    // server thread pinned to server_core_id (default 1).
+    int svr_core = server_core_id.load(std::memory_order_relaxed);
+    std::vector<double> cpu_usage = getUsage(svr_core, Config::GetConfig()->duration_);
+    double memory_during_test = cpu_usage[cpu_usage.size() - 1];
+    Log_info("CORE %d USAGE: ", svr_core);
+    for(int i = 0; i < cpu_usage.size(); i++){
+      Log_info("%.4F", cpu_usage[i]);
+    }
+    // Report both median and mean of the mid-10s samples. The mean is the
+    // "per-host avg CPU" headline for this experiment; median is kept for
+    // backward compat with older sweep scripts.
+    Log_info("server median : %.3f", median(cpu_usage));
+    {
+      double sum = 0.0;
+      size_t n = 0;
+      for (double v : cpu_usage) {
+        // getUsage() pushes the final memory_during_test sample as the
+        // last element; skip it so the mean reflects CPU samples only.
+        if (n < cpu_usage.size() - 1) {
+          sum += v;
+          n++;
+        }
+      }
+      double avg = (n > 0) ? sum / n : 0.0;
+      Log_info("server average : %.3f", avg);
+    }
+    Log_info("memory during test: %.3f", memory_during_test);
+    wait_for_clients();
+    failover_server_quit = true;
+    Log_info("all clients have shut down.");
+  } else if (!server_infos.empty()) {
+    // Server-only process (no clients): wait for duration_ so that the
+    // recovery hooker has time to receive the failover signal before shutdown.
+    sleep(Config::GetConfig()->duration_);
+    failover_server_quit = true;
+  }
+  Log_info("Total throughtput is %.2f", total_throughput);
+
+  // CRITICAL: do client stats merge + CSV dump BEFORE the post-run cleanup
+  // (sleep + WaitForShutdown + ft.join). On AWS at high offered load
+  // (≥ 3000 req/s), the leader process intermittently dies during the
+  // cleanup phase — possibly an rrr server thread crash on cascading
+  // client disconnects — and never reaches the original CSV-dump call
+  // site below. By doing the dump first we ensure the per-experiment
+  // data is durably written even if the binary aborts during cleanup.
+  Log_info("[STATS] dumping CSV before post-run cleanup");
+  client_shutdown();
+  Log_info("All-fast-path-attempts           statistics %s", cli2cli[0].statistics().c_str());
+  Log_info("Success-fast-path-attempts       statistics %s", cli2cli[1].statistics().c_str());
+  Log_info("Efficient-fast-path-attempts     statistics %s", cli2cli[2].statistics().c_str());
+  Log_info("All-original-path-attempts       statistics %s", cli2cli[3].statistics().c_str());
+  Log_info("Efficient-original-path-attempts statistics %s", cli2cli[4].statistics().c_str());
+  Log_info("All-efficient-attempts           statistics %s", cli2cli[5].statistics().c_str());
+  Log_info("Read-mid-10s                     statistics %s", cli2cli[6].statistics().c_str());
+  Log_info("Write-mid-10s                    statistics %s", cli2cli[7].statistics().c_str());
+  Log_info("Mid throughput is %.2f", cli2cli[5].count() / (Config::GetConfig()->duration_ / 3.0));
+  {
+    string dump_file_name = "results/recent_csv/" + Config::GetConfig()->exp_setting_name_ + ".csv";
+    std::ofstream file(dump_file_name);
+    if (file.is_open()) {
+      file << "All-fast-path-attempts" << "," << "Success-fast-path-attempts" << "," << "Efficient-fast-path-attempts" << "," << "All-original-path-attempts" << ","  << "Efficient-original-path-attempts" << ","  << "All-efficient-attempts" << "," << "Start-Time" << "," << "End2End-Latency" << "," << "Dispatch-Time" << "," << "Mid-Read-Lat" << "," << "Mid-Write-Lat" << "\n";
+      std::sort(commit_time.begin(), commit_time.end(),
+                [](auto const& a, auto const& b) { return a.first < b.first; });
+      size_t max_size = commit_time.size();
+      for (int i = 0; i < 8; i++)
+        if (cli2cli[i].count() > max_size) max_size = cli2cli[i].count();
+      if (dispatch_time_distribution.count() > max_size) max_size = dispatch_time_distribution.count();
+      for (size_t i = 0; i < max_size; ++i) {
+        for (int k = 0; k < 6; k++) {
+          if (i < cli2cli[k].count()) file << cli2cli[k].data_[i];
+          file << ",";
+        }
+        if (i < commit_time.size()) file << std::fixed << commit_time[i].first;
+        file << ",";
+        if (i < commit_time.size()) file << commit_time[i].second;
+        file << ",";
+        if (i < dispatch_time_distribution.count()) file << dispatch_time_distribution.data_[i];
+        // Mid-10s R/W columns (set 2026-05-05). Appended at the end so
+        // existing column positions 0-8 stay unchanged for downstream
+        // positional readers (e.g. gen_latency_cdf.py uses col 5).
+        file << ",";
+        if (i < cli2cli[6].count()) file << cli2cli[6].data_[i];
+        file << ",";
+        if (i < cli2cli[7].count()) file << cli2cli[7].data_[i];
+        file << "\n";
+      }
+      file.flush();
+      file.close();
+      Log_info("Dumped to %s with %d lines data", dump_file_name.c_str(), max_size);
+    } else {
+      Log_info("Failed to open file for writing %s", dump_file_name.c_str());
+    }
+  }
+  // Force flush so any later abort doesn't lose this data.
+  fflush(stderr);
+  fflush(stdout);
+  Log_info("[STATS] CSV dump done; entering post-run cleanup (may abort, that's OK)");
+
+#ifdef DB_CHECKSUM
+  sleep(90); // hopefully servers can finish hanging RPCs in 90 seconds.
+#endif
+  Log_info("[SHUTDOWN-DBG] start sleep(10)");
+  sleep(10); // hopefully servers can finish reset of work in 10 seconds
+  Log_info("[SHUTDOWN-DBG] sleep done; entering worker.WaitForShutdown loop (%zu workers)", svr_workers_g.size());
+
+  for (size_t wi = 0; wi < svr_workers_g.size(); wi++) {
+    Log_info("[SHUTDOWN-DBG] worker[%zu].WaitForShutdown() start", wi);
+    svr_workers_g[wi].WaitForShutdown();
+    Log_info("[SHUTDOWN-DBG] worker[%zu].WaitForShutdown() done", wi);
+  }
+
+  Log_info("After worker.WaitForShutdown();");
+
+  Log_info("[SHUTDOWN-DBG] entering failover_threads_g.join() loop (%zu threads)", failover_threads_g.size());
+  for (size_t fi = 0; fi < failover_threads_g.size(); fi++) {
+    Log_info("[SHUTDOWN-DBG] ft[%zu].join() start", fi);
+    failover_threads_g[fi].join();
+    Log_info("[SHUTDOWN-DBG] ft[%zu].join() done", fi);
+  }
+  Log_info("[SHUTDOWN-DBG] all failover threads joined");
+
+#ifdef DB_CHECKSUM
+  map<parid_t, vector<int>> checksum_results = {};
+  for (auto& worker : svr_workers_g) {
+    auto p = worker.site_info_->partition_id_;
+    int sum = worker.DbChecksum();
+    checksum_results[p].push_back(sum);
+    Log_info("partition %d checksum %d", p, sum);
+  }
+  bool checksum_fail = false;
+  for (auto& pair : checksum_results) {
+    auto& vec = pair.second;
+    for (auto checksum: vec) {
+      if (checksum != vec[0]) {
+        checksum_fail = true;
+      }
+    }
+  }
+  if (checksum_fail) {
+    Log_warn("checksum match failed...perhaps wait longer before checksum?");
+  } else {
+    Log_info("checksum success");
+  }
+#endif
+#ifdef CPU_PROFILE
+  // stop profiling
+  ProfilerStop();
+#endif // ifdef CPU_PROFILE
+  Log_info("[SHUTDOWN-DBG] before client_shutdown()");
+  client_shutdown();
+  Log_info("After client_shutdown");
+  Log_info("[SHUTDOWN-DBG] after client_shutdown()");
+  
+  Log_info("All-fast-path-attempts           statistics %s", cli2cli[0].statistics().c_str());
+  Log_info("Success-fast-path-attempts       statistics %s", cli2cli[1].statistics().c_str());
+  Log_info("Efficient-fast-path-attempts     statistics %s", cli2cli[2].statistics().c_str());
+  Log_info("All-original-path-attempts       statistics %s", cli2cli[3].statistics().c_str());
+  Log_info("Efficient-original-path-attempts statistics %s", cli2cli[4].statistics().c_str());
+  Log_info("All-efficient-attempts           statistics %s", cli2cli[5].statistics().c_str());
+  Log_info("Read-mid-10s                     statistics %s", cli2cli[6].statistics().c_str());
+  Log_info("Write-mid-10s                    statistics %s", cli2cli[7].statistics().c_str());
+  Log_info("Dispatch-time                    statistics %s", dispatch_time_distribution.statistics().c_str());
+
+  Log_info("All-fast-path-attempts           distribution %s", cli2cli[0].distribution().c_str());
+  Log_info("Success-fast-path-attempts       distribution %s", cli2cli[1].distribution().c_str());
+  Log_info("Efficient-fast-path-attempts     distribution %s", cli2cli[2].distribution().c_str());
+  Log_info("All-original-path-attempts       distribution %s", cli2cli[3].distribution().c_str());
+  Log_info("Efficient-original-path-attempts distribution %s", cli2cli[4].distribution().c_str());
+  Log_info("All-efficient-attempts           distribution %s", cli2cli[5].distribution().c_str());
+  Log_info("Read-mid-10s                     distribution %s", cli2cli[6].distribution().c_str());
+  Log_info("Write-mid-10s                    distribution %s", cli2cli[7].distribution().c_str());
+  Log_info("Dispatch-time                    distribution %s", dispatch_time_distribution.distribution().c_str());
+  
+  Log_info("Mid throughput is %.2f", cli2cli[5].count() / (Config::GetConfig()->duration_ / 3.0));
+  Log_info("Fastpath statistics attempted %d successed %d rate(pct) %.2f efficient_successed %d efficient_rate(pct) %.2f",
+    cli2cli[0].count(), cli2cli[1].count(), cli2cli[1].count() * 100.0 / cli2cli[0].count(), cli2cli[2].count(), cli2cli[2].count() * 100.0 / cli2cli[0].count());
+  // If client-side CPU data is empty (none/original mode where the RPC
+  // reply schema doesn't carry cpu_usage), fall back to a direct
+  // /proc/stat 100ms before/after sample. SampleCpuUsage() can't be
+  // used here because its delta state is thread_local — it returns -1
+  // on the first call on a given thread, which is what we'd hit on
+  // the main thread at shutdown.
+  if (cpu_usage_leaders.count() == 0) {
+    int core = server_core_id.load(std::memory_order_relaxed);
+    for (auto& worker : svr_workers_g) {
+      TxLogServer* sv = worker.tx_sched_ ? worker.tx_sched_ : worker.rep_sched_;
+      if (!sv) continue;
+      CpuStatSnapshot s1{}, s2{};
+      if (sv->ReadCpuStats(core, &s1)) {
+        usleep(100000);  // 100ms window for a meaningful delta
+        if (sv->ReadCpuStats(core, &s2)) {
+          double cpu = sv->ComputeCpuUsage(s1, s2);
+          if (cpu >= 0.0) cpu_usage_leaders.append(cpu);
+        }
+      }
+      break;  // one sample per host's bound core is sufficient
+    }
+  }
+  Log_info("Cpu-usage-leaders ave %.4f count %zu", cpu_usage_leaders.ave(), cpu_usage_leaders.count());
+  // Same fallback for queue depth in none/original mode
+  if (queue_depth.count() == 0) {
+    for (auto& worker : svr_workers_g) {
+      if (worker.tx_sched_) {
+        double qd = worker.tx_sched_->GetQueueDepthForRule();
+        if (qd >= 0.0) {
+          queue_depth.append(qd);
+        }
+      }
+    }
+  }
+  Log_info("Queue-depth ave %.4f count %zu", queue_depth.ave(), queue_depth.count());
+  Log_info("Frequency: %s", frequency.top_keys_pcts().c_str());
+
+  string dump_file_name = "results/recent_csv/" + Config::GetConfig()->exp_setting_name_ + ".csv";
+  std::ofstream file(dump_file_name);
+  if (!file.is_open()) {
+    Log_info("Failed to open file for writing %s", dump_file_name.c_str());
+  } else {
+    file << "All-fast-path-attempts" << "," << "Success-fast-path-attempts" << "," << "Efficient-fast-path-attempts" << "," << "All-original-path-attempts" << ","  << "Efficient-original-path-attempts" << ","  << "All-efficient-attempts" << "," << "Start-Time" << "," << "End2End-Latency" << "," << "Dispatch-Time" << "," << "Mid-Read-Lat" << "," << "Mid-Write-Lat" << "\n";
+    size_t max_size = commit_time.size();
+    std::sort(commit_time.begin(),
+              commit_time.end(),
+              [](auto const& a, auto const& b) {
+                  return a.first < b.first;
+              });
+    for (int i = 0; i < 8; i++)
+      if (cli2cli[i].count() > max_size)
+        max_size = cli2cli[i].count();
+    if (dispatch_time_distribution.count() > max_size)
+      max_size = dispatch_time_distribution.count();
+    for (size_t i = 0; i < max_size; ++i) {
+        for (int k = 0; k < 6; k++) {
+          if (i < cli2cli[k].count())
+            file << cli2cli[k].data_[i];
+          file << ",";
+        }
+        if (i < commit_time.size())
+          file << std::fixed << commit_time[i].first;
+        file << ",";
+        if (i < commit_time.size())
+          file << commit_time[i].second;
+        file << ",";
+        if (i < dispatch_time_distribution.count()) {
+          file << dispatch_time_distribution.data_[i];
+        }
+        // Mid-10s R/W columns (set 2026-05-05). See first dump block.
+        file << ",";
+        if (i < cli2cli[6].count()) file << cli2cli[6].data_[i];
+        file << ",";
+        if (i < cli2cli[7].count()) file << cli2cli[7].data_[i];
+        file << "\n";
+    }
+    Log_info("Dumped to %s with %d lines data", dump_file_name.c_str(), max_size);
+    file.close();
+    Log_info("%s closed", dump_file_name.c_str());
+  }
+
+#ifdef LATENCY_DEBUG
+  Log_info("client2leader 50pct %.2f 90pct %.2f 99pct %.2f", client2leader.pct50(), client2leader.pct90(), client2leader.pct99());
+  Log_info("client2test_point 50pct %.2f 90pct %.2f 99pct %.2f", client2test_point.pct50(), client2test_point.pct90(), client2test_point.pct99());
+  Log_info("client2leader_send 50pct %.2f 90pct %.2f 99pct %.2f", client2leader_send.pct50(), client2leader_send.pct90(), client2leader_send.pct99());
+#endif
+  // Log_info("FastPath-count = %d CoordinatorAccept-count = %d OriginalProtocol-count = %d", fastpath_count, coordinatoraccept_count, original_protocol_count);
+  server_shutdown();
+  // TODO, FIXME pending_future in rpc cause error.
+  fflush(stderr);
+  fflush(stdout);
+  exit(0);
+  return 0;
+  
+  Log_info("all server workers have shut down.");
+
+  RandomGenerator::destroy();
+  Config::DestroyConfig();
+
+  Log_debug("exit process.");
+
+  return 0;
+}

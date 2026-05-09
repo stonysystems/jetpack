@@ -1,0 +1,13 @@
+{
+  "environment": "zoo",
+  "server_username": "REPLACE_ME_USER",
+  "n_server": "5",
+  "zoo_directory": "REPLACE_ME_PATH",
+  "servers": [
+    { "server_0_ip": "REPLACE_ME" },
+    { "server_1_ip": "REPLACE_ME" },
+    { "server_2_ip": "REPLACE_ME" },
+    { "server_3_ip": "REPLACE_ME" },
+    { "server_4_ip": "REPLACE_ME" }
+  ]
+}
