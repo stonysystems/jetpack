@@ -23,13 +23,22 @@
 #   bash scripts/start_mongodb_cluster.sh
 #
 # Env knobs:
-#   READY_TIMEOUT  seconds to wait for all nodes to respond to ping (default 60)
-#   BACKEND_CORE   expected CPU affinity for mongod (default 1, advisory only)
+#   READY_TIMEOUT       seconds to wait for all nodes to respond to ping (default 60)
+#   BACKEND_CORE        expected CPU affinity for mongod (default 1, advisory only)
+#   MONGODB_NO_JOURNAL  if =1, toggle storage.journal.enabled=false in /etc/mongod.conf
+#                       on each replica BEFORE the systemctl restart, mirroring etcd's
+#                       --unsafe-no-fsync. Default 0 (journal stays at whatever the
+#                       persisted config says, normally enabled). Setting to 0 (or
+#                       leaving unset) restores enabled=true.
+#                       After the experiment, run with MONGODB_NO_JOURNAL=0 to flip
+#                       it back so the next workload gets default durability.
 #
 # Exit status:
 #   0 — all nodes healthy AND server0 is PRIMARY
 #   1 — at least one node failed liveness OR server0 is not PRIMARY
 set -uo pipefail
+
+MONGODB_NO_JOURNAL="${MONGODB_NO_JOURNAL:-0}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
@@ -56,6 +65,107 @@ done
 # Replica set lives on server0..server4 (5 nodes); spare hosts (5..9) are
 # clients only and don't run mongod.
 N_REPLICA=5
+
+# If MONGODB_NO_JOURNAL is set, patch /etc/mongod.conf on every replica
+# to set storage.journal.enabled to the requested state BEFORE the
+# restart. Uses Python on the remote side for safe YAML editing
+# (handles the case where storage.journal subkey is missing or already
+# present). The script is idempotent — running with =0 restores default.
+target_journal="true"
+if [[ "$MONGODB_NO_JOURNAL" == "1" ]]; then
+    target_journal="false"
+fi
+echo "[mongodb] toggling storage.journal.enabled=${target_journal} on all $N_REPLICA replicas (MONGODB_NO_JOURNAL=${MONGODB_NO_JOURNAL})..."
+toggle_pids=()
+for i in $(seq 0 $((N_REPLICA-1))); do
+    ssh -i "$KEY" -o BatchMode=yes "${USERNAME}@${IPS[$i]}" \
+        "sudo python3 -c '
+import re, sys
+p = \"/etc/mongod.conf\"
+with open(p) as f:
+    t = f.read()
+desired = \"${target_journal}\"
+# Find storage: block and journal: subblock; replace or insert enabled.
+lines = t.splitlines(keepends=True)
+out = []
+i = 0
+in_storage = False
+in_journal = False
+storage_indent = 0
+journal_indent = 0
+storage_emitted_journal = False
+journal_set = False
+def indent_of(line):
+    return len(line) - len(line.lstrip(\" \"))
+while i < len(lines):
+    ln = lines[i]
+    s = ln.rstrip(\"\\n\")
+    if not s.strip().startswith(\"#\"):
+        if s.startswith(\"storage:\"):
+            in_storage = True
+            in_journal = False
+            storage_indent = 0
+            out.append(ln)
+            i += 1
+            continue
+        if in_storage and s.strip() and indent_of(s) <= storage_indent and not s.startswith(\" \"):
+            if not storage_emitted_journal:
+                out.append(\"  journal:\\n    enabled: \" + desired + \"\\n\")
+                storage_emitted_journal = True
+            in_storage = False
+            in_journal = False
+        if in_storage and s.lstrip().startswith(\"journal:\"):
+            in_journal = True
+            journal_indent = indent_of(s)
+            out.append(ln)
+            i += 1
+            storage_emitted_journal = True
+            # walk through journal subblock
+            while i < len(lines):
+                ln2 = lines[i]
+                s2 = ln2.rstrip(\"\\n\")
+                if s2.strip() == \"\":
+                    out.append(ln2); i += 1; continue
+                if indent_of(s2) <= journal_indent and not s2.lstrip().startswith(\"#\"):
+                    break
+                if s2.lstrip().startswith(\"enabled:\"):
+                    out.append(\" \" * (journal_indent + 2) + \"enabled: \" + desired + \"\\n\")
+                    journal_set = True
+                else:
+                    out.append(ln2)
+                i += 1
+            if not journal_set:
+                out.append(\" \" * (journal_indent + 2) + \"enabled: \" + desired + \"\\n\")
+                journal_set = True
+            in_journal = False
+            continue
+    out.append(ln)
+    i += 1
+# If storage: block was missing entirely, append one
+if not any(l.startswith(\"storage:\") for l in out):
+    out.append(\"storage:\\n  journal:\\n    enabled: \" + desired + \"\\n\")
+elif in_storage and not storage_emitted_journal:
+    out.append(\"  journal:\\n    enabled: \" + desired + \"\\n\")
+with open(p, \"w\") as f:
+    f.writelines(out)
+print(\"[journal-toggle] enabled=\" + desired + \" on \" + p)
+' 2>&1" &
+    toggle_pids+=($!)
+done
+fail=0
+for p in "${toggle_pids[@]}"; do wait "$p" || fail=$((fail+1)); done
+if (( fail > 0 )); then
+    echo "[mongodb] FATAL: $fail / $N_REPLICA hosts failed journal toggle"; exit 1
+fi
+# Verify by re-grepping each conf for "enabled: <target>" inside storage.journal
+for i in $(seq 0 $((N_REPLICA-1))); do
+    actual=$(ssh -i "$KEY" -o BatchMode=yes "${USERNAME}@${IPS[$i]}" \
+        "awk '/^storage:/{f=1;next} f && /^[^ ]/{f=0} f && /journal:/{j=1;next} f && j && /enabled:/{print \$2;exit}' /etc/mongod.conf" 2>/dev/null)
+    if [[ "$actual" != "$target_journal" ]]; then
+        echo "[mongodb] FATAL: server$i journal.enabled='$actual' (expected '$target_journal')"; exit 1
+    fi
+done
+echo "[mongodb] all $N_REPLICA replicas: storage.journal.enabled=$target_journal confirmed"
 
 echo "[mongodb] (re)starting mongod on server0..server$((N_REPLICA-1))..."
 # Server0 first (it is the NFS host and typical replica-set primary), then

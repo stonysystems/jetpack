@@ -411,7 +411,21 @@ void server_launch_worker(vector<Config::SiteInfo>& server_sites) {
   }
 }
 
+#ifdef JETPACK_PROF
+namespace janus {
+void JetpackProfNone_Dump();
+void JetpackProfRule_Dump();
+}
+#endif
+
 void client_shutdown() {
+#ifdef JETPACK_PROF
+  // Dump per-coordinator-phase wall-time accumulators before tearing down
+  // the per-client stat structures. Lets the profiling sweep attribute
+  // the (Raft 0%) - (Raft vanilla) latency gap to specific phases.
+  janus::JetpackProfNone_Dump();
+  janus::JetpackProfRule_Dump();
+#endif
   for (const unique_ptr<ClientWorker>& client: client_workers_g) {
     // client->retrive_statistic();
     for (int i = 0; i < 6; i++)

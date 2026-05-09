@@ -5,7 +5,52 @@
 #include "../../rrr/misc/rand.hpp"
 #include "commo.h"
 
+#ifdef JETPACK_PROF
+#include <atomic>
+#include <chrono>
+#endif
+
 namespace janus {
+
+#ifdef JETPACK_PROF
+// Per-phase wall-time accounting for CoordinatorRule. Static file-scope
+// atomics aggregate across all client threads on this process. Sub-phase
+// counters break down INIT_END so we can attribute the 285 ms gap to
+// GetReadyPiecesData / cmds_by_par_ loop / dispatch path. Dumped from
+// s_main.cc::client_shutdown() via JetpackProfRule_Dump().
+static std::atomic<uint64_t> g_rule_init_end_calls_{0};
+static std::atomic<uint64_t> g_rule_init_end_ns_{0};
+static std::atomic<uint64_t> g_rule_init_end_get_ready_ns_{0};
+static std::atomic<uint64_t> g_rule_init_end_bookkeep_ns_{0};   // cmds_by_par_ loop, dispatch_acks_ map, frequency_.append
+static std::atomic<uint64_t> g_rule_init_end_dispatch_ns_{0};   // DispatchAsync + BroadcastRuleSpeculativeExecute
+static std::atomic<uint64_t> g_rule_dispatched_calls_{0};
+static std::atomic<uint64_t> g_rule_dispatched_ns_{0};
+static std::atomic<uint64_t> g_rule_waiting_origin_calls_{0};
+static std::atomic<uint64_t> g_rule_waiting_origin_ns_{0};
+
+void JetpackProfRule_Dump() {
+  uint64_t ie_n = g_rule_init_end_calls_.load();
+  uint64_t ie_ns = g_rule_init_end_ns_.load();
+  uint64_t ie_gr_ns = g_rule_init_end_get_ready_ns_.load();
+  uint64_t ie_bk_ns = g_rule_init_end_bookkeep_ns_.load();
+  uint64_t ie_dp_ns = g_rule_init_end_dispatch_ns_.load();
+  uint64_t d_n = g_rule_dispatched_calls_.load();
+  uint64_t d_ns = g_rule_dispatched_ns_.load();
+  uint64_t w_n = g_rule_waiting_origin_calls_.load();
+  uint64_t w_ns = g_rule_waiting_origin_ns_.load();
+  auto avg_us = [](uint64_t n, uint64_t ns) {
+    return n ? (double)ns / n / 1000.0 : 0.0;
+  };
+  Log_info("[PROF-COORD-RULE] init_end_calls=%lu init_end_avg_us=%.2f init_end_total_ms=%.2f | "
+           "init_end_get_ready_total_ms=%.2f init_end_bookkeep_total_ms=%.2f init_end_dispatch_total_ms=%.2f | "
+           "dispatched_calls=%lu dispatched_avg_us=%.2f dispatched_total_ms=%.2f | "
+           "waiting_origin_calls=%lu waiting_origin_avg_us=%.2f waiting_origin_total_ms=%.2f",
+           ie_n, avg_us(ie_n, ie_ns), ie_ns / 1e6,
+           ie_gr_ns / 1e6, ie_bk_ns / 1e6, ie_dp_ns / 1e6,
+           d_n, avg_us(d_n, d_ns), d_ns / 1e6,
+           w_n, avg_us(w_n, w_ns), w_ns / 1e6);
+}
+#endif  // JETPACK_PROF
 
 // This Coordinator should be on Client Side
 
@@ -50,8 +95,16 @@ void CoordinatorRule::GotoNextPhase() {
   bool latency_window = dispatch_duration_3_times_ > Config::GetConfig()->duration_ * 1000 &&
                               dispatch_duration_3_times_ < Config::GetConfig()->duration_ * 2 * 1000;
   bool skip_latency = latency_window && (txn->reply_.res_ == WRONG_LEADER || aborted_);
+#ifdef JETPACK_PROF
+  auto _prof_t0 = std::chrono::high_resolution_clock::now();
+  int _prof_branch = phase_ % n_phase;
+#endif
   switch (phase_++ % n_phase) {
     case Phase::INIT_END:
+    {
+#ifdef JETPACK_PROF
+      auto _prof_get_ready_t0 = std::chrono::high_resolution_clock::now();
+#endif
       dispatch_time_ = SimpleRWCommand::GetCurrentMsTime();
       dispatch_duration_3_times_ = (dispatch_time_ - clientworker_creation_time_) * 3;
       client_worker_->dispatch_time_distribution_.append(dispatch_time_ - clientworker_creation_time_);
@@ -67,6 +120,12 @@ void CoordinatorRule::GotoNextPhase() {
         if (cmds.size() > 0)
           cmd_is_write_ = SimpleRWCommand(cmds[0]).IsWrite();
       }
+#ifdef JETPACK_PROF
+      g_rule_init_end_get_ready_ns_.fetch_add(
+          std::chrono::duration_cast<std::chrono::nanoseconds>(
+              std::chrono::high_resolution_clock::now() - _prof_get_ready_t0).count(),
+          std::memory_order_relaxed);
+#endif
 
       if (Config::GetConfig()->IsCurpMode()) {
         go_to_fastpath_ = true;  // CURP: always attempt fast path, no throttle
@@ -185,6 +244,9 @@ void CoordinatorRule::GotoNextPhase() {
 
       client_worker_->go_to_jetpack_fastpath_cnt_ += go_to_fastpath_;
 
+#ifdef JETPACK_PROF
+      auto _prof_bookkeep_t0 = std::chrono::high_resolution_clock::now();
+#endif
       sp_vec_piece_by_par_.clear();
       for (auto& pair: cmds_by_par_) {
         const parid_t& par_id = pair.first;
@@ -200,6 +262,13 @@ void CoordinatorRule::GotoNextPhase() {
         }
         sp_vec_piece_by_par_[par_id] = sp_vec_piece;
       }
+#ifdef JETPACK_PROF
+      g_rule_init_end_bookkeep_ns_.fetch_add(
+          std::chrono::duration_cast<std::chrono::nanoseconds>(
+              std::chrono::high_resolution_clock::now() - _prof_bookkeep_t0).count(),
+          std::memory_order_relaxed);
+      auto _prof_dispatch_t0 = std::chrono::high_resolution_clock::now();
+#endif
 
       {
         // Merge mode (fused DispatchWithRuleSpec to leader + spec to
@@ -226,7 +295,14 @@ void CoordinatorRule::GotoNextPhase() {
           }
         }
       }
+#ifdef JETPACK_PROF
+      g_rule_init_end_dispatch_ns_.fetch_add(
+          std::chrono::duration_cast<std::chrono::nanoseconds>(
+              std::chrono::high_resolution_clock::now() - _prof_dispatch_t0).count(),
+          std::memory_order_relaxed);
+#endif
       break;
+    }
     case Phase::DISPATCHED:
       // if (go_to_fastpath_) {
       //   if (fast_path_success_)
@@ -330,6 +406,20 @@ void CoordinatorRule::GotoNextPhase() {
     default:
       verify(0);
   }
+#ifdef JETPACK_PROF
+  uint64_t _prof_dt = std::chrono::duration_cast<std::chrono::nanoseconds>(
+      std::chrono::high_resolution_clock::now() - _prof_t0).count();
+  if (_prof_branch == Phase::INIT_END) {
+    g_rule_init_end_calls_.fetch_add(1, std::memory_order_relaxed);
+    g_rule_init_end_ns_.fetch_add(_prof_dt, std::memory_order_relaxed);
+  } else if (_prof_branch == Phase::DISPATCHED) {
+    g_rule_dispatched_calls_.fetch_add(1, std::memory_order_relaxed);
+    g_rule_dispatched_ns_.fetch_add(_prof_dt, std::memory_order_relaxed);
+  } else {
+    g_rule_waiting_origin_calls_.fetch_add(1, std::memory_order_relaxed);
+    g_rule_waiting_origin_ns_.fetch_add(_prof_dt, std::memory_order_relaxed);
+  }
+#endif
 }
 
 void CoordinatorRule::BroadcastRuleSpeculativeExecute(int phase) {

@@ -69,6 +69,9 @@ def options(opt):
     opt.add_option('','--raft-pipeline-cap', dest='raft_pipeline_cap',
                    default=None, type='int',
                    help='Override kMaxInFlightPerFollower (default 8000). Defines RAFT_PIPELINE_CAP=N for the build.')
+    opt.add_option('','--enable-jetpack-prof', dest='enable_jetpack_prof',
+                   default=False, action='store_true',
+                   help='Define JETPACK_PROF=1 to enable per-stage timing counters in scheduler / service / coordinator hot paths. Production builds should leave this off (zero overhead when undefined).')
     opt.parse_args();
 
 def configure(conf):
@@ -138,7 +141,9 @@ def configure(conf):
     if Options.options.raft_pipeline_cap is not None:
         conf.env.append_value("CXXFLAGS",
                               "-DRAFT_PIPELINE_CAP=%d" % Options.options.raft_pipeline_cap)
-    
+    if Options.options.enable_jetpack_prof:
+        conf.env.append_value("CXXFLAGS", "-DJETPACK_PROF=1")
+
     # if Options.options.curp_fast_path:
     #     conf.env.append_value("CXXFLAGS", "-DCURP_FAST_PATH")
     # conf.env.append_value("CXXFLAGS", "-lprofiler scripts/pprof".split())
