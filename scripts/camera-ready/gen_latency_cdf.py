@@ -297,7 +297,14 @@ DEFAULT_FOLDERS = [
 RESULTS_ROOT = "/home/users/ztang/janus/results"
 
 
-def run_one(result_dir):
+def run_one(result_dir, mencius_conc=None):
+    """Generate latency-CDF figures.
+
+    mencius_conc (optional int): if provided, monkey-patches FIXED_CONC['mencius']
+        for this pass and suffixes every output filename with `_mencius_c<N>`.
+        Used to emit a parallel c=10 mencius CDF next to the c=16 default
+        (added 2026-05-09).
+    """
     log_dir = os.path.join(result_dir, "log")
     figs_dir = os.path.join(result_dir, "figs")
     os.makedirs(figs_dir, exist_ok=True)
@@ -307,13 +314,21 @@ def run_one(result_dir):
     folder_name = os.path.basename(result_dir.rstrip("/"))
     print(f"\n=== {folder_name} ===")
 
+    fname_extra = ""
+    saved_mencius_conc = None
+    if mencius_conc is not None:
+        saved_mencius_conc = FIXED_CONC.get("mencius")
+        FIXED_CONC["mencius"] = mencius_conc
+        fname_extra = f"_mencius_c{mencius_conc}"
+        print(f"  [override] FIXED_CONC['mencius'] {saved_mencius_conc} -> {mencius_conc} ({fname_extra})")
+
     # Cluster — emit both with all 5 protocols and a 4-proto variant without etcd
     # (set 2026-05-09 for the writeup's no-etcd alternative).
     for fname_suffix, protocols in (
         ("",        GRID_PROTOCOLS),
         ("_noetcd", [p for p in GRID_PROTOCOLS if p[1] != "etcd"]),
     ):
-        grid_path = os.path.join(figs_dir, f"latency_cdf_grid{fname_suffix}.pdf")
+        grid_path = os.path.join(figs_dir, f"latency_cdf_grid{fname_suffix}{fname_extra}.pdf")
         grid_counts = draw_grid(log_dir, grid_path, protocols=protocols)
         print(f"  [GRID{fname_suffix}] {grid_path}")
         for title, conc, n in grid_counts:
@@ -346,18 +361,26 @@ def run_one(result_dir):
             draw_compare(log_dir, cmp_p, dc=dc, dc_label=f"DC{dc} ({name}) view")
             print(f"  [DC{dc:>2}] {tag}: grid + cmp written")
 
+    # Restore FIXED_CONC['mencius'] if we overrode it.
+    if saved_mencius_conc is not None:
+        FIXED_CONC["mencius"] = saved_mencius_conc
+
 
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--result-dir", action="append",
                     help="Absolute or basename path under results/. Repeatable.")
+    ap.add_argument("--mencius-conc-extra", action="append", type=int, default=[],
+                    help="Override FIXED_CONC['mencius'] and emit a parallel "
+                         "set of CDFs suffixed `_mencius_c<N>`. Repeatable. "
+                         "(2026-05-09 task 2 deliverable.)")
     args = ap.parse_args()
     folders = args.result_dir or DEFAULT_FOLDERS
     for f in folders:
-        if os.path.isabs(f):
-            run_one(f)
-        else:
-            run_one(os.path.join(RESULTS_ROOT, f))
+        path = f if os.path.isabs(f) else os.path.join(RESULTS_ROOT, f)
+        run_one(path)
+        for mc in args.mencius_conc_extra:
+            run_one(path, mencius_conc=mc)
 
 
 if __name__ == "__main__":

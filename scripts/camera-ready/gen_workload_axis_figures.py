@@ -528,7 +528,14 @@ DEFAULT_FOLDERS = [
 RESULTS_ROOT = "/home/users/ztang/janus/results"
 
 
-def run_one(result_dir):
+def run_one(result_dir, mencius_conc=None):
+    """Generate the workload-axis figure suite under result_dir/figs/.
+
+    mencius_conc (optional int): if provided, overrides Mencius's conc
+        (default 16) for this generation pass, and suffixes every output
+        filename with `_mencius_c<N>`. Used to emit parallel c=10 figures
+        next to the c=16 defaults (added 2026-05-09).
+    """
     log_dir = os.path.join(result_dir, "log")
     figs_dir = os.path.join(result_dir, "figs")
     os.makedirs(figs_dir, exist_ok=True)
@@ -539,6 +546,19 @@ def run_one(result_dir):
     folder_name = os.path.basename(result_dir.rstrip("/"))
     print(f"\n=== {folder_name} ===")
 
+    # Apply mencius_conc override and bake the file suffix.
+    protocols_local = [list(p) for p in PROTOCOLS]
+    fname_extra = ""
+    if mencius_conc is not None:
+        for p in protocols_local:
+            if p[1] == "mencius":
+                p[2] = mencius_conc
+        protocols_local = [tuple(p) for p in protocols_local]
+        fname_extra = f"_mencius_c{mencius_conc}"
+        print(f"  [override] Mencius conc -> {mencius_conc} (filename suffix: {fname_extra})")
+    else:
+        protocols_local = [tuple(p) for p in protocols_local]
+
     axes_specs = [
         ("zipf",     ZIPF_LEVELS,     "Zipfian Skew Parameter (θ)", "zipf"),
         ("keyrange", KEYRANGE_LEVELS, "Key Range",                   "keyrange"),
@@ -548,8 +568,8 @@ def run_one(result_dir):
     # with etcd dropped (suffix `_noetcd`). Set 2026-05-09 to give a
     # without-etcd alternative for the writeup.
     PROTO_PASSES = (
-        ("",        PROTOCOLS),
-        ("_noetcd", [p for p in PROTOCOLS if p[1] != "etcd"]),
+        ("",        protocols_local),
+        ("_noetcd", [p for p in protocols_local if p[1] != "etcd"]),
     )
 
     for axis_slug, levels, axis_label, axis_name in axes_specs:
@@ -559,7 +579,7 @@ def run_one(result_dir):
         # near-saturation conc, the band that holds the bulk of points.
         for metric in ("p50", "p90", "p99", "ave"):
             for fname_suffix, protocols in PROTO_PASSES:
-                out = os.path.join(figs_dir, f"latency_{metric}_vs_{axis_slug}{fname_suffix}.pdf")
+                out = os.path.join(figs_dir, f"latency_{metric}_vs_{axis_slug}{fname_suffix}{fname_extra}.pdf")
                 ylim = (150, 550)
                 print(f"  [{axis_slug}/{metric}{fname_suffix}] -> {out}")
                 counts = draw_grid(log_dir, out,
@@ -571,7 +591,7 @@ def run_one(result_dir):
 
         # throughput panel (one figure per axis)
         for fname_suffix, protocols in PROTO_PASSES:
-            out_t = os.path.join(figs_dir, f"tput_vs_{axis_slug}{fname_suffix}.pdf")
+            out_t = os.path.join(figs_dir, f"tput_vs_{axis_slug}{fname_suffix}{fname_extra}.pdf")
             print(f"  [{axis_slug}/tput{fname_suffix}] -> {out_t}")
             counts = draw_grid(log_dir, out_t,
                                axis_label=axis_label, axis_name=axis_name,
@@ -585,7 +605,7 @@ def run_one(result_dir):
     # Per user spec:
     #   zipf:     figsize=(24, 3.5) with the top 0.5" reserved for the legend
     #   keyrange: figsize=(24, 3)   no legend (already shown on the zipf one)
-    noetcd_protocols = [p for p in PROTOCOLS if p[1] != "etcd"]
+    noetcd_protocols = [p for p in protocols_local if p[1] != "etcd"]
     DUAL_PER_AXIS = {
         # zipf has 6 dense ticks per panel (0.5..1.0) → smaller xtick label,
         # plus a lower `top` and slightly-above-fig legend so the per-panel
@@ -597,7 +617,7 @@ def run_one(result_dir):
                          xtick_size=None, top=None, legend_y=None),
     }
     for axis_slug, levels, axis_label, axis_name in axes_specs:
-        out = os.path.join(figs_dir, f"latency_ave_p99_vs_{axis_slug}_noetcd.pdf")
+        out = os.path.join(figs_dir, f"latency_ave_p99_vs_{axis_slug}_noetcd{fname_extra}.pdf")
         opts = DUAL_PER_AXIS[axis_slug]
         print(f"  [{axis_slug}/ave+p99 dual_noetcd figsize={opts['figsize']} legend={opts['show_legend']}] -> {out}")
         draw_dual_metric_grid(log_dir, out,
@@ -609,7 +629,7 @@ def run_one(result_dir):
     # Combined fast-path success-rate figure: two-panel (zipf | keyrange),
     # one adaptive line per protocol. Same dual emit (with/without etcd).
     for fname_suffix, protocols in PROTO_PASSES:
-        out_fp = os.path.join(figs_dir, f"fp_success_rate{fname_suffix}.pdf")
+        out_fp = os.path.join(figs_dir, f"fp_success_rate{fname_suffix}{fname_extra}.pdf")
         print(f"  [fp_success_rate{fname_suffix} (zipf | keyrange)] -> {out_fp}")
         summary = draw_combined_fp_rate_two_axes(
             log_dir, out_fp,
@@ -629,13 +649,17 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--result-dir", action="append",
                     help="Absolute or basename path under results/. Repeatable.")
+    ap.add_argument("--mencius-conc-extra", action="append", type=int, default=[],
+                    help="Override Mencius conc and emit a parallel set of "
+                         "figures suffixed `_mencius_c<N>`. Repeatable. "
+                         "(2026-05-09 task 2 deliverable.)")
     args = ap.parse_args()
     folders = args.result_dir or DEFAULT_FOLDERS
     for f in folders:
-        if os.path.isabs(f):
-            run_one(f)
-        else:
-            run_one(os.path.join(RESULTS_ROOT, f))
+        path = f if os.path.isabs(f) else os.path.join(RESULTS_ROOT, f)
+        run_one(path)
+        for mc in args.mencius_conc_extra:
+            run_one(path, mencius_conc=mc)
 
 
 if __name__ == "__main__":
