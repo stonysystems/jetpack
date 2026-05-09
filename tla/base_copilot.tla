@@ -310,9 +310,12 @@ ClientRequest(i, v) ==
 \* composition's recovery can fire. CoPilot's native failure handling is
 \* fast-takeover only (copilot -> pilot, no "view change" over the whole
 \* ensemble); this action is a no-op at the base-protocol level except
-\* for the ostate transition. Can be enabled from any state other than
-\* ToBeLeader itself.
+\* for the ostate transition. Restricted to existing proposers so the
+\* pilot/copilot swap preserves the 2-proposer invariant: if an Acceptor
+\* were promoted to Pilot while both existing proposers remained, the
+\* ensemble would end up with three proposers and break ActiveProposerBound.
 EmptyViewChange(i) ==
+    /\ role[i] \in {Pilot, Copilot}
     /\ ostate[i] /= ToBeLeader
     /\ currentTerm' = [currentTerm EXCEPT ![i] = currentTerm[i] + 1]
     /\ ostate' = [ostate EXCEPT ![i] = ToBeLeader]

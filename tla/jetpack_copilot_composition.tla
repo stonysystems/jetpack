@@ -77,6 +77,7 @@ B == INSTANCE base_copilot
 
 \* CoPilot: per-server proposer IDs. Each server is its own proposer.
 J == INSTANCE jetpack WITH NoOpCmd <- [tag |-> "CoPilotNoOp"],
+                          InitialMembers <- Server,
                           Proposer <- Server,
                           ProposerOf <- LAMBDA i : i
 

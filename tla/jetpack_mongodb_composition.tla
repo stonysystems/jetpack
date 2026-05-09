@@ -1,15 +1,26 @@
 -------------------------- MODULE jetpack_mongodb_composition --------------------------
-\* Composition of Jetpack plugin with MongoDB base protocol.
+\* Composition of Jetpack plugin with MongoDB base protocol (with Raft
+\* single-server reconfig).
 \*
-\* This wrapper module:
-\*   1. Declares all variables (shared + MongoDB-specific + Jetpack + client + execution)
-\*   2. INSTANCE's base_mongodb.tla (MongoDB protocol) and jetpack.tla (plugin)
-\*   3. Wraps base protocol actions with UNCHANGED <<jetpackVars, clientVars, executionVars>>
-\*   4. Wraps Jetpack actions with UNCHANGED mongodbVars
-\*   5. Wires Init, Next, Spec, and properties
+\* Jetpack recovery has two entry points, both routed through ostate=ToBeLeader:
+\*   1. Election:   B!BecomeToBeLeader (Candidate -> ToBeLeader) +
+\*                  J!SendBeginRecovery / ... / J!FinishRecovery.
+\*   2. Reconfig:   B!BeginReconfig (Leader -> ToBeLeader, stage pendingConfig)
+\*                  + J!SendBeginRecovery / ... / WFinishReconfig (inlines
+\*                  the J!FinishRecovery body and additionally appends the
+\*                  config entry, extends configs, clears pendingConfig).
 \*
-\* Like Raft, MongoDB uses a single replication stream ("sole" proposer), so
-\* ApplyCommitted walks the sole sequence in order.
+\* Recovery in the reconfig path runs in the OLD config: the new config entry
+\* is not appended (and configs is not extended) until WFinishReconfig fires,
+\* atomically with ostate ToBeLeader -> Leader.
+\*
+\* Wrapping pattern:
+\*   - Base protocol actions wrapped with UNCHANGED <<jetpackVars, clientVars,
+\*     executionVars>>.
+\*   - Jetpack actions wrapped with UNCHANGED mongodbVars (which now includes
+\*     configs and pendingConfig, so Jetpack does not touch them).
+\*   - Reconfig finish lives at the composition level because it crosses the
+\*     boundary (mutates log, configs, pendingConfig AND jetpack state).
 
 EXTENDS Naturals, FiniteSets, Sequences, TLC
 
@@ -36,6 +47,10 @@ VARIABLES
     nextIndex,
     matchIndex,
 
+    \* Reconfig variables (MongoDB-specific; Jetpack does not touch).
+    configs,
+    pendingConfig,
+
     \* Jetpack per-server variables.
     jstate, jepoch, oepoch, old_view, new_view, jpool,
     recovery_set, chosen_value, br_responses, prep_responses, accept_responses,
@@ -47,11 +62,13 @@ VARIABLES
     original_execution_cmds, execution_cmds
 
 \* Variable groups for UNCHANGED clauses.
-mongodbVars   == <<votedFor, votesResponded, votesGranted, nextIndex, matchIndex>>
+mongodbVars   == <<votedFor, votesResponded, votesGranted, nextIndex, matchIndex,
+                   configs, pendingConfig>>
 serverVars    == <<currentTerm, ostate, votedFor>>
 candidateVars == <<votesResponded, votesGranted>>
 leaderVars    == <<nextIndex, matchIndex>>
 logVars       == <<log, commitIndex>>
+configVars    == <<configs, pendingConfig>>
 jetpackVars   == <<jstate, jepoch, oepoch, old_view, new_view, jpool,
                    recovery_set, chosen_value, br_responses,
                    prep_responses, accept_responses>>
@@ -59,7 +76,7 @@ clientVars    == <<client_view, client_pending, client_successes, client_heard_f
 executionVars == <<original_execution_cmds, execution_cmds>>
 
 vars == <<messages, serverVars, candidateVars, leaderVars,
-          logVars, jetpackVars, clientVars, executionVars>>
+          logVars, configVars, jetpackVars, clientVars, executionVars>>
 
 (****************************************************************************)
 (* INSTANCE base protocol and Jetpack modules                               *)
@@ -69,6 +86,7 @@ B == INSTANCE base_mongodb
 
 \* MongoDB: single proposer "sole". ProposerOf maps every server to "sole".
 J == INSTANCE jetpack WITH NoOpCmd <- [tag |-> "MongoDbNoOp"],
+                          InitialMembers <- Server,
                           Proposer <- {"sole"},
                           ProposerOf <- LAMBDA i : "sole"
 
@@ -76,12 +94,12 @@ J == INSTANCE jetpack WITH NoOpCmd <- [tag |-> "MongoDbNoOp"],
 (* Re-exported constants                                                    *)
 (****************************************************************************)
 
+Nil          == B!Nil
 Follower     == B!Follower
 Candidate    == B!Candidate
 ToBeLeader   == B!ToBeLeader
 Leader       == B!Leader
 Symmetry     == B!Symmetry
-Quorum       == B!Quorum
 
 (****************************************************************************)
 (* Initialization                                                           *)
@@ -121,12 +139,15 @@ LearnCommitPoint(i, j) ==
     /\ B!LearnCommitPoint(i, j)
     /\ UNCHANGED <<jetpackVars, clientVars, executionVars>>
 
+\* Election entry into recovery: Candidate -> ToBeLeader.
 BecomeToBeLeader(i) ==
     /\ B!BecomeToBeLeader(i)
     /\ UNCHANGED <<jetpackVars, clientVars, executionVars>>
 
-EmptyViewChange(i) ==
-    /\ B!EmptyViewChange(i)
+\* Reconfig entry into recovery: Leader -> ToBeLeader, stage pendingConfig.
+\* The actual config entry is not appended until WFinishReconfig (below).
+BeginReconfig(i, newConfig) ==
+    /\ B!BeginReconfig(i, newConfig)
     /\ UNCHANGED <<jetpackVars, clientVars, executionVars>>
 
 ClientRequest(i, v) ==
@@ -137,9 +158,8 @@ AdvanceCommitIndex(i) ==
     /\ B!AdvanceCommitIndex(i)
     /\ UNCHANGED <<jetpackVars, clientVars, executionVars>>
 
-\* MongoDB ApplyCommitted: execute the next committed entry from the sole
-\* sequence. Like Raft, MongoDB has only one proposer, so execution order
-\* is simply log order.
+\* Apply the next committed log entry. MongoDB has a single proposer, so
+\* execution order is simply log order.
 ApplyCommitted(i) ==
     /\ ostate[i] = Leader
     /\ LET ci == commitIndex[i]["sole"]
@@ -149,7 +169,7 @@ ApplyCommitted(i) ==
              IN /\ original_execution_cmds' = Append(original_execution_cmds, entry.value)
                 /\ execution_cmds' = Append(execution_cmds, entry.value)
     /\ UNCHANGED <<messages, serverVars, candidateVars, leaderVars, logVars,
-                   jetpackVars, clientVars>>
+                   configVars, jetpackVars, clientVars>>
 
 (****************************************************************************)
 (* Wrapped MongoDB message handlers                                         *)
@@ -160,7 +180,8 @@ MongoDbReceive(m) ==
     /\ UNCHANGED <<jetpackVars, clientVars, executionVars>>
 
 (****************************************************************************)
-(* Wrapped Jetpack transitions (add UNCHANGED mongodbVars)                  *)
+(* Wrapped Jetpack transitions (UNCHANGED mongodbVars now also covers       *)
+(* configs and pendingConfig, so Jetpack actions cannot touch them).        *)
 (****************************************************************************)
 
 WClientSendPreaccept(c) ==
@@ -231,13 +252,67 @@ WCompleteResubmit(i) ==
     /\ J!CompleteResubmit(i)
     /\ UNCHANGED mongodbVars
 
+\* Election-path recovery completion: only fires when no reconfig is staged.
 WFinishRecovery(i) ==
+    /\ pendingConfig[i] = Nil
     /\ J!FinishRecovery(i)
     /\ UNCHANGED mongodbVars
 
 WHandleFinishRecovery(i, m) ==
     /\ J!HandleFinishRecovery(i, m)
     /\ UNCHANGED mongodbVars
+
+(****************************************************************************)
+(* Reconfig-path recovery completion                                        *)
+(*                                                                          *)
+(* Inlines the body of J!FinishRecovery and additionally:                   *)
+(*   - appends the new config entry to the leader's log                     *)
+(*   - extends the configs sequence                                         *)
+(*   - clears pendingConfig[i]                                              *)
+(*                                                                          *)
+(* Atomic with ostate ToBeLeader -> Leader, so client writes resume in the  *)
+(* new config.                                                              *)
+(****************************************************************************)
+
+WFinishReconfig(i) ==
+    /\ pendingConfig[i] /= Nil
+    /\ jstate[i] = J!AfterResubmit
+    /\ LET view == new_view[i]
+           newCV == Len(configs) + 1
+           configEntry == [term |-> currentTerm[i],
+                           value |-> B!NilCmd,
+                           configVersion |-> newCV]
+           msgSet == { [mtype     |-> J!FinishRecoveryRequest,
+                        moepoch   |-> oepoch[i],
+                        mnew_view |-> view,
+                        msource   |-> i,
+                        mdest     |-> s] : s \in view.replica_ids }
+       IN /\ messages' = J!AddMessages(msgSet, messages)
+          \* Jetpack state cleanup (mirrors J!FinishRecovery body).
+          /\ jepoch' = [jepoch EXCEPT ![i] = oepoch[i]]
+          /\ oepoch' = [oepoch EXCEPT ![i] = oepoch[i]]
+          /\ old_view' = [old_view EXCEPT ![i] = view]
+          /\ new_view' = [new_view EXCEPT ![i] = view]
+          /\ jpool' = [jpool EXCEPT ![i] = J!EmptyJPool]
+          /\ jstate' = [jstate EXCEPT ![i] = J!Ready]
+          /\ recovery_set' = [recovery_set EXCEPT ![i] = {}]
+          /\ chosen_value' = [chosen_value EXCEPT ![i] = {}]
+          /\ br_responses' = [br_responses EXCEPT ![i] =
+                                  [s \in Server |-> J!NilJPool]]
+          /\ prep_responses' = [prep_responses EXCEPT ![i] =
+                                    [s \in Server |-> J!NilPrepResp]]
+          /\ accept_responses' = [accept_responses EXCEPT ![i] =
+                                      [s \in Server |-> FALSE]]
+          \* Resume to Leader.
+          /\ ostate' = [ostate EXCEPT ![i] = Leader]
+          \* Append the new config entry and extend configs.
+          /\ log' = [log EXCEPT ![i]["sole"] =
+                         Append(log[i]["sole"], configEntry)]
+          /\ configs' = Append(configs, pendingConfig[i])
+          /\ pendingConfig' = [pendingConfig EXCEPT ![i] = Nil]
+    /\ UNCHANGED <<currentTerm, commitIndex, votedFor,
+                   votesResponded, votesGranted, nextIndex, matchIndex,
+                   clientVars, executionVars>>
 
 (****************************************************************************)
 (* Message receive plumbing                                                 *)
@@ -252,7 +327,7 @@ ServerReceive(m) ==
        \/ /\ m.mtype = J!PreacceptResponse
           /\ J!Discard(m)
           /\ UNCHANGED <<serverVars, candidateVars, leaderVars, logVars,
-                         jetpackVars, clientVars, executionVars>>
+                         configVars, jetpackVars, clientVars, executionVars>>
        \/ /\ m.mtype = J!BeginRecoveryRequest
           /\ WHandleBeginRecoveryRequest(m.mdest, m)
        \/ /\ m.mtype = J!BeginRecoveryResponse
@@ -276,12 +351,12 @@ ClientReceive(m) ==
 DuplicateMessage(m) ==
     /\ J!Send(m)
     /\ UNCHANGED <<serverVars, candidateVars, leaderVars, logVars,
-                   jetpackVars, clientVars, executionVars>>
+                   configVars, jetpackVars, clientVars, executionVars>>
 
 DropMessage(m) ==
     /\ J!Discard(m)
     /\ UNCHANGED <<serverVars, candidateVars, leaderVars, logVars,
-                   jetpackVars, clientVars, executionVars>>
+                   configVars, jetpackVars, clientVars, executionVars>>
 
 (****************************************************************************)
 (* Next-state relation                                                      *)
@@ -292,7 +367,7 @@ Next ==
        \/ \E i \in Server : Timeout(i)
        \/ \E i, j \in Server : RequestVote(i, j)
        \/ \E i \in Server : BecomeToBeLeader(i)
-       \/ \E i \in Server : EmptyViewChange(i)
+       \/ \E i \in Server, c \in SUBSET Server : BeginReconfig(i, c)
        \/ \E i \in Server : AdvanceCommitIndex(i)
        \/ \E i \in Server : ApplyCommitted(i)
        \/ \E i, j \in Server : AppendOplog(i, j)
@@ -310,6 +385,7 @@ Next ==
        \/ \E i \in Server : WResubmit(i)
        \/ \E i \in Server : WCompleteResubmit(i)
        \/ \E i \in Server : WFinishRecovery(i)
+       \/ \E i \in Server : WFinishReconfig(i)
 
        \/ \E m \in DOMAIN messages : ServerReceive(m)
        \/ \E m \in DOMAIN messages : ClientReceive(m)
@@ -322,18 +398,20 @@ StateConstraint ==
     /\ \A i \in Server : currentTerm[i] <= 3
     /\ \A m \in DOMAIN messages : messages[m] <= 1
     /\ Cardinality(DOMAIN messages) <= 5
-    /\ \A i \in Server : Len(log[i]["sole"]) <= 4
-    /\ Len(original_execution_cmds) <= 4
-    /\ Len(execution_cmds) <= 4
+    /\ \A i \in Server : Len(log[i]["sole"]) <= 5
+    /\ Len(original_execution_cmds) <= 5
+    /\ Len(execution_cmds) <= 5
+    /\ Len(configs) <= 2
 
 \* Tighter constraint for quick exhaustive checking.
 SmallStateConstraint ==
     /\ \A i \in Server : currentTerm[i] <= 2
     /\ \A m \in DOMAIN messages : messages[m] <= 1
     /\ Cardinality(DOMAIN messages) <= 2
-    /\ \A i \in Server : Len(log[i]["sole"]) <= 2
-    /\ Len(original_execution_cmds) <= 2
-    /\ Len(execution_cmds) <= 2
+    /\ \A i \in Server : Len(log[i]["sole"]) <= 3
+    /\ Len(original_execution_cmds) <= 3
+    /\ Len(execution_cmds) <= 3
+    /\ Len(configs) <= 2
 
 (****************************************************************************)
 (* Properties                                                               *)

@@ -63,6 +63,8 @@ EXTENDS Naturals, FiniteSets, Sequences, TLC
 
 \* ---- Constants shared with base protocol (supplied at instantiation) ----
 CONSTANTS Server, Client, CmdId, Key, NoOpCmd,
+          InitialMembers,    \* Initial cluster member set (subset of Server).
+                             \* Bases without reconfig pass InitialMembers <- Server.
           Proposer,          \* Set of proposer IDs (protocol-specific)
           ProposerOf(_)      \* Server -> Proposer (which proposer a server uses)
 
@@ -109,8 +111,8 @@ View == [epoch: Nat,
 
 DefaultView ==
     [epoch |-> 1,
-     proposing_replica_ids |-> Server,
-     replica_ids |-> Server]
+     proposing_replica_ids |-> InitialMembers,
+     replica_ids |-> InitialMembers]
 
 JPool == [max_seen_ballot: Nat,
           accepted_ballot: Nat,
@@ -371,7 +373,12 @@ HandlePreacceptRequest(i, m) ==
                      msource |-> i,
                      mdest   |-> m.msource]
            j == ProposerOf(i)
-           newLog == Append(log[i][j], [term |-> currentTerm[i], value |-> cmd])
+           \* Tag with command="AppendCommand" so bases that distinguish
+           \* entry types (e.g. Raft's reconfig variant) can filter on it.
+           \* Bases that don't care simply ignore the field.
+           newLog == Append(log[i][j], [command |-> "AppendCommand",
+                                        term    |-> currentTerm[i],
+                                        value   |-> cmd])
        IN /\ jpool' = IF accept THEN
                           [jpool EXCEPT ![i].pool[cmd.key] = cmd]
                       ELSE

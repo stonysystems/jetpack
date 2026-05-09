@@ -82,6 +82,7 @@ B == INSTANCE base_mencius
 
 \* Mencius: per-server proposer IDs. Each server is its own proposer.
 J == INSTANCE jetpack WITH NoOpCmd <- B!NoOp,
+                          InitialMembers <- Server,
                           Proposer <- Server,
                           ProposerOf <- LAMBDA i : i
 
