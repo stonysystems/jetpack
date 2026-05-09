@@ -184,7 +184,10 @@ PROTOCOLS = [
     ("etcd",     "etcd",     50),
     ("MongoDB",  "mongodb",  50),
     ("Copilot",  "copilot",  50),
-    ("Mencius",  "mencius",  16),
+    # Mencius: default conc swapped 16 → 10 (2026-05-09 task 2 follow-up).
+    # The c=10 battery covers all 11 workloads × 3 modes; c=16 stays
+    # available as a parallel pass via `--mencius-conc-extra 16`.
+    ("Mencius",  "mencius",  10),
 ]
 
 # Lines drawn per panel. (label, color, marker, linestyle, proto_prefix_fmt, mode)
