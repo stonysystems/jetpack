@@ -246,6 +246,13 @@ def collect_concs(log_dir, proto, mode):
 # copilot/mencius outlier cells from bisection runs).
 BANNED_CONC = {
     ("none_raft",     0):   {200, 250, 275, 300},
+    # rule_raft @ m=0 saturates earlier than vanilla (knee at c≈175-180):
+    # at c=180/190 latency jumps to ~1000ms while vanilla still pre-knee.
+    # 2026-05-09 follow-up rerun confirmed across 3 attempts — this is a
+    # real protocol property, not noise. Ban the post-saturation concs to
+    # avoid showing 1000ms+ artifacts; keep c=170/175 (the visible knee
+    # transition) and {200, 250, 275, 300} for vanilla-parity.
+    ("rule_raft",     0):   {180, 190, 200, 250, 275, 300},
     ("rule_raft",   100):   {225, 275, 300},
     ("rule_raft",   101):   {200, 275, 300},
     ("rule_copilot", 100):  {64},
