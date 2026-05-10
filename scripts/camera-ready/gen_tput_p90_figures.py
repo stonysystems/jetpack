@@ -298,11 +298,22 @@ BANNED_CONC = {
     # depending on which cell happened to recover briefly).
     ("none_mencius", 0):    {32, 33, 35},
     ("rule_mencius", 101):  {27, 31, 32, 33, 35},
-    # MongoDB (2025-06-26 dataset, restored 2026-05-10): conc-axis is
-    # {1, 10, 20, 30, 35, 40, 45, 50, 60} with knee around c=40-45. No
-    # bans needed at present — vanilla / 0% rise smoothly through the
-    # knee and adaptive / 100% stay flat (~155-200 ms) across the full
-    # range.
+    # MongoDB hybrid dataset (2026-05-10): conc-axis cells at concs
+    # {1, 10, 20, 30, 35, 40} are the OSDI Dec 2025 submission (mongodb
+    # cluster config that reaches ~2400 ops/s before saturation,
+    # matches the published OSDI Figure 7 conc-axis); cells at c={45,
+    # 50, 60} are kept from the 2025-06-26 sweep because the workload-
+    # axis figure anchors at c=50 rw_1000000 = 286 ms (clean) — the
+    # OSDI version of c=50 saturates at 3934 ms. To avoid mixing the
+    # two clusters' values on the conc-axis line, ban c={45, 50, 60}
+    # so the visible line ends at c=40 (2406 ops/s, p90=484 ms — the
+    # OSDI knee).
+    ("none_mongodb",  0):   {45, 50, 60},
+    # Also ban c=40 for rule_mongodb@m=0 — known OSDI Dec 2025 flap
+    # (p90=8811 ms while vanilla at c=40 is 504). Line ends at c=35.
+    ("rule_mongodb",  0):   {40, 45, 50, 60},
+    ("rule_mongodb", 100):  {45, 50, 60},
+    ("rule_mongodb", 101):  {45, 50, 60},
 }
 
 # Latency-outlier filter disabled (2026-05-07) for the same reason: v2
