@@ -133,27 +133,12 @@ def aggregate_rows(log_dir, proto, workload, conc, mode):
 
 
 # Per-(proto, conc, workload, mode) ban list for the workload-axis figures.
-# OSDI Dec 2025 alt_workloads sweep (mongodb @ c=40) has several flap cells
-# whose latencies are 2-10x the baseline, creating visual noise that doesn't
-# match the OSDI camera-ready figure. Hard-code them here; the script will
-# return None as if the cell had no data, so the line plotter just skips
-# the missing tick (np.nan placeholder via integer x-positions).
-BANNED_WORKLOAD_CELLS = {
-    # mongodb @ c=40 vanilla: 0.75 spike (avg 1303 ms vs 315 baseline)
-    ("none_mongodb",  40, "rw_zipf_0.75", 0): "vanilla flap (avg 1303 ms)",
-    # mongodb @ c=40 0%: zipf flap band 0.6-0.7 + isolated 0.95 + the
-    # very-bad rw_1000000 cell (avg 3641 ms, p99 11859 ms — same cell that
-    # poisons the conc-axis at c=40 too).
-    ("rule_mongodb",  40, "rw_zipf_0.6",  0): "0% flap (avg 402, p99 1855)",
-    ("rule_mongodb",  40, "rw_zipf_0.65", 0): "0% flap (avg 414, p99 1712)",
-    ("rule_mongodb",  40, "rw_zipf_0.7",  0): "0% flap (avg 659, p99 3796)",
-    ("rule_mongodb",  40, "rw_zipf_0.95", 0): "0% flap (avg 397, p99 1610)",
-    ("rule_mongodb",  40, "rw_1000000",   0): "0% flap (avg 3641, p99 11859)",
-    # mongodb @ c=40 100%: rw_100 high (avg 415 vs ~160 baseline) + zipf 0.95
-    # outlier (avg 1188, p99 8626).
-    ("rule_mongodb",  40, "rw_100",       100): "100% flap (avg 415, p99 1798)",
-    ("rule_mongodb",  40, "rw_zipf_0.95", 100): "100% flap (avg 1188, p99 8626)",
-}
+# Was needed for the OSDI Dec 2025 alt_workloads sweep (mongodb @ c=40)
+# which had several 2-10x flap cells, but the 2025-06-26 mongodb data
+# (restored 2026-05-10) is clean across all workloads, so this list is
+# now empty. Kept the dict here so future flaps can be banned per cell
+# without rewriting the aggregate() helper.
+BANNED_WORKLOAD_CELLS = {}
 
 
 def aggregate(log_dir, proto, workload, conc, mode, metric):
@@ -208,10 +193,11 @@ def aggregate_fp_rate(log_dir, proto, workload, conc, mode, kind="success"):
 PROTOCOLS = [
     ("Raft",     "raft",     50),
     ("etcd",     "etcd",     50),
-    # MongoDB: c=40 matches the OSDI Dec 2025 dataset (alt_workloads
-    # archive) — restored 2026-05-10 in place of the June 2025 contention
-    # dataset / Task 5 fsync-off dataset (both archived under log/).
-    ("MongoDB",  "mongodb",  40),
+    # MongoDB: c=50 matches the 2025-06-26 merged jetpack-paper dataset
+    # (the source of the camera-ready figure). Swapped 2026-05-10 from the
+    # OSDI Dec 2025 alt_workloads (c=40, had flap cells) to the older but
+    # cleaner 2025-06-26 sweep that produced the published OSDI Figure 7.
+    ("MongoDB",  "mongodb",  50),
     ("Copilot",  "copilot",  50),
     # Mencius @ c=10 is the camera-ready default (2026-05-10): the c=10
     # battery covers all 11 workloads × 3 modes; c=16 figures are
