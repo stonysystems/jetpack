@@ -357,7 +357,8 @@ def draw_combined_fp_rate_two_axes(log_dir, out_path,
 def draw_dual_metric_grid(log_dir, out_path, axis_label, axis_name, levels,
                           metrics_pair=("ave", "p99"), ylim=(120, 550),
                           protocols=None, figsize=(24, 6), show_legend=False,
-                          xtick_size=None, top=None, legend_y=1.04):
+                          xtick_size=None, top=None, legend_y=1.04,
+                          legend_visible=True):
     """**Stacked** (2-row × N-column) dual-metric figure:
     top row    = metrics_pair[0] (default "ave") for each protocol
     bottom row = metrics_pair[1] (default "p99") for each protocol
@@ -441,8 +442,28 @@ def draw_dual_metric_grid(log_dir, out_path, axis_label, axis_name, levels,
     if show_legend:
         handles, labels = axes[0, 0].get_legend_handles_labels()
         if handles:
-            fig.legend(handles, labels, loc="upper center", ncol=len(handles),
-                       bbox_to_anchor=(0.5, legend_y), frameon=True, fontsize=DUAL_LEGEND)
+            leg = fig.legend(handles, labels, loc="upper center", ncol=len(handles),
+                             bbox_to_anchor=(0.5, legend_y), frameon=True,
+                             fontsize=DUAL_LEGEND)
+            # legend_visible=False keeps the legend in the layout (so
+            # bbox_inches="tight" reserves the same vertical space as a
+            # visible legend would) but renders it transparent. Used by
+            # the keyrange figure so its height matches zipf's for
+            # side-by-side display.
+            if not legend_visible:
+                leg.set_alpha(0)
+                for child in leg.get_children():
+                    try:
+                        child.set_alpha(0)
+                    except Exception:
+                        pass
+                # Also hide every text/marker inside
+                for t in leg.get_texts():
+                    t.set_alpha(0)
+                for line in leg.get_lines():
+                    line.set_alpha(0)
+                if leg.legendPatch is not None:
+                    leg.legendPatch.set_alpha(0)
         # Wider left/bottom margin to seat the 30pt axis labels with
         # labelpad clearance from the 20pt tick numbers.
         fig.subplots_adjust(left=0.06, right=0.995, bottom=0.18,
@@ -634,11 +655,16 @@ def run_one(result_dir):
     noetcd_protocols = [p for p in protocols_local if p[1] != "etcd"]
     DUAL_PER_AXIS = {
         # zipf has 6 dense ticks per panel (0.5..1.0) → smaller xtick label,
-        # legend lives above the figure.
+        # legend visible at the top.
         "zipf":     dict(figsize=(24, 7), show_legend=True,
-                         xtick_size=14, top=0.84, legend_y=1.06),
-        "keyrange": dict(figsize=(24, 6),   show_legend=False,
-                         xtick_size=None, top=None, legend_y=None),
+                         xtick_size=14, top=0.84, legend_y=1.06,
+                         legend_visible=True),
+        # keyrange uses the SAME figsize / top / legend_y as zipf but draws
+        # the legend INVISIBLE so the rendered output has identical
+        # dimensions to zipf (for side-by-side display).
+        "keyrange": dict(figsize=(24, 7), show_legend=True,
+                         xtick_size=None, top=0.84, legend_y=1.06,
+                         legend_visible=False),
     }
     for axis_slug, levels, axis_label, axis_name in axes_specs:
         out = os.path.join(figs_dir, f"latency_ave_p99_vs_{axis_slug}_noetcd.pdf")
