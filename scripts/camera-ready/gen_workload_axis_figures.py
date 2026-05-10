@@ -132,7 +132,33 @@ def aggregate_rows(log_dir, proto, workload, conc, mode):
     return rows
 
 
+# Per-(proto, conc, workload, mode) ban list for the workload-axis figures.
+# OSDI Dec 2025 alt_workloads sweep (mongodb @ c=40) has several flap cells
+# whose latencies are 2-10x the baseline, creating visual noise that doesn't
+# match the OSDI camera-ready figure. Hard-code them here; the script will
+# return None as if the cell had no data, so the line plotter just skips
+# the missing tick (np.nan placeholder via integer x-positions).
+BANNED_WORKLOAD_CELLS = {
+    # mongodb @ c=40 vanilla: 0.75 spike (avg 1303 ms vs 315 baseline)
+    ("none_mongodb",  40, "rw_zipf_0.75", 0): "vanilla flap (avg 1303 ms)",
+    # mongodb @ c=40 0%: zipf flap band 0.6-0.7 + isolated 0.95 + the
+    # very-bad rw_1000000 cell (avg 3641 ms, p99 11859 ms — same cell that
+    # poisons the conc-axis at c=40 too).
+    ("rule_mongodb",  40, "rw_zipf_0.6",  0): "0% flap (avg 402, p99 1855)",
+    ("rule_mongodb",  40, "rw_zipf_0.65", 0): "0% flap (avg 414, p99 1712)",
+    ("rule_mongodb",  40, "rw_zipf_0.7",  0): "0% flap (avg 659, p99 3796)",
+    ("rule_mongodb",  40, "rw_zipf_0.95", 0): "0% flap (avg 397, p99 1610)",
+    ("rule_mongodb",  40, "rw_1000000",   0): "0% flap (avg 3641, p99 11859)",
+    # mongodb @ c=40 100%: rw_100 high (avg 415 vs ~160 baseline) + zipf 0.95
+    # outlier (avg 1188, p99 8626).
+    ("rule_mongodb",  40, "rw_100",       100): "100% flap (avg 415, p99 1798)",
+    ("rule_mongodb",  40, "rw_zipf_0.95", 100): "100% flap (avg 1188, p99 8626)",
+}
+
+
 def aggregate(log_dir, proto, workload, conc, mode, metric):
+    if (proto, conc, workload, mode) in BANNED_WORKLOAD_CELLS:
+        return None
     rows = aggregate_rows(log_dir, proto, workload, conc, mode)
     if rows is None:
         return None

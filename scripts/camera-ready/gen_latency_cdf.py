@@ -44,7 +44,11 @@ FIXED_CONC = {
     "raft":              50,    # was 150 (OSDI near-saturation override)
     "copilot":           50,
     "mencius":           10,
-    "mongodb":           40,    # OSDI Dec 2025 alt_workloads anchor (restored 2026-05-10)
+    "mongodb":           30,    # OSDI Dec 2025 c=30: pre-knee, all modes clean
+                                 #   (avg ~180-282 ms, p99 ~300-430 ms; no long tail).
+                                 # c=40 had a broken 0% cell (avg 3641 ms,
+                                 # p99 11859 ms) and adaptive long tail (p99
+                                 # 1655 ms) so was unusable for CDF (set 2026-05-10).
     "etcd":              50,
     "zookeeper":        200,
     "curp":             150,
