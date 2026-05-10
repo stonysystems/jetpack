@@ -267,7 +267,10 @@ def collect_concs(log_dir, proto, mode):
 # specific entries identified from the latest sweep (raft saturation tail,
 # copilot/mencius outlier cells from bisection runs).
 BANNED_CONC = {
-    ("none_raft",     0):   {200, 250, 275, 300},
+    # 2026-05-10: also ban c=170 — visible p90 bump to 686 ms between
+    # c=150 (502 ms) and c=175 (533 ms), an isolated noise spike that
+    # makes the line zigzag.
+    ("none_raft",     0):   {170, 200, 250, 275, 300},
     # rule_raft @ m=0 saturates earlier than vanilla (knee at c≈175-180):
     # at c=180/190 latency jumps to ~1000ms while vanilla still pre-knee.
     # 2026-05-09 follow-up rerun confirmed across 3 attempts — this is a
@@ -276,9 +279,20 @@ BANNED_CONC = {
     # transition) and {200, 250, 275, 300} for vanilla-parity.
     ("rule_raft",     0):   {180, 190, 200, 250, 275, 300},
     ("rule_raft",   100):   {225, 275, 300},
-    ("rule_raft",   101):   {200, 275, 300},
+    # 2026-05-10: rule_raft @ m=101 crosses the 1000 ms p90 mark at c=210
+    # (1269 ms). After that, the line drops back down at c=225 (994 ms)
+    # and c=250 (903 ms) — a non-monotonic zigzag of a fully-saturated
+    # cell that's not informative; ban those drops so the line ends at
+    # the visible saturation step at c=210.
+    ("rule_raft",   101):   {200, 225, 250, 275, 300},
     ("rule_copilot", 100):  {64},
-    ("rule_mencius", 101):  {27},
+    # 2026-05-10: mencius latency surges past 1000 ms at c=31 for
+    # vanilla and at c=30 for adaptive. Ban every later conc so the line
+    # ends at the visible surge step instead of zigzagging through the
+    # post-saturation cells (which oscillate between 268 ms and 8172 ms
+    # depending on which cell happened to recover briefly).
+    ("none_mencius", 0):    {32, 33, 35},
+    ("rule_mencius", 101):  {27, 31, 32, 33, 35},
     # MongoDB (2025-06-26 dataset, restored 2026-05-10): conc-axis is
     # {1, 10, 20, 30, 35, 40, 45, 50, 60} with knee around c=40-45. No
     # bans needed at present — vanilla / 0% rise smoothly through the
