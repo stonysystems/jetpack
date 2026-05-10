@@ -285,6 +285,11 @@ BANNED_CONC = {
     # cell that's not informative; ban those drops so the line ends at
     # the visible saturation step at c=210.
     ("rule_raft",   101):   {200, 225, 250, 275, 300},
+    # 2026-05-10: none_copilot @ m=0 surges past 1000 ms at c=70
+    # (1102 ms p90), then drops back to 968 ms at c=75 — same
+    # non-monotonic post-saturation pattern as raft / mencius. Ban
+    # c=75 so the line ends at the visible surge step.
+    ("none_copilot",  0):   {75},
     ("rule_copilot", 100):  {64},
     # 2026-05-10: mencius latency surges past 1000 ms at c=31 for
     # vanilla and at c=30 for adaptive. Ban every later conc so the line
