@@ -245,12 +245,15 @@ KEYRANGE_LEVELS = [
 ]
 
 # OSDI cell 10 numeric defaults (used by zipf cell 20 and keyrange cell 21).
-LINE_WIDTH       = 2
+# Unified style with gen_latency_cdf.py (set 2026-05-10): all camera-ready
+# figures use the OSDI cell 14 spec — LINE_WIDTH=3, fonts 22/22/22/18,
+# tick label size 18.
+LINE_WIDTH       = 3
 MARKER_SIZE      = 10
-TITLE_FONT_SIZE  = 24
-XLABEL_FONT_SIZE = 20
-YLABEL_FONT_SIZE = 20
-LEGEND_FONT_SIZE = 15
+TITLE_FONT_SIZE  = 22
+XLABEL_FONT_SIZE = 22
+YLABEL_FONT_SIZE = 22
+LEGEND_FONT_SIZE = 18
 
 plt.rcParams.update({
     "text.usetex": False,
@@ -309,9 +312,9 @@ def _plot_fp_rate_on_ax(ax, log_dir, axis_label, axis_name, levels,
         handles.append(line)
         labels.append(label)
         counts.append((title, 1))
-    ax.set_xlabel(axis_label, fontsize=18)
+    ax.set_xlabel(axis_label, fontsize=XLABEL_FONT_SIZE)
     if ylabel is not None:
-        ax.set_ylabel(ylabel, fontsize=18)
+        ax.set_ylabel(ylabel, fontsize=YLABEL_FONT_SIZE)
     ax.set_xticks(x_idx)
     ax.set_xticklabels(x_tick_labels)
     ax.set_xlim(-0.3, n - 0.7)
@@ -341,7 +344,7 @@ def draw_combined_fp_rate_two_axes(log_dir, out_path,
     handles, labels = (lh, ll) if len(lh) >= len(rh) else (rh, rl)
     if handles:
         fig.legend(handles, labels, loc="upper center", ncol=len(handles),
-                   bbox_to_anchor=(0.5, 1.02), frameon=True, fontsize=14,
+                   bbox_to_anchor=(0.5, 1.02), frameon=True, fontsize=LEGEND_FONT_SIZE,
                    handlelength=2.0, handletextpad=0.6, columnspacing=1.2)
     fig.subplots_adjust(left=0.08, right=0.99, top=0.86, bottom=0.13,
                         wspace=0.20)
@@ -404,7 +407,7 @@ def draw_dual_metric_grid(log_dir, out_path, axis_label, axis_name, levels,
                             linestyle=ls, linewidth=LINE_WIDTH, ms=MARKER_SIZE)
             # Title only on the top row; just protocol name, no metric suffix.
             if row_idx == 0:
-                ax.set_title(title, fontsize=26)
+                ax.set_title(title, fontsize=TITLE_FONT_SIZE)
             ax.set_xticks(x_idx)
             # X-tick labels only on bottom row (top row gets blank ticks via
             # sharex, but we must explicitly clear them just in case).
@@ -426,7 +429,7 @@ def draw_dual_metric_grid(log_dir, out_path, axis_label, axis_name, levels,
         handles, labels = axes[0, 0].get_legend_handles_labels()
         if handles:
             fig.legend(handles, labels, loc="upper center", ncol=len(handles),
-                       bbox_to_anchor=(0.5, legend_y), frameon=True, fontsize=24)
+                       bbox_to_anchor=(0.5, legend_y), frameon=True, fontsize=LEGEND_FONT_SIZE)
         fig.subplots_adjust(left=0.05, right=0.99, bottom=0.13,
                             top=top if top is not None else 0.86,
                             wspace=0.05, hspace=0.10)
@@ -511,7 +514,7 @@ def draw_grid(log_dir, out_path, axis_label, axis_name, levels, metric=None,
                 ax.plot(x_idx, ys, label=label, color=color, marker=marker,
                         linestyle=ls, linewidth=LINE_WIDTH, ms=MARKER_SIZE)
                 n_lines_drawn += 1
-        ax.set_title(f"{title} (c={conc})", fontsize=26)
+        ax.set_title(f"{title} (c={conc})", fontsize=TITLE_FONT_SIZE)
         ax.set_xlabel(axis_label, fontsize=XLABEL_FONT_SIZE)
         ax.set_xticks(x_idx)
         ax.set_xticklabels(x_tick_labels)
@@ -538,7 +541,7 @@ def draw_grid(log_dir, out_path, axis_label, axis_name, levels, metric=None,
     handles, labels = axes[0].get_legend_handles_labels()
     if handles:
         fig.legend(handles, labels, loc="upper center", ncol=len(handles),
-                   bbox_to_anchor=(0.5, 0.97), frameon=True, fontsize=24)
+                   bbox_to_anchor=(0.5, 0.97), frameon=True, fontsize=LEGEND_FONT_SIZE)
     fig.subplots_adjust(left=0.05, right=0.99, bottom=0.27, top=0.70,
                         wspace=0.05)
     savefig_all(fig, out_path, bbox_inches="tight", pad_inches=0.02)

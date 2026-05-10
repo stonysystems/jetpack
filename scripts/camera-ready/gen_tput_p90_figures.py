@@ -363,14 +363,17 @@ PANEL_CONFIGS = [
     ("100%",     "orange",  "*", "--"),
 ]
 
-LINE_WIDTH = 2     # OSDI cell 10
-MARKER_SIZE = 10   # OSDI cell 10
+# Unified style with gen_latency_cdf.py (set 2026-05-10): all camera-ready
+# figures use the OSDI cell 14 spec — LINE_WIDTH=3, fonts 22/22/22/18,
+# tick label size 18.
+LINE_WIDTH = 3
+MARKER_SIZE = 10
 
 # OSDI cell 10 / cell 11 font sizes
-TITLE_FONT_SIZE  = 24
-XLABEL_FONT_SIZE = 20
-YLABEL_FONT_SIZE = 20
-LEGEND_FONT_SIZE = 15
+TITLE_FONT_SIZE  = 22
+XLABEL_FONT_SIZE = 22
+YLABEL_FONT_SIZE = 22
+LEGEND_FONT_SIZE = 18
 
 
 def savefig_all(fig, pdf_path, **kwargs):
@@ -452,7 +455,7 @@ def draw_grid_figure(log_dir, out_path, metric="p90", dc=None, dc_label=None,
             ys = [r[2] for r in rows]
             ax.plot(xs, ys, label=label, color=color, marker=marker,
                     linestyle=ls, linewidth=LINE_WIDTH, ms=MARKER_SIZE)
-        ax.set_title(title, fontsize=26)  # OSDI make_figures.py:615
+        ax.set_title(title, fontsize=TITLE_FONT_SIZE)
         ax.set_xlabel("Throughput (ops/s)", fontsize=XLABEL_FONT_SIZE)
         ax.grid(True, linestyle="--", alpha=0.5)
         ax.set_ylim(0, ylim_top)  # user override (OSDI uses 0-1000 for latency)
@@ -469,9 +472,9 @@ def draw_grid_figure(log_dir, out_path, metric="p90", dc=None, dc_label=None,
     handles, labels = axes[0].get_legend_handles_labels()
     if handles:
         fig.legend(handles, labels, loc="upper center", ncol=len(handles),
-                   bbox_to_anchor=(0.5, 0.97), frameon=True, fontsize=24)
+                   bbox_to_anchor=(0.5, 0.97), frameon=True, fontsize=LEGEND_FONT_SIZE)
     if dc_label:
-        fig.suptitle(dc_label, fontsize=20, y=1.03)
+        fig.suptitle(dc_label, fontsize=TITLE_FONT_SIZE, y=1.03)
     fig.subplots_adjust(left=0.05, right=0.99, bottom=0.20, top=0.74,
                         wspace=0.05)
 
@@ -505,15 +508,15 @@ def draw_compare_figure(log_dir, out_path, metric="p90", dc=None, dc_label=None)
         ys = [r[2] for r in rows]
         ax.plot(xs, ys, label=label, color=color, marker=marker, linestyle=ls,
                 linewidth=LINE_WIDTH, ms=MARKER_SIZE)
-    ax.set_xlabel("Throughput (ops/s)", fontsize=24)
-    ax.set_ylabel(LATENCY_METRICS[metric][1], fontsize=24)
-    ax.tick_params(axis="both", labelsize=20)
+    ax.set_xlabel("Throughput (ops/s)", fontsize=XLABEL_FONT_SIZE)
+    ax.set_ylabel(LATENCY_METRICS[metric][1], fontsize=YLABEL_FONT_SIZE)
+    ax.tick_params(axis="both", labelsize=18)
     ax.grid(True, linestyle="--", alpha=0.5)
     ax.set_ylim(0, 2000)
     ax.set_xlim(left=0)
     if dc_label:
-        ax.set_title(dc_label, fontsize=22)
-    ax.legend(fontsize=18, loc="upper left", framealpha=0.95)
+        ax.set_title(dc_label, fontsize=TITLE_FONT_SIZE)
+    ax.legend(fontsize=LEGEND_FONT_SIZE, loc="upper left", framealpha=0.95)
     fig.tight_layout()
     savefig_all(fig, out_path, bbox_inches="tight")
     plt.close(fig)
