@@ -442,8 +442,13 @@ def draw_dual_metric_grid(log_dir, out_path, axis_label, axis_name, levels,
     if show_legend:
         handles, labels = axes[0, 0].get_legend_handles_labels()
         if handles:
+            # legend_y clamped <= 1.0 so the legend sits INSIDE the figure
+            # (otherwise bbox_inches='tight' expansion makes the two dual
+            # figures end up with off-by-N-pixel widths between zipf and
+            # keyrange). 0.99 puts it just below the figure's top edge.
+            ly = min(legend_y, 0.99)
             leg = fig.legend(handles, labels, loc="upper center", ncol=len(handles),
-                             bbox_to_anchor=(0.5, legend_y), frameon=True,
+                             bbox_to_anchor=(0.5, ly), frameon=True,
                              fontsize=DUAL_LEGEND)
             # legend_visible=False keeps the legend in the layout (so
             # bbox_inches="tight" reserves the same vertical space as a
@@ -464,15 +469,17 @@ def draw_dual_metric_grid(log_dir, out_path, axis_label, axis_name, levels,
                     line.set_alpha(0)
                 if leg.legendPatch is not None:
                     leg.legendPatch.set_alpha(0)
-        # Wider left/bottom margin to seat the 30pt axis labels with
-        # labelpad clearance from the 20pt tick numbers.
-        fig.subplots_adjust(left=0.06, right=0.995, bottom=0.18,
+        # Wider left/bottom margin to seat the 22-30pt axis labels with
+        # labelpad clearance from the 20pt tick numbers. With figsize=12,
+        # left=0.10 gives ~1.2" of left margin which fits the rotated
+        # y-axis label + tick numbers.
+        fig.subplots_adjust(left=0.10, right=0.995, bottom=0.18,
                             top=top if top is not None else 0.86,
-                            wspace=0.06, hspace=0.10)
+                            wspace=0.10, hspace=0.10)
     else:
-        fig.subplots_adjust(left=0.06, right=0.995, bottom=0.18,
+        fig.subplots_adjust(left=0.10, right=0.995, bottom=0.18,
                             top=top if top is not None else 0.93,
-                            wspace=0.06, hspace=0.10)
+                            wspace=0.10, hspace=0.10)
 
     # Single centered x-axis label below the bottom row only.
     fig.canvas.draw()
@@ -482,7 +489,11 @@ def draw_dual_metric_grid(log_dir, out_path, axis_label, axis_name, levels,
     fig.text(xc, label_y, axis_label, ha="center", va="bottom",
              fontsize=DUAL_XLABEL)
 
-    savefig_all(fig, out_path, bbox_inches="tight", pad_inches=0.02)
+    # Use the figure's exact canvas (no bbox_inches='tight') so zipf and
+    # keyrange both render at exactly figsize × DPI pixels regardless of
+    # legend visibility — required for pixel-perfect side-by-side LaTeX
+    # alignment.
+    savefig_all(fig, out_path)
     plt.close(fig)
     return None
 
@@ -653,16 +664,20 @@ def run_one(result_dir):
     # 2026-05-10 layout: stacked (2 rows × 4 cols) — top row = avg, bottom
     # row = p99. Single x-axis label centered under the bottom row.
     noetcd_protocols = [p for p in protocols_local if p[1] != "etcd"]
+    # Figsize narrowed 24 -> 12 (set 2026-05-10 by user) so two figures fit
+    # side-by-side in a LaTeX two-figure block without LaTeX rescaling
+    # them down. 4 panels in 12" gives ~3" per panel — still legible at
+    # the 20pt tick / 30pt title spec.
     DUAL_PER_AXIS = {
         # zipf has 6 dense ticks per panel (0.5..1.0) → smaller xtick label,
         # legend visible at the top.
-        "zipf":     dict(figsize=(24, 7), show_legend=True,
+        "zipf":     dict(figsize=(12, 7), show_legend=True,
                          xtick_size=14, top=0.84, legend_y=1.06,
                          legend_visible=True),
         # keyrange uses the SAME figsize / top / legend_y as zipf but draws
         # the legend INVISIBLE so the rendered output has identical
         # dimensions to zipf (for side-by-side display).
-        "keyrange": dict(figsize=(24, 7), show_legend=True,
+        "keyrange": dict(figsize=(12, 7), show_legend=True,
                          xtick_size=None, top=0.84, legend_y=1.06,
                          legend_visible=False),
     }
