@@ -375,7 +375,18 @@ def draw_dual_metric_grid(log_dir, out_path, axis_label, axis_name, levels,
         cleanest adaptive lines (~150 ms).
 
     figsize stretched vertically to ~6" (was 3) since we now have two rows.
+
+    Font sizes (set 2026-05-10 by user, local to this dual figure — the
+    other figure scripts continue to use the OSDI cell 14 defaults):
+      panel title / x-axis label / y-axis label = 30
+      legend                                      = 24
+      x-tick labels / y-tick labels               = 20
     """
+    DUAL_TITLE   = 30
+    DUAL_XLABEL  = 30
+    DUAL_YLABEL  = 30
+    DUAL_LEGEND  = 24
+    DUAL_TICK    = 20
     METRIC_LABEL = {"ave": "Avg. Lat. (ms)", "p50": "p50 Lat. (ms)",
                     "p90": "p90 Lat. (ms)", "p99": "p99 Lat. (ms)"}
     if protocols is None:
@@ -407,36 +418,40 @@ def draw_dual_metric_grid(log_dir, out_path, axis_label, axis_name, levels,
                             linestyle=ls, linewidth=LINE_WIDTH, ms=MARKER_SIZE)
             # Title only on the top row; just protocol name, no metric suffix.
             if row_idx == 0:
-                ax.set_title(title, fontsize=TITLE_FONT_SIZE)
+                ax.set_title(title, fontsize=DUAL_TITLE)
             ax.set_xticks(x_idx)
             # X-tick labels only on bottom row (top row gets blank ticks via
             # sharex, but we must explicitly clear them just in case).
             if row_idx == len(metrics_pair) - 1:
                 ax.set_xticklabels(x_tick_labels)
-                if xtick_size is not None:
-                    ax.tick_params(axis="x", labelsize=xtick_size)
+                ax.tick_params(axis="x", labelsize=DUAL_TICK)
             ax.set_xlim(-0.3, n - 0.7)
             ax.grid(True, linestyle="--", alpha=0.5)
             ax.set_ylim(*ylim)
-            # Hide y-tick labels except on the leftmost panel of each row.
+            # Y-ticks: 20pt always; hide labels on non-leftmost columns.
+            ax.tick_params(axis="y", labelsize=DUAL_TICK)
             if col_idx > 0:
                 ax.tick_params(axis="y", labelleft=False)
-        # Per-row y-axis label on the leftmost panel.
+        # Per-row y-axis label on the leftmost panel. labelpad pushes the
+        # label further left so the 30pt text doesn't crash into the 20pt
+        # y-tick numbers.
         axes[row_idx, 0].set_ylabel(METRIC_LABEL.get(metric, metric),
-                                    fontsize=YLABEL_FONT_SIZE)
+                                    fontsize=DUAL_YLABEL, labelpad=10)
 
     if show_legend:
         handles, labels = axes[0, 0].get_legend_handles_labels()
         if handles:
             fig.legend(handles, labels, loc="upper center", ncol=len(handles),
-                       bbox_to_anchor=(0.5, legend_y), frameon=True, fontsize=LEGEND_FONT_SIZE)
-        fig.subplots_adjust(left=0.05, right=0.99, bottom=0.13,
+                       bbox_to_anchor=(0.5, legend_y), frameon=True, fontsize=DUAL_LEGEND)
+        # Wider left/bottom margin to seat the 30pt axis labels with
+        # labelpad clearance from the 20pt tick numbers.
+        fig.subplots_adjust(left=0.06, right=0.995, bottom=0.18,
                             top=top if top is not None else 0.86,
-                            wspace=0.05, hspace=0.10)
+                            wspace=0.06, hspace=0.10)
     else:
-        fig.subplots_adjust(left=0.05, right=0.99, bottom=0.13,
+        fig.subplots_adjust(left=0.06, right=0.995, bottom=0.18,
                             top=top if top is not None else 0.93,
-                            wspace=0.05, hspace=0.10)
+                            wspace=0.06, hspace=0.10)
 
     # Single centered x-axis label below the bottom row only.
     fig.canvas.draw()
@@ -444,7 +459,7 @@ def draw_dual_metric_grid(log_dir, out_path, axis_label, axis_name, levels,
     xc = (bottom_axes[0].get_position().x0 + bottom_axes[-1].get_position().x1) / 2
     label_y = 0.02
     fig.text(xc, label_y, axis_label, ha="center", va="bottom",
-             fontsize=XLABEL_FONT_SIZE)
+             fontsize=DUAL_XLABEL)
 
     savefig_all(fig, out_path, bbox_inches="tight", pad_inches=0.02)
     plt.close(fig)
