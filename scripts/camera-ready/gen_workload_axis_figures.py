@@ -384,7 +384,7 @@ def draw_dual_metric_grid(log_dir, out_path, axis_label, axis_name, levels,
     """
     DUAL_TITLE   = 30
     DUAL_XLABEL  = 30
-    DUAL_YLABEL  = 30
+    DUAL_YLABEL  = 22   # bumped back from 30 (set 2026-05-10 by user)
     DUAL_LEGEND  = 24
     DUAL_TICK    = 20
     METRIC_LABEL = {"ave": "Avg. Lat. (ms)", "p50": "p50 Lat. (ms)",
@@ -636,7 +636,7 @@ def run_one(result_dir):
         # zipf has 6 dense ticks per panel (0.5..1.0) → smaller xtick label,
         # legend lives above the figure.
         "zipf":     dict(figsize=(24, 7), show_legend=True,
-                         xtick_size=14, top=0.84, legend_y=1.00),
+                         xtick_size=14, top=0.84, legend_y=1.06),
         "keyrange": dict(figsize=(24, 6),   show_legend=False,
                          xtick_size=None, top=None, legend_y=None),
     }
