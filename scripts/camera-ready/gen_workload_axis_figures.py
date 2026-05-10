@@ -675,14 +675,16 @@ def run_one(result_dir):
     DUAL_PER_AXIS = {
         # zipf x-tick labels are now ".5"/.../"1" (short form, see
         # ZIPF_LEVELS), so they fit at the standard 20pt size.
+        # top=0.80 leaves ~20% of figure height for legend + title gap;
+        # bumped from 0.84 (set 2026-05-10 by user — was small overlap).
         "zipf":     dict(figsize=(12, 7), show_legend=True,
-                         xtick_size=None, top=0.84, legend_y=1.06,
+                         xtick_size=None, top=0.80, legend_y=1.06,
                          legend_visible=True),
         # keyrange uses the SAME figsize / top / legend_y as zipf but draws
         # the legend INVISIBLE so the rendered output has identical
         # dimensions to zipf (for side-by-side display).
         "keyrange": dict(figsize=(12, 7), show_legend=True,
-                         xtick_size=None, top=0.84, legend_y=1.06,
+                         xtick_size=None, top=0.80, legend_y=1.06,
                          legend_visible=False),
     }
     for axis_slug, levels, axis_label, axis_name in axes_specs:
