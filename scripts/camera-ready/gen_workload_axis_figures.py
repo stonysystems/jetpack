@@ -182,7 +182,10 @@ def aggregate_fp_rate(log_dir, proto, workload, conc, mode, kind="success"):
 PROTOCOLS = [
     ("Raft",     "raft",     50),
     ("etcd",     "etcd",     50),
-    ("MongoDB",  "mongodb",  50),
+    # MongoDB: c=40 matches the OSDI Dec 2025 dataset (alt_workloads
+    # archive) — restored 2026-05-10 in place of the June 2025 contention
+    # dataset / Task 5 fsync-off dataset (both archived under log/).
+    ("MongoDB",  "mongodb",  40),
     ("Copilot",  "copilot",  50),
     # Mencius @ c=10 is the camera-ready default (2026-05-10): the c=10
     # battery covers all 11 workloads × 3 modes; c=16 figures are

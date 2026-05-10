@@ -44,7 +44,7 @@ FIXED_CONC = {
     "raft":              50,    # was 150 (OSDI near-saturation override)
     "copilot":           50,
     "mencius":           10,
-    "mongodb":           50,    # was 30 (OSDI near-saturation anchor)
+    "mongodb":           40,    # OSDI Dec 2025 alt_workloads anchor (restored 2026-05-10)
     "etcd":              50,
     "zookeeper":        200,
     "curp":             150,
