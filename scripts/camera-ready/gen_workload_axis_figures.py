@@ -352,37 +352,45 @@ def draw_combined_fp_rate_two_axes(log_dir, out_path,
 
 
 def draw_dual_metric_grid(log_dir, out_path, axis_label, axis_name, levels,
-                          metrics_pair=("ave", "p99"), ylim=(150, 550),
-                          protocols=None, figsize=(24, 3), show_legend=False,
+                          metrics_pair=("ave", "p99"), ylim=(120, 550),
+                          protocols=None, figsize=(24, 6), show_legend=False,
                           xtick_size=None, top=None, legend_y=1.04):
-    """Side-by-side dual-metric figure with a SHARED y-axis ("Latency (ms)"):
-    left N panels = metrics_pair[0], right N panels = metrics_pair[1]. One
-    row, 2*N panels total, sharey=True so only axes[0] shows the y-label and
-    y-tick labels. Each panel title is "{protocol} ({metric_short})" (e.g.
-    "Raft (avg)", "Raft (p99)") rather than the conc tag. Two centered
-    x-axis labels are placed below the figure — one under the left N panels,
-    one under the right N panels — instead of a per-panel xlabel.
+    """**Stacked** (2-row × N-column) dual-metric figure:
+    top row    = metrics_pair[0] (default "ave") for each protocol
+    bottom row = metrics_pair[1] (default "p99") for each protocol
 
-    figsize / show_legend tunable per call:
-      * keyrange dual: figsize=(24, 3),   show_legend=False
-      * zipf dual:     figsize=(24, 3.5), show_legend=True  (top 0.5" = legend)
+    Per-row design (set 2026-05-10 by user):
+      - Titles on the TOP row only (just protocol name; no "(avg)/(p99)"
+        suffix). Bottom row's panels have no title.
+      - Y-labels: top row's leftmost = "Avg. Lat. (ms)"; bottom row's
+        leftmost = "p99 Lat. (ms)" (or whatever metrics_pair maps to).
+      - X-tick labels and the single centered axis_label go on the
+        BOTTOM row only.
+      - Both rows share x-axis (sharex=True via column linkage); each
+        row has its own y-axis (sharey applies per row, not across rows).
+      - Y-axis defaults to (120, 550) so the floor sits a bit below the
+        cleanest adaptive lines (~150 ms).
+
+    figsize stretched vertically to ~6" (was 3) since we now have two rows.
     """
-    METRIC_SHORT = {"ave": "avg", "p50": "p50", "p90": "p90", "p99": "p99"}
+    METRIC_LABEL = {"ave": "Avg. Lat. (ms)", "p50": "p50 Lat. (ms)",
+                    "p90": "p90 Lat. (ms)", "p99": "p99 Lat. (ms)"}
     if protocols is None:
         protocols = PROTOCOLS
     n_panels = len(protocols)
-    n_total = 2 * n_panels
-    fig, axes = plt.subplots(1, n_total, figsize=figsize, sharey=True)
-    if n_total == 1:
-        axes = [axes]
+    fig, axes = plt.subplots(2, n_panels, figsize=figsize,
+                             sharex="col")  # share x per column; sharey handled manually
 
     n = len(levels)
     x_idx = np.arange(n)
     x_tick_labels = [x_label for (_, x_label) in levels]
 
-    for block_idx, metric in enumerate(metrics_pair):
-        block_axes = axes[block_idx * n_panels:(block_idx + 1) * n_panels]
-        for ax, (title, root, conc) in zip(block_axes, protocols):
+    for row_idx, metric in enumerate(metrics_pair):
+        # Row-internal sharey: link all panels in this row by setting the
+        # same ylim AFTER plotting, and only show y-tick labels on the
+        # leftmost panel of each row.
+        for col_idx, (title, root, conc) in enumerate(protocols):
+            ax = axes[row_idx, col_idx]
             for (label, color, marker, ls, proto_fmt, mode) in LINE_CONFIGS:
                 proto = proto_fmt.format(root=root)
                 ys = np.full(n, np.nan)
@@ -390,48 +398,49 @@ def draw_dual_metric_grid(log_dir, out_path, axis_label, axis_name, levels,
                     agg = aggregate(log_dir, proto, wl, conc, mode, metric)
                     if agg is None:
                         continue
-                    ys[i] = agg[1]   # latency value
+                    ys[i] = agg[1]
                 if np.isfinite(ys).any():
                     ax.plot(x_idx, ys, label=label, color=color, marker=marker,
                             linestyle=ls, linewidth=LINE_WIDTH, ms=MARKER_SIZE)
-            short = METRIC_SHORT.get(metric, metric)
-            ax.set_title(f"{title} ({short})", fontsize=26)
-            ax.set_xlabel("")   # suppress per-panel x-label; we'll add 2 group-level labels below
+            # Title only on the top row; just protocol name, no metric suffix.
+            if row_idx == 0:
+                ax.set_title(title, fontsize=26)
             ax.set_xticks(x_idx)
-            ax.set_xticklabels(x_tick_labels)
-            if xtick_size is not None:
-                ax.tick_params(axis="x", labelsize=xtick_size)
+            # X-tick labels only on bottom row (top row gets blank ticks via
+            # sharex, but we must explicitly clear them just in case).
+            if row_idx == len(metrics_pair) - 1:
+                ax.set_xticklabels(x_tick_labels)
+                if xtick_size is not None:
+                    ax.tick_params(axis="x", labelsize=xtick_size)
             ax.set_xlim(-0.3, n - 0.7)
             ax.grid(True, linestyle="--", alpha=0.5)
             ax.set_ylim(*ylim)
-
-    # Single shared y-label on the leftmost panel. (sharey=True hides ticks
-    # on the rest automatically.)
-    axes[0].set_ylabel("Latency (ms)", fontsize=YLABEL_FONT_SIZE)
+            # Hide y-tick labels except on the leftmost panel of each row.
+            if col_idx > 0:
+                ax.tick_params(axis="y", labelleft=False)
+        # Per-row y-axis label on the leftmost panel.
+        axes[row_idx, 0].set_ylabel(METRIC_LABEL.get(metric, metric),
+                                    fontsize=YLABEL_FONT_SIZE)
 
     if show_legend:
-        handles, labels = axes[0].get_legend_handles_labels()
+        handles, labels = axes[0, 0].get_legend_handles_labels()
         if handles:
             fig.legend(handles, labels, loc="upper center", ncol=len(handles),
                        bbox_to_anchor=(0.5, legend_y), frameon=True, fontsize=24)
-        # `top` controls panel-area top; default 0.72 leaves room for title
-        # AND legend (with bbox above the figure at legend_y > 1.0).
-        fig.subplots_adjust(left=0.04, right=0.99, bottom=0.27,
-                            top=top if top is not None else 0.72,
-                            wspace=0.05)
+        fig.subplots_adjust(left=0.05, right=0.99, bottom=0.13,
+                            top=top if top is not None else 0.86,
+                            wspace=0.05, hspace=0.10)
     else:
-        fig.subplots_adjust(left=0.04, right=0.99, bottom=0.27,
-                            top=top if top is not None else 0.88,
-                            wspace=0.05)
+        fig.subplots_adjust(left=0.05, right=0.99, bottom=0.13,
+                            top=top if top is not None else 0.93,
+                            wspace=0.05, hspace=0.10)
 
-    # Two group-level x-axis labels: each centered under its 4 panels.
+    # Single centered x-axis label below the bottom row only.
     fig.canvas.draw()
-    left_xc  = (axes[0].get_position().x0 + axes[n_panels - 1].get_position().x1) / 2
-    right_xc = (axes[n_panels].get_position().x0 + axes[n_total - 1].get_position().x1) / 2
-    label_y  = 0.04   # below the panels' bottom edge (subplots_adjust bottom=0.27)
-    fig.text(left_xc,  label_y, axis_label, ha="center", va="bottom",
-             fontsize=XLABEL_FONT_SIZE)
-    fig.text(right_xc, label_y, axis_label, ha="center", va="bottom",
+    bottom_axes = axes[-1, :]
+    xc = (bottom_axes[0].get_position().x0 + bottom_axes[-1].get_position().x1) / 2
+    label_y = 0.02
+    fig.text(xc, label_y, axis_label, ha="center", va="bottom",
              fontsize=XLABEL_FONT_SIZE)
 
     savefig_all(fig, out_path, bbox_inches="tight", pad_inches=0.02)
@@ -602,19 +611,15 @@ def run_one(result_dir):
                 print(f"    {title:<10} -> {n} lines drawn")
 
     # Combined dual-metric workload-axis figures (no-etcd only) — set
-    # 2026-05-09: side-by-side avg + p99 latency for zipf and keyrange.
-    # Per user spec:
-    #   zipf:     figsize=(24, 3.5) with the top 0.5" reserved for the legend
-    #   keyrange: figsize=(24, 3)   no legend (already shown on the zipf one)
+    # 2026-05-10 layout: stacked (2 rows × 4 cols) — top row = avg, bottom
+    # row = p99. Single x-axis label centered under the bottom row.
     noetcd_protocols = [p for p in protocols_local if p[1] != "etcd"]
     DUAL_PER_AXIS = {
         # zipf has 6 dense ticks per panel (0.5..1.0) → smaller xtick label,
-        # plus a lower `top` and slightly-above-fig legend so the per-panel
-        # titles don't collide with the legend.
-        "zipf":     dict(figsize=(24, 3.5), show_legend=True,
-                         xtick_size=14, top=0.70, legend_y=1.04),
-        # keyrange has only 5 ticks ($10^2$..$10^6$) → default xtick size is fine.
-        "keyrange": dict(figsize=(24, 3),   show_legend=False,
+        # legend lives above the figure.
+        "zipf":     dict(figsize=(24, 7), show_legend=True,
+                         xtick_size=14, top=0.84, legend_y=1.00),
+        "keyrange": dict(figsize=(24, 6),   show_legend=False,
                          xtick_size=None, top=None, legend_y=None),
     }
     for axis_slug, levels, axis_label, axis_name in axes_specs:
@@ -624,7 +629,7 @@ def run_one(result_dir):
         draw_dual_metric_grid(log_dir, out,
                               axis_label=axis_label, axis_name=axis_name,
                               levels=levels, metrics_pair=("ave", "p99"),
-                              ylim=(150, 550), protocols=noetcd_protocols,
+                              ylim=(120, 550), protocols=noetcd_protocols,
                               **opts)
 
     # Combined fast-path success-rate figure: two-panel (zipf | keyrange),
