@@ -184,9 +184,9 @@ PROTOCOLS = [
     ("etcd",     "etcd",     50),
     ("MongoDB",  "mongodb",  50),
     ("Copilot",  "copilot",  50),
-    # Mencius: default conc swapped 16 → 10 (2026-05-09 task 2 follow-up).
-    # The c=10 battery covers all 11 workloads × 3 modes; c=16 stays
-    # available as a parallel pass via `--mencius-conc-extra 16`.
+    # Mencius @ c=10 is the camera-ready default (2026-05-10): the c=10
+    # battery covers all 11 workloads × 3 modes; c=16 figures are
+    # explicitly NOT generated (per user directive 2026-05-10).
     ("Mencius",  "mencius",  10),
 ]
 
@@ -531,14 +531,8 @@ DEFAULT_FOLDERS = [
 RESULTS_ROOT = "/home/users/ztang/janus/results"
 
 
-def run_one(result_dir, mencius_conc=None):
-    """Generate the workload-axis figure suite under result_dir/figs/.
-
-    mencius_conc (optional int): if provided, overrides Mencius's conc
-        (default 16) for this generation pass, and suffixes every output
-        filename with `_mencius_c<N>`. Used to emit parallel c=10 figures
-        next to the c=16 defaults (added 2026-05-09).
-    """
+def run_one(result_dir):
+    """Generate the workload-axis figure suite under result_dir/figs/."""
     log_dir = os.path.join(result_dir, "log")
     figs_dir = os.path.join(result_dir, "figs")
     os.makedirs(figs_dir, exist_ok=True)
@@ -549,18 +543,7 @@ def run_one(result_dir, mencius_conc=None):
     folder_name = os.path.basename(result_dir.rstrip("/"))
     print(f"\n=== {folder_name} ===")
 
-    # Apply mencius_conc override and bake the file suffix.
-    protocols_local = [list(p) for p in PROTOCOLS]
-    fname_extra = ""
-    if mencius_conc is not None:
-        for p in protocols_local:
-            if p[1] == "mencius":
-                p[2] = mencius_conc
-        protocols_local = [tuple(p) for p in protocols_local]
-        fname_extra = f"_mencius_c{mencius_conc}"
-        print(f"  [override] Mencius conc -> {mencius_conc} (filename suffix: {fname_extra})")
-    else:
-        protocols_local = [tuple(p) for p in protocols_local]
+    protocols_local = [tuple(p) for p in PROTOCOLS]
 
     axes_specs = [
         ("zipf",     ZIPF_LEVELS,     "Zipfian Skew Parameter (θ)", "zipf"),
@@ -582,7 +565,7 @@ def run_one(result_dir, mencius_conc=None):
         # near-saturation conc, the band that holds the bulk of points.
         for metric in ("p50", "p90", "p99", "ave"):
             for fname_suffix, protocols in PROTO_PASSES:
-                out = os.path.join(figs_dir, f"latency_{metric}_vs_{axis_slug}{fname_suffix}{fname_extra}.pdf")
+                out = os.path.join(figs_dir, f"latency_{metric}_vs_{axis_slug}{fname_suffix}.pdf")
                 ylim = (150, 550)
                 print(f"  [{axis_slug}/{metric}{fname_suffix}] -> {out}")
                 counts = draw_grid(log_dir, out,
@@ -594,7 +577,7 @@ def run_one(result_dir, mencius_conc=None):
 
         # throughput panel (one figure per axis)
         for fname_suffix, protocols in PROTO_PASSES:
-            out_t = os.path.join(figs_dir, f"tput_vs_{axis_slug}{fname_suffix}{fname_extra}.pdf")
+            out_t = os.path.join(figs_dir, f"tput_vs_{axis_slug}{fname_suffix}.pdf")
             print(f"  [{axis_slug}/tput{fname_suffix}] -> {out_t}")
             counts = draw_grid(log_dir, out_t,
                                axis_label=axis_label, axis_name=axis_name,
@@ -620,7 +603,7 @@ def run_one(result_dir, mencius_conc=None):
                          xtick_size=None, top=None, legend_y=None),
     }
     for axis_slug, levels, axis_label, axis_name in axes_specs:
-        out = os.path.join(figs_dir, f"latency_ave_p99_vs_{axis_slug}_noetcd{fname_extra}.pdf")
+        out = os.path.join(figs_dir, f"latency_ave_p99_vs_{axis_slug}_noetcd.pdf")
         opts = DUAL_PER_AXIS[axis_slug]
         print(f"  [{axis_slug}/ave+p99 dual_noetcd figsize={opts['figsize']} legend={opts['show_legend']}] -> {out}")
         draw_dual_metric_grid(log_dir, out,
@@ -632,7 +615,7 @@ def run_one(result_dir, mencius_conc=None):
     # Combined fast-path success-rate figure: two-panel (zipf | keyrange),
     # one adaptive line per protocol. Same dual emit (with/without etcd).
     for fname_suffix, protocols in PROTO_PASSES:
-        out_fp = os.path.join(figs_dir, f"fp_success_rate{fname_suffix}{fname_extra}.pdf")
+        out_fp = os.path.join(figs_dir, f"fp_success_rate{fname_suffix}.pdf")
         print(f"  [fp_success_rate{fname_suffix} (zipf | keyrange)] -> {out_fp}")
         summary = draw_combined_fp_rate_two_axes(
             log_dir, out_fp,
@@ -652,17 +635,11 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--result-dir", action="append",
                     help="Absolute or basename path under results/. Repeatable.")
-    ap.add_argument("--mencius-conc-extra", action="append", type=int, default=[],
-                    help="Override Mencius conc and emit a parallel set of "
-                         "figures suffixed `_mencius_c<N>`. Repeatable. "
-                         "(2026-05-09 task 2 deliverable.)")
     args = ap.parse_args()
     folders = args.result_dir or DEFAULT_FOLDERS
     for f in folders:
         path = f if os.path.isabs(f) else os.path.join(RESULTS_ROOT, f)
         run_one(path)
-        for mc in args.mencius_conc_extra:
-            run_one(path, mencius_conc=mc)
 
 
 if __name__ == "__main__":
