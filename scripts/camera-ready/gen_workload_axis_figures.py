@@ -226,12 +226,16 @@ PROTOCOL_STYLE = {
 
 # Workload axes — the values we plot at, plus how to render them on the x-axis.
 ZIPF_LEVELS = [
-    ("rw_zipf_0.5", "0.5"),
-    ("rw_zipf_0.6", "0.6"),
-    ("rw_zipf_0.7", "0.7"),
-    ("rw_zipf_0.8", "0.8"),
-    ("rw_zipf_0.9", "0.9"),
-    ("rw_zipf_1",   "1.0"),
+    # Drop the leading "0" (0.5 → .5) and trailing ".0" (1.0 → 1) to free up
+    # ~30% horizontal space per tick. With 6 ticks crammed in a 3"-wide
+    # panel at 20pt the longer "0.5"-style labels collide; the shorter
+    # ".5"/.../"1" form reads cleanly. Set 2026-05-10 by user.
+    ("rw_zipf_0.5", ".5"),
+    ("rw_zipf_0.6", ".6"),
+    ("rw_zipf_0.7", ".7"),
+    ("rw_zipf_0.8", ".8"),
+    ("rw_zipf_0.9", ".9"),
+    ("rw_zipf_1",   "1"),
 ]
 # Key-range axis: start at 10^2. Smaller key ranges (rw_1 / rw_10) are
 # degenerate hot-key cases that don't add information; OSDI's notebook also
@@ -669,10 +673,10 @@ def run_one(result_dir):
     # them down. 4 panels in 12" gives ~3" per panel — still legible at
     # the 20pt tick / 30pt title spec.
     DUAL_PER_AXIS = {
-        # zipf has 6 dense ticks per panel (0.5..1.0) → smaller xtick label,
-        # legend visible at the top.
+        # zipf x-tick labels are now ".5"/.../"1" (short form, see
+        # ZIPF_LEVELS), so they fit at the standard 20pt size.
         "zipf":     dict(figsize=(12, 7), show_legend=True,
-                         xtick_size=14, top=0.84, legend_y=1.06,
+                         xtick_size=None, top=0.84, legend_y=1.06,
                          legend_visible=True),
         # keyrange uses the SAME figsize / top / legend_y as zipf but draws
         # the legend INVISIBLE so the rendered output has identical
