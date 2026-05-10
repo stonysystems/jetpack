@@ -257,6 +257,18 @@ BANNED_CONC = {
     ("rule_raft",   101):   {200, 275, 300},
     ("rule_copilot", 100):  {64},
     ("rule_mencius", 101):  {27},
+    # MongoDB (OSDI Dec 2025 dataset, restored 2026-05-10): the OSDI
+    # bisection sweep has 14 conc points {1, 10, 20, 30, 35, 40, 50, 60,
+    # 70, 80, 90, 100, 110, 120} of which c≥50 are deep in saturation
+    # (tput oscillates ~2500-2600 ops/s while p90 zigzags 4800-5200 ms).
+    # Plotted as a connected line, these create a visual zigzag mess.
+    # Ban c≥60 to keep the figure clean (c=50 stays as the visible knee
+    # vertical jump). For rule_mongodb@m=0, also ban {37, 38, 40}: the
+    # OSDI bisection's flap cells with anomalously high p90 (6244-8810 ms).
+    ("none_mongodb",  0):   {60, 70, 80, 90, 100, 110, 120},
+    ("rule_mongodb",  0):   {37, 38, 40, 60, 70, 80, 90, 100, 110, 120},
+    ("rule_mongodb", 100):  {60, 70, 80, 90, 100, 110, 120},
+    ("rule_mongodb", 101):  {60, 70, 80, 90, 100, 110, 120},
 }
 
 # Latency-outlier filter disabled (2026-05-07) for the same reason: v2
