@@ -86,8 +86,9 @@ ZooKeeper, swiftpaxos, and epaxos are unchanged. So a single
 correctly drives every protocol in the matrix.
 
 > No source edits on hosts: every code change goes
-> zoo → `git commit` → `git push` (`MintGreenTZ/JetPack`) →
-> server0 `git pull`.
+> zoo → `git commit` → `git push` (fans out to `stonysystems/janus`,
+> `stonysystems/jetpack`, and `MintGreenTZ/JetPack`, all on the
+> `jetpack` branch) → server0 `git pull`.
 
 ### 2.1 MongoDB consistency: **linearizable**
 

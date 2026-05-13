@@ -65,12 +65,16 @@ fi
 
 
 # 4) Clone via SSH (not HTTPS) on SERVER_0
+# Source repo: stonysystems/jetpack, branch jetpack (was MintGreenTZ/JetPack
+# / branch copilot+, retired 2026-05-13). Clone explicitly into the existing
+# JetPack/ directory name so downstream paths (/home/ubuntu/code/JetPack)
+# stay unchanged.
 git_clone_cmd='
 set -euo pipefail
 mkdir -p /home/ubuntu/code
 cd /home/ubuntu/code
 if [ ! -d "JetPack" ]; then
-  git clone git@github.com:MintGreenTZ/JetPack.git
+  git clone -b jetpack git@github.com:stonysystems/jetpack.git JetPack
 else
   echo "Directory /home/ubuntu/code/JetPack already exists."
 fi
