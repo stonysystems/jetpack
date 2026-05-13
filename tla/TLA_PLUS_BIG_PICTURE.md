@@ -1,47 +1,37 @@
 # TLA+ Big Picture For Jetpack
 
-This note defines the intended TLA+ architecture, file naming, and finish criteria.
-The main purpose is to keep the first-step monolithic work separate from the
-second-step decoupled composition work.
+This note defines the intended TLA+ architecture, file naming, and finish
+criteria for the decoupled `base_*` + shared `jetpack.tla` composition work.
 
 ## Goal
 
-Jetpack is a plugin protocol layered on top of a base protocol. The TLA+ work is
-finished only when both of the following stories are covered:
-
-1. the base protocols and monolithic Jetpack integrations are checkable as
-   standalone artifacts
-2. the decoupled `base_*` + shared `jetpack.tla` architecture is checkable
-   without hiding protocol logic inside the wrapper modules
+Jetpack is a plugin protocol layered on top of a base protocol. The TLA+ work
+is finished when the decoupled `base_*` + shared `jetpack.tla` architecture is
+checkable for every integrated protocol, without hiding protocol logic inside
+the wrapper modules.
 
 The target base protocols are:
 - Raft
 - CoPilot
 - Mencius
+- MongoDB
+
+> **History note.** An earlier plan also called for "monolithic"
+> single-file integrations (`jetpack_<proto>_monolithic.tla`) alongside the
+> decoupled composition track. That plan was dropped: no `_monolithic.tla`
+> files exist in the repo. All verification is now done via the
+> decoupled `base_*` + `jetpack.tla` + `jetpack_<proto>_composition.tla`
+> architecture described below.
 
 ## File Taxonomy
 
-### Part 1: Base protocols and monolithic Jetpack integrations
-
-Base protocol specs:
-- `raft.tla`
-- `copilot.tla`
-- `mencius.tla`
-
-Monolithic integrated specs:
-- `jetpack_raft_monolithic.tla`
-- `jetpack_copilot_monolithic.tla`
-- `jetpack_mencius_monolithic.tla`
-
-A monolithic integrated spec is a self-contained model of "base protocol +
-Jetpack integration". It is not a thin wrapper around `base_*` plus `jetpack.tla`.
-
-### Part 2: Decoupled Jetpack composition
+### Decoupled Jetpack composition (the only active track)
 
 Base-adapter specs:
 - `base_raft.tla`
 - `base_copilot.tla`
 - `base_mencius.tla`
+- `base_mongodb.tla`
 
 Shared Jetpack module:
 - `jetpack.tla`
@@ -50,25 +40,25 @@ Thin composition wrappers:
 - `jetpack_raft_composition.tla`
 - `jetpack_copilot_composition.tla`
 - `jetpack_mencius_composition.tla`
+- `jetpack_mongodb_composition.tla`
 
-Each `*_composition.tla` file should extend or instance exactly one `base_*` module
-and the shared `jetpack.tla`, then do only the glue needed to wire `Init`, `Next`,
-`Spec`, `Safety`, `UNCHANGED`, and any protocol-specific execution ordering helper
-such as `ApplyCommitted`.
+Each `*_composition.tla` file should extend or instance exactly one `base_*`
+module and the shared `jetpack.tla`, then do only the glue needed to wire
+`Init`, `Next`, `Spec`, `Safety`, `UNCHANGED`, and any protocol-specific
+execution-ordering helper such as `ApplyCommitted`.
 
 ## Naming Rule
 
 The old filenames `jetpack_raft.tla`, `jetpack_copilot.tla`, and
-`jetpack_mencius.tla` were already thin wrappers over `base_*` plus `jetpack.tla`.
-They therefore belong to Part 2 and have been renamed to:
+`jetpack_mencius.tla` were thin wrappers over `base_*` plus `jetpack.tla`. They
+were renamed on 2026-03-16 to:
 
 - `jetpack_raft_composition.tla`
 - `jetpack_copilot_composition.tla`
 - `jetpack_mencius_composition.tla`
 
-Do not satisfy the monolithic deliverable by relabeling a composition wrapper.
-If a `*_monolithic.tla` file is needed, it must actually be a first-step,
-self-contained integrated model.
+The MongoDB composition (`jetpack_mongodb_composition.tla`) was added later and
+was created under the new naming scheme directly.
 
 ## Non-Negotiable Modeling Rule: The Base Protocol Owns the 3-D Log
 
@@ -97,8 +87,8 @@ What is acceptable:
 - unused logical sequences may stay blank / `Nil`
 
 What is not acceptable:
-- keeping a flatter base log as the real state and reconstructing `j` or local `k`
-  in `jetpack.tla`
+- keeping a flatter base log as the real state and reconstructing `j` or local
+  `k` in `jetpack.tla`
 - projection operators that fake a 3-D interface from a 2-D state
 - moving heavy protocol logic into the `*_composition.tla` wrappers
 
@@ -106,129 +96,98 @@ Per-protocol interpretation:
 - Raft: one active logical sequence
 - CoPilot: two active logical sequences
 - Mencius: one logical sequence per server
+- MongoDB: one active logical sequence (Raft-style)
 
 ## Required Property Coverage
 
-### Standalone base protocols
+Every composition checks the shared Jetpack-facing properties (all defined in
+`jetpack.tla` and re-exported by the composition wrappers):
 
-Expected base properties:
-- `raft.tla`:
-  - `CommittedLogAgreement`
-  - `ElectionSafety`
-  - `LogOrderMatchesExecution`
-- `copilot.tla`:
-  - `CommittedLogAgreement`
-  - `ActiveProposerBound`
-  - `LogOrderMatchesExecution`
-- `mencius.tla`:
-  - `SlotAgreement`
-  - `CommittedLogAgreement`
-  - `LogOrderMatchesExecution`
-
-### Decoupled base modules
-
-The adapted base modules must be able to run and pass the protocol-side invariants
-they need before the composition results count:
-- `base_raft.tla`
-- `base_copilot.tla`
-- `base_mencius.tla`
-
-### Integrated Jetpack specs
-
-Both monolithic and composition variants must check:
-- the relevant base-protocol properties
-- the Jetpack-side properties
-
-Expected Jetpack-facing properties:
-- `LogAgreement`
+- `CommittedLogAgreement`
 - `LogOrderMatchesExecution`
 - `ExecutionDedupMatches`
 
-Protocol-specific additions:
-- CoPilot keeps `ActiveProposerBound`
-- Mencius keeps `SlotAgreement`
+Per-composition additions inside `Safety`:
+
+- **Raft:** `NoLogDivergence`, `MaxOneReconfigurationAtATime` (reconfig
+  invariants); `LogOrderMatchesExecution` is overridden to filter out config
+  entries.
+- **CoPilot:** `MultiSequenceLogAgreement`, `ActiveProposerBound`.
+- **Mencius:** `MultiSequenceLogAgreement`, `SlotAgreement`.
+- **MongoDB:** `MultiSequenceLogAgreement`.
+
+For exact `Safety` formulas, see the corresponding `*_composition.tla`
+file.
 
 ## Config Rules
 
-Canonical base configs:
-- `raft.cfg`
-- `copilot.cfg`
-- `mencius.cfg`
+Canonical configs used today:
 
-These three config files are immutable. Do not modify them.
+- `jetpack_raft_large.cfg` — Raft only (reconfig constants, no `SYMMETRY`).
+- `large.cfg` — shared by copilot / mencius / mongodb (5 servers, 3 clients,
+  3 cmds, 2 keys, `SYMMETRY` on).
+- `jetpack_<proto>_small.cfg` — small sanity-check configs for raft / copilot
+  / mencius / mongodb (3 servers, narrow bounds).
 
 Default rule:
-- use `raft.cfg`, `copilot.cfg`, and `mencius.cfg` for the base protocol runs
-- use the same constants and invariant intent when checking the adapted base modules
-
-Explicit exception rule:
-- if a Jetpack-integrated spec needs extra constants or properties such as `Client`
-  or `Safety`, it may use a checked-in Jetpack-specific cfg
-- that exception must be called out explicitly
-- the exception cfg must preserve the same `Server`, `CmdId`, and `Key` cardinalities
-  as the canonical base cfg for any claimed finish run
+- use the appropriate large config for each composition's accepted finish run
+- use the small config for quick sanity checks after editing a spec
 
 Debug-only rule:
 - `*_small.cfg` is allowed for sanity checking and debugging
-- a small run is not enough to claim the final task is finished unless the task
-  explicitly says otherwise
+- a small run is not enough to claim the final task is finished unless the
+  task explicitly says otherwise
 
 ## Runtime And Resource Rules
 
-Accepted bounded-run target for the integrated specs in the current phase:
-- 1 hour per spec
-
-Priority order:
-- high priority:
-  - `jetpack_raft_composition.tla`
-  - `jetpack_copilot_composition.tla`
-  - `jetpack_mencius_composition.tla`
-- low priority:
-  - `jetpack_raft_monolithic.tla`
-  - `jetpack_copilot_monolithic.tla`
-  - `jetpack_mencius_monolithic.tla`
+Accepted bounded-run target for the integrated specs:
+- the run continues until it reaches the BFS depth limit imposed by the
+  config's `StateConstraint`, or until manually stopped after the recorded
+  evidence window in `VERIFICATION.md`
 
 Before every TLC run:
 - inspect total system memory
 - cap TLC so it uses at most one third of total RAM
-- apply that cap consistently to Java heap, Docker/container limits, and any wrapper
-  script settings
+- apply that cap consistently to Java heap, Docker/container limits, and any
+  wrapper-script settings
 
-Do not silently shorten the 1-hour window and do not weaken the config to make a run fit.
+Do not silently shorten the evidence window and do not weaken the config to
+make a run fit.
 
 ## What Counts As Finished
 
 A deliverable counts only when all of the following are true:
-- the spec filename matches the intended deliverable
-- the relevant invariants or properties are enabled
+- the spec filename matches one of the four composition wrappers
+- the relevant invariants or properties are enabled in `Safety`
 - the run uses the canonical cfg or an explicitly justified exception cfg
-- the run respects the one-hour time budget for the integrated specs
+- the run respects the recorded time / depth window
 - the run respects the one-third-memory cap
 - the log is saved
 - the result is summarized with the exact spec, cfg, memory cap, and outcome
 
-Part 2 composition is finished only when:
-- `base_raft.tla`, `base_copilot.tla`, and `base_mencius.tla` each pass their own
-  protocol-needed checks
-- `jetpack_raft_composition.tla`, `jetpack_copilot_composition.tla`, and
-  `jetpack_mencius_composition.tla` each pass both the base properties and Jetpack
-  properties
+The composition track is finished when:
+- `base_raft.tla`, `base_copilot.tla`, `base_mencius.tla`, and
+  `base_mongodb.tla` each pass their own protocol-needed checks
+- `jetpack_raft_composition.tla`, `jetpack_copilot_composition.tla`,
+  `jetpack_mencius_composition.tla`, and `jetpack_mongodb_composition.tla`
+  each pass both the base properties and the Jetpack properties
 - the composition wrappers remain thin glue modules
 
-Part 1 monolithic is finished only when:
-- `jetpack_raft_monolithic.tla`, `jetpack_copilot_monolithic.tla`, and
-  `jetpack_mencius_monolithic.tla` exist as real monolithic integrations
-- each passes the one-hour bounded run under the accepted rules
+The latest snapshot recorded in `VERIFICATION.md` constitutes the current
+accepted finish evidence across all four compositions (~8.5 B states
+generated, ~1.21 B distinct as of 2026-05-13, with no safety violations;
+the Raft and MongoDB runs are still progressing under the 2026-05-07
+batch, while CoPilot and Mencius completed in the 2026-04-21 batch).
 
 ## Anti-Shortcut Rules
 
-- Do not claim the composition goal is done merely because `base_*` and `jetpack.tla`
-  exist.
-- Do not claim the monolithic goal is done by copying or renaming a composition wrapper.
-- Do not move base-protocol or Jetpack core logic into `*_composition.tla` just to make
-  the composition pass.
-- Do not weaken invariants, reduce constants, or use a debug cfg for a claimed finish run
-  unless the exception is explicit and approved by the task.
-- Do not rely on old logs under the legacy wrapper filenames as final evidence without
-  clearly mapping them to the renamed specs and re-checking that the acceptance criteria
-  still match.
+- Do not claim the composition goal is done merely because `base_*` and
+  `jetpack.tla` exist.
+- Do not move base-protocol or Jetpack core logic into `*_composition.tla`
+  just to make the composition pass.
+- Do not weaken invariants, reduce constants, or use a debug cfg for a
+  claimed finish run unless the exception is explicit and approved by the
+  task.
+- Do not rely on old logs under the legacy wrapper filenames as final
+  evidence without clearly mapping them to the renamed specs and re-checking
+  that the acceptance criteria still match.

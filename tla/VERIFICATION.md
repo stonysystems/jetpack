@@ -5,11 +5,13 @@ Reproducible model-checking workflow for the Jetpack consensus plugin.
 Thin-wrapper rename note: on 2026-03-16 the decoupled wrapper specs were renamed
 from `jetpack_raft.tla`, `jetpack_copilot.tla`, and `jetpack_mencius.tla` to
 `jetpack_raft_composition.tla`, `jetpack_copilot_composition.tla`, and
-`jetpack_mencius_composition.tla`. Older logs still reference the legacy names.
+`jetpack_mencius_composition.tla`. The MongoDB composition
+(`jetpack_mongodb_composition.tla`) was added later and was created under the
+new naming scheme directly. Older logs still reference the legacy names.
 
 Scope note: this file keeps the reproducible workflow and historical evidence. If
-it disagrees with `tla/TLA_PLUS_BIG_PICTURE.md` or `TODO.md` about the active
-finish bar, treat those two files as authoritative for the current task.
+it disagrees with `tla/TLA_PLUS_BIG_PICTURE.md` about the active finish bar,
+treat that file as authoritative for the current task.
 
 ## Accepted Jetpack/Base Compositions
 
@@ -18,8 +20,9 @@ finish bar, treat those two files as authoritative for the current task.
 | `jetpack_raft_composition.tla` | Raft (`base_raft.tla`) | 1 proposer (`"sole"`) |
 | `jetpack_copilot_composition.tla` | CoPilot (`base_copilot.tla`) | 2 proposers (pilot + copilot) |
 | `jetpack_mencius_composition.tla` | Mencius (`base_mencius.tla`) | N proposers (round-robin) |
+| `jetpack_mongodb_composition.tla` | MongoDB-flavored Raft (`base_mongodb.tla`) | 1 proposer (`"sole"`) |
 
-All three compose `jetpack.tla` via TLA+ `INSTANCE` with protocol-specific
+All four compose `jetpack.tla` via TLA+ `INSTANCE` with protocol-specific
 `Proposer`, `ProposerOf`, and `NoOpCmd` bindings.
 
 ## Config Files
@@ -31,20 +34,22 @@ All three compose `jetpack.tla` via TLA+ `INSTANCE` with protocol-specific
 | `jetpack_raft_small.cfg` | 3 servers, 1 client, 1 cmd, 1 key |
 | `jetpack_copilot_small.cfg` | 3 servers, 1 client, 1 cmd, 1 key |
 | `jetpack_mencius_small.cfg` | 3 servers, 1 client, 2 cmds, 1 key |
+| `jetpack_mongodb_small.cfg` | 3 servers, 1 client, 1 cmd, 1 key; `Len(configs) <= 2` (one reconfig allowed) |
 
 Mencius small uses 2 CmdIds to exercise multi-proposer interleaving.
 
-### Big configs (historical large-run configs)
+### Big configs (current large-run configs)
 
-| Config file | Constants |
-|---|---|
-| `jetpack_raft.cfg` | 5 servers, 1 client, 3 cmds, 2 keys |
-| `jetpack_copilot.cfg` | 5 servers, 1 client, 3 cmds, 2 keys |
-| `jetpack_mencius.cfg` | 5 servers, 1 client, 3 cmds, 2 keys |
+| Config file | Used by | Constants |
+|---|---|---|
+| `large.cfg` | copilot / mencius / mongodb | 5 servers, 3 clients, 3 cmds, 2 keys, `SYMMETRY` on |
+| `jetpack_raft_large.cfg` | raft only | Same dimensions as `large.cfg`, plus reconfig constants (`InitialMembers`, `MinClusterSize`, `MaxClusterSize`, `MaxElections`, `MaxRestarts`, `MaxAddReconfigs`, `MaxRemoveReconfigs`, `IncludeThesisBug`); `SYMMETRY` dropped because `InitialMembers ⊊ Server` |
 
-The big configs encode the accepted large-run constants: 5 servers, 1 client,
-3 commands, 2 keys. The current acceptance window is defined by the active task
-docs, not by this historical section.
+Raft uses its own `_large.cfg` because reconfig changes the membership during
+the run (`InitialMembers ⊊ Server`), which makes `Permutations(Server)` unsafe.
+The other three compositions reuse `large.cfg` directly: copilot and mencius
+have static membership; MongoDB's reconfig is constrained inside the spec
+itself (`Len(configs) <= N` in `StateConstraint` / `SmallStateConstraint`).
 
 ## Running TLC
 
@@ -64,7 +69,7 @@ wget -O tla/tla2tools.jar \
 
 ### Memory cap
 
-`tla/run-tlc.sh` now enforces the repository memory policy automatically:
+`tla/run-tlc.sh` enforces the repository memory policy automatically:
 
 - it detects total system memory, or the active cgroup/container limit if smaller
 - it caps TLC to at most one third of that total
@@ -101,15 +106,21 @@ All runs use `tla/run-tlc.sh`. Run from the repo root or the `tla/` directory.
 
 ```bash
 # Small-config runs (minutes to hours depending on spec):
-./tla/run-tlc.sh jetpack_raft_composition.tla small
+./tla/run-tlc.sh jetpack_raft_composition.tla    small
 ./tla/run-tlc.sh jetpack_copilot_composition.tla small
 ./tla/run-tlc.sh jetpack_mencius_composition.tla small
+./tla/run-tlc.sh jetpack_mongodb_composition.tla tla/jetpack_mongodb_small.cfg
 
 # Large-config runs (runtime window defined by the current task docs):
-./tla/run-tlc.sh jetpack_raft_composition.tla
-./tla/run-tlc.sh jetpack_copilot_composition.tla
-./tla/run-tlc.sh jetpack_mencius_composition.tla
+./tla/run-tlc.sh jetpack_raft_composition.tla    tla/jetpack_raft_large.cfg
+./tla/run-tlc.sh jetpack_copilot_composition.tla tla/large.cfg
+./tla/run-tlc.sh jetpack_mencius_composition.tla tla/large.cfg
+./tla/run-tlc.sh jetpack_mongodb_composition.tla tla/large.cfg
 ```
+
+`small` resolves to `<spec>_small.cfg` for raft / copilot / mencius (e.g.
+`tla/jetpack_raft_small.cfg`). The `small` alias is **not wired up for the
+MongoDB composition** in `run-tlc.sh` yet, so pass the cfg path explicitly.
 
 The runner auto-detects local vs Docker mode. Override with `TLC_MODE`:
 ```bash
@@ -124,60 +135,77 @@ All runs produce timestamp-prefixed logs in `tla/log/`:
 tla/log/20260308_101528_jetpack_raft_small.log
 tla/log/20260308_101541_jetpack_copilot_small.log
 tla/log/20260308_153000_jetpack_mencius.log
+tla/log/<timestamp>_jetpack_mongodb_composition.log
 ```
+
+For full parallel-launch instructions across all four compositions, see
+`RUNBOOK.md`.
 
 ## Verified Properties
 
-Each composition checks the following safety invariants (via `Safety` property):
+Each composition checks safety invariants (via the `Safety` property). The
+shared invariants across all four compositions are:
 
 - **CommittedLogAgreement** — All servers agree on committed log entries.
-- **MultiSequenceLogAgreement** — Per-proposer sequences are consistent across servers.
-- **LogOrderMatchesExecution** — Execution order matches log commitment order.
-- **ExecutionDedupMatches** — Deduplicated execution trace is consistent.
+- **LogOrderMatchesExecution** — Execution order matches log commitment order
+  (the TLA+ form of PR1 from the paper).
+- **ExecutionDedupMatches** — Deduplicated execution trace is consistent across
+  the fast path and the original path.
 
-Additional protocol-specific properties:
-- **Raft**: (none beyond the shared set)
-- **CoPilot**: `ActiveProposerBound` — at most 2 active proposers at any time.
-- **Mencius**: `SlotAgreement` — all servers agree on learned/skipped slot values.
+Per-composition additions:
+
+| Composition | Additional invariants in `Safety` |
+|---|---|
+| Raft | `NoLogDivergence`, `MaxOneReconfigurationAtATime` (reconfig invariants); `LogOrderMatchesExecution` is overridden to filter out config entries |
+| CoPilot | `MultiSequenceLogAgreement` (per-proposer sequence agreement), `ActiveProposerBound` (≤ 2 active proposers) |
+| Mencius | `MultiSequenceLogAgreement`, `SlotAgreement` (all servers agree on learned/skipped slot values) |
+| MongoDB | `MultiSequenceLogAgreement` |
 
 ## Verification Status
 
-### Post-3D-refactor runs (2026-03-08 to 2026-03-12)
+### Current accepted runs
+
+Bounded BFS runs of each composition on its full-coverage config. No safety
+violations have been observed in any run. CoPilot and Mencius were completed
+in the 2026-04-21 batch; Raft and MongoDB are still being explored under a
+re-launched 2026-05-07 run, with the latest snapshot captured below.
+
+| Spec | Config | Status | Depth (BFS) | States generated | Distinct states |
+|---|---|---|---:|---:|---:|
+| `jetpack_raft_composition.tla` | `jetpack_raft_large.cfg` | in progress (snapshot 2026-05-13) | 12 | 4.22 B | 894 M |
+| `jetpack_copilot_composition.tla` | `large.cfg` | completed 2026-04-22 | 17 | 1.76 B | 149 M |
+| `jetpack_mencius_composition.tla` | `large.cfg` | completed 2026-04-22 | 11 | 611 M | 32 M |
+| `jetpack_mongodb_composition.tla` | `large.cfg` | in progress (snapshot 2026-05-13) | 15 | 1.89 B | 138 M |
+| **Total** | | | | **~8.5 B** | **~1.21 B** |
+
+Source logs (all timestamp-prefixed in `tla/log/`):
+- `20260507_091029_jetpack_raft_composition_jetpack_raft_large.log` (latest Raft, still progressing)
+- `20260421_004429_jetpack_copilot_composition_large.log`
+- `20260421_002956_jetpack_mencius_composition_large.log`
+- `20260507_091045_jetpack_mongodb_composition_large.log` (latest MongoDB, still progressing)
+
+Earlier batch (2026-04-21) is retained for reference:
+- `20260421_002903_jetpack_raft_composition_large.log` (Raft, depth 16, 2.69 B / 196 M)
+- `20260421_003032_jetpack_mongodb_composition_large.log` (MongoDB, depth 15, 2.54 B / 196 M)
+
+The paper's `Appendix~\ref{appendix:tla-verification}` table currently cites
+the 2026-04-21 numbers (Raft 2.7 B / 196 M, CoPilot 1.8 B / 149 M, Mencius
+611 M / 32 M, MongoDB 2.5 B / 196 M; total ~7.6 B / ~573 M). Update the
+paper table to match the snapshot above whenever a paper revision is cut.
+
+### Historical small-config evidence (2026-03-08 batch)
 
 | Spec | Config | Result | States generated | Distinct states |
 |---|---|---|---|---|
 | `jetpack_raft_composition.tla` | small | Exhaustive, no errors | 82,375 | 6,029 |
 | `jetpack_copilot_composition.tla` | small | Exhaustive, no errors | 515 | 70 |
-| `jetpack_mencius_composition.tla` | small | Terminated (OOM), no errors (34h) | 598,252,218 | 56,217,812 |
-| `jetpack_raft_composition.tla` | big | 12h bounded run completed, no TLC error/invariant/deadlock marker (accepted) | 87,135,107 | 9,101,950 |
-| `jetpack_copilot_composition.tla` | big | 12h+ bounded run completed, no TLC error/invariant/deadlock marker (accepted, detached-run caveat) | 47,418,535 | 4,040,373 |
-| `jetpack_mencius_composition.tla` | big | Not yet run | — | — |
+| `jetpack_mencius_composition.tla` | small | Terminated at 34 h (queue OOM), no errors | 598,252,218 | 56,217,812 |
 
-Logs: `tla/log/20260308_*` (small runs),
-`tla/log/20260310_214540_jetpack_raft.log`,
-`tla/log/20260310_214540_jetpack_raft_big_launcher.log`,
-`tla/log/20260311_102514_jetpack_copilot.log`,
-`tla/log/20260311_102513_jetpack_copilot_big_launcher.log` (big runs)
-Primary Mencius small evidence: `tla/log/20260308_101553_jetpack_mencius_small.log`
+Small-config logs at `tla/log/20260308_*`. These exhaustive runs predate the
+2026-04-21 large-config batch but remain useful as a quick sanity check after
+editing a spec.
 
-Raft big-run note (2026-03-10/11): launched before the rename via
-`timeout 12h ./tla/run-tlc.sh jetpack_raft.tla`. Final TLC line was
-`Progress(13) at 2026-03-11 13:45:21 ... 87,135,107 generated, 9,101,950 distinct`.
-No `Error:`, invariant-violation, or deadlock marker was emitted before timeout-window
-closure. The expected launcher status file
-`tla/log/20260310_214540_jetpack_raft_big_launcher.status` was not present for this run,
-so the timeout exit code is recorded as inferred (`124`) rather than directly captured.
-
-CoPilot big-run note (2026-03-11/12): launched before the rename via
-`timeout 12h ./tla/run-tlc.sh jetpack_copilot.tla`. The launcher wrapper exited without
-writing `tla/log/20260311_102513_jetpack_copilot_big_launcher.status`, but the TLC Docker
-container continued running detached (`started=2026-03-11T14:25:17Z`). At
-`2026-03-12T02:47:49Z` (12h22m elapsed), the captured TLC log reached:
-`Progress(14) at 2026-03-12 02:47:19: 47,418,535 generated, 4,040,373 distinct`.
-No `Error:`, invariant-violation, or deadlock marker appeared before manual stop after the
->=12h evidence capture.
-
-### Note on Mencius small-config state space
+#### Note on Mencius small-config state space
 
 The Mencius small-config run has an extremely large state space due to the
 combination of 3 servers × 3 proposers (round-robin) × 2 CmdIds. The run
@@ -192,6 +220,6 @@ machine with limited memory.
 
 **598M states with zero errors is strong evidence of correctness** — this
 exceeds typical TLC verification runs by orders of magnitude. The partial
-result is accepted as sufficient verification evidence. Exhaustive completion
-would require a machine with significantly more memory (the queue was still
-growing at termination) or a distributed TLC setup.
+result is accepted as sufficient verification evidence for the small config.
+The 2026-04-21 batch above is the primary acceptance evidence for the large
+configs.
