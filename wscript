@@ -240,27 +240,21 @@ def build(bld):
               uselib="BOOST",
               use="rrr simplerpc PYTHON")
 
-    # FIX 3 source list: when raw-gRPC is enabled, also compile the
-    # generated etcdserverpb stubs (KV-only subset, matching
-    # scripts/build_backend_benches.sh).
-    grpc_stub_sources = []
-    if bld.env.JANUS_ETCD_USE_RAW_GRPC:
-        gen_dir = "third_party/etcd-cpp-apiv3/build/proto/gen/proto"
-        grpc_stub_sources = [
-            gen_dir + "/rpc.pb.cc",
-            gen_dir + "/rpc.grpc.pb.cc",
-            gen_dir + "/kv.pb.cc",
-            gen_dir + "/auth.pb.cc",
-            gen_dir + "/gogoproto/gogo.pb.cc",
-            gen_dir + "/google/api/annotations.pb.cc",
-            gen_dir + "/google/api/http.pb.cc",
-        ]
+    # FIX 3 note: the etcdserverpb generated stubs (rpc.pb.cc /
+    # rpc.grpc.pb.cc / kv.pb.cc / auth.pb.cc / gogoproto / google.api)
+    # are intentionally NOT recompiled into Janus. They're already
+    # compiled into libetcd-cpp-api.so (which we link via
+    # `-letcd-cpp-api`), and linking another copy double-registers the
+    # protobuf type descriptors at runtime, causing
+    # "Multiple extension registrations for type
+    # 'google.protobuf.EnumOptions'" fatal at process start.
+    # The header include path is enough — the symbols come from the
+    # .so at link time.
 
     bld.objects(source=bld.path.ant_glob("src/deptran/*.cc "
                                        "src/deptran/*/*.cc "
                                        "src/bench/*/*.cc",
-                                       excl=['src/deptran/s_main.cc', 'src/deptran/paxos_main_helper.cc','src/deptran/lab_solution_raft/*.cc'])
-                     + grpc_stub_sources,
+                                       excl=['src/deptran/s_main.cc', 'src/deptran/paxos_main_helper.cc','src/deptran/lab_solution_raft/*.cc']),
               target="deptran_objects",
               includes="src src/rrr src/deptran ",
               uselib="YAML-CPP BOOST",
