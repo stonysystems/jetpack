@@ -14,6 +14,9 @@
 #include "constants.h"
 #include "config.h"
 #include "etcd_kv_table_handler.h"
+#ifdef JANUS_ETCD_USE_RAW_GRPC
+#include "etcd_grpc_handler.h"
+#endif
 #include "RW_command.h"
 
 namespace janus {
@@ -204,6 +207,20 @@ class EtcdConnectionThreadPool {
   std::atomic<uint32_t> async_handler_rr_{0};
   static constexpr int kAsyncHandlerPoolSize = 256;
 
+#ifdef JANUS_ETCD_USE_RAW_GRPC
+  // FIX 3 (2026-05-17): parallel pool of raw-gRPC handlers. Used when
+  // -DJANUS_ETCD_USE_RAW_GRPC is set instead of the cpprestsdk/pplx
+  // async_handlers_ above. Same size, same round-robin index.
+  std::vector<std::shared_ptr<EtcdGrpcHandler>> grpc_handlers_;
+  std::atomic<uint32_t> grpc_handler_rr_{0};
+
+  std::shared_ptr<EtcdGrpcHandler> pick_grpc_handler() {
+    if (grpc_handlers_.empty()) return nullptr;
+    uint32_t idx = grpc_handler_rr_.fetch_add(1, std::memory_order_relaxed);
+    return grpc_handlers_[idx % grpc_handlers_.size()];
+  }
+#endif
+
   // Round-robin pick into async_handlers_; falls back to handler_ if the
   // pool failed to populate (e.g. in tests).
   std::shared_ptr<EtcdKVTableHandler> pick_async_handler() {
@@ -300,6 +317,19 @@ class EtcdConnectionThreadPool {
       Log_info("[ETCD][POOL] async-path handler pool size=%d (multi-channel "
                "fix for cpprestsdk single-channel queueing)",
                kAsyncHandlerPoolSize);
+#ifdef JANUS_ETCD_USE_RAW_GRPC
+      // FIX 3 (2026-05-17): parallel raw-gRPC handler pool. Each
+      // EtcdGrpcHandler owns its own grpc::Channel (TCP conn to etcd),
+      // matching the kAsyncHandlerPoolSize pool dimensioning. Used when
+      // the build flag JANUS_ETCD_USE_RAW_GRPC is defined.
+      grpc_handlers_.reserve(kAsyncHandlerPoolSize);
+      for (int i = 0; i < kAsyncHandlerPoolSize; ++i) {
+        grpc_handlers_.push_back(std::make_shared<EtcdGrpcHandler>(uri));
+      }
+      Log_info("[ETCD][POOL] FIX 3: raw-gRPC handler pool size=%d "
+               "(bypass cpprestsdk+pplx)",
+               kAsyncHandlerPoolSize);
+#endif
     }
     auto* cfg = Config::GetConfig();
     if (cfg != nullptr) {
@@ -371,7 +401,30 @@ class EtcdConnectionThreadPool {
     }
 
     if (parsed_cmd.IsRead()) {
-#if JANUS_ETCD_HAS_PPLX
+#if defined(JANUS_ETCD_USE_RAW_GRPC)
+      // FIX 3 (2026-05-17): raw-gRPC path. Detached thread per request +
+      // sync EtcdGrpcHandler::Read(). Bypasses cpprestsdk+pplx entirely.
+      try {
+        auto grpc_h = pick_grpc_handler();
+        const int key = parsed_cmd.key_;
+        std::thread([this, cmd_content, cmd, start_time, grpc_h, key]() {
+          (void)cmd;
+          if (grpc_h) (void)grpc_h->Read(key);
+#ifdef ETCD_INNER_DEBUG
+          auto t_post = std::chrono::steady_clock::now();
+          if (metrics_) {
+            auto handler_ms = std::chrono::duration_cast<std::chrono::microseconds>(
+                t_post - start_time).count() / 1000.0;
+            metrics_->RecordInner(0.0, handler_ms, handler_ms);
+          }
+#endif
+          SignalFinished(cmd_content, start_time);
+        }).detach();
+      } catch (const std::exception& e) {
+        Log_warn("[ETCD-GRPC] read enqueue failed: %s", e.what());
+        SignalFinished(cmd_content, start_time);
+      }
+#elif JANUS_ETCD_HAS_PPLX
       try {
         // FIX 2.5 (2026-05-14): replaced `.then()` continuation with a
         // detached thread that drives `WriteAsync(...).get()` to its
@@ -428,7 +481,30 @@ class EtcdConnectionThreadPool {
       }).detach();
 #endif
     } else if (parsed_cmd.IsWrite()) {
-#if JANUS_ETCD_HAS_PPLX
+#if defined(JANUS_ETCD_USE_RAW_GRPC)
+      // FIX 3 (2026-05-17): raw-gRPC path. See read branch comment.
+      try {
+        auto grpc_h = pick_grpc_handler();
+        const int key = parsed_cmd.key_;
+        const int value = parsed_cmd.value_;
+        std::thread([this, cmd_content, cmd, start_time, grpc_h, key, value]() {
+          (void)cmd;
+          if (grpc_h) (void)grpc_h->Write(key, value);
+#ifdef ETCD_INNER_DEBUG
+          auto t_post = std::chrono::steady_clock::now();
+          if (metrics_) {
+            auto handler_ms = std::chrono::duration_cast<std::chrono::microseconds>(
+                t_post - start_time).count() / 1000.0;
+            metrics_->RecordInner(0.0, handler_ms, handler_ms);
+          }
+#endif
+          SignalFinished(cmd_content, start_time);
+        }).detach();
+      } catch (const std::exception& e) {
+        Log_warn("[ETCD-GRPC] write enqueue failed: %s", e.what());
+        SignalFinished(cmd_content, start_time);
+      }
+#elif JANUS_ETCD_HAS_PPLX
       try {
         // FIX 2.5 (2026-05-14): see read branch comment. Replaced
         // `.then()` continuation with detached thread + `.get()`.

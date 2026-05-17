@@ -75,6 +75,9 @@ def options(opt):
     opt.add_option('','--enable-mongodb-no-journal', dest='enable_mongodb_no_journal',
                    default=False, action='store_true',
                    help='Define MONGODB_NO_JOURNAL=1 so the mongocxx client URI carries journal=false instead of journal=true. Mongodb 7+ requires journal at the server, so this is the only fsync-off-equivalent knob: writes ack before the server has flushed the journal.')
+    opt.add_option('','--enable-etcd-raw-grpc', dest='enable_etcd_raw_grpc',
+                   default=False, action='store_true',
+                   help='Define JANUS_ETCD_USE_RAW_GRPC=1 to bypass etcd-cpp-apiv3 / cpprestsdk / pplx for the etcd KV hot path and talk directly to etcdserverpb via grpc++. The leader watcher still uses etcd-cpp-apiv3. Requires the etcdserverpb generated stubs at third_party/etcd-cpp-apiv3/build/proto/gen/proto/ (built when etcd-cpp-apiv3 itself is built).')
     opt.parse_args();
 
 def configure(conf):
@@ -148,6 +151,20 @@ def configure(conf):
         conf.env.append_value("CXXFLAGS", "-DJETPACK_PROF=1")
     if Options.options.enable_mongodb_no_journal:
         conf.env.append_value("CXXFLAGS", "-DMONGODB_NO_JOURNAL=1")
+    if Options.options.enable_etcd_raw_grpc:
+        # FIX 3 (2026-05-17): use raw gRPC for the etcd KV hot path.
+        # Set the define, add the generated-stub include path, and
+        # link grpc++/grpc/protobuf. The actual .pb.cc source files
+        # are added to deptran_objects in the build() function below.
+        conf.env.append_value("CXXFLAGS", "-DJANUS_ETCD_USE_RAW_GRPC=1")
+        gen_proto_dir = os.path.abspath(
+            'third_party/etcd-cpp-apiv3/build/proto/gen/proto')
+        conf.env.append_value('INCLUDES', [gen_proto_dir])
+        conf.env.append_value("LDFLAGS", ["-lgrpc++", "-lgrpc"])
+        # protobuf is already linked via etcd-cpp-apiv3's deps; explicit
+        # add in case ordering matters.
+        conf.env.append_value("LDFLAGS", "-lprotobuf")
+        conf.env.append_value("JANUS_ETCD_USE_RAW_GRPC", "1")
 
     # if Options.options.curp_fast_path:
     #     conf.env.append_value("CXXFLAGS", "-DCURP_FAST_PATH")
@@ -223,10 +240,27 @@ def build(bld):
               uselib="BOOST",
               use="rrr simplerpc PYTHON")
 
+    # FIX 3 source list: when raw-gRPC is enabled, also compile the
+    # generated etcdserverpb stubs (KV-only subset, matching
+    # scripts/build_backend_benches.sh).
+    grpc_stub_sources = []
+    if bld.env.JANUS_ETCD_USE_RAW_GRPC:
+        gen_dir = "third_party/etcd-cpp-apiv3/build/proto/gen/proto"
+        grpc_stub_sources = [
+            gen_dir + "/rpc.pb.cc",
+            gen_dir + "/rpc.grpc.pb.cc",
+            gen_dir + "/kv.pb.cc",
+            gen_dir + "/auth.pb.cc",
+            gen_dir + "/gogoproto/gogo.pb.cc",
+            gen_dir + "/google/api/annotations.pb.cc",
+            gen_dir + "/google/api/http.pb.cc",
+        ]
+
     bld.objects(source=bld.path.ant_glob("src/deptran/*.cc "
                                        "src/deptran/*/*.cc "
                                        "src/bench/*/*.cc",
-                                       excl=['src/deptran/s_main.cc', 'src/deptran/paxos_main_helper.cc','src/deptran/lab_solution_raft/*.cc']),
+                                       excl=['src/deptran/s_main.cc', 'src/deptran/paxos_main_helper.cc','src/deptran/lab_solution_raft/*.cc'])
+                     + grpc_stub_sources,
               target="deptran_objects",
               includes="src src/rrr src/deptran ",
               uselib="YAML-CPP BOOST",
