@@ -171,11 +171,14 @@ void ServerWorker::SetupService() {
   // set running mode and initialize transaction manager.
   std::string bind_addr = site_info_->GetBindAddress();
 
-  // init rrr::PollMgr 1 threads
-  int n_io_threads = 1;
+  // FIX 2.7 (2026-05-14): bump rrr PollMgr io threads from 1 → 8 and enable
+  // a 64-thread server-side rrr::ThreadPool (was nullptr / disabled). Tests
+  // whether the etcd-dispatch coroutines are bottlenecked by rrr's
+  // single-IO-thread / no-worker-pool default.
+  int n_io_threads = 8;
   svr_poll_mgr_ = new rrr::PollMgr(n_io_threads, config->replica_proto_ == MODE_RAFT || config->replica_proto_ == MODE_FPGA_RAFT);  // Fpga Raft needs a disk thread
   Reactor::GetReactor()->server_id_ = site_info_->id;
-//  svr_thread_pool_ = new rrr::ThreadPool(1);
+  svr_thread_pool_ = new rrr::ThreadPool(64);
 
   // init service implementation
 #ifdef RAFT_TEST_CORO
