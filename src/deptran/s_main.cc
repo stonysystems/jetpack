@@ -865,28 +865,10 @@ vector<double> getUsage(int core_id, int duration){
 
 }
 
-#ifdef JANUS_ETCD_HAS_PPLX
-#include <pplx/threadpool.h>
-#endif
-
 int main(int argc, char *argv[]) {
   check_current_path();
   Log_info("starting process %ld", getpid());
   setup_ulimit();
-
-  // FIX 2.6 (2026-05-14): pre-size cpprestsdk's ambient threadpool to 256.
-  // Default is ~hardware concurrency (typically 8 here). With 256 active
-  // gRPC channels (kAsyncHandlerPoolSize) each potentially dispatching a
-  // pplx continuation, default-size pool serializes continuations. 256
-  // threads matches the channel-pool size 1:1.
-#ifdef JANUS_ETCD_HAS_PPLX
-  try {
-    crossplat::threadpool::initialize_with_threads(256);
-    Log_info("[FIX26] cpprestsdk threadpool initialized with 256 threads");
-  } catch (const std::exception& e) {
-    Log_warn("[FIX26] threadpool init failed: %s", e.what());
-  }
-#endif
 
   // read configuration
   int ret = Config::CreateConfig(argc, argv);
