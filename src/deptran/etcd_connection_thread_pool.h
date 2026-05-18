@@ -4,7 +4,9 @@
 #include <chrono>
 #include <condition_variable>
 #include <inttypes.h>
+#include <memory>
 #include <mutex>
+#include <queue>
 #include <string>
 #include <thread>
 #include <tuple>
@@ -219,6 +221,82 @@ class EtcdConnectionThreadPool {
     uint32_t idx = grpc_handler_rr_.fetch_add(1, std::memory_order_relaxed);
     return grpc_handlers_[idx % grpc_handlers_.size()];
   }
+
+  // FIX 4 (2026-05-18): MongoDB-pattern worker pool.
+  //
+  // The original Fix 3 raw-gRPC path spawned a fresh std::thread per
+  // request, which caps at ~5K pthread_create+exit/s on Linux and
+  // halves throughput at c>=100. The mongodb integration in this
+  // repo (see mongodb_connection_thread_pool.h) already solves this
+  // with N long-lived worker threads, each owning a queue and a
+  // dedicated connection. We port that pattern here, sized 1:1 to
+  // the existing 256-handler pool, and replace the std::thread().detach()
+  // sites with a single queue.push().
+  struct GrpcWorkItem {
+    bool is_write;
+    int key;
+    int value;
+    std::shared_ptr<TxPieceData> cmd_content;
+    std::chrono::steady_clock::time_point start_time;
+  };
+
+  class GrpcWorkQueue {
+   private:
+    std::queue<GrpcWorkItem> q_;
+    std::mutex mu_;
+    std::condition_variable cv_;
+    bool closed_{false};
+   public:
+    void push(GrpcWorkItem item) {
+      std::lock_guard<std::mutex> lk(mu_);
+      q_.push(std::move(item));
+      cv_.notify_one();
+    }
+    // Returns false iff queue is closed and drained.
+    bool pop(GrpcWorkItem& out) {
+      std::unique_lock<std::mutex> lk(mu_);
+      cv_.wait(lk, [this]{ return !q_.empty() || closed_; });
+      if (q_.empty() && closed_) return false;
+      out = std::move(q_.front());
+      q_.pop();
+      return true;
+    }
+    void close() {
+      std::lock_guard<std::mutex> lk(mu_);
+      closed_ = true;
+      cv_.notify_all();
+    }
+  };
+
+  std::vector<std::unique_ptr<GrpcWorkQueue>> grpc_worker_queues_;
+  std::vector<std::thread> grpc_worker_threads_;
+  std::atomic<uint32_t> grpc_worker_rr_{0};
+
+  void GrpcWorkerLoop(int worker_id) {
+    auto& h = grpc_handlers_[worker_id];
+    auto& q = *grpc_worker_queues_[worker_id];
+    GrpcWorkItem item;
+    while (q.pop(item)) {
+      try {
+        if (item.is_write) {
+          (void)h->Write(item.key, item.value);
+        } else {
+          (void)h->Read(item.key);
+        }
+      } catch (const std::exception& e) {
+        Log_warn("[ETCD-GRPC-WORKER] op failed: %s", e.what());
+      }
+#ifdef ETCD_INNER_DEBUG
+      auto t_post = std::chrono::steady_clock::now();
+      if (metrics_) {
+        auto handler_ms = std::chrono::duration_cast<std::chrono::microseconds>(
+            t_post - item.start_time).count() / 1000.0;
+        metrics_->RecordInner(0.0, handler_ms, handler_ms);
+      }
+#endif
+      SignalFinished(item.cmd_content, item.start_time);
+    }
+  }
 #endif
 
   // Round-robin pick into async_handlers_; falls back to handler_ if the
@@ -329,6 +407,25 @@ class EtcdConnectionThreadPool {
       Log_info("[ETCD][POOL] FIX 3: raw-gRPC handler pool size=%d "
                "(bypass cpprestsdk+pplx)",
                kAsyncHandlerPoolSize);
+
+      // FIX 4 (2026-05-18): spawn N long-lived worker threads, one per
+      // grpc handler. Workers block on their queue, run sync Read/Write,
+      // and signal completion. EtcdRequest just pushes — no per-request
+      // pthread_create. Mirrors mongodb_connection_thread_pool.h.
+      grpc_worker_queues_.reserve(kAsyncHandlerPoolSize);
+      for (int i = 0; i < kAsyncHandlerPoolSize; ++i) {
+        grpc_worker_queues_.push_back(
+            std::unique_ptr<GrpcWorkQueue>(new GrpcWorkQueue()));
+      }
+      grpc_worker_threads_.reserve(kAsyncHandlerPoolSize);
+      for (int i = 0; i < kAsyncHandlerPoolSize; ++i) {
+        grpc_worker_threads_.emplace_back(
+            [this, i]() { GrpcWorkerLoop(i); });
+      }
+      Log_info("[ETCD][POOL] FIX 4: raw-gRPC worker threads=%d "
+               "(replaces per-request std::thread().detach() with "
+               "long-lived workers + queues)",
+               kAsyncHandlerPoolSize);
 #endif
     }
     auto* cfg = Config::GetConfig();
@@ -352,6 +449,15 @@ class EtcdConnectionThreadPool {
   ~EtcdConnectionThreadPool() {
     batch_shutdown_.store(true, std::memory_order_relaxed);
     if (batch_timeout_thread_.joinable()) batch_timeout_thread_.join();
+#ifdef JANUS_ETCD_USE_RAW_GRPC
+    // FIX 4: drain workers cleanly.
+    for (auto& q : grpc_worker_queues_) {
+      if (q) q->close();
+    }
+    for (auto& t : grpc_worker_threads_) {
+      if (t.joinable()) t.join();
+    }
+#endif
   }
 
   size_t EtcdRequest(const shared_ptr<Marshallable>& cmd) {
@@ -402,28 +508,18 @@ class EtcdConnectionThreadPool {
 
     if (parsed_cmd.IsRead()) {
 #if defined(JANUS_ETCD_USE_RAW_GRPC)
-      // FIX 3 (2026-05-17): raw-gRPC path. Detached thread per request +
-      // sync EtcdGrpcHandler::Read(). Bypasses cpprestsdk+pplx entirely.
-      try {
-        auto grpc_h = pick_grpc_handler();
-        const int key = parsed_cmd.key_;
-        std::thread([this, cmd_content, cmd, start_time, grpc_h, key]() {
-          (void)cmd;
-          if (grpc_h) (void)grpc_h->Read(key);
-#ifdef ETCD_INNER_DEBUG
-          auto t_post = std::chrono::steady_clock::now();
-          if (metrics_) {
-            auto handler_ms = std::chrono::duration_cast<std::chrono::microseconds>(
-                t_post - start_time).count() / 1000.0;
-            metrics_->RecordInner(0.0, handler_ms, handler_ms);
-          }
-#endif
-          SignalFinished(cmd_content, start_time);
-        }).detach();
-      } catch (const std::exception& e) {
-        Log_warn("[ETCD-GRPC] read enqueue failed: %s", e.what());
-        SignalFinished(cmd_content, start_time);
-      }
+      // FIX 4 (2026-05-18): enqueue into one of N long-lived worker
+      // queues (round-robin). Worker thread owns the handler and runs
+      // the sync Read inline. No per-request thread spawn.
+      GrpcWorkItem item;
+      item.is_write = false;
+      item.key = parsed_cmd.key_;
+      item.value = 0;
+      item.cmd_content = cmd_content;
+      item.start_time = start_time;
+      uint32_t idx = grpc_worker_rr_.fetch_add(1, std::memory_order_relaxed)
+                     % grpc_worker_queues_.size();
+      grpc_worker_queues_[idx]->push(std::move(item));
 #elif JANUS_ETCD_HAS_PPLX
       try {
         // Multi-handler round-robin (set 2026-05-07): each request picks
@@ -481,28 +577,16 @@ class EtcdConnectionThreadPool {
 #endif
     } else if (parsed_cmd.IsWrite()) {
 #if defined(JANUS_ETCD_USE_RAW_GRPC)
-      // FIX 3 (2026-05-17): raw-gRPC path. See read branch comment.
-      try {
-        auto grpc_h = pick_grpc_handler();
-        const int key = parsed_cmd.key_;
-        const int value = parsed_cmd.value_;
-        std::thread([this, cmd_content, cmd, start_time, grpc_h, key, value]() {
-          (void)cmd;
-          if (grpc_h) (void)grpc_h->Write(key, value);
-#ifdef ETCD_INNER_DEBUG
-          auto t_post = std::chrono::steady_clock::now();
-          if (metrics_) {
-            auto handler_ms = std::chrono::duration_cast<std::chrono::microseconds>(
-                t_post - start_time).count() / 1000.0;
-            metrics_->RecordInner(0.0, handler_ms, handler_ms);
-          }
-#endif
-          SignalFinished(cmd_content, start_time);
-        }).detach();
-      } catch (const std::exception& e) {
-        Log_warn("[ETCD-GRPC] write enqueue failed: %s", e.what());
-        SignalFinished(cmd_content, start_time);
-      }
+      // FIX 4 (2026-05-18): see read branch — same enqueue pattern.
+      GrpcWorkItem item;
+      item.is_write = true;
+      item.key = parsed_cmd.key_;
+      item.value = parsed_cmd.value_;
+      item.cmd_content = cmd_content;
+      item.start_time = start_time;
+      uint32_t idx = grpc_worker_rr_.fetch_add(1, std::memory_order_relaxed)
+                     % grpc_worker_queues_.size();
+      grpc_worker_queues_[idx]->push(std::move(item));
 #elif JANUS_ETCD_HAS_PPLX
       try {
         // Multi-handler round-robin (set 2026-05-07): see read branch.
