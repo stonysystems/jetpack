@@ -426,20 +426,19 @@ class EtcdConnectionThreadPool {
       }
 #elif JANUS_ETCD_HAS_PPLX
       try {
-        // FIX 2.5 (2026-05-14): replaced `.then()` continuation with a
-        // detached thread that drives `WriteAsync(...).get()` to its
-        // completion. Phase A diagnostic (bench_etcd_libetcd modes)
-        // showed `then` mode degrades ~30% past conc=100 while `async`
-        // (= .get() on a worker thread) scales linearly to conc=200.
-        // The original `.then()` continuation queued in pplx's
-        // ambient scheduler; the detached-thread pattern bypasses
-        // pplx entirely.
+        // Multi-handler round-robin (set 2026-05-07): each request picks
+        // a handler from a 256-channel pool to avoid serialising through
+        // one cpprestsdk gRPC channel. See kAsyncHandlerPoolSize.
         auto async_h = pick_async_handler();
-        const int key = parsed_cmd.key_;
-        std::thread([this, cmd_content, cmd, start_time, async_h, key]() {
+        async_h->ReadAsync(parsed_cmd.key_).then([
+            this,
+            cmd_content,
+            cmd,
+            start_time
+          ](pplx::task<etcd::Response> response_task) {
           (void)cmd;
           try {
-            auto response = async_h->ReadAsync(key).get();
+            auto response = response_task.get();
             (void)response;
           } catch (const std::exception& e) {
             Log_warn("[ETCD] read failed: %s", e.what());
@@ -453,7 +452,7 @@ class EtcdConnectionThreadPool {
           }
 #endif
           SignalFinished(cmd_content, start_time);
-        }).detach();
+        });
       } catch (const std::exception& e) {
         Log_warn("[ETCD] read enqueue failed: %s", e.what());
         SignalFinished(cmd_content, start_time);
@@ -506,15 +505,29 @@ class EtcdConnectionThreadPool {
       }
 #elif JANUS_ETCD_HAS_PPLX
       try {
-        // FIX 2.5 (2026-05-14): see read branch comment. Replaced
-        // `.then()` continuation with detached thread + `.get()`.
+        // Multi-handler round-robin (set 2026-05-07): see read branch.
         auto async_h = pick_async_handler();
-        const int key = parsed_cmd.key_;
-        const int value = parsed_cmd.value_;
-        std::thread([this, cmd_content, cmd, start_time, async_h, key, value]() {
+        auto write_task = async_h->WriteAsync(parsed_cmd.key_, parsed_cmd.value_);
+#ifdef ETCD_INNER_DEBUG
+        // Time WriteAsync returned and continuation registered. Used as the
+        // phase A end / phase B start boundary inside the .then() callback.
+        auto t_post_writeasync = std::chrono::steady_clock::now();
+#endif
+        write_task.then([
+            this,
+            cmd_content,
+            cmd,
+            start_time
+#ifdef ETCD_INNER_DEBUG
+            , t_post_writeasync
+#endif
+          ](pplx::task<etcd::Response> response_task) {
           (void)cmd;
+#ifdef ETCD_INNER_DEBUG
+          auto t_callback_entry = std::chrono::steady_clock::now();
+#endif
           try {
-            auto response = async_h->WriteAsync(key, value).get();
+            auto response = response_task.get();
             (void)response;
           } catch (const std::exception& e) {
             Log_warn("[ETCD] write failed: %s", e.what());
@@ -522,13 +535,24 @@ class EtcdConnectionThreadPool {
 #ifdef ETCD_INNER_DEBUG
           auto t_post = std::chrono::steady_clock::now();
           if (metrics_) {
-            auto handler_ms = std::chrono::duration_cast<std::chrono::microseconds>(
-                t_post - start_time).count() / 1000.0;
+            auto us = [](auto a, auto b) {
+              return std::chrono::duration_cast<std::chrono::microseconds>(
+                  a - b).count() / 1000.0;
+            };
+            // A: enqueue (sync EtcdRequest entry → WriteAsync returned).
+            // B: response wait (.then() registered → callback entry).
+            // C: callback work (entry → SignalFinished done; signal happens
+            //    just below this block, so we sample t_post here).
+            double phase_a = us(t_post_writeasync, start_time);
+            double phase_b = us(t_callback_entry, t_post_writeasync);
+            double phase_c = us(t_post, t_callback_entry);
+            double handler_ms = us(t_post, start_time);
             metrics_->RecordInner(0.0, handler_ms, handler_ms);
+            metrics_->RecordSubmitPhases(phase_a, phase_b, phase_c);
           }
 #endif
           SignalFinished(cmd_content, start_time);
-        }).detach();
+        });
       } catch (const std::exception& e) {
         Log_warn("[ETCD] write enqueue failed: %s", e.what());
         SignalFinished(cmd_content, start_time);
