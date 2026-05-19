@@ -136,7 +136,7 @@ class EtcdConnectionThreadPool {
       (void)tag;
 #endif
 #ifdef ETCD_INNER_DEBUG
-      std::lock_guard<std::mutex> lock(inner_mu);
+      std::lock_guard<std::mutex> inner_lock(inner_mu);
       Log_info("[ETCD-INNER][%s] inner_samples=%" PRIu64, tag, inner_samples);
       auto inner_log_or_empty = [&](const char* label, Distribution& dist) {
         if (dist.count() == 0) {

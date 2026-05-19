@@ -78,6 +78,15 @@ def options(opt):
     opt.add_option('','--enable-etcd-raw-grpc', dest='enable_etcd_raw_grpc',
                    default=False, action='store_true',
                    help='Define JANUS_ETCD_USE_RAW_GRPC=1 to bypass etcd-cpp-apiv3 / cpprestsdk / pplx for the etcd KV hot path and talk directly to etcdserverpb via grpc++. The leader watcher still uses etcd-cpp-apiv3. Requires the etcdserverpb generated stubs at third_party/etcd-cpp-apiv3/build/proto/gen/proto/ (built when etcd-cpp-apiv3 itself is built).')
+    opt.add_option('','--enable-etcd-inner-debug', dest='enable_etcd_inner_debug',
+                   default=False, action='store_true',
+                   help='Define ETCD_INNER_DEBUG=1 and ETCD_STATISTICS=1 to emit per-stage timing breakdown ([ETCD-INNER] / [ETCD-SUBMIT]) for every etcd request. Off by default (zero overhead when undefined).')
+    opt.add_option('','--enable-mongodb-statistics', dest='enable_mongodb_statistics',
+                   default=False, action='store_true',
+                   help='Define MONGODB_STATISTICS=1 to record queue_wait_ms / queue_depth / mongo_service_ms / end_to_end_ms in MongodbConnectionThreadPool. Off by default.')
+    opt.add_option('','--enable-zookeeper-statistics', dest='enable_zookeeper_statistics',
+                   default=False, action='store_true',
+                   help='Define ZOOKEEPER_STATISTICS=1 to record queue_wait_ms / queue_depth / zk_service_ms / end_to_end_ms in ZookeeperConnectionThreadPool. Off by default.')
     opt.parse_args();
 
 def configure(conf):
@@ -151,6 +160,13 @@ def configure(conf):
         conf.env.append_value("CXXFLAGS", "-DJETPACK_PROF=1")
     if Options.options.enable_mongodb_no_journal:
         conf.env.append_value("CXXFLAGS", "-DMONGODB_NO_JOURNAL=1")
+    if Options.options.enable_etcd_inner_debug:
+        conf.env.append_value("CXXFLAGS", "-DETCD_INNER_DEBUG=1")
+        conf.env.append_value("CXXFLAGS", "-DETCD_STATISTICS=1")
+    if Options.options.enable_mongodb_statistics:
+        conf.env.append_value("CXXFLAGS", "-DMONGODB_STATISTICS=1")
+    if Options.options.enable_zookeeper_statistics:
+        conf.env.append_value("CXXFLAGS", "-DZOOKEEPER_STATISTICS=1")
     if Options.options.enable_etcd_raw_grpc:
         # FIX 3 (2026-05-17): use raw gRPC for the etcd KV hot path.
         # Set the define, add the generated-stub include path, and
