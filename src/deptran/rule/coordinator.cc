@@ -259,23 +259,54 @@ void CoordinatorRule::GotoNextPhase() {
 
       client_worker_->go_to_jetpack_fastpath_cnt_ += go_to_fastpath_;
 
+      // FIX 2 (2026-05-19): for KV-backend protocols (mongodb/etcd/zookeeper),
+      // when fast-path will NOT fire for this transaction (either m=0 or
+      // throttled by Fix 1), short-circuit the rule coord's bookkeeping.
+      // Skip sp_vec_piece_by_par_, frequency_, and the per-piece map writes
+      // that are only useful when the spec-broadcast path runs. Saves reactor
+      // event work to keep the coord's per-tx overhead from compounding into
+      // pplx callback queueing at saturation. Scope is gated to KV backends to
+      // keep zero impact on raft/copilot/mencius where the rule machinery is
+      // integral to the protocol's correctness.
+      rule_short_circuit_ =
+          (!go_to_fastpath_) &&
+          (Config::GetConfig()->replica_proto_ == MODE_MONGODB ||
+           Config::GetConfig()->replica_proto_ == MODE_ETCD ||
+           Config::GetConfig()->replica_proto_ == MODE_ZOOKEEPER);
+
 #ifdef JETPACK_PROF
       auto _prof_bookkeep_t0 = std::chrono::high_resolution_clock::now();
 #endif
-      sp_vec_piece_by_par_.clear();
-      for (auto& pair: cmds_by_par_) {
-        const parid_t& par_id = pair.first;
-        auto& cmds = pair.second;
-        n_dispatch_ += cmds.size();
-        auto sp_vec_piece = std::make_shared<vector<shared_ptr<TxPieceData>>>();
-        for (auto c: cmds) {
-          c->id_ = next_pie_id();
-          c->rule_mode_on_and_is_original_path_only_command_ = !go_to_fastpath_;
-          dispatch_acks_[c->inn_id_] = false;
-          sp_vec_piece->push_back(c);
-          client_worker_->frequency_.append(SimpleRWCommand::GetKey(c));
+      if (rule_short_circuit_) {
+        // Minimal INIT_END: only what DispatchAsync needs. Skip
+        // sp_vec_piece_by_par_ (unused without spec broadcast), skip the
+        // frequency_ stat append, but keep dispatch_acks_ (used by the
+        // DISPATCHED commit path).
+        for (auto& pair: cmds_by_par_) {
+          auto& cmds = pair.second;
+          n_dispatch_ += cmds.size();
+          for (auto c: cmds) {
+            c->id_ = next_pie_id();
+            c->rule_mode_on_and_is_original_path_only_command_ = true;
+            dispatch_acks_[c->inn_id_] = false;
+          }
         }
-        sp_vec_piece_by_par_[par_id] = sp_vec_piece;
+      } else {
+        sp_vec_piece_by_par_.clear();
+        for (auto& pair: cmds_by_par_) {
+          const parid_t& par_id = pair.first;
+          auto& cmds = pair.second;
+          n_dispatch_ += cmds.size();
+          auto sp_vec_piece = std::make_shared<vector<shared_ptr<TxPieceData>>>();
+          for (auto c: cmds) {
+            c->id_ = next_pie_id();
+            c->rule_mode_on_and_is_original_path_only_command_ = !go_to_fastpath_;
+            dispatch_acks_[c->inn_id_] = false;
+            sp_vec_piece->push_back(c);
+            client_worker_->frequency_.append(SimpleRWCommand::GetKey(c));
+          }
+          sp_vec_piece_by_par_[par_id] = sp_vec_piece;
+        }
       }
 #ifdef JETPACK_PROF
       g_rule_init_end_bookkeep_ns_.fetch_add(
@@ -319,6 +350,29 @@ void CoordinatorRule::GotoNextPhase() {
       break;
     }
     case Phase::DISPATCHED:
+      // FIX 2 (2026-05-19): short-circuit commit path for KV-backend protocols
+      // when fast-path didn't fire. Skip cli2cli stat appends and bandit
+      // recording (nothing to record when no fast-path was attempted). Keep
+      // commit_time_ push (used by figure data) and the Fix 1 counter
+      // decrement.
+      if (rule_short_circuit_) {
+        if (aborted_) {
+          client_worker_->rule_outstanding_dispatches_.fetch_sub(
+              1, std::memory_order_relaxed);  // Fix 1
+          End();
+          break;
+        }
+        committed_ = true;
+        phase_++;
+        verify(phase_ % n_phase == Phase::INIT_END);
+        client_worker_->commit_time_.push_back(
+            std::make_pair(dispatch_time_,
+                            SimpleRWCommand::GetCurrentMsTime() - dispatch_time_));
+        client_worker_->rule_outstanding_dispatches_.fetch_sub(
+            1, std::memory_order_relaxed);  // Fix 1
+        End();
+        break;
+      }
       // if (go_to_fastpath_) {
       //   if (fast_path_success_)
       //     recent_fastpath_success_.append(1);

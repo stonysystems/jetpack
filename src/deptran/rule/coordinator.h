@@ -12,6 +12,13 @@ class CoordinatorRule : public CoordinatorClassic {
   enum Phase {INIT_END=0, DISPATCHED=1, WAITING_ORIGIN=2};
   bool fast_path_success_{false};
   bool coordinator_success_{false};
+  // FIX 2 (2026-05-19): per-tx flag — when true, the rule coord skips
+  // the bookkeeping (sp_vec_piece_by_par_, frequency_, cli2cli, bandit)
+  // that's only useful when fast-path actually fires. Set in INIT_END
+  // after the throttle decision; consumed in DISPATCHED. Scope is gated
+  // on KV-backend protocols (MODE_MONGODB/ETCD/ZOOKEEPER) to keep zero
+  // impact on raft/copilot/mencius which rely on the full rule machinery.
+  bool rule_short_circuit_{false};
   shared_ptr<VecPieceData> sp_vpd_; // cmd
 
   // CommunicatorRule* commo_;
