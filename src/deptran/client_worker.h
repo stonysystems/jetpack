@@ -1,5 +1,7 @@
 #pragma once
 
+#include <atomic>
+
 #include "__dep__.h"
 #include "config.h"
 #include "communicator.h"
@@ -91,6 +93,15 @@ class ClientWorker {
   Distribution cpu_usage_all_;
   Distribution cpu_usage_leaders_;
   Distribution queue_depth_;
+  // FIX 1 (2026-05-19): coord-side in-flight counter for the etcd
+  // throttle. The existing queue_depth_ above is fed by
+  // BroadcastRuleSpeculativeExecute's RPC replies — so it stops
+  // updating whenever the throttle disables fast-path, defeating its
+  // own purpose. This atomic counter tracks the rule coord's local
+  // view of in-flight transactions (incremented on dispatch start,
+  // decremented at End()). It's bounded by the test's `conc` parameter,
+  // making it a clean per-client saturation signal.
+  std::atomic<int> rule_outstanding_dispatches_{0};
   int go_to_jetpack_fastpath_cnt_ = 0;
   vector<std::pair<double, double>> commit_time_; // <dispatch_time, duration>
   Frequency frequency_;

@@ -112,6 +112,10 @@ void CoordinatorRule::GotoNextPhase() {
       verify(phase_ % n_phase == Phase::DISPATCHED);
       fast_path_success_ = false;
       dispatch_ack_ = false;
+      // FIX 1 (2026-05-19): increment coord-side in-flight counter.
+      // Decrement happens before each End() call in this state machine.
+      client_worker_->rule_outstanding_dispatches_.fetch_add(
+          1, std::memory_order_relaxed);
 
       // [Ze] Get cmds_by_par_ and sp_vec_piece_by_par_ in advance here since both original path and fastpath need this
       cmds_by_par_ = ((TxData*) cmd_)->GetReadyPiecesData(100); // TODO setting n_pd larger than 1 will cause 2pl to wait forever
@@ -220,16 +224,27 @@ void CoordinatorRule::GotoNextPhase() {
       }
 
       // Throttle fast-path at high queue depth for MongoDB/Etcd/ZK/Copilot.
-      // At low queue depth (<50): fast-path freely for latency benefit.
-      // At high queue depth (>50): ramp down fast-path to avoid overhead from
+      // At low queue depth (<25): fast-path freely for latency benefit.
+      // At high queue depth (>25): ramp down fast-path to avoid overhead from
       // failed speculative RPCs which hurt peak throughput at high concurrency.
+      //
+      // FIX 1 (2026-05-19): switched from
+      // `client_worker_->queue_depth_.recent_100_ave()` (fed by spec-broadcast
+      // replies, so only updates when fast-path actually fires — useless as
+      // a feedback signal because it disables fast-path which kills the
+      // signal source) to the coord-side `rule_outstanding_dispatches_`
+      // atomic counter (tracks in-flight dispatches at this client). The new
+      // signal is bounded by the test's `conc` parameter (per-client), so
+      // thresholds are recalibrated for that scale.
       if (Config::GetConfig()->replica_proto_ == MODE_MONGODB ||
           Config::GetConfig()->replica_proto_ == MODE_ETCD ||
           Config::GetConfig()->replica_proto_ == MODE_ZOOKEEPER) {
-        double queue_depth = client_worker_->queue_depth_.recent_100_ave();
-        if (queue_depth > 50) {
+        double queue_depth =
+            static_cast<double>(client_worker_->rule_outstanding_dispatches_.load(
+                std::memory_order_relaxed));
+        if (queue_depth > 25) {
           double rand_val = RandomGenerator::rand(0, 99);
-          double throttle = (queue_depth - 50) * 0.5; // ramp: 50% at 150, 100% at 250+
+          double throttle = (queue_depth - 25) * 10; // 100% disable past qd=35
           if (throttle > rand_val) {
             go_to_fastpath_ = false;
           }
@@ -316,6 +331,8 @@ void CoordinatorRule::GotoNextPhase() {
                    txn->id_, txn->reply_.res_, aborted_, current_phase,
                    dispatch_time_ - clientworker_creation_time_);
 #endif
+        client_worker_->rule_outstanding_dispatches_.fetch_sub(
+            1, std::memory_order_relaxed);  // Fix 1
         End();
       }
       if (fast_path_success_ || dispatch_ack_) {
@@ -362,6 +379,8 @@ void CoordinatorRule::GotoNextPhase() {
         client_worker_->commit_time_.push_back(
           std::make_pair(dispatch_time_,
                           SimpleRWCommand::GetCurrentMsTime() - dispatch_time_));
+        client_worker_->rule_outstanding_dispatches_.fetch_sub(
+            1, std::memory_order_relaxed);  // Fix 1
         End();
       } else {
         verify(phase_ % n_phase == Phase::WAITING_ORIGIN);
@@ -401,6 +420,8 @@ void CoordinatorRule::GotoNextPhase() {
       if (!(txn->reply_.res_ == WRONG_LEADER || aborted_))
         client_worker_->commit_time_.push_back(std::make_pair(dispatch_time_, SimpleRWCommand::GetCurrentMsTime() - dispatch_time_));
       // Log_info("End");
+      client_worker_->rule_outstanding_dispatches_.fetch_sub(
+          1, std::memory_order_relaxed);  // Fix 1
       End();
       break;
     default:
