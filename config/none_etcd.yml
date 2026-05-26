@@ -5,9 +5,4 @@ mode:
   batch: false
   retry: 20
   ongoing: 1 # per client
-  # TEMPORARY (2026-05-25): test client-side Txn batching to see if it
-  # closes the etcd cpprestsdk surge. Revert these two lines once the
-  # smoke run is parsed. Mirrors config/none_etcd_batch.yml.
-  etcd_batch_size: 16
-  etcd_batch_timeout_ms: 5
 
