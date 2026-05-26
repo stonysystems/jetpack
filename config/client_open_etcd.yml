@@ -8,4 +8,7 @@ client:
     # tightening to 100 → 60×100 = 6 000 r/s cluster cap, just above the
     # observed peak. Backpressure prevents queue blowup at high conc;
     # post-knee latencies should look cleaner without affecting the peak.
-    max_undone: 100
+    # 2026-05-26: temporarily raised to 300 (60×300 = 18k cap) to test
+    # whether batched etcd can sustain higher throughput now that the
+    # cpprestsdk surge is removed. Revert after sweep.
+    max_undone: 300
