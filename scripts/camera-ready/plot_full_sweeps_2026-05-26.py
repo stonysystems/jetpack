@@ -22,12 +22,12 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
-OUT_DIR = "/home/users/ztang/janus/results/2026-05-13-camera-ready-exp0-fixes-v3/figs"
+OUT_DIR = "/home/users/ztang/janus/results/2026-05-13-camera-ready-exp0-fixes-v3/figs/2026-05-26-full-sweeps"
 LOG_TOP = "/home/users/ztang/janus/results/2026-05-13-camera-ready-exp0-fixes-v3/log"
 
 ETCD_DIR = f"{LOG_TOP}/_etcd_full_batched_sweep_2026-05-26"
 ZK_DIR = f"{LOG_TOP}/_zookeeper_full_sweep_2026-05-26"
-RAFT_BATCHOFF_DIR = "/home/users/ztang/janus/results/2026-05-26-raft-batchoff-pipeon-full"
+RAFT_BATCHOFF_DIR = f"{LOG_TOP}/_raft_batchoff_pipeon_2026-05-26"
 RAFT_BATCHON_DIR = "/home/users/ztang/janus/results/2026-05-05-camera-ready-exp0-fixes-v2/log"
 
 CONCS = [1, 50, 100, 150, 200, 300]
