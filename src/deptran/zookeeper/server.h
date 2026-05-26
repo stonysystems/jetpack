@@ -19,7 +19,15 @@ namespace janus {
 class ZookeeperServer : public TxLogServer {
 
 #ifdef AWS
-  const int zk_connection_ = 2500;
+  // TEMPORARY (2026-05-26): reduce 2500 → 256 to test whether the c≥50
+  // failure on 2026-05-19 was thread-burst at startup (2500 std::thread
+  // + libzookeeper-mt sessions racing rrr Communicator::Setup), NOT
+  // cross-region socket exhaustion as the writeup hypothesised. The ZK
+  // pool URI is kZookeeperUri = "127.0.0.1:2181" (loopback), so cross-
+  // region sockets from the pool were never the actual issue. Localhost
+  // + 256 workers should still saturate ZK's ZAB throughput ceiling
+  // (~few k ops/sec geo) without the startup resource burst.
+  const int zk_connection_ = 256;
 #endif
 #ifndef AWS
   const int zk_connection_ = 80;
