@@ -5,6 +5,4 @@ mode:
   batch: false
   retry: 20
   ongoing: 1 # per client
-  etcd_batch_size: 16
-  etcd_batch_timeout_ms: 5
 
