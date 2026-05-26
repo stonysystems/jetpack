@@ -10,3 +10,8 @@ mode:
   # path skips the leader from the spec quorum, dropping FQ from 4-of-5
   # to 3-of-4 and breaking fast-path recovery. Force-disabled here.
   jetpack_merge_leader_rpc: false
+  # TEMPORARY (2026-05-26): test client-side Txn batching for JetPack-etcd
+  # adaptive sweep. Mirrors none_etcd batching that closed ~70% of surge.
+  # Revert after sweep is parsed.
+  etcd_batch_size: 16
+  etcd_batch_timeout_ms: 5
