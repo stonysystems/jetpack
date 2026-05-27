@@ -8,4 +8,5 @@ client:
     # tightening to 100 → 60×100 = 6 000 r/s cluster cap, just above the
     # observed peak. Backpressure prevents queue blowup at high conc;
     # post-knee latencies should look cleaner without affecting the peak.
-    max_undone: 100
+    # TEMP: etcd b=64 + max_undone=300 sweep (revert after)
+    max_undone: 300
