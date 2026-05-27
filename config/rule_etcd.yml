@@ -10,5 +10,5 @@ mode:
   # path skips the leader from the spec quorum, dropping FQ from 4-of-5
   # to 3-of-4 and breaking fast-path recovery. Force-disabled here.
   jetpack_merge_leader_rpc: false
-  etcd_batch_size: 64
+  etcd_batch_size: 128
   etcd_batch_timeout_ms: 5
