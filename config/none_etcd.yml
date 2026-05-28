@@ -5,4 +5,7 @@ mode:
   batch: false
   retry: 20
   ongoing: 1 # per client
+  # TEMP 2026-05-28: zipf-locality diagnostic (vanilla etcd, b=16, will revert)
+  etcd_batch_size: 16
+  etcd_batch_timeout_ms: 5
 

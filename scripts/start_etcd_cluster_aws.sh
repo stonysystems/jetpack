@@ -53,6 +53,26 @@ if [[ "$ETCD_UNSAFE_NO_FSYNC" == "1" ]]; then
     echo "[etcd] WARNING: launching with --unsafe-no-fsync (durability disabled)"
 fi
 
+# Data-dir root. Default /tmp (disk-backed on these instances). Set
+# ETCD_DATA_ROOT=/dev/shm to put the boltdb/WAL on tmpfs (RAM) — eliminates
+# all disk I/O, for the zipf-locality diagnostic. The dir is wiped on start.
+ETCD_DATA_ROOT="${ETCD_DATA_ROOT:-/tmp}"
+if [[ "$ETCD_DATA_ROOT" != "/tmp" ]]; then
+    echo "[etcd] data-dir root: $ETCD_DATA_ROOT"
+fi
+
+# Log level (default warn). Set ETCD_LOG_LEVEL=debug to capture per-RPC
+# server-side timings for profiling. Note: debug output is ~50x verbose
+# and adds ~3-10ms latency per request; only enable for short captures.
+ETCD_LOG_LEVEL="${ETCD_LOG_LEVEL:-warn}"
+case "$ETCD_LOG_LEVEL" in
+    debug|info|warn|error|panic|fatal) ;;
+    *) echo "[etcd] FATAL: invalid ETCD_LOG_LEVEL=$ETCD_LOG_LEVEL"; exit 1 ;;
+esac
+if [[ "$ETCD_LOG_LEVEL" != "warn" ]]; then
+    echo "[etcd] log level: $ETCD_LOG_LEVEL"
+fi
+
 if [[ "$ENV" != "aws" ]]; then
     echo "[etcd] AWS-specific script (setup.json says env=$ENV); use start_etcd_cluster.sh for zoo"; exit 1
 fi
@@ -87,7 +107,7 @@ echo "  cluster: $CLUSTER"
 pids=()
 for i in $(seq 0 $((N_REPLICA-1))); do
     ssh -i "$KEY" -o BatchMode=yes -o ConnectTimeout=5 "${USERNAME}@${IPS[$i]}" \
-        "pkill -9 etcd 2>/dev/null; rm -rf /tmp/etcd-${NAMES[$i]}.etcd 2>/dev/null; true" \
+        "pkill -9 etcd 2>/dev/null; rm -rf ${ETCD_DATA_ROOT}/etcd-${NAMES[$i]}.etcd 2>/dev/null; true" \
         >/dev/null 2>&1 &
     pids+=($!)
 done
@@ -104,7 +124,7 @@ for i in $(seq 0 $((N_REPLICA-1))); do
     ssh -i "$KEY" -o BatchMode=yes -o ConnectTimeout=5 "${USERNAME}@${IPS[$i]}" \
         "nohup ${TASKSET_PREFIX}${ETCD_BIN} \
             --name=${NAMES[$i]} \
-            --data-dir=/tmp/etcd-${NAMES[$i]}.etcd \
+            --data-dir=${ETCD_DATA_ROOT}/etcd-${NAMES[$i]}.etcd \
             --listen-peer-urls=http://0.0.0.0:${ETCD_PEER_PORT} \
             --initial-advertise-peer-urls=http://${IPS[$i]}:${ETCD_PEER_PORT} \
             --listen-client-urls=http://0.0.0.0:${ETCD_PORT} \
@@ -113,7 +133,7 @@ for i in $(seq 0 $((N_REPLICA-1))); do
             --initial-cluster=${CLUSTER} \
             --initial-cluster-state=new \
             ${ETCD_NO_FSYNC_FLAG} \
-            --logger=zap --log-level=warn \
+            --logger=zap --log-level=${ETCD_LOG_LEVEL} \
             > /tmp/etcd-${NAMES[$i]}.log 2>&1 &" \
         >/dev/null 2>&1 &
     pids+=($!)
