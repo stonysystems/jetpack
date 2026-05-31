@@ -5,7 +5,4 @@ mode:
   batch: false
   retry: 20
   ongoing: 1 # per client
-  # TEMP 2026-05-29: full etcd re-sweep on tmpfs (b=8 everywhere, max_undone=300)
-  etcd_batch_size: 8
-  etcd_batch_timeout_ms: 5
 
