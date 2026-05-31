@@ -5,4 +5,7 @@ mode:
   batch: false
   retry: 20
   ongoing: 1 # per client
+  # TEMP 2026-05-29: tmpfs keyrange probe (b=16, max_undone=300, ETCD_DATA_ROOT=/dev/shm)
+  etcd_batch_size: 16
+  etcd_batch_timeout_ms: 5
 
