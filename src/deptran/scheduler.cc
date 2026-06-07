@@ -1501,8 +1501,22 @@ void TxLogServer::JetpackResubmit(int sid) {
 #endif
   
   auto e = commo()->JetpackBroadcastFinishRecovery(partition_id_, site_id_, oepoch_);
-  // e->Wait(); [Jetpack] BroadcastFinishRecovery do not need to sync
-  
+  // [Jetpack] 2026-06-07: synchronously wait for the majority of followers to
+  // ack FinishRecovery so the reported recovery duration in
+  // JetpackRecoveryEntry() includes the WAN RTT for followers to flip
+  // jetpack_status_ to READY (apples-to-apples with vanilla Raft recovery,
+  // which already counts majority log-replication ack). Same Wait() idiom
+  // already used at the intra-recovery event above (line ~1481).
+  if (e && e->target_ > 0) {
+    auto fr_wait_start = std::chrono::steady_clock::now();
+    e->Wait();
+    auto fr_wait_end = std::chrono::steady_clock::now();
+    auto fr_wait_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+        fr_wait_end - fr_wait_start).count();
+    Log_info("[JETPACK-RECOVERY-FINISH-WAIT] FinishRecovery quorum ack after "
+             "%ldms (value=%d target=%d)",
+             fr_wait_ms, e->value_, e->target_);
+  }
   Log_info("[JETPACK-RECOVERY] FinishRecovery broadcast completed, fast path restored");
 }
 
