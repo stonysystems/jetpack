@@ -1,0 +1,83 @@
+diff --git a/server/etcdserver/server.go b/server/etcdserver/server.go
+index ae2076a..21f2c72 100644
+--- a/server/etcdserver/server.go
++++ b/server/etcdserver/server.go
+@@ -1068,6 +1068,10 @@ func (s *EtcdServer) run() {
+ 					s.leadTimeMu.Lock()
+ 					s.leadElectedTime = t
+ 					s.leadTimeMu.Unlock()
++					// Jetpack 2a: block the raft loop here (before the first
++					// AppendEntries of this term is sent) until the co-located
++					// Jetpack replica has paused. Fail-open on a short deadline.
++					s.jetpackViewBarrier()
+ 				}
+ 				setSyncC(s.SyncTicker.C)
+ 				if s.compactor != nil {
+@@ -1923,6 +1927,67 @@ func (s *EtcdServer) getLead() uint64 {
+ 	return atomic.LoadUint64(&s.lead)
+ }
+ 
++// jetpackViewBarrier is invoked synchronously from updateLeadership at the
++// instant this node becomes raft leader — BEFORE the raft loop sends the first
++// AppendEntries of the new term (raft.go: r.transport.Send runs after
++// updateLeadership). It hands off to the co-located Jetpack replica and blocks
++// the raft loop until Jetpack acks that it has paused (entered RECOVERY), or a
++// short fail-open deadline elapses. So no command — not even the no-op — is
++// replicated under the new view until Jetpack has stopped. No shared state, no
++// per-propose cost: this runs once per leadership change.
++//
++// Writes "etcd:viewchange term=<T> nonce=<N> lead=<self> member=<self>" and then
++// polls for "jetpack:leader_paused term=<T> nonce=<N>". A per-boot nonce makes
++// the match self-protecting across cluster restarts: a stale ack left in the
++// append-only signal file by a prior run (whose terms reset to small values)
++// carries a different nonce and therefore cannot release this barrier.
++
++// jetpackBootNonce is unique per etcd process boot; deptran echoes it in the ack.
++var jetpackBootNonce = uint64(time.Now().UnixNano())
++
++func (s *EtcdServer) jetpackViewBarrier() {
++	term := s.raftStatus().Term // live raft term = the view raft will stamp on AppendEntries
++	self := uint64(s.ID())
++
++	dir := os.Getenv("JM_SIGNAL_DIR")
++	if dir == "" {
++		dir = "/tmp"
++	}
++	host := os.Getenv("JM_SIGNAL_HOST")
++	if host == "" {
++		host = "0.0.0.0"
++	}
++	p := dir + "/JM_Jetpack_" + host
++
++	f, err := os.OpenFile(p, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
++	if err != nil {
++		s.Logger().Warn("jetpack: view barrier open failed, resuming", zap.Error(err))
++		return // fail-open: never wedge the raft loop if we cannot even signal
++	}
++	fmt.Fprintf(f, "etcd:viewchange term=%d nonce=%d lead=%d member=%d\n", term, jetpackBootNonce, self, self)
++	f.Close()
++	s.Logger().Info("jetpack: view barrier armed", zap.Uint64("term", term))
++
++	// Newline-anchored so term=6 is not a substring of term=60 (the ack line is
++	// written by jm_signal::set_key, which appends '\n').
++	ack := fmt.Sprintf("jetpack:leader_paused term=%d nonce=%d\n", term, jetpackBootNonce)
++	// Fail-open budget derived from the election timeout so we never stall the
++	// raft loop long enough to risk a spurious follower election; capped at 200ms.
++	budget := time.Duration(s.Cfg.ElectionTicks*int(s.Cfg.TickMs)) * time.Millisecond / 3
++	if budget > 200*time.Millisecond {
++		budget = 200 * time.Millisecond
++	}
++	deadline := time.Now().Add(budget)
++	for time.Now().Before(deadline) {
++		if data, rerr := os.ReadFile(p); rerr == nil && strings.Contains(string(data), ack) {
++			s.Logger().Info("jetpack: view barrier released", zap.Uint64("term", term))
++			return
++		}
++		time.Sleep(time.Millisecond)
++	}
++	s.Logger().Warn("jetpack: view barrier timed out, resuming anyway", zap.Uint64("term", term))
++}
++
+ func (s *EtcdServer) LeaderChangedNotify() <-chan struct{} {
+ 	s.leaderChangedMu.RLock()
+ 	defer s.leaderChangedMu.RUnlock()
