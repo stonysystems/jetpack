@@ -7,13 +7,11 @@
 \*   3. Wraps base_raft actions with UNCHANGED <<jetpackVars, clientVars,
 \*      executionVars>>.
 \*   4. Wraps jetpack actions with UNCHANGED raftOnlyVars.
-\*   5. Defines WRequestReconfig — the only place where Jetpack's view is
-\*      updated to reflect a membership change. Composes B!RequestReconfig
-\*      (which puts the leader into ToBeLeader) with a wrapper-side update
-\*      to old_view / new_view / jepoch. Standard Jetpack recovery then
-\*      fires (because ostate=ToBeLeader and jstate=Ready), and after
-\*      FinishRecovery puts ostate back to Leader, AppendPendingReconfigToLog
-\*      emits the actual config-log entry.
+\*   5. Defines WRequestReconfig (B!RequestReconfig: the leader becomes
+\*      ToBeLeader with a pending_reconfig) and WSendBeginRecovery, whose round
+\*      targets the member set of the pending change under a fresh epoch.
+\*      After FinishRecovery installs that view and puts ostate back to Leader,
+\*      AppendPendingReconfigToLog emits the actual config-log entry.
 \*   6. Defines ApplyCommitted that filters config-log entries (they are
 \*      protocol bookkeeping and don't enter the user-facing execution trace).
 \*
@@ -168,22 +166,11 @@ AdvanceCommitIndex(i) ==
 
 \* ---- The composite reconfig action ----
 \* B!RequestReconfig drops Leader -> ToBeLeader and stashes pending_reconfig.
-\* The wrapper additionally bumps Jetpack's view to the proposed member set,
-\* so the recovery quorums use the new cluster.
+\* Jetpack state is unchanged: the new member set is used only by the
+\* recovery round that WSendBeginRecovery starts under a fresh epoch.
 WRequestReconfig(i, op, target) ==
     /\ B!RequestReconfig(i, op, target)
-    /\ LET newMembers == IF op = ReconfigAdd
-                         THEN config[i].members \cup {target}
-                         ELSE config[i].members \ {target}
-           proposedView == [epoch                 |-> jepoch[i] + 1,
-                            proposing_replica_ids |-> newMembers,
-                            replica_ids           |-> newMembers]
-       IN /\ old_view' = [old_view EXCEPT ![i] = new_view[i]]
-          /\ new_view' = [new_view EXCEPT ![i] = proposedView]
-          /\ jepoch'   = [jepoch EXCEPT ![i] = jepoch[i] + 1]
-    /\ UNCHANGED <<jstate, oepoch, jpool, recovery_set, chosen_value,
-                   br_responses, prep_responses, accept_responses,
-                   clientVars, executionVars>>
+    /\ UNCHANGED <<jetpackVars, clientVars, executionVars>>
 
 WAppendPendingReconfigToLog(i) ==
     /\ B!AppendPendingReconfigToLog(i)
@@ -223,8 +210,19 @@ WHandlePreacceptResponse(c, m) ==
     /\ J!HandlePreacceptResponse(c, m)
     /\ UNCHANGED raftOnlyVars
 
+\* With a reconfiguration pending, the round targets the member set the change
+\* yields (as AppendPendingReconfigToLog will append it); otherwise i's
+\* current view. J!SendBeginRecoveryTo gives the target a fresh epoch.
 WSendBeginRecovery(i) ==
-    /\ J!SendBeginRecovery(i)
+    /\ LET pr      == pending_reconfig[i]
+           members == IF pr.op = ReconfigAdd
+                      THEN config[i].members \cup {pr.target}
+                      ELSE config[i].members \ {pr.target}
+           target  == IF pr = B!NoReconfig
+                      THEN new_view[i]
+                      ELSE [new_view[i] EXCEPT !.proposing_replica_ids = members,
+                                               !.replica_ids           = members]
+       IN J!SendBeginRecoveryTo(i, target)
     /\ UNCHANGED raftOnlyVars
 
 WHandleBeginRecoveryRequest(i, m) ==
@@ -425,12 +423,42 @@ MaxOneReconfigurationAtATime ==
             /\ commitIndex[i]["sole"] < ind1
             /\ commitIndex[i]["sole"] < ind2
 
+\* ---- Election safety and view membership ----
+
+\* At most one Leader per term.
+ElectionSafety ==
+    \A i, j \in Server :
+        (i # j /\ ostate[i] = Leader /\ ostate[j] = Leader)
+            => currentTerm[i] # currentTerm[j]
+
+\* Messages still in flight (Raft keeps consumed message keys with count 0).
+LiveMsgs == {m \in DOMAIN messages : messages[m] > 0}
+
+\* Views held by servers and clients or carried by live messages.
+StateViews ==
+    LET ms(T) == {m \in LiveMsgs : m.mtype \in T}
+    IN  {old_view[i] : i \in Server} \cup {new_view[i] : i \in Server}
+        \cup {client_view[c] : c \in Client}
+        \cup {m.mview : m \in ms({J!PreacceptRequest, J!PreacceptResponse})}
+        \cup {m.mold_view : m \in ms({J!BeginRecoveryRequest})}
+        \cup {m.mnew_view : m \in ms({J!BeginRecoveryRequest,
+                                      J!FinishRecoveryRequest})}
+
+\* An epoch names one membership: a membership change always comes with a
+\* fresh epoch, so two views with the same epoch have the same member sets.
+EpochDeterminesMembership ==
+    \A v, w \in StateViews :
+        v.epoch = w.epoch => /\ v.replica_ids = w.replica_ids
+                             /\ v.proposing_replica_ids = w.proposing_replica_ids
+
 Safety ==
     [](CommittedLogAgreement
        /\ LogOrderMatchesExecution
        /\ ExecutionDedupMatches
        /\ NoLogDivergence
-       /\ MaxOneReconfigurationAtATime)
+       /\ MaxOneReconfigurationAtATime
+       /\ ElectionSafety
+       /\ EpochDeterminesMembership)
 
 SpecSafety == Spec => Safety
 

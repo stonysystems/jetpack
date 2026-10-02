@@ -272,6 +272,12 @@ WHandleFinishRecovery(i, m) ==
 (*                                                                          *)
 (* Atomic with ostate ToBeLeader -> Leader, so client writes resume in the  *)
 (* new config.                                                              *)
+(*                                                                          *)
+(* As in J!FinishRecovery, it installs the round's epoch (jepoch :=         *)
+(* oepoch[i], chosen by J!SendBeginRecovery) and promotes only a server     *)
+(* that is still ToBeLeader. pendingConfig[i] # Nil already implies         *)
+(* ToBeLeader here (UpdateTerm and Restart clear it), so the guard keeps    *)
+(* the two bodies alike.                                                    *)
 (****************************************************************************)
 
 WFinishReconfig(i) ==
@@ -303,8 +309,9 @@ WFinishReconfig(i) ==
                                     [s \in Server |-> J!NilPrepResp]]
           /\ accept_responses' = [accept_responses EXCEPT ![i] =
                                       [s \in Server |-> FALSE]]
-          \* Resume to Leader.
-          /\ ostate' = [ostate EXCEPT ![i] = Leader]
+          \* Resume to Leader (only from ToBeLeader, as in J!FinishRecovery).
+          /\ ostate' = [ostate EXCEPT ![i] =
+                           IF ostate[i] = ToBeLeader THEN Leader ELSE ostate[i]]
           \* Append the new config entry and extend configs.
           /\ log' = [log EXCEPT ![i]["sole"] =
                          Append(log[i]["sole"], configEntry)]

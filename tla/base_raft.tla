@@ -16,7 +16,8 @@
 \*                directly append a config entry from Leader.
 \*      Here:     RequestReconfig(i, op, target) drops Leader to ToBeLeader,
 \*                stashes the intent in pending_reconfig[i]. Jetpack recovery
-\*                runs (the wrapper concurrently bumps new_view[i] / jepoch[i]).
+\*                runs (the wrapper's round targets the new member set under
+\*                a fresh epoch).
 \*                After FinishRecovery returns the server to Leader,
 \*                AppendPendingReconfigToLog(i) emits the actual log entry.
 \*
@@ -562,9 +563,8 @@ AdvanceCommitIndex(i) ==
 (*                                                                         *)
 (*   Leader ──RequestReconfig──▶ ToBeLeader                                *)
 (*                                  │                                      *)
-(*                            (wrapper bumps new_view + jepoch)            *)
-(*                                  │                                      *)
 (*                            Jetpack recovery runs                        *)
+(*                            (round over the new member set)              *)
 (*                                  │                                      *)
 (*                          FinishRecovery sets ostate = Leader            *)
 (*                                  │                                      *)
