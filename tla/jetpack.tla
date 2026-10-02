@@ -186,11 +186,18 @@ Quorum == {q \in SUBSET(Server) : Cardinality(q) * 2 > Cardinality(Server)}
 JQuorum(v) == {q \in SUBSET(v.replica_ids) :
                    Cardinality(q) * 2 > Cardinality(v.replica_ids)}
 
+\* Fast-path superquorum: it contains every original-path proposer of the
+\* view and at least N - RQ + (RQ \div 2) + 1 of the view's N replicas, where
+\* RQ = N \div 2 + 1 is the size of a recovery quorum (JQuorum). The replies
+\* of any recovery quorum then hold a fast-committed command in a strict
+\* majority, which is what RecoveryCommands tests. For N = 2f + 1 this is
+\* f + ceil(f/2) + 1 (N = 3, 5, 7 -> 3, 4, 6).
+FastRQ(v) == Cardinality(v.replica_ids) \div 2 + 1
+
 FastpathQuorum(v) ==
-    {q \in JQuorum(v) :
+    {q \in SUBSET(v.replica_ids) :
         /\ v.proposing_replica_ids \subseteq q
-        /\ \A q2 \in JQuorum(v) :
-             v.proposing_replica_ids \subseteq q2 => (q \cap q2) \in JQuorum(v)}
+        /\ Cardinality(q) >= Cardinality(v.replica_ids) - FastRQ(v) + (FastRQ(v) \div 2) + 1}
 
 Min(s) == CHOOSE x \in s : \A y \in s : x <= y
 Max(s) == CHOOSE x \in s : \A y \in s : x >= y
