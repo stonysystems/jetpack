@@ -58,6 +58,26 @@
 \*   Constants:
 \*     Proposer        - set of proposer IDs
 \*     ProposerOf(_)   - maps server to its active proposer ID when leading
+\*
+\* ---- Recovery rounds ----
+\*
+\* Every recovery runs as a round with its own Jetpack epoch (view id),
+\* chosen by its coordinator in SendBeginRecoveryTo (NextViewId). Per server:
+\*   jepoch[i]   the installed epoch: the fast path acks a request only if
+\*               the request carries this epoch and jstate[i] = Ready. Only
+\*               FinishRecovery changes it.
+\*   oepoch[i]   the newest round i has joined (or installed); jepoch <= oepoch.
+\*   new_view[i] the view i is moving to: a coordinator's target view; at a
+\*               participant, the view of the last BeginRecovery or
+\*               FinishRecovery it handled.
+\* A replica joins round v when it handles a BeginRecovery, Prepare or Accept
+\* for v, and enters recovery mode (jstate # Ready) in the same step. It
+\* accepts such a message only if v > jepoch[i] and v >= oepoch[i] (Prepare
+\* and Accept also check the ballot), and a FinishRecovery for u only if
+\* u > jepoch[i] and u >= oepoch[i]; any other message is consumed with no
+\* other effect. Replies carry the round's epoch, and the coordinator counts
+\* only replies of its current round in the matching phase. A client counts a
+\* fast-path ack only if it was given in the epoch of its current attempt.
 
 EXTENDS Naturals, FiniteSets, Sequences, TLC
 
@@ -201,6 +221,20 @@ FastpathQuorum(v) ==
 
 Min(s) == CHOOSE x \in s : \A y \in s : x <= y
 Max(s) == CHOOSE x \in s : \A y \in s : x >= y
+
+\* ---- Recovery round ids ----
+\* A numbering of the servers, 1..|Server|.
+ServerRank == CHOOSE f \in [Server -> 1..Cardinality(Server)] :
+                  \A a, b \in Server : a # b => f[a] # f[b]
+ViewIdStride == Cardinality(Server) + 1
+
+\* The epoch of a new recovery round coordinated by i: strictly greater than
+\* every epoch i has installed or joined, and unique across coordinators,
+\* because NextViewId(i) % ViewIdStride = ServerRank[i]. The initial epoch
+\* (DefaultView.epoch = 1) is below every round epoch.
+NextViewId(i) ==
+    LET known == Max({jepoch[i], oepoch[i], old_view[i].epoch, new_view[i].epoch})
+    IN (known \div ViewIdStride + 1) * ViewIdStride + ServerRank[i]
 
 SeqToSet(s) == {s[i] : i \in 1..Len(s)}
 
@@ -364,6 +398,9 @@ ClientSendPreaccept(c) ==
 
 \* Server handles Preaccept from client.
 \* When the leader accepts, it appends to its own proposer's sequence in the 3-D log.
+\* An ack needs jstate[i] = Ready and the request's epoch (the epoch of
+\* the client's attempt) equal to the installed epoch jepoch[i], so the
+\* mjepoch of a successful reply is the epoch the ack was given in.
 HandlePreacceptRequest(i, m) ==
     /\ m.mtype = PreacceptRequest
     /\ i = m.mdest
@@ -414,22 +451,33 @@ HandlePreacceptRequest(i, m) ==
 \* Completion events that clear client_pending[c]:
 \*   - Fast-path success: newSuccesses \in FastpathQuorum(view)
 \*   - Fast-path abandoned: no remaining possibility to reach a FastpathQuorum
+\*   - A reject revealed a newer view (see below)
+\*
+\* All acks of one attempt come from the attempt's epoch. The attempt's
+\* requests carry client_view[c].epoch, and a successful reply carries the
+\* epoch the replica acked in (mjepoch = jepoch[i] = the request's mepoch), so
+\* a success counts only if mjepoch = client_view[c].epoch; any other reply is
+\* still "heard". Adopting a newer view ends the attempt (the client retries
+\* in that view as a new attempt), so client_view[c] does not change while an
+\* attempt is pending. An ack from an earlier attempt in the same epoch may
+\* count: it is an ack given in that epoch.
 HandlePreacceptResponse(c, m) ==
     /\ m.mtype = PreacceptResponse
     /\ m.mdest = c
     /\ client_pending[c] = m.mcmd
     /\ LET view == client_view[c]
+           newerView == \lnot m.msuccess /\ m.mview.epoch > view.epoch
            newHeard == client_heard_from[c] \cup {m.msource}
-           newSuccesses == IF m.msuccess
+           newSuccesses == IF m.msuccess /\ m.mjepoch = view.epoch
                            THEN client_successes[c] \cup {m.msource}
                            ELSE client_successes[c]
-           fastOk == newSuccesses \in FastpathQuorum(view)
+           fastOk == \lnot newerView /\ newSuccesses \in FastpathQuorum(view)
            \* Fast-path is still achievable if the current successes plus all
            \* remaining unheard replicas could form some FastpathQuorum.
            remaining == view.replica_ids \ newHeard
            canStillSucceed ==
                \E q \in FastpathQuorum(view) : q \subseteq (newSuccesses \cup remaining)
-           abandon == \lnot fastOk /\ \lnot canStillSucceed
+           abandon == newerView \/ (\lnot fastOk /\ \lnot canStillSucceed)
        IN /\ client_successes' =
               IF fastOk \/ abandon
               THEN [client_successes EXCEPT ![c] = {}]
@@ -443,8 +491,7 @@ HandlePreacceptResponse(c, m) ==
               THEN [client_pending EXCEPT ![c] = NilCmd]
               ELSE client_pending
           /\ client_view' =
-              IF /\ \lnot m.msuccess
-                 /\ m.mview.epoch > client_view[c].epoch
+              IF newerView
               THEN [client_view EXCEPT ![c] = m.mview]
               ELSE client_view
           /\ execution_cmds' =
@@ -455,46 +502,85 @@ HandlePreacceptResponse(c, m) ==
           /\ Discard(m)
           /\ UNCHANGED <<baseVars, jetpackVars>>
 
-\* Recovery Phase 1: BeginRecovery.
-SendBeginRecovery(i) ==
+\* Recovery Phase 1: BeginRecovery. Coordinator i starts a round for the
+\* member set of tv under a fresh epoch v = NextViewId(i), entering recovery
+\* mode and clearing its stored replies in the same step; FinishRecovery
+\* installs v.
+SendBeginRecoveryTo(i, tv) ==
     /\ ostate[i] = ToBeLeader
     /\ jstate[i] = Ready
-    /\ LET view == new_view[i]
+    /\ LET v      == NextViewId(i)
+           view   == [tv EXCEPT !.epoch = v]
            msgSet == { [mtype |-> BeginRecoveryRequest,
                         msource |-> i,
                         mdest |-> s,
                         mold_view |-> old_view[i],
-                        mnew_view |-> new_view[i]] : s \in view.replica_ids }
+                        mnew_view |-> view] : s \in view.replica_ids }
        IN /\ messages' = AddMessages(msgSet, messages)
+          /\ new_view' = [new_view EXCEPT ![i] = view]
+          /\ oepoch' = [oepoch EXCEPT ![i] = v]
           /\ jstate' = [jstate EXCEPT ![i] = Recovery]
           /\ br_responses' = [br_responses EXCEPT ![i] = [s \in Server |-> NilJPool]]
+          /\ prep_responses' = [prep_responses EXCEPT ![i] = [s \in Server |-> NilPrepResp]]
+          /\ accept_responses' = [accept_responses EXCEPT ![i] = [s \in Server |-> FALSE]]
           /\ UNCHANGED <<baseVars,
-                         jepoch, oepoch, old_view, new_view, jpool,
-                         recovery_set, chosen_value, prep_responses,
-                         accept_responses, clientVars, executionVars>>
+                         jepoch, old_view, jpool,
+                         recovery_set, chosen_value, clientVars, executionVars>>
 
+\* A round that keeps i's current member set.
+SendBeginRecovery(i) == SendBeginRecoveryTo(i, new_view[i])
+
+\* Replica i takes part in the round of epoch v only if v is newer than the
+\* epoch it has installed and not older than the round it has joined.
+RoundOk(i, v) == v > jepoch[i] /\ v >= oepoch[i]
+
+\* Joining round v puts i in recovery mode in the same step and records v.
+\* Joining a newer round also ends any round i was coordinating: i becomes a
+\* participant and its stored replies, which belong to the older round, are
+\* cleared. A message of the round i has already joined (e.g. a coordinator's
+\* own message to itself) leaves i's phase alone. RoundOk excludes a Ready i
+\* with v = oepoch[i], because Ready implies oepoch[i] = jepoch[i].
+JoinRound(i, v) ==
+    /\ oepoch' = [oepoch EXCEPT ![i] = v]
+    /\ IF v > oepoch[i]
+       THEN /\ jstate' = [jstate EXCEPT ![i] = Recovery]
+            /\ br_responses' = [br_responses EXCEPT ![i] = [s \in Server |-> NilJPool]]
+            /\ prep_responses' = [prep_responses EXCEPT ![i] = [s \in Server |-> NilPrepResp]]
+            /\ accept_responses' = [accept_responses EXCEPT ![i] = [s \in Server |-> FALSE]]
+       ELSE UNCHANGED <<jstate, br_responses, prep_responses, accept_responses>>
+
+\* The snapshot of the fast-path pool is taken in the step in which i joins
+\* the round, and the reply carries the round's epoch. A request that fails
+\* RoundOk is consumed with no other effect.
 HandleBeginRecoveryRequest(i, m) ==
     /\ m.mtype = BeginRecoveryRequest
     /\ i = m.mdest
-    /\ old_view' = [old_view EXCEPT ![i] = m.mold_view]
-    /\ new_view' = [new_view EXCEPT ![i] = m.mnew_view]
-    /\ oepoch' = [oepoch EXCEPT ![i] = m.mnew_view.epoch]
-    /\ jstate' = [jstate EXCEPT ![i] = Recovery]
-    /\ Reply([mtype |-> BeginRecoveryResponse,
-              mjpool |-> jpool[i],
-              msource |-> i,
-              mdest |-> m.msource],
-              m)
-    /\ UNCHANGED <<baseVars,
-                   jepoch, jpool, recovery_set, chosen_value,
-                   br_responses, prep_responses, accept_responses,
-                   clientVars, executionVars>>
+    /\ LET v == m.mnew_view.epoch
+       IN IF RoundOk(i, v)
+          THEN /\ old_view' = [old_view EXCEPT ![i] = m.mold_view]
+               /\ new_view' = [new_view EXCEPT ![i] = m.mnew_view]
+               /\ JoinRound(i, v)
+               /\ Reply([mtype |-> BeginRecoveryResponse,
+                         mepoch |-> v,
+                         mjpool |-> jpool[i],
+                         msource |-> i,
+                         mdest |-> m.msource],
+                         m)
+               /\ UNCHANGED <<baseVars,
+                              jepoch, jpool, recovery_set, chosen_value,
+                              clientVars, executionVars>>
+          ELSE /\ Discard(m)
+               /\ UNCHANGED <<baseVars, jetpackVars, clientVars, executionVars>>
 
+\* A reply is recorded only if it belongs to the coordinator's
+\* current round (oepoch[i]) and the coordinator is still collecting
+\* BeginRecovery replies; otherwise it is consumed with no other effect.
 HandleBeginRecoveryResponse(i, m) ==
     /\ m.mtype = BeginRecoveryResponse
     /\ i = m.mdest
-    /\ jstate[i] = Recovery
-    /\ br_responses' = [br_responses EXCEPT ![i][m.msource] = m.mjpool]
+    /\ br_responses' = IF m.mepoch = oepoch[i] /\ jstate[i] = Recovery
+                       THEN [br_responses EXCEPT ![i][m.msource] = m.mjpool]
+                       ELSE br_responses
     /\ Discard(m)
     /\ UNCHANGED <<baseVars,
                    jstate, jepoch, oepoch, old_view, new_view, jpool,
@@ -515,12 +601,13 @@ CompleteBeginRecovery(i) ==
                    clientVars, executionVars>>
 
 \* Recovery Phase 2: Prepare.
+\* The request carries the round's epoch (moepoch = oepoch[i] = v). Prepare
+\* and Accept never install an epoch at their receiver; FinishRecovery does.
 SendPrepare(i) ==
     /\ jstate[i] = AfterBeginRecovery
     /\ LET view == new_view[i]
            msgSet == { [mtype |-> JetpackPrepareRequest,
                         moepoch |-> oepoch[i],
-                        mjepoch |-> jepoch[i],
                         mmax_seen_ballot |-> jpool[i].max_seen_ballot,
                         msource |-> i,
                         mdest |-> s] : s \in view.replica_ids }
@@ -531,63 +618,45 @@ SendPrepare(i) ==
                          recovery_set, chosen_value, br_responses,
                          accept_responses, clientVars, executionVars>>
 
+\* A Prepare for round v that passes RoundOk and the ballot check makes i
+\* join round v (JoinRound) in the same step and is answered with a reply
+\* tagged v; jepoch is unchanged. Any other Prepare is consumed with no other
+\* effect.
 HandlePrepareRequest(i, m) ==
     /\ m.mtype = JetpackPrepareRequest
     /\ i = m.mdest
-    /\ LET ok == /\ m.moepoch >= oepoch[i]
-                 /\ m.mjepoch >= jepoch[i]
-                 /\ m.mmax_seen_ballot >= jpool[i].max_seen_ballot
-           reply == IF ok THEN
-                       [mtype |-> JetpackPrepareResponse,
-                        mok |-> TRUE,
-                        maccepted_ballot |-> jpool[i].accepted_ballot,
-                        maccepted_value |-> jpool[i].accepted_value,
-                        moepoch |-> oepoch[i],
-                        mjepoch |-> jepoch[i],
-                        mmax_seen_ballot |-> m.mmax_seen_ballot,
-                        msource |-> i,
-                        mdest |-> m.msource]
-                   ELSE
-                       [mtype |-> JetpackPrepareResponse,
-                        mok |-> FALSE,
-                        maccepted_ballot |-> jpool[i].accepted_ballot,
-                        maccepted_value |-> jpool[i].accepted_value,
-                        moepoch |-> oepoch[i],
-                        mjepoch |-> jepoch[i],
-                        mmax_seen_ballot |-> jpool[i].max_seen_ballot,
-                        msource |-> i,
-                        mdest |-> m.msource]
-       IN /\ oepoch' = IF ok THEN [oepoch EXCEPT ![i] = Max({oepoch[i], m.moepoch})]
-                       ELSE oepoch
-          /\ jepoch' = IF ok THEN [jepoch EXCEPT ![i] = Max({jepoch[i], m.mjepoch})]
-                       ELSE jepoch
-          /\ jpool' = IF ok THEN
-                        [jpool EXCEPT ![i].max_seen_ballot = m.mmax_seen_ballot]
-                      ELSE jpool
-          /\ Reply(reply, m)
-          /\ UNCHANGED <<baseVars,
-                         jstate, old_view, new_view, recovery_set, chosen_value,
-                         br_responses, prep_responses, accept_responses,
-                         clientVars, executionVars>>
+    /\ LET v == m.moepoch
+       IN IF RoundOk(i, v) /\ m.mmax_seen_ballot >= jpool[i].max_seen_ballot
+          THEN /\ JoinRound(i, v)
+               /\ jpool' = [jpool EXCEPT ![i].max_seen_ballot = m.mmax_seen_ballot]
+               /\ Reply([mtype |-> JetpackPrepareResponse,
+                         mepoch |-> v,
+                         maccepted_ballot |-> jpool[i].accepted_ballot,
+                         maccepted_value |-> jpool[i].accepted_value,
+                         msource |-> i,
+                         mdest |-> m.msource],
+                         m)
+               /\ UNCHANGED <<baseVars,
+                              jepoch, old_view, new_view, recovery_set, chosen_value,
+                              clientVars, executionVars>>
+          ELSE /\ Discard(m)
+               /\ UNCHANGED <<baseVars, jetpackVars, clientVars, executionVars>>
 
+\* Recorded only for the current round and only while collecting Prepare
+\* replies; otherwise consumed with no other effect.
 HandlePrepareResponse(i, m) ==
     /\ m.mtype = JetpackPrepareResponse
     /\ i = m.mdest
-    /\ IF m.mok THEN
-          /\ prep_responses' =
-                 [prep_responses EXCEPT ![i][m.msource] =
-                     [accepted_ballot |-> m.maccepted_ballot,
-                      accepted_value |-> m.maccepted_value]]
-          /\ UNCHANGED <<oepoch, jepoch, jpool>>
-       ELSE
-          /\ prep_responses' = prep_responses
-          /\ oepoch' = [oepoch EXCEPT ![i] = Max({oepoch[i], m.moepoch})]
-          /\ jepoch' = [jepoch EXCEPT ![i] = Max({jepoch[i], m.mjepoch})]
-          /\ jpool' = [jpool EXCEPT ![i].max_seen_ballot =
-                           Max({jpool[i].max_seen_ballot, m.mmax_seen_ballot})]
+    /\ prep_responses' =
+          IF m.mepoch = oepoch[i] /\ jstate[i] = AfterBeginRecovery
+          THEN [prep_responses EXCEPT ![i][m.msource] =
+                   [accepted_ballot |-> m.maccepted_ballot,
+                    accepted_value |-> m.maccepted_value]]
+          ELSE prep_responses
     /\ Discard(m)
     /\ UNCHANGED <<baseVars,
-                   jstate, old_view, new_view, recovery_set, chosen_value,
+                   jstate, jepoch, oepoch, old_view, new_view, jpool,
+                   recovery_set, chosen_value,
                    br_responses, accept_responses, clientVars, executionVars>>
 
 CompletePrepare(i) ==
@@ -609,13 +678,12 @@ CompletePrepare(i) ==
                    recovery_set, br_responses, prep_responses,
                    accept_responses, clientVars, executionVars>>
 
-\* Recovery Phase 3: Accept.
+\* Recovery Phase 3: Accept (same round tagging as Prepare).
 SendAccept(i) ==
     /\ jstate[i] = AfterPrepare
     /\ LET view == new_view[i]
            msgSet == { [mtype |-> JetpackAcceptRequest,
                         moepoch |-> oepoch[i],
-                        mjepoch |-> jepoch[i],
                         mmax_seen_ballot |-> jpool[i].max_seen_ballot,
                         mvalue |-> chosen_value[i],
                         msource |-> i,
@@ -627,54 +695,42 @@ SendAccept(i) ==
                          recovery_set, chosen_value, br_responses,
                          prep_responses, clientVars, executionVars>>
 
+\* As for Prepare: i joins round v in the same step and replies with a reply
+\* tagged v; jepoch is unchanged; anything else is consumed with no other
+\* effect.
 HandleAcceptRequest(i, m) ==
     /\ m.mtype = JetpackAcceptRequest
     /\ i = m.mdest
-    /\ LET ok == /\ m.moepoch >= oepoch[i]
-                 /\ m.mjepoch >= jepoch[i]
-                 /\ m.mmax_seen_ballot >= jpool[i].max_seen_ballot
-           reply == IF ok THEN
-                       [mtype |-> JetpackAcceptResponse,
-                        mok |-> TRUE,
-                        mmax_seen_ballot |-> m.mmax_seen_ballot,
-                        msource |-> i,
-                        mdest |-> m.msource]
-                   ELSE
-                       [mtype |-> JetpackAcceptResponse,
-                        mok |-> FALSE,
-                        mmax_seen_ballot |-> jpool[i].max_seen_ballot,
-                        msource |-> i,
-                        mdest |-> m.msource]
-       IN /\ oepoch' = IF ok THEN [oepoch EXCEPT ![i] = Max({oepoch[i], m.moepoch})]
-                       ELSE oepoch
-          /\ jepoch' = IF ok THEN [jepoch EXCEPT ![i] = Max({jepoch[i], m.mjepoch})]
-                       ELSE jepoch
-          /\ jpool' = IF ok THEN
-                        [jpool EXCEPT ![i].max_seen_ballot = m.mmax_seen_ballot,
+    /\ LET v == m.moepoch
+       IN IF RoundOk(i, v) /\ m.mmax_seen_ballot >= jpool[i].max_seen_ballot
+          THEN /\ JoinRound(i, v)
+               /\ jpool' = [jpool EXCEPT ![i].max_seen_ballot = m.mmax_seen_ballot,
                                          ![i].accepted_ballot = m.mmax_seen_ballot,
                                          ![i].accepted_value = m.mvalue]
-                      ELSE jpool
-          /\ Reply(reply, m)
-          /\ UNCHANGED <<baseVars,
-                         jstate, old_view, new_view, recovery_set, chosen_value,
-                         br_responses, prep_responses, accept_responses,
-                         clientVars, executionVars>>
+               /\ Reply([mtype |-> JetpackAcceptResponse,
+                         mepoch |-> v,
+                         msource |-> i,
+                         mdest |-> m.msource],
+                         m)
+               /\ UNCHANGED <<baseVars,
+                              jepoch, old_view, new_view, recovery_set, chosen_value,
+                              clientVars, executionVars>>
+          ELSE /\ Discard(m)
+               /\ UNCHANGED <<baseVars, jetpackVars, clientVars, executionVars>>
 
+\* Recorded only for the current round and only while collecting Accept
+\* replies; otherwise consumed with no other effect.
 HandleAcceptResponse(i, m) ==
     /\ m.mtype = JetpackAcceptResponse
     /\ i = m.mdest
-    /\ IF m.mok THEN
-          /\ accept_responses' =
-                 [accept_responses EXCEPT ![i][m.msource] = TRUE]
-          /\ UNCHANGED <<oepoch, jepoch, jpool>>
-       ELSE
-          /\ accept_responses' = accept_responses
-          /\ jpool' = [jpool EXCEPT ![i].max_seen_ballot =
-                          Max({jpool[i].max_seen_ballot, m.mmax_seen_ballot})]
-          /\ UNCHANGED <<oepoch, jepoch>>
+    /\ accept_responses' =
+          IF m.mepoch = oepoch[i] /\ jstate[i] = AfterPrepare
+          THEN [accept_responses EXCEPT ![i][m.msource] = TRUE]
+          ELSE accept_responses
     /\ Discard(m)
     /\ UNCHANGED <<baseVars,
-                   jstate, old_view, new_view, recovery_set, chosen_value,
+                   jstate, jepoch, oepoch, old_view, new_view, jpool,
+                   recovery_set, chosen_value,
                    br_responses, prep_responses, clientVars, executionVars>>
 
 CompleteAccept(i) ==
@@ -687,14 +743,15 @@ CompleteAccept(i) ==
                    recovery_set, chosen_value, br_responses,
                    prep_responses, accept_responses, clientVars, executionVars>>
 
-\* Resubmit chosen_value via Preaccept.
+\* Resubmit chosen_value via Preaccept in the round's view (new_view[i]), whose
+\* epoch FinishRecovery installs.
 Resubmit(i) ==
     /\ jstate[i] = AfterAccept
     /\ LET proposers == new_view[i].proposing_replica_ids
            msgSet == { [mtype |-> PreacceptRequest,
                         msource |-> i,
                         mdest |-> s,
-                        mepoch |-> jepoch[i],
+                        mepoch |-> new_view[i].epoch,
                         mview |-> new_view[i],
                         mcmd |-> cmd] :
                         s \in proposers, cmd \in chosen_value[i] }
@@ -713,6 +770,12 @@ CompleteResubmit(i) ==
                    recovery_set, chosen_value, br_responses,
                    prep_responses, accept_responses, clientVars, executionVars>>
 
+\* The coordinator installs its round's epoch (jepoch := oepoch[i] = v);
+\* HandleFinishRecovery, and WFinishReconfig in the MongoDB composition,
+\* install it at the other servers. The coordinator becomes Leader only if it
+\* is still ToBeLeader: a coordinator that UpdateTerm or Restart has demoted
+\* still finishes its round, and the base protocol elects the next leader,
+\* which runs its own round.
 FinishRecovery(i) ==
     /\ jstate[i] = AfterResubmit
     /\ LET view == new_view[i]
@@ -733,24 +796,33 @@ FinishRecovery(i) ==
           /\ br_responses' = [br_responses EXCEPT ![i] = [s \in Server |-> NilJPool]]
           /\ prep_responses' = [prep_responses EXCEPT ![i] = [s \in Server |-> NilPrepResp]]
           /\ accept_responses' = [accept_responses EXCEPT ![i] = [s \in Server |-> FALSE]]
-          /\ ostate' = [ostate EXCEPT ![i] = Leader]
+          /\ ostate' = [ostate EXCEPT ![i] =
+                           IF ostate[i] = ToBeLeader THEN Leader ELSE ostate[i]]
     /\ UNCHANGED <<currentTerm, log, commitIndex,
                    clientVars, executionVars>>
 
+\* A FinishRecovery for epoch u is applied only if u is newer than the
+\* installed epoch and not older than the round i has joined; any other
+\* FinishRecovery is consumed with no other effect (i stays in recovery mode
+\* and keeps its pool). Applying it does not change i's role: a ToBeLeader i
+\* becomes Leader through its own round (it is Ready again, so it can start
+\* one).
 HandleFinishRecovery(i, m) ==
     /\ m.mtype = FinishRecoveryRequest
     /\ i = m.mdest
-    /\ jepoch' = [jepoch EXCEPT ![i] = m.moepoch]
-    /\ oepoch' = [oepoch EXCEPT ![i] = m.moepoch]
-    /\ old_view' = [old_view EXCEPT ![i] = m.mnew_view]
-    /\ new_view' = [new_view EXCEPT ![i] = m.mnew_view]
-    /\ jpool' = [jpool EXCEPT ![i] = EmptyJPool]
-    /\ jstate' = [jstate EXCEPT ![i] = Ready]
-    /\ recovery_set' = [recovery_set EXCEPT ![i] = {}]
-    /\ chosen_value' = [chosen_value EXCEPT ![i] = {}]
-    /\ ostate' = [ostate EXCEPT ![i] = IF ostate[i] = ToBeLeader THEN Leader ELSE ostate[i]]
+    /\ IF m.moepoch > jepoch[i] /\ m.moepoch >= oepoch[i]
+       THEN /\ jepoch' = [jepoch EXCEPT ![i] = m.moepoch]
+            /\ oepoch' = [oepoch EXCEPT ![i] = m.moepoch]
+            /\ old_view' = [old_view EXCEPT ![i] = m.mnew_view]
+            /\ new_view' = [new_view EXCEPT ![i] = m.mnew_view]
+            /\ jpool' = [jpool EXCEPT ![i] = EmptyJPool]
+            /\ jstate' = [jstate EXCEPT ![i] = Ready]
+            /\ recovery_set' = [recovery_set EXCEPT ![i] = {}]
+            /\ chosen_value' = [chosen_value EXCEPT ![i] = {}]
+       ELSE UNCHANGED <<jepoch, oepoch, old_view, new_view, jpool, jstate,
+                        recovery_set, chosen_value>>
     /\ Discard(m)
-    /\ UNCHANGED <<currentTerm, log, commitIndex,
+    /\ UNCHANGED <<currentTerm, ostate, log, commitIndex,
                    br_responses, prep_responses,
                    accept_responses, clientVars, executionVars>>
 
