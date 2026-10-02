@@ -28,6 +28,11 @@
 \*      and the pendingResponse variable are removed. New members catch up via
 \*      plain AppendEntries from index 1 (less efficient for TLC, but smaller
 \*      vocabulary; revisit if state space bites).
+\*      Without pendingResponse a leader can re-send an AppendEntries request
+\*      that a follower has already acknowledged. AcceptAppendEntriesRequest
+\*      therefore follows the Raft paper, section 5.3: it deletes an existing
+\*      entry only on a term conflict, treats a same-term entry as already
+\*      present, and never lowers commitIndex.
 \*
 \*   5. acked / valueCtr / Value dropped
 \*      Replaced by Jetpack's Commands ([cmd_id, key]) at composition time.
@@ -435,9 +440,13 @@ CanAppend(m, i) ==
     /\ m.mentries # <<>>
     /\ Len(ServerLog(i)) = m.mprevLogIndex
 
+\* Raft paper, section 5.3: an existing entry at index conflicts with the
+\* incoming one only if their terms differ. A same-term entry at the same
+\* index is the same entry (Log Matching), so the log is left unchanged.
 NeedsTruncation(m, i, index) ==
     /\ m.mentries # <<>>
     /\ Len(ServerLog(i)) >= index
+    /\ ServerLog(i)[index].term # m.mentries[1].term
 
 TruncateLog(m, i) == [index \in 1..m.mprevLogIndex |-> ServerLog(i)[index]]
 
@@ -465,13 +474,18 @@ AcceptAppendEntriesRequest ==
                                                      term    |-> 0,
                                                      value   |-> [id      |-> 0,
                                                                   members |-> {}]]]
+                     \* Raft: commitIndex = max(commitIndex, min(leaderCommit,
+                     \* index of last new entry)), so it never decreases.
+                     newCommit  == Max({ServerCommit(i),
+                                        Min({m.mcommitIndex,
+                                             m.mprevLogIndex + Len(m.mentries)})})
                      currConfig == IF hasConfig
                                    THEN ConfigFor(configEntry.index,
                                                   configEntry.entry,
-                                                  m.mcommitIndex)
+                                                  newCommit)
                                    ELSE config[i]
                  IN /\ config'      = [config EXCEPT ![i] = currConfig]
-                    /\ commitIndex' = [commitIndex EXCEPT ![i]["sole"] = m.mcommitIndex]
+                    /\ commitIndex' = [commitIndex EXCEPT ![i]["sole"] = newCommit]
                     /\ ostate'      = [ostate EXCEPT ![i] =
                                          IF i \in currConfig.members
                                          THEN Follower
