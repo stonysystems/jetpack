@@ -318,8 +318,10 @@ run_recovery_test() {
     rm -f /tmp/JM_Jetpack_* 2>/dev/null || true
 
     # Start Jetpack WITHOUT failover config — the script handles the kill externally.
-    # JETPACK_ETCD_RECOVERY is compiled in, so non-leader servers poll for
-    # primary_elected signal and trigger JetpackRecoveryEntry() when found.
+    # JETPACK_ETCD_RECOVERY is compiled in, so every server polls for the
+    # patched etcd's viewchange signal and calls JetpackRecoveryEntry() for a
+    # newer term (with Jetpack recovery only the server co-located with the
+    # new etcd leader, member=).
     local jetpack_pids=()
     if [ "$recovery_latency" -gt 0 ] 2>/dev/null; then
         log_info "Starting Jetpack (3-process WAN mode: h1=127.0.0.1, h2=127.0.0.2, h3=127.0.0.3)"
@@ -400,11 +402,11 @@ run_recovery_test() {
     if [ "$etcd_downtime_ms" != "-1" ] && [ -n "$new_leader_ip" ]; then
         log_info "etcd downtime: ${etcd_downtime_ms}ms (new leader: $new_leader_ip)"
 
-        # Write primary_elected signal for Jetpack servers to detect.
-        # The Jetpack binary (with AWS defined in constants.h) polls for
-        # JM_Jetpack_0.0.0.0, so write the signal there.
-        echo "etcd:primary_elected" > /tmp/JM_Jetpack_0.0.0.0
-        log_info "Wrote primary_elected signal to /tmp/JM_Jetpack_0.0.0.0"
+        # No signal is written from here: the patched etcd (see the Dockerfile)
+        # appends "etcd:viewchange term=T nonce=N lead=L member=M" to
+        # JM_Jetpack_0.0.0.0 itself (the AWS mode of constants.h polls that
+        # file). A term-less etcd:primary_elected starts no recovery, and
+        # writing a line with '>' would truncate the viewchange and ack lines.
 
         # Also update the JetPack/leader key in etcd
         etcdctl --endpoints="http://${new_leader_ip}:2379" put JetPack/leader "$new_leader_ip" >/dev/null 2>&1 || true

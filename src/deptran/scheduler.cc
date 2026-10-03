@@ -25,6 +25,7 @@
 #include <sstream>
 
 #include "../../jm_file_signal.h"
+#include "jetpack_term_source.h"
 
 namespace janus {
 
@@ -296,6 +297,10 @@ void TxLogServer::get_prepare_log(i64 txn_id,
 TxLogServer::TxLogServer() : mtx_() {
   command_pool_.set_owner(this);
   mdb_txn_mgr_ = make_shared<mdb::TxnMgrUnsafe>();
+  // A restarted replica is amnesiac before it serves its first RPC.
+  if (JpRejoinRequested()) {
+    jp_rejoin_ = jp::RejoinState(true);
+  }
   if (Config::GetConfig()->do_logging()) {
     auto path = Config::GetConfig()->log_path();
     // TODO free this
@@ -343,6 +348,9 @@ TxLogServer::TxLogServer(int mode) : TxLogServer() {
 }
 
 TxLogServer::~TxLogServer() {
+  // The recovery driver and FinishRecovery stragglers stop at their next
+  // wake-up (the reactor keeps running after ServerWorker::ShutDown).
+  jp_alive_->store(false);
   auto it = mdb_txns_.begin();
   for (; it != mdb_txns_.end(); it++)
     Log::info("tid: %ld still running", it->first);
@@ -361,6 +369,13 @@ TxLogServer::~TxLogServer() {
   std::vector<double> pool_size_distribution = command_pool_.pool_size_distribution();
   Log_info("loc_id=%d command pool size distribution 50pct %.2f 90pct %.2f 99pct %.2f ave %.2f",
     loc_id_, pool_size_distribution[0], pool_size_distribution[1], pool_size_distribution[2], pool_size_distribution[3]);
+  if (rep_sched_ == nullptr) {
+    // The fast-path gate counts on the replication server; the tx
+    // scheduler in front of it would only print zeros.
+    Log_info("loc_id=%d jetpack fast-path rejects not_ready %" PRIu64 " view_mismatch %" PRIu64
+             " view=%u vid=%u",
+             loc_id_, jp_fp_not_ready_, jp_fp_view_mismatch_, jepoch_, oepoch_);
+  }
 #ifdef COMMAND_POOL_LOG_DEBUG
   if (loc_id_ == 0 || loc_id_ == 1)
     command_pool_.print_log();
@@ -535,14 +550,22 @@ double TxLogServer::GetQueueDepthForRule() {
 }
 
 void TxLogServer::OnRuleSpeculativeExecute(const shared_ptr<Marshallable>& cmd,
+                    epoch_t req_view,
                     bool_t* accepted,
                     value_t* result,
                     bool_t* is_leader,
                     double* cpu_usage,
-                    double* queue_depth) {
+                    double* queue_depth,
+                    epoch_t* reply_view) {
 #ifdef JETPACK_PROF
   auto prof_t0 = std::chrono::steady_clock::now();
 #endif
+  // All Jetpack state lives on the replication server; this tx_sched_'s own
+  // jepoch_/jetpack_status_ are never updated.
+  TxLogServer* rs = rep_sched_ ? rep_sched_ : this;
+  // First, so that every return path carries it (the generated wrapper's
+  // outputs start uninitialized): the installed view, also in RECOVERY.
+  *reply_view = rs->jepoch_;
   if (paused_) { // [Jetpack] Bad fix, should be blocked from handle_write, not to this layer
     *accepted = false;
     *result = 0;
@@ -551,8 +574,32 @@ void TxLogServer::OnRuleSpeculativeExecute(const shared_ptr<Marshallable>& cmd,
     if (queue_depth) *queue_depth = -1.0;
     return;
   }
+  // View gate, decided without yielding and before the CURP branch and
+  // the ZERO_OVERHEAD variant: ack only if READY and the request was sent in
+  // the installed view. Outside Jetpack recovery every replica stays READY in
+  // view 0 and clients send view 0, so the gate never fires there. An
+  // amnesiac replica (restarted with an empty pool) acks nothing until it
+  // installs a fresh view.
+  const bool ready = rs->jetpack_status_ == JetpackStatus::READY && rs->jp_rejoin_.AckAllowed();
+  const bool view_ok = jp::AckAllowed(ready, rs->jepoch_, req_view);
   bool no_conflict;
-  if (Config::GetConfig()->IsCurpMode()) {
+  if (!view_ok) {
+    no_conflict = false;
+    if (!ready) {
+      // RECOVERY (or amnesiac): nothing is inserted (push_back refuses in
+      // RECOVERY as well; an amnesiac pool is cleared when it rejoins).
+      rs->jp_fp_not_ready_++;
+    } else {
+      rs->jp_fp_view_mismatch_++;
+      // Record the command as a non-acked conflict guard. Its Dispatch is
+      // not view-gated, so it may sit in the leader's log ahead of a later
+      // conflicting command of this view; it never becomes the bucket's
+      // to_recover entry and is GC'd when it commits.
+      if (!Config::GetConfig()->IsCurpMode()) {
+        rs->command_pool_.push_back(cmd, /*allow_ack=*/false);
+      }
+    }
+  } else if (Config::GetConfig()->IsCurpMode()) {
     // CURP path: every replica records the optimistic attempt in its
     // own witness and signals back whether any in-flight attempt on
     // the same key would conflict (write-write or write-read).
@@ -617,7 +664,9 @@ void TxLogServer::OnRuleSpeculativeExecute(const shared_ptr<Marshallable>& cmd,
     *accepted = false;
     *result = 0;
   }
-  *is_leader = IsLeader();
+  // The proposer of the request's view (IsLeader() outside
+  // Jetpack recovery).
+  *is_leader = rs->JetpackIsProposerOf(req_view);
   if (cpu_usage) {
     *cpu_usage = SampleCpuUsage();
   }
@@ -717,16 +766,23 @@ void TxLogServer::RuleCommandPoolGC(const shared_ptr<Marshallable>& cmd) {
 }
 
 
-void RevoveryCandidates::push_back(uint64_t cmd_id, shared_ptr<Marshallable> cmd, bool is_write) {
-  candidates_[cmd_id] = Entry{cmd, is_write};
-  if (total_write_ == 0 && is_write) {
-    verify(to_recover_id_ == (uint64_t)(-1));
+void RevoveryCandidates::insert(uint64_t cmd_id, shared_ptr<Marshallable> cmd,
+                                bool is_write, bool acked) {
+  candidates_[cmd_id] = Entry{cmd, is_write, acked};
+  if (acked && is_write) {
+    // An acked write needs a conflict-free bucket, so no other write exists.
+    verify(total_write_ == 0 && to_recover_id_ == (uint64_t)(-1));
     to_recover_id_ = cmd_id;
   }
   total_write_ += is_write;
 #ifdef JETPACK_DEDUPLICATE_OPTIMIZATION
   appeared_[cmd_id] = true;
 #endif
+}
+
+const RevoveryCandidates::Entry* RevoveryCandidates::find(uint64_t cmd_id) const {
+  auto it = candidates_.find(cmd_id);
+  return it == candidates_.end() ? nullptr : &it->second;
 }
 
 bool RevoveryCandidates::remove(uint64_t cmd_id) {
@@ -753,7 +809,7 @@ size_t RevoveryCandidates::size() const {
   return candidates_.size();
 }
 
-int RevoveryCandidates::total_write() {
+int RevoveryCandidates::total_write() const {
   return total_write_;
 }
 
@@ -761,7 +817,7 @@ bool RevoveryCandidates::has_cmd_to_recover() const {
   return to_recover_id_ != (uint64_t)(-1);
 }
 
-shared_ptr<Marshallable> RevoveryCandidates::cmd_to_recover() {
+shared_ptr<Marshallable> RevoveryCandidates::cmd_to_recover() const {
   if (to_recover_id_ != (uint64_t)(-1)) {
     auto it = candidates_.find(to_recover_id_);
     if (it != candidates_.end()) {
@@ -818,7 +874,7 @@ JetpackCommandPool::~JetpackCommandPool() {
 #endif
 }
 
-bool JetpackCommandPool::push_back(const shared_ptr<Marshallable>& cmd) {
+bool JetpackCommandPool::push_back(const shared_ptr<Marshallable>& cmd, bool allow_ack) {
   if (owner_ && owner_->jetpack_status_ == TxLogServer::JetpackStatus::RECOVERY) {
 #ifdef JETPACK_RECOVERY_DEBUG
     Log_info("[JETPACK-DEBUG] JetpackCommandPool::push_back rejected because Jetpack is recovering");
@@ -851,43 +907,59 @@ bool JetpackCommandPool::push_back(const shared_ptr<Marshallable>& cmd) {
         std::memory_order_relaxed);
   }
 #endif
+  // A redelivered request gets its first verdict back and changes nothing.
+  if (const auto* seen = bucket.find(cmd_id)) {
+    return seen->acked;
+  }
   bool was_empty = bucket.size() == 0;
 
 #ifdef JETPACK_RECOVERY_DEBUG
-  Log_info("[JETPACK-DEBUG] JetpackCommandPool::push_back called for key=%d, cmd_id=%lu", key, cmd_id);
+  Log_info("[JETPACK-DEBUG] JetpackCommandPool::push_back called for key=%d, cmd_id=%lu allow_ack=%d",
+           key, cmd_id, allow_ack);
 #endif
 
 #ifdef JETPACK_PROF
   auto t_inner0 = std::chrono::steady_clock::now();
 #endif
 #ifdef READ_NOT_CONFLICT_OPTIMIZATION
-  if (bucket.total_write() == 0) {
+  bool no_conflict = bucket.total_write() == 0;
+#else
+  bool no_conflict = bucket.size() == 0;
 #endif
-#ifndef READ_NOT_CONFLICT_OPTIMIZATION
-  if (bucket.size() == 0) {
-#endif
-    // not exist conflict
-    bucket.push_back(cmd_id, cmd, is_write);
+  // Only an acked write becomes the bucket's to_recover entry; a non-acked
+  // insert is recorded purely as a conflict guard.
+  bool acked = allow_ack && no_conflict;
+  bucket.insert(cmd_id, cmd, is_write, acked);
 #ifdef JETPACK_RECOVERY_DEBUG
+  if (acked) {
     Log_info("[JETPACK-DEBUG] Added cmd to candidates[%d], no conflict", key);
+  } else {
+    Log_info("[JETPACK-DEBUG] Added cmd to candidates[%d], not acked (size now=%zu)",
+             key, bucket.size());
+  }
 #endif
 #ifdef COMMAND_POOL_LOG_DEBUG
-    pool_log_.push_back(CommandPoolLog(0, cmd, 1, pool_size_));
+  pool_log_.push_back(CommandPoolLog(0, cmd, acked, pool_size_));
 #endif
 #ifdef COMMAND_POOL_ON_DISK
+  if (acked) {
     // Disk write still needs value; fall back to full parse on the rare path.
     WriteCommandToDisk(SimpleRWCommand(cmd));
+  }
 #endif
-    pool_cmd_count_++;
-    if (was_empty) {
-      pool_size_distribution_.mid_time_append(++pool_size_);
-    }
+  pool_cmd_count_++;
+  // Also for a non-acked insert into an empty bucket, so that remove() (which
+  // decrements when the last entry leaves) stays balanced.
+  if (was_empty) {
+    pool_size_distribution_.mid_time_append(++pool_size_);
+  }
 #ifdef JETPACK_PROF
-    auto t_inner1 = std::chrono::steady_clock::now();
-    if (owner_) {
-      owner_->prof_pool_inner_insert_ns_.fetch_add(
-          std::chrono::duration_cast<std::chrono::nanoseconds>(t_inner1 - t_inner0).count(),
-          std::memory_order_relaxed);
+  auto t_inner1 = std::chrono::steady_clock::now();
+  if (owner_) {
+    owner_->prof_pool_inner_insert_ns_.fetch_add(
+        std::chrono::duration_cast<std::chrono::nanoseconds>(t_inner1 - t_inner0).count(),
+        std::memory_order_relaxed);
+    if (acked) {
       uint64_t prev_keys = owner_->prof_pool_peak_keys_.load(std::memory_order_relaxed);
       while ((uint64_t)pool_size_ > prev_keys &&
              !owner_->prof_pool_peak_keys_.compare_exchange_weak(prev_keys, pool_size_));
@@ -895,29 +967,9 @@ bool JetpackCommandPool::push_back(const shared_ptr<Marshallable>& cmd) {
       while ((uint64_t)pool_cmd_count_ > prev_cmds &&
              !owner_->prof_pool_peak_cmds_.compare_exchange_weak(prev_cmds, pool_cmd_count_));
     }
-#endif
-    return true;
-  } else {
-    // exist conflict, candidates_[key].size() >= 1
-    bucket.push_back(cmd_id, cmd, is_write);
-#ifdef JETPACK_RECOVERY_DEBUG
-    Log_info("[JETPACK-DEBUG] Added cmd to candidates[%d], WITH conflict (size now=%zu)",
-             key, bucket.size());
-#endif
-#ifdef COMMAND_POOL_LOG_DEBUG
-    pool_log_.push_back(CommandPoolLog(0, cmd, 0, pool_size_));
-#endif
-    pool_cmd_count_++;
-#ifdef JETPACK_PROF
-    auto t_inner1 = std::chrono::steady_clock::now();
-    if (owner_) {
-      owner_->prof_pool_inner_insert_ns_.fetch_add(
-          std::chrono::duration_cast<std::chrono::nanoseconds>(t_inner1 - t_inner0).count(),
-          std::memory_order_relaxed);
-    }
-#endif
-    return false;
   }
+#endif
+  return acked;
 }
 
 int JetpackCommandPool::remove(const shared_ptr<Marshallable>& cmd) {
@@ -1048,35 +1100,34 @@ std::vector<double> JetpackCommandPool::pool_size_distribution() {
   return ret;
 }
 
-shared_ptr<VecRecData> JetpackCommandPool::id_set() {
-  auto result = std::make_shared<VecRecData>();
-  result->key_data_ = std::make_shared<vector<key_t>>();
-  
+void JetpackCommandPool::AckedSnapshot(KeyCmdBatchData& out) const {
   for (const auto& kv : candidates_) {
-    key_t key = kv.first;
-    if (kv.second.has_cmd_to_recover()) {
-      result->key_data_->push_back(key);
+    if (!kv.second.has_cmd_to_recover()) {
+      continue;
+    }
+    // nullptr: the reported write was GC'd (committed) while a later
+    // conflicting write is still recorded; nothing to recover for it.
+    auto cmd = kv.second.cmd_to_recover();
+    if (cmd) {
+      out.AddEntry(kv.first, cmd);
     }
   }
-  
 #ifdef JETPACK_RECOVERY_DEBUG
-  Log_info("[JETPACK-RECOVERY-CommandPool] id_set size %d", result->key_data_->size());
+  Log_info("[JETPACK-RECOVERY-CommandPool] acked snapshot size %zu", out.Size());
 #endif
-
-  return result;
 }
 
-void JetpackCommandPool::reset() {
+bool JetpackCommandPool::HasAckedWrite(key_t key) const {
+  // find(), not operator[]: a lookup must not create an empty bucket.
+  auto it = candidates_.find(key);
+  return it != candidates_.end() && it->second.has_cmd_to_recover();
+}
+
+void JetpackCommandPool::ClearPool() {
   candidates_.clear();
   pool_size_ = 0;
   pool_cmd_count_ = 0;
   pool_size_distribution_ = Distribution();
-  
-  // Reset recovery related fields
-  max_seen_ballot_ = -1;
-  max_accepted_ballot_ = -1;
-  sid_ = -1;
-  committed_ = false;
 }
 
 
@@ -1091,933 +1142,1484 @@ void JetpackCommandPool::print_log() {
 #endif
 
 
-void TxLogServer::JetpackRecoveryEntry(epoch_t etcd_view, uint64_t etcd_nonce) {
-  jetpack_recovery_start_time_ = std::chrono::steady_clock::now();
-  struct timeval recovery_start_tv;
-  gettimeofday(&recovery_start_tv, nullptr);
-  double recovery_start_ms = static_cast<double>(recovery_start_tv.tv_sec) * 1000.0 +
-                             static_cast<double>(recovery_start_tv.tv_usec) / 1000.0;
-  Log_info("[JETPACK-RECOVERY] ===== STARTING JETPACK RECOVERY ====== time=%.6fms",
-           recovery_start_ms);
-  Log_info("[JETPACK-RECOVERY] Leader: site_id=%d, jepoch=%d, oepoch=%d", site_id_, jepoch_, oepoch_);
-  jetpack_status_ = TxLogServer::JetpackStatus::RECOVERY;
+/************************ Jetpack recovery begin ****************************/
+// Replica handlers (non-yielding, guard first, no side effect on reject) and
+// the recovery coordinator (one driver coroutine per server object,
+// round-local state, re-validated after every yield).
 
-  // Emit fastpath_stopped signal so the new leader's backend knows the
-  // Jetpack fast path is now stopped and it is safe to resume request
-  // processing.  This signal must be written as soon as we enter RECOVERY,
-  // *before* the multi-phase recovery protocol runs.
-  {
-    std::string host;
-    if (frame_ && frame_->site_info_) {
-      auto* si = frame_->site_info_;
-      if (!si->host.empty())
-        host = si->host;
-      else if (!si->proc_name.empty())
-        host = si->proc_name;
-      else if (!si->name.empty())
-        host = si->name;
-    }
-#ifdef AWS
-    host = "0.0.0.0";
-#endif
-    jm_signal::set_key("jetpack", "fastpath_stopped", host);
-    Log_info("[JETPACK-RECOVERY] Emitted jetpack:fastpath_stopped on JM_Jetpack_%s",
-             host.c_str());
-    // Route 2a: the term+nonce-matched ack that releases the etcd new-leader
-    // barrier (etcd's jetpackViewBarrier polls for exactly this line). Echoing
-    // etcd's per-boot nonce makes it robust against a stale ack left in the
-    // append-only signal file by a previous run, whose terms restart small.
-    // etcd_view == 0 for non-etcd callers -> no ack.
-    if (etcd_view != 0) {
-      jm_signal::set_key("jetpack",
-          "leader_paused term=" + std::to_string(etcd_view) +
-          " nonce=" + std::to_string(etcd_nonce), host);
-      Log_info("[JETPACK-RECOVERY] Emitted jetpack:leader_paused term=%u nonce=%llu on JM_Jetpack_%s",
-               (unsigned) etcd_view, (unsigned long long) etcd_nonce, host.c_str());
-    }
-  }
+namespace {
 
-  // Combined recovery RPC: updates views and pulls commands
-  JetpackRecovery();
+// Timing (kept here, not in constants.h, to avoid rebuilding every TU).
+const int64_t kJpSliceUs = 250 * 1000;              // longest single wait
+const int64_t kJpPhaseDeadlineUs = 2 * 1000 * 1000; // Pull / Accept round
+const int64_t kJpBackoffMinUs = 10 * 1000;          // round + resubmit retry
+const int64_t kJpBackoffMaxUs = 1000 * 1000;
+const int64_t kJpFrBackoffMinUs = 1000 * 1000;      // FinishRecovery resend
+const int64_t kJpFrBackoffMaxUs = 10 * 1000 * 1000;
+const int64_t kJpResubmitLogEveryUs = 10 * 1000 * 1000;
+const int64_t kJpDriverIdleUs = 100 * 1000;
+const int64_t kJpTakeoverTickUs = 500 * 1000;       // takeover timer resolution
+const int64_t kJpRejoinTermWaitUs = 30LL * 1000 * 1000;  // no rejoin term by then: Log_error
 
-  // // Comment JetpackRecovery(); and uncomment below can enable original path failure recovery only
-  // Log_info("Mark FinishRecovery on %s", "recovery_finish");
-  // jm_signal::set_key("jetpack", "recovery_finish", "recovery_finish");
-  // Log_info("[JETPACK-RECOVERY] Wrote finish signal to JM_Jetpack_%s", "recovery_finish");
-  // if (jm_signal::exists_key("failure", "failure_triggered", "failure_triggered")) {
-  //   jm_signal::set_key("jetpack", "recovery_finish_after_failure", "recovery_finish_after_failure");
-  //   Log_info("[JETPACK-RECOVERY] Wrote post-failure finish signal to JM_Jetpack_%s",
-  //             "recovery_finish_after_failure");
-  // }
-  // auto e = commo()->JetpackBroadcastFinishRecovery(partition_id_, site_id_, oepoch_);
-  
-  auto recovery_end_time = std::chrono::steady_clock::now();
-  auto recovery_duration_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-      recovery_end_time - jetpack_recovery_start_time_).count();
-  struct timeval recovery_end_tv;
-  gettimeofday(&recovery_end_tv, nullptr);
-  double recovery_end_ms = static_cast<double>(recovery_end_tv.tv_sec) * 1000.0 +
-                           static_cast<double>(recovery_end_tv.tv_usec) / 1000.0;
-  Log_info("[JETPACK-RECOVERY] ===== JETPACK RECOVERY COMPLETED ====== duration=%lldms time=%.6fms",
-           static_cast<long long>(recovery_duration_ms),
-           recovery_end_ms);
+// Raft stability marker: a recovery-flagged no-op committed in term v.
+// Its tx id lives far above every client tx id ((coo_id << 32) + n), and its
+// ret_ is REJECT, so CommitReplicated finishes it without executing anything.
+const txnid_t kJpMarkerTxBase = 0xFFFFFF00ULL << 32;
+const int32_t kJpMarkerClientId = -2;
+// The replication coordinator returned without calling back (e.g. the Raft
+// term moved while it waited, or the server is paused).
+const int kJpNoCallback = -1001;
+
+int64_t JpNowUs() {
+  return std::chrono::duration_cast<std::chrono::microseconds>(
+      std::chrono::steady_clock::now().time_since_epoch()).count();
 }
 
+double JpWallMs() {
+  struct timeval tv;
+  gettimeofday(&tv, nullptr);
+  return static_cast<double>(tv.tv_sec) * 1000.0 +
+         static_cast<double>(tv.tv_usec) / 1000.0;
+}
 
-void TxLogServer::JetpackRecovery() {
-  Log_info("[JETPACK-RECOVERY] Step 1: PullRecovery + Prepare (parallel) for partition %d", partition_id_);
+long long JpMsSince(const std::chrono::steady_clock::time_point& t) {
+  return (long long) std::chrono::duration_cast<std::chrono::milliseconds>(
+      std::chrono::steady_clock::now() - t).count();
+}
 
-  const auto step1_start = std::chrono::steady_clock::now();
-  const auto pull_start = step1_start;
-  auto recovery_e = commo()->JetpackBroadcastPullRecovery(partition_id_, site_id_, old_view_, new_view_, jepoch_, oepoch_);
+// rrr's Event::Wait(0) means "no timeout", so every computed wait is
+// clamped to [1us, kJpSliceUs].
+uint64_t JpClampWaitUs(int64_t us) {
+  if (us < 1) return 1;
+  if (us > kJpSliceUs) return (uint64_t) kJpSliceUs;
+  return (uint64_t) us;
+}
 
-  const auto prepare_start = std::chrono::steady_clock::now();
-  auto prepare_e = commo()->JetpackBroadcastPrepare(
-      partition_id_, site_id_, jepoch_, oepoch_, command_pool_.max_seen_ballot_);
+int64_t JpJitter(int64_t us) {
+  return std::max<int64_t>(1, (int64_t) (us * RandomGenerator::rand_double(0.5, 1.5)));
+}
 
-  // Round 1: PullRecovery and Prepare in parallel.
-  prepare_e->Wait();
-  auto prepare_wait_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-      std::chrono::steady_clock::now() - prepare_start).count();
-  recovery_e->Wait();
-  auto pull_wait_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-      std::chrono::steady_clock::now() - pull_start).count();
-  const auto round1_handle_start = std::chrono::steady_clock::now();
+// 10ms, 20ms, ... capped at 1s; attempt >= 1.
+int64_t JpRetryBackoffUs(int attempt) {
+  int64_t b = kJpBackoffMinUs;
+  for (int i = 1; i < attempt && b < kJpBackoffMaxUs; i++) b *= 2;
+  return JpJitter(std::min(b, kJpBackoffMaxUs));
+}
 
-  if (!recovery_e->Yes()) {
-    Log_info("[JETPACK-RECOVERY] PullRecovery FAILED: got %d/%d responses wait=%lldms",
-             recovery_e->n_voted_yes_, recovery_e->n_total_, (long long) pull_wait_ms);
-    if (recovery_e->max_jepoch_ > jepoch_) {
-#ifdef JETPACK_RECOVERY_DEBUG
-      Log_info("[JETPACK-RECOVERY] Updating jepoch from %d to %d", jepoch_, recovery_e->max_jepoch_);
-#endif
-      jepoch_ = recovery_e->max_jepoch_;
-      command_pool_.reset();
-    }
-    if (recovery_e->max_oepoch_ > oepoch_) {
-#ifdef JETPACK_RECOVERY_DEBUG
-      Log_info("[JETPACK-RECOVERY] Updating oepoch from %d to %d", oepoch_, recovery_e->max_oepoch_);
-#endif
-      oepoch_ = recovery_e->max_oepoch_;
-    }
-    auto step1_end = std::chrono::steady_clock::now();
-    auto handle_round1_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-        step1_end - round1_handle_start).count();
-    auto step1_total_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-        step1_end - step1_start).count();
-    Log_info("[JETPACK-RECOVERY][STEP1] pull_wait=%lldms prepare_wait=%lldms handle=%lldms total=%lldms",
-             (long long) pull_wait_ms, (long long) prepare_wait_ms,
-             (long long) handle_round1_ms, (long long) step1_total_ms);
-    return;
+void JpSetSignal(const std::string& role, const std::string& value, const std::string& host) {
+  try {
+    jm_signal::set_key(role, value, host);
+  } catch (const std::exception& e) {
+    Log_warn("[JETPACK-RECOVERY] failed to write signal %s:%s on JM_Jetpack_%s: %s",
+             role.c_str(), value.c_str(), host.c_str(), e.what());
   }
+}
 
-  auto recovered_key_ids = recovery_e->GetRecoveredKeyIds();
-  Log_info("[JETPACK-RECOVERY] PullRecovery SUCCESS: recovered %zu key-ids wait=%lldms",
-           recovered_key_ids.size(), (long long) pull_wait_ms);
+// Recovery classification of the replies of a failed round.
+struct JpRoundClass {
+  bool superseded = false;   // some replica joined a view newer than v
+  bool finished = false;     // some replica already installed v or newer
+  ballot_t max_promise_same_view = -1;
+};
 
-  sid = ((sid_cnt_++) << 8) | loc_id_;
-
-  // Record id set into local rec_set_
-  rec_set_.set_rec_set(sid, recovered_key_ids);
-  // Build missing list where local command pool lacks matching cmd id
-  std::vector<std::pair<key_t, uint64_t>> missing_ids;
-  for (const auto& entry : recovered_key_ids) {
-    key_t key = entry.first;
-    uint64_t cmd_id = entry.second;
-    auto it = command_pool_.candidates_.find(key);
-    auto has_local = it != command_pool_.candidates_.end() && it->second.get_cmd(cmd_id);
-    if (!has_local) {
-      missing_ids.push_back(entry);
+template <class R>
+JpRoundClass JpClassify(const std::vector<R>& replies, epoch_t v) {
+  JpRoundClass c;
+  for (const auto& r : replies) {
+    if (r.vid > v) c.superseded = true;
+    if (r.view_id >= v) c.finished = true;
+    if (jp::BallotView(r.promised) == v && r.promised > c.max_promise_same_view) {
+      c.max_promise_same_view = r.promised;
     }
   }
+  return c;
+}
 
-  bool prepare_ok = prepare_e->Yes();
-  int propose_sid = sid;
-  if (prepare_ok && prepare_e->HasValue()) {
-    propose_sid = prepare_e->GetSid();
-#ifdef JETPACK_RECOVERY_DEBUG
-    Log_info("[JETPACK-RECOVERY] Using previously accepted value: sid=%d", propose_sid);
-#endif
-  } else if (prepare_ok) {
-#ifdef JETPACK_RECOVERY_DEBUG
-    Log_info("[JETPACK-RECOVERY] No previous value, proposing recovered values: sid=%d", propose_sid);
-#endif
+typedef shared_ptr<Marshallable> JpBody;
+
+// Pull reply -> rule input. The cmd id is recomputed from the body, which is
+// what the pool keyed it by.
+bool JpToEntries(const shared_ptr<KeyCmdBatchData>& batch,
+                 std::vector<jp::Entry<JpBody>>* out) {
+  if (!batch) return true;
+  bool all_ok = true;
+  for (size_t i = 0; i < batch->Size(); i++) {
+    auto cmd = batch->GetCommand(i);
+    key_t key = 0;
+    uint64_t cmd_id = 0;
+    bool is_write = false;
+    if (!cmd || !SimpleRWCommand::ExtractPoolKeys(cmd, &key, &cmd_id, &is_write)) {
+      all_ok = false;
+      continue;
+    }
+    out->push_back(jp::Entry<JpBody>{batch->GetKey(i), cmd_id, cmd});
   }
+  return all_ok;
+}
 
-  auto step1_end = std::chrono::steady_clock::now();
-  auto handle_round1_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-      step1_end - round1_handle_start).count();
-  auto step1_total_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-      step1_end - step1_start).count();
-  Log_info("[JETPACK-RECOVERY][STEP1] pull_wait=%lldms prepare_wait=%lldms handle=%lldms total=%lldms",
-           (long long) pull_wait_ms, (long long) prepare_wait_ms,
-           (long long) handle_round1_ms, (long long) step1_total_ms);
-
-  // Round 2: RecordCmd and Accept (if Prepare succeeded) in parallel.
-  const auto step2_start = std::chrono::steady_clock::now();
-  auto record_start = std::chrono::steady_clock::now();
-  auto record_e = commo()->JetpackBroadcastRecordCmd(partition_id_, site_id_, jepoch_, oepoch_, sid, recovered_key_ids, missing_ids);
-
-  std::shared_ptr<JetpackAcceptQuorumEvent> accept_e = nullptr;
-  std::chrono::steady_clock::time_point accept_start;
-  if (prepare_ok) {
-    Log_info("[JETPACK-RECOVERY] Step 2: Starting Paxos Accept phase");
-    command_pool_.max_seen_ballot_++;
-#ifdef JETPACK_RECOVERY_DEBUG
-    Log_info("[JETPACK-RECOVERY] Accept: proposing sid=%d, ballot=%lld",
-             propose_sid, command_pool_.max_seen_ballot_);
-#endif
-    accept_start = std::chrono::steady_clock::now();
-    accept_e = commo()->JetpackBroadcastAccept(
-        partition_id_, site_id_, jepoch_, oepoch_, command_pool_.max_seen_ballot_, propose_sid);
+// The pieces of a recovered command body (pool entries are VecPieceData).
+shared_ptr<VecPieceData> JpRecoveredPieces(const shared_ptr<Marshallable>& cmd) {
+  if (!cmd) return nullptr;
+  shared_ptr<Marshallable> inner = cmd;
+  if (inner->kind_ == MarshallDeputy::CMD_TPC_BATCH) {
+    auto batch = std::dynamic_pointer_cast<TpcBatchCommand>(inner);
+    if (!batch || batch->Size() != 1 || !batch->cmds_[0]) return nullptr;
+    inner = batch->cmds_[0]->cmd_;
+  } else if (inner->kind_ == MarshallDeputy::CMD_TPC_COMMIT) {
+    auto tpc = std::dynamic_pointer_cast<TpcCommitCommand>(inner);
+    if (!tpc) return nullptr;
+    inner = tpc->cmd_;
   }
+  if (!inner) return nullptr;
+  if (inner->kind_ == MarshallDeputy::CMD_VEC_PIECE) {
+    auto vpd = std::dynamic_pointer_cast<VecPieceData>(inner);
+    if (!vpd || !vpd->sp_vec_piece_data_ || vpd->sp_vec_piece_data_->empty()) return nullptr;
+    return vpd;
+  }
+  if (inner->kind_ == MarshallDeputy::CONTAINER_CMD) {
+    auto piece = std::dynamic_pointer_cast<TxPieceData>(inner);
+    if (!piece) return nullptr;
+    auto vpd = std::make_shared<VecPieceData>();
+    vpd->sp_vec_piece_data_ = std::make_shared<vector<shared_ptr<TxPieceData>>>();
+    vpd->sp_vec_piece_data_->push_back(piece);
+    return vpd;
+  }
+  return nullptr;
+}
 
-  long long accept_wait_ms = 0;
-  if (accept_e) {
-    accept_e->Wait();
-    accept_wait_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-        std::chrono::steady_clock::now() - accept_start).count();
+// One member of the chosen recovery set (or the Raft stability marker).
+struct JpMember {
+  enum State { kPending, kInflight, kDone, kFailed };
+  key_t key = 0;
+  uint64_t cmd_id = 0;
+  txnid_t tx_id = 0;
+  shared_ptr<VecPieceData> body;
+  bool marker = false;
+  State state = kPending;
+  int attempts = 0;
+  int64_t next_try_us = 0;
+  int last_code = 0;
+};
+
+}  // namespace
+
+bool TxLogServer::JetpackRecoveryEnabled() {
+  auto* cfg = Config::GetConfig();
+  if (cfg == nullptr) return false;
+  if (cfg->tx_proto_ != MODE_RULE || cfg->IsCurpMode()) return false;
+  switch (cfg->replica_proto_) {
+    case MODE_RAFT:
+    case MODE_ETCD:
+    case MODE_MONGODB:
+    case MODE_ZOOKEEPER:
+      return true;
+    default:
+      return false;
   }
-  if (record_e) {
-    record_e->Wait();
+}
+
+bool TxLogServer::JpTakeoverEnabled() {
+  if (!JetpackRecoveryEnabled()) return false;
+  switch (Config::GetConfig()->replica_proto_) {
+    case MODE_ETCD:
+    case MODE_MONGODB:
+    case MODE_ZOOKEEPER:
+      return true;
+    default:
+      return false;
   }
-  auto record_wait_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-      std::chrono::steady_clock::now() - record_start).count();
-  
-      auto round2_handle_start = std::chrono::steady_clock::now();
-  
-  if (record_e) {
-    if (record_e->Yes()) {
-      std::vector<std::pair<key_t, shared_ptr<Marshallable>>> missed_cmds;
-      for (const auto& kv : record_e->GetRecoveredCmds()) {
-        auto key = kv.first;
-        auto cmd = kv.second;
-        if (!cmd) {
-          continue;
-        }
-        missed_cmds.emplace_back(key, cmd);
+}
+
+bool TxLogServer::JpRejoinRequested() {
+  const char* e = std::getenv("JETPACK_REJOIN");
+  return e != nullptr && std::string(e) == "1" && JetpackRecoveryEnabled();
+}
+
+const char* TxLogServer::JpValidityName(JpValidity r) {
+  switch (r) {
+    case kJpValid: return "valid";
+    case kJpSuperseded: return "superseded";
+    case kJpFinishedElsewhere: return "finished_elsewhere";
+    case kJpNotCoordinator: return "not_coordinator";
+    case kJpTakenOver: return "taken_over";
+  }
+  return "unknown";
+}
+
+void TxLogServer::JpJoin(epoch_t v) {
+  verify(v > jepoch_ && v >= oepoch_);
+  oepoch_ = v;
+  jetpack_status_ = JetpackStatus::RECOVERY;
+  // Recovery progress here (the takeover timer counts from it).
+  jp_progress_us_ = JpNowUs();
+}
+
+const View& TxLogServer::JpInstalledView() {
+  if (jp_installed_view_.IsEmpty()) {
+    // No FinishRecovery applied yet: the static view, led by locale 0.
+    auto* cfg = Config::GetConfig();
+    int n = cfg->GetPartitionSize(partition_id_);
+    int leader = -1;
+    for (auto& si : cfg->SitesByPartitionId(partition_id_)) {
+      if (si.locale_id == 0) {
+        leader = si.id;
+        break;
       }
-      rec_set_.set_missed_key_cmd_set(sid, missed_cmds);
-      Log_info("[JETPACK-RECOVERY] RecordCmd SUCCESS: recorded=%zu wait=%lldms",
-               recovered_key_ids.size(), (long long) record_wait_ms);
+    }
+    jp_installed_view_ = View(n, leader, jepoch_);
+  }
+  return jp_installed_view_;
+}
+
+bool TxLogServer::JetpackIsProposerOf(epoch_t view) {
+  if (!JetpackRecoveryEnabled()) {
+    return IsLeader();
+  }
+  return view == jepoch_ && JpInstalledView().GetLeader() == (int) site_id_;
+}
+
+bool TxLogServer::JetpackLeaseReadAllowed(key_t key) const {
+  if (!JetpackRecoveryEnabled()) {
+    return true;
+  }
+  // In RECOVERY the local state may lack fast-committed writes that are still
+  // being recovered. In READY an acked write of this key may have been
+  // fast-committed without being applied here yet; the replicated read path
+  // (OnCommit) is used then, and also on an amnesiac replica, whose pool
+  // restarted empty.
+  return jetpack_status_ == JetpackStatus::READY && jp_rejoin_.AckAllowed() &&
+         !command_pool_.HasAckedWrite(key);
+}
+
+void TxLogServer::JpAdoptBaseView(const View& w, bool allow_same_id) {
+  if (w.IsEmpty()) return;
+  bool newer = w.view_id_ > new_view_.view_id_;
+  bool replace = allow_same_id && w.view_id_ == new_view_.view_id_ &&
+                 w.leaders_ != new_view_.leaders_;
+  if (newer || replace) {
+    old_view_ = new_view_;
+    new_view_ = w;
+  }
+  if (commo_) {
+    // The process-wide routing map (co-located clients route by it).
+    // An applied FinishRecovery is authoritative for its view id, so it may
+    // replace the leader of a known view of the same id (redirect); other
+    // adoptions only take strictly newer ids.
+    auto vd = std::make_shared<ViewData>(w, partition_id_);
+    if (allow_same_id) {
+      commo_->AdoptRedirectView(partition_id_, vd);
     } else {
-      Log_info("[JETPACK-RECOVERY] RecordCmd FAILED: got %d/%d responses wait=%lldms",
-               record_e->n_voted_yes_, record_e->n_total_, (long long) record_wait_ms);
+      commo_->UpdatePartitionView(partition_id_, vd);
     }
   }
-
-  if (!prepare_ok) {
-    Log_info("[JETPACK-RECOVERY] Prepare FAILED: got %d/%d responses", prepare_e->n_voted_yes_, prepare_e->n_total_);
-    if (prepare_e->max_jepoch_ > jepoch_) {
-#ifdef JETPACK_RECOVERY_DEBUG
-      Log_info("[JETPACK-RECOVERY] Updating jepoch from %d to %d", jepoch_, prepare_e->max_jepoch_);
-#endif
-      jepoch_ = prepare_e->max_jepoch_;
-      command_pool_.reset();
-    }
-    if (prepare_e->max_oepoch_ > oepoch_) {
-#ifdef JETPACK_RECOVERY_DEBUG
-      Log_info("[JETPACK-RECOVERY] Updating oepoch from %d to %d", oepoch_, prepare_e->max_oepoch_);
-#endif
-      oepoch_ = prepare_e->max_oepoch_;
-    }
-    if (prepare_e->max_seen_ballot_ > command_pool_.max_seen_ballot_) {
-#ifdef JETPACK_RECOVERY_DEBUG
-      Log_info("[JETPACK-RECOVERY] Updating ballot from %lld to %lld",
-               command_pool_.max_seen_ballot_, prepare_e->max_seen_ballot_);
-#endif
-      command_pool_.max_seen_ballot_ = prepare_e->max_seen_ballot_;
-    }
-    auto step2_end = std::chrono::steady_clock::now();
-    auto handle_round2_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-        step2_end - round2_handle_start).count();
-    auto step2_total_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-        step2_end - step2_start).count();
-    Log_info("[JETPACK-RECOVERY][STEP2] record_wait=%lldms accept_wait=%lldms handle=%lldms total=%lldms",
-             (long long) record_wait_ms, 0LL,
-             (long long) handle_round2_ms, (long long) step2_total_ms);
-    return;
-  }
-
-  if (accept_e && !accept_e->Yes()) {
-    Log_info("[JETPACK-RECOVERY] Accept FAILED: got %d/%d responses", accept_e->n_voted_yes_, accept_e->n_total_);
-    if (accept_e->max_jepoch_ > jepoch_) {
-#ifdef JETPACK_RECOVERY_DEBUG
-      Log_info("[JETPACK-RECOVERY] Updating jepoch from %d to %d", jepoch_, accept_e->max_jepoch_);
-#endif
-      jepoch_ = accept_e->max_jepoch_;
-      command_pool_.reset();
-    }
-    if (accept_e->max_oepoch_ > oepoch_) {
-#ifdef JETPACK_RECOVERY_DEBUG
-      Log_info("[JETPACK-RECOVERY] Updating oepoch from %d to %d", oepoch_, accept_e->max_oepoch_);
-#endif
-      oepoch_ = accept_e->max_oepoch_;
-    }
-    if (accept_e->max_seen_ballot_ > command_pool_.max_seen_ballot_) {
-#ifdef JETPACK_RECOVERY_DEBUG
-      Log_info("[JETPACK-RECOVERY] Updating ballot from %lld to %lld",
-               command_pool_.max_seen_ballot_, accept_e->max_seen_ballot_);
-#endif
-      command_pool_.max_seen_ballot_ = accept_e->max_seen_ballot_;
-    }
-    auto step2_end = std::chrono::steady_clock::now();
-    auto handle_round2_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-        step2_end - round2_handle_start).count();
-    auto step2_total_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-        step2_end - step2_start).count();
-    Log_info("[JETPACK-RECOVERY][STEP2] record_wait=%lldms accept_wait=%lldms handle=%lldms total=%lldms",
-             (long long) record_wait_ms, (long long) accept_wait_ms,
-             (long long) handle_round2_ms, (long long) step2_total_ms);
-    return;
-  }
-
-  auto step2_end = std::chrono::steady_clock::now();
-  auto handle_round2_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-      step2_end - round2_handle_start).count();
-  auto step2_total_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-      step2_end - step2_start).count();
-
-  Log_info("[JETPACK-RECOVERY][STEP2] record_wait=%lldms accept_wait=%lldms handle=%lldms total=%lldms",
-           (long long) record_wait_ms, (long long) accept_wait_ms,
-           (long long) handle_round2_ms, (long long) step2_total_ms);
-
-  Log_info("[JETPACK-RECOVERY] Accept SUCCESS: got %d/%d responses, proceeding to commit sid=%d",
-           accept_e->n_voted_yes_, accept_e->n_total_, propose_sid);
-  JetpackCommit(propose_sid);
-  
 }
 
-void TxLogServer::JetpackCommit(int commit_sid) {
-  Log_info("[JETPACK-RECOVERY] Step 3: Broadcasting Commit for consensus decision");
-#ifdef JETPACK_RECOVERY_DEBUG
-  Log_info("[JETPACK-RECOVERY] Commit: sid=%d", commit_sid);
-#endif
-  
-  // Commit cannot fail - it's just notification after successful Accept
-  auto e = commo()->JetpackBroadcastCommit(partition_id_, site_id_, jepoch_, oepoch_, commit_sid);
-  // e->Wait(); // Wait for at least 1 response (quorum size can be 1)
-  
-#ifdef JETPACK_RECOVERY_DEBUG
-  Log_info("[JETPACK-RECOVERY] Commit sent for sid=%d, proceeding to resubmit", commit_sid);
-#endif
-  JetpackResubmit(commit_sid);
+bool TxLogServer::JpBackendIsLeader() {
+  if (!JetpackRecoveryEnabled()) {
+    return loc_id_ == 0;
+  }
+  return JpInstalledView().GetLeader() == (int) site_id_;
 }
 
-void TxLogServer::JetpackResubmit(int sid) {
-  const int batch_size = 1;
-  Log_info("[JETPACK-RECOVERY] Step 4: Starting resubmit process for sid=%d (batch_size=%d)",
-           sid, batch_size);
+View TxLogServer::JpReplyBaseView() {
+  if (!new_view_.IsEmpty()) {
+    return new_view_;
+  }
+  return JpInstalledView();
+}
 
-  std::vector<std::shared_ptr<TpcCommitCommand>> cmds_to_dispatch;
-  const auto* rec_vec = rec_set_.get_rec_set(sid);
-  const auto* missed_vec = rec_set_.get_missed_key_cmd_set(sid);
-  std::unordered_map<key_t, shared_ptr<Marshallable>> missed_map;
-  if (missed_vec) {
-    for (const auto& kv : *missed_vec) {
-      if (kv.second) {
-        missed_map.emplace(kv.first, kv.second);
-      }
+void TxLogServer::JpMarkWrongLeader(const shared_ptr<Marshallable>& cmd) {
+  if (!cmd || cmd->kind_ != MarshallDeputy::CMD_TPC_COMMIT) {
+    return;
+  }
+  auto tpc_cmd = std::dynamic_pointer_cast<TpcCommitCommand>(cmd);
+  if (!tpc_cmd) {
+    return;
+  }
+  tpc_cmd->ret_ = WRONG_LEADER;
+  // Clients learn the base view (routing) and, under Jetpack recovery, its
+  // id for their fast path.
+  tpc_cmd->sp_view_data_ = std::make_shared<ViewData>(JpReplyBaseView(), partition_id_);
+}
+
+bool TxLogServer::JpBackendBounce(const shared_ptr<Marshallable>& cmd, const char* who) {
+  if (SimpleRWCommand(cmd).IsRecoveryCommand()) {
+    // Recovered commands are submitted by the coordinator itself, in RECOVERY
+    // and before the view they belong to is installed here.
+    return false;
+  }
+  const bool recovering = jetpack_status_ == JetpackStatus::RECOVERY;
+  if (!recovering) {
+    // Without Jetpack recovery every replica keeps accepting, as before.
+    if (!JetpackRecoveryEnabled() || IsLeader()) {
+      return false;
+    }
+    // A non-leader still writes a fast-path-attempted command through its own
+    // backend endpoint: its conflict guard is its fast-path vote at every
+    // replica (the proposer included), and if it was fast-committed (the
+    // client ends the tx on the fast path and never re-sends its Dispatch) a
+    // bounce would leave it durable only in the pools until the next
+    // recovery. Only an original-path-only command must go to the leader, so
+    // its placeholder is recorded at the fast-path proposer.
+    if (!SimpleRWCommand::NeedRecordConflictInOriginalPath(cmd)) {
+      return false;
     }
   }
+#ifdef JETPACK_WRONG_LEADER_DEBUG
+  {
+    auto tpc_cmd = std::dynamic_pointer_cast<TpcCommitCommand>(cmd);
+    Log_info("[WRONG_LEADER_FLOW] %s rejecting tx_id=%lu at loc_id=%d because %s",
+             who, tpc_cmd ? (unsigned long) tpc_cmd->tx_id_ : 0UL, loc_id_,
+             recovering ? "status=RECOVERY" : "not the leader of the installed view");
+  }
+#else
+  (void) who;
+#endif
+  JpMarkWrongLeader(cmd);
+  JpDropBouncedPlaceholder(cmd);
+  return true;
+}
 
-  if (rec_vec) {
-    for (const auto& entry : *rec_vec) {
-      key_t key = entry.first;
-      uint64_t cmd_id = entry.second;
-      shared_ptr<Marshallable> cmd = nullptr;
-      auto wit_it = command_pool_.candidates_.find(key);
-      if (wit_it != command_pool_.candidates_.end()) {
-        cmd = wit_it->second.get_cmd(cmd_id);
-      }
-      if (!cmd) {
-        auto miss_it = missed_map.find(key);
-        if (miss_it != missed_map.end()) {
-          auto candidate = miss_it->second;
-          if (candidate && SimpleRWCommand::GetCombinedCmdID(candidate) == cmd_id) {
-            cmd = candidate;
-          }
-        }
-      }
-      if (!cmd || cmd->kind_ == MarshallDeputy::CMD_TPC_EMPTY) {
-        continue;
-      }
-      auto tpc_cmd = std::dynamic_pointer_cast<TpcCommitCommand>(cmd);
-      if (!tpc_cmd && cmd->kind_ == MarshallDeputy::CMD_VEC_PIECE) {
-        auto vec_cmd = std::dynamic_pointer_cast<VecPieceData>(cmd);
-        if (vec_cmd) {
-          auto wrapper = std::make_shared<TpcCommitCommand>();
-          wrapper->cmd_ = vec_cmd;
-          tpc_cmd = wrapper;
-        }
-      }
-      if (tpc_cmd) {
-        cmds_to_dispatch.push_back(tpc_cmd);
-      }
+void TxLogServer::JpDropBouncedPlaceholder(const shared_ptr<Marshallable>& cmd) {
+  if (!cmd || !JetpackRecoveryEnabled() || cmd->kind_ != MarshallDeputy::CMD_TPC_COMMIT) {
+    return;
+  }
+  auto tpc_cmd = std::dynamic_pointer_cast<TpcCommitCommand>(cmd);
+  if (!tpc_cmd || !tpc_cmd->cmd_ || tpc_cmd->cmd_->kind_ != MarshallDeputy::CMD_VEC_PIECE) {
+    return;
+  }
+  auto vpd = std::dynamic_pointer_cast<VecPieceData>(tpc_cmd->cmd_);
+  if (!vpd || vpd->is_recovery_command_ || !vpd->sp_vec_piece_data_ ||
+      vpd->sp_vec_piece_data_->empty()) {
+    return;
+  }
+  // A fast-path-attempted command has no placeholder; its pool entry is its
+  // fast-path vote, which must stay.
+  if (!SimpleRWCommand::NeedRecordConflictInOriginalPath(cmd)) {
+    return;
+  }
+  // The placeholder lives on the replication server (rep_sched_), like the
+  // insert in OriginalPathUnexecutedCmdConflictPlaceHolder.
+  TxLogServer* rs = rep_sched_ ? rep_sched_ : this;
+  rs->RuleCommandPoolGC(cmd);
+}
+
+ballot_t TxLogServer::JpFinishLevel(epoch_t u) const {
+  // The highest ballot this replica accepted (ballots of views older than u
+  // are lower than every ballot of u; with a newer one FinishAllowed fails).
+  ballot_t level = -1;
+  for (const auto& kv : jp_accepted_) {
+    level = std::max(level, kv.second.ballot);
+  }
+  if (jp::BallotView(jp_fr_floor_) == u) {
+    level = std::max(level, jp_fr_floor_);
+  }
+  return level;
+}
+
+bool TxLogServer::JpApplyFinish(epoch_t u, ballot_t b, const View* w) {
+  if (!jp::FinishAllowed(jepoch_, oepoch_, u)) {
+    return false;
+  }
+  // One agreed leader per view: no lower same-view coordinator's view where a
+  // higher one took part (jp::FinishBallotOk).
+  if (!jp::FinishBallotOk(JpFinishLevel(u), b)) {
+    return false;
+  }
+  // An amnesiac replica installs only a view that did not exist before
+  // its restart (it may have acked or promised in any older one).
+  if (!jp_rejoin_.FinishAllowed(u)) {
+    return false;
+  }
+  jepoch_ = u;
+  oepoch_ = u;
+  // The fast-path log of the old view; the only place the pool is cleared.
+  command_pool_.ClearPool();
+  // accepted[vn] with vn < u can never be read again: any Pull quorum that
+  // includes this replica now computes vn' >= u.
+  for (auto it = jp_accepted_.begin(); it != jp_accepted_.end();) {
+    if (it->first < u) {
+      it = jp_accepted_.erase(it);
+    } else {
+      ++it;
     }
   }
-
-  const int total_to_dispatch = static_cast<int>(cmds_to_dispatch.size());
-  shared_ptr<IntEvent> recovery_event = nullptr;
-  if (total_to_dispatch > 0) {
-    recovery_event = Reactor::CreateSpEvent<IntEvent>(total_to_dispatch);
+  if (w != nullptr && !w->leaders_.empty()) {
+    jp_installed_view_ = *w;
+  } else {
+    jp_installed_view_ = JpInstalledView();
   }
+  jp_installed_view_.view_id_ = u;
+  if (w != nullptr) {
+    JpAdoptBaseView(*w, /*allow_same_id=*/true);
+  }
+  jp_progress_us_ = JpNowUs();
+  if (jp_rejoin_.OnInstalled(u)) {
+    const std::string t = jp_rejoin_.term_known() ? std::to_string(jp_rejoin_.term()) : "unknown";
+    Log_info("[JETPACK-REJOIN] rejoined: installed fresh view u=%u (fresh from %llu, T_rejoin=%s) "
+             "loc_id=%d; fast-path acks and recovery messages are allowed again",
+             u, (unsigned long long) jp_rejoin_.fresh_from(), t.c_str(), loc_id_);
+  }
+  // Last: the fast-path ack gate opens only in view u.
+  jetpack_status_ = JetpackStatus::READY;
+  return true;
+}
 
-  std::vector<std::shared_ptr<TpcCommitCommand>> batch_buffer;
-  batch_buffer.reserve(batch_size);
-  int resubmitted = 0;
-  auto flush_batch = [&]() {
-    if (batch_buffer.empty()) return;
-    size_t batch_count = batch_buffer.size();
-    DispatchRecoveredBatch(batch_buffer, recovery_event);
-    resubmitted += batch_count;
-    if ((resubmitted % 100) == 0 || resubmitted == total_to_dispatch) {
-      Log_info("[JETPACK-RECOVERY] Step 4: Resubmitted %d/%d commands for sid=%d",
-               resubmitted, total_to_dispatch, sid);
+std::string TxLogServer::JpSignalHost() {
+  std::string host;
+  if (frame_ && frame_->site_info_) {
+    auto* si = frame_->site_info_;
+    if (!si->host.empty())
+      host = si->host;
+    else if (!si->proc_name.empty())
+      host = si->proc_name;
+    else if (!si->name.empty())
+      host = si->name;
+  }
+#ifdef AWS
+  host = "0.0.0.0";
+#endif
+  return host;
+}
+
+void TxLogServer::JpWriteFinishSignals() {
+#if defined(JETPACK_MONGODB_RECOVERY) || defined(JETPACK_ETCD_RECOVERY) || defined(JETPACK_ZOOKEEPER_RECOVERY)
+  Log_info("Mark FinishRecovery on %s", "recovery_finish");
+  JpSetSignal("jetpack", "recovery_finish", "recovery_finish");
+  Log_info("[JETPACK-RECOVERY] Wrote finish signal to JM_Jetpack_%s", "recovery_finish");
+  bool failure_seen = false;
+  try {
+    failure_seen = jm_signal::exists_key("failure", "failure_triggered", "failure_triggered");
+  } catch (const std::exception& e) {
+    Log_warn("[JETPACK-RECOVERY] failed to read the failure_triggered signal: %s", e.what());
+  }
+  if (failure_seen) {
+    JpSetSignal("jetpack", "recovery_finish_after_failure", "recovery_finish_after_failure");
+    Log_info("[JETPACK-RECOVERY] Wrote post-failure finish signal to JM_Jetpack_%s",
+             "recovery_finish_after_failure");
+  }
+#endif
+}
+
+bool TxLogServer::JpUsesStabilityMarker() const {
+  // Raft only. etcd/Mongo/ZK have no marker; one would need fenced backend
+  // writes, which this code does not use.
+  return Config::GetConfig()->replica_proto_ == MODE_RAFT;
+}
+
+/* ---------------------------- replica handlers ---------------------------- */
+
+void TxLogServer::OnJetpackPullRecovery(const epoch_t& v,
+                                        const ballot_t& b,
+                                        const MarshallDeputy& new_view,
+                                        bool_t* ok,
+                                        epoch_t* reply_view_id,
+                                        epoch_t* reply_vid,
+                                        ballot_t* reply_promised,
+                                        const shared_ptr<KeyCmdBatchData>& acked,
+                                        const shared_ptr<JetpackAcceptedMapData>& accepted) {
+  TxLogServer* rs = rep_sched_ ? rep_sched_ : this;
+  // Guard first; a rejection writes nothing (no freeze, no view change, no
+  // promise, no step-down). An amnesiac replica answers no Pull: its
+  // empty pool and forgotten promise would count as real acceptor state.
+  const bool amnesiac = !rs->jp_rejoin_.RecoveryMsgAllowed();
+  if (amnesiac || !rs->JpRecoveryMsgAllowed(v, b, jp::BallotRule::kStrict)) {
+    *ok = 0;
+    *reply_view_id = rs->jepoch_;
+    *reply_vid = rs->oepoch_;
+    *reply_promised = rs->jp_promised_;
+    Log_info("[JETPACK-GUARD] PullRecovery rejected v=%u b=%lld view=%u vid=%u promised=%lld%s",
+             v, (long long) b, rs->jepoch_, rs->oepoch_, (long long) rs->jp_promised_,
+             amnesiac ? " (amnesiac)" : "");
+    return;
+  }
+  // One non-yielding step: join (stop acking) BEFORE the snapshot, then
+  // promise, then snapshot. Every snapshot entry was acked before the freeze.
+  rs->JpJoin(v);
+  rs->jp_promised_ = b;
+  auto sp_view = std::dynamic_pointer_cast<ViewData>(new_view.sp_data_);
+  if (sp_view) {
+    rs->JpAdoptBaseView(sp_view->GetView());
+  }
+  rs->command_pool_.AckedSnapshot(*acked);
+  for (const auto& kv : rs->jp_accepted_) {
+    if (kv.first >= rs->jepoch_) {
+      accepted->entries_.push_back(
+          JetpackAcceptedMapData::Entry{kv.first, kv.second.ballot, kv.second.value});
     }
-    batch_buffer.clear();
+  }
+  *ok = 1;
+  *reply_view_id = rs->jepoch_;
+  *reply_vid = rs->oepoch_;
+  *reply_promised = b;
+  Log_info("[JETPACK-RECOVERY] PullRecovery joined v=%u b=%lld view=%u acked=%zu accepted=%zu pool_keys=%d pool_cmds=%d",
+           v, (long long) b, rs->jepoch_, acked->Size(), accepted->entries_.size(),
+           rs->command_pool_.size(), rs->command_pool_.cmd_size());
+}
+
+void TxLogServer::OnJetpackAccept(const epoch_t& v,
+                                  const epoch_t& vn,
+                                  const ballot_t& b,
+                                  const MarshallDeputy& value,
+                                  bool_t* ok,
+                                  epoch_t* reply_view_id,
+                                  epoch_t* reply_vid,
+                                  ballot_t* reply_promised) {
+  TxLogServer* rs = rep_sched_ ? rep_sched_ : this;
+  auto sp_value = std::dynamic_pointer_cast<KeyCmdBatchData>(value.sp_data_);
+  const bool amnesiac = !rs->jp_rejoin_.RecoveryMsgAllowed();
+  if (amnesiac || !sp_value ||
+      !jp::AcceptAllowed(rs->jepoch_, rs->oepoch_, rs->jp_promised_, v, vn, b)) {
+    *ok = 0;
+    *reply_view_id = rs->jepoch_;
+    *reply_vid = rs->oepoch_;
+    *reply_promised = rs->jp_promised_;
+    Log_info("[JETPACK-GUARD] Accept rejected v=%u vn=%u b=%lld view=%u vid=%u promised=%lld%s%s",
+             v, vn, (long long) b, rs->jepoch_, rs->oepoch_, (long long) rs->jp_promised_,
+             sp_value ? "" : " (no value)", amnesiac ? " (amnesiac)" : "");
+    return;
+  }
+  rs->JpJoin(v);
+  rs->jp_promised_ = b;
+  // An accepted empty set is a value, too.
+  rs->jp_accepted_[vn] = JpAccepted{b, sp_value};
+  *ok = 1;
+  *reply_view_id = rs->jepoch_;
+  *reply_vid = rs->oepoch_;
+  *reply_promised = b;
+  Log_info("[JETPACK-RECOVERY] Accept accepted v=%u vn=%u b=%lld set=%zu",
+           v, vn, (long long) b, sp_value->Size());
+}
+
+void TxLogServer::OnJetpackFinishRecovery(const epoch_t& u,
+                                          const ballot_t& b,
+                                          const MarshallDeputy& new_view,
+                                          bool_t* applied,
+                                          epoch_t* reply_view_id,
+                                          epoch_t* reply_vid) {
+  TxLogServer* rs = rep_sched_ ? rep_sched_ : this;
+  auto sp_view = std::dynamic_pointer_cast<ViewData>(new_view.sp_data_);
+  View w;
+  const View* wp = nullptr;
+  if (sp_view) {
+    w = sp_view->GetView();
+    wp = &w;
+  }
+  int cleared = rs->command_pool_.cmd_size();
+  const ballot_t level = rs->JpFinishLevel(u);
+  bool ok = rs->JpApplyFinish(u, b, wp);
+  // "applied" = this replica is in view u with this FinishRecovery's leader,
+  // installed now or by an earlier copy (the coordinator counts these
+  // before it installs v itself, also across dropped replies).
+  const bool installed = jp::FinishReplyInstalled(ok, rs->jepoch_, rs->jp_installed_view_.GetLeader(),
+                                                  u, wp ? wp->GetLeader() : -1);
+  *applied = installed ? 1 : 0;
+  *reply_view_id = rs->jepoch_;
+  *reply_vid = rs->oepoch_;
+  if (ok) {
+    Log_info("[JETPACK-FR] applied u=%u cleared=%d leader=%d", u, cleared,
+             rs->jp_installed_view_.GetLeader());
+    rs->JpWriteFinishSignals();
+  } else {
+    // A duplicate or stale FinishRecovery: no state change and no signal.
+    const bool view_ok = jp::FinishAllowed(rs->jepoch_, rs->oepoch_, u);
+    const bool lower = view_ok && !jp::FinishBallotOk(level, b);
+    const bool amnesia = view_ok && !lower && !rs->jp_rejoin_.FinishAllowed(u);
+    std::string why;
+    if (installed) {
+      why = " (already installed with this leader)";
+    } else if (lower) {
+      why = " (b=" + std::to_string(b) + " below this replica's level " + std::to_string(level) +
+            ": a higher same-view coordinator took part here)";
+    } else if (amnesia) {
+      why = " (amnesiac: not a fresh view)";
+    }
+    Log_info("[JETPACK-FR] ignored u=%u view=%u vid=%u%s", u, rs->jepoch_, rs->oepoch_, why.c_str());
+  }
+}
+
+/* ------------------------------- coordinator ------------------------------ */
+
+void TxLogServer::JetpackRecoveryEntry(const View& target, bool emit_ack,
+                                       uint64_t ack_nonce, bool ack_has_nonce,
+                                       bool takeover) {
+  const epoch_t v = target.view_id_;
+  if (v == 0 || (uint64_t) v >= jp::kBallotViewLimit) {
+    // The ballot encoding needs 0 < v < 2^31.
+    Log_error("[JETPACK-RECOVERY] trigger with unusable view id v=%u (need 0 < v < 2^31), ignored", v);
+    return;
+  }
+  bool joined = false;
+  if (!JetpackRecoveryEnabled()) {
+    Log_info("[JETPACK-RECOVERY] trigger v=%u: Jetpack recovery is not enabled in this mode, no recovery", v);
+  } else {
+    // First, so the driver parks on its event before anything is published.
+    JpStartDriverIfNeeded();
+    // v == vid passes (a takeover re-joins the view it is frozen in).
+    if (JpRecoveryMsgAllowed(v, 0, jp::BallotRule::kIgnore)) {
+      // Local freeze now. jp_promised_ stays untouched so the coordinator's
+      // own Pull still passes b > promised.
+      JpJoin(v);
+      JpAdoptBaseView(target);
+      joined = true;
+      if (!takeover && jp_rejoin_.amnesiac()) {
+        // This replica's own backend node won term v after the restart,
+        // so v and every newer view did not exist before it.
+        jp_rejoin_.NoteOwnTrigger(v);
+        Log_info("[JETPACK-REJOIN] amnesiac replica coordinates its own view v=%u: views >= %llu are fresh here",
+                 v, (unsigned long long) jp_rejoin_.fresh_from());
+      }
+      Log_info("[JETPACK-RECOVERY] %s v=%u site_id=%d loc_id=%d: joined locally (view=%u vid=%u), fast path stopped",
+               takeover ? "takeover trigger" : "trigger", v, site_id_, loc_id_, jepoch_, oepoch_);
+    } else {
+      Log_info("[JETPACK-RECOVERY] stale %s v=%u view=%u vid=%u, skipped",
+               takeover ? "takeover" : "trigger", v, jepoch_, oepoch_);
+    }
+  }
+  if (emit_ack) {
+    // After the freeze, also for a stale trigger: this replica is frozen at a
+    // newer vid or installed in a view >= v, so it acks nothing older.
+    std::string host = JpSignalHost();
+    JpSetSignal("jetpack", "fastpath_stopped", host);
+    std::string ack = "leader_paused term=" + std::to_string(v);
+    if (ack_has_nonce) {
+      ack += " nonce=" + std::to_string(ack_nonce);
+    }
+    JpSetSignal("jetpack", ack, host);
+    Log_info("[JETPACK-RECOVERY] Emitted jetpack:%s on JM_Jetpack_%s", ack.c_str(), host.c_str());
+  }
+  // A newer view, or (a takeover) the view this node is frozen in once
+  // more, to run with its own ballot even if it drove that view before.
+  if (joined && (v > jp_pending_view_ || (takeover && v == jp_pending_view_))) {
+    jp_pending_view_ = v;
+    jp_pending_target_ = target;
+    jp_pending_seq_++;
+    if (jp_driver_event_) {
+      jp_driver_event_->Set(1);
+    }
+  }
+}
+
+void TxLogServer::JpStartTakeoverTimer(const std::shared_ptr<std::atomic<bool>>& alive) {
+  if (jp_takeover_started_ || !JpTakeoverEnabled()) {
+    return;
+  }
+  jp_takeover_started_ = true;
+  jp_takeover_clock_ = jp::TakeoverClock((uint32_t) loc_id_);
+  Log_info("[JETPACK-TAKEOVER] timer started site_id=%d loc_id=%d: a recovery frozen here without progress "
+           "for %lldms (doubling per takeover of the same view, up to x8) is taken over",
+           site_id_, loc_id_, (long long) (jp::TakeoverDelayUs((uint32_t) loc_id_, 0) / 1000));
+  auto keep = alive;
+  Coroutine::CreateRun([this, keep]() {
+    while (keep->load()) {
+      Reactor::CreateSpEvent<TimeoutEvent>((uint64_t) kJpTakeoverTickUs)->Wait();
+      if (!keep->load()) {
+        break;  // the server is gone: touch nothing of it
+      }
+      JpTakeoverTick(JpNowUs());
+    }
+  });
+}
+
+epoch_t TxLogServer::JpTakeoverTick(int64_t now_us) {
+  const bool frozen = oepoch_ > jepoch_;
+  // A replica that could not lead the view (MongoDB: its mongod is not the
+  // primary of that term) waits like a busy one: the attempt is not used up.
+  std::string why;
+  const bool can_lead = !frozen || JpTakeoverAllowedHere(oepoch_, &why);
+  const epoch_t v = jp_takeover_clock_.Tick(now_us, frozen, oepoch_, jp_progress_us_,
+                                            JpDriverBusy() || !can_lead);
+  if (!can_lead && now_us >= jp_takeover_clock_.deadline_us() && jp_takeover_refused_view_ != oepoch_) {
+    jp_takeover_refused_view_ = oepoch_;
+    Log_info("[JETPACK-TAKEOVER] no recovery progress at vid=%u (view=%u), but loc_id=%d cannot lead it: %s",
+             oepoch_, jepoch_, loc_id_, why.c_str());
+  }
+  if (v == 0) {
+    return 0;
+  }
+  Log_info("[JETPACK-TAKEOVER] no recovery progress at vid=%u (view=%u) for %lldms: loc_id=%d site_id=%d "
+           "takes over v=%u (attempt %d, next no earlier than %lldms)",
+           oepoch_, jepoch_, (long long) ((now_us - jp_progress_us_) / 1000), loc_id_, site_id_, v,
+           jp_takeover_clock_.attempts(),
+           (long long) (jp::TakeoverDelayUs(jp_takeover_clock_.rank(), jp_takeover_clock_.attempts()) / 1000));
+  const int n = Config::GetConfig()->GetPartitionSize(partition_id_);
+  // Same view, this replica as coordinator (and, through its FinishRecovery,
+  // leader of the view; JpTakeoverAllowedHere vetted that it can lead it).
+  JetpackRecoveryEntry(View(n, (int) site_id_, v), /*emit_ack=*/false, 0, false, /*takeover=*/true);
+  return v;
+}
+
+void TxLogServer::JpLearnRejoinTerm(uint64_t term, const char* source) {
+  if (!jp_rejoin_.LearnTerm(term)) {
+    return;
+  }
+  Log_info("[JETPACK-REJOIN] T_rejoin=%llu learned from %s (loc_id=%d): this restarted replica installs only "
+           "views >= %llu (or one it coordinates itself)",
+           (unsigned long long) term, source, loc_id_, (unsigned long long) jp_rejoin_.fresh_from());
+}
+
+void TxLogServer::JpRejoinTermUnavailable(const char* tag, const char* why) {
+  if (!jp_rejoin_.amnesiac() || jp_rejoin_.term_known() || jp_rejoin_error_logged_) {
+    return;
+  }
+  jp_rejoin_error_logged_ = true;
+  Log_error("%s [JETPACK-REJOIN] cannot learn T_rejoin (%s): this restarted replica (loc_id=%d) stays amnesiac, "
+            "no fast-path acks and no Pull/Accept, until it installs a view it coordinates itself",
+            tag, why, loc_id_);
+}
+
+void TxLogServer::JpLogRejoinState(const char* tag) {
+  const char* e = std::getenv("JETPACK_REJOIN");
+  const bool requested = e != nullptr && std::string(e) == "1";
+  if (!jp_rejoin_.amnesiac()) {
+    if (requested && !JetpackRecoveryEnabled()) {
+      Log_warn("%s [JETPACK-REJOIN] JETPACK_REJOIN=1 ignored: Jetpack recovery is not enabled in this mode", tag);
+    }
+    return;
+  }
+  Log_info("%s [JETPACK-REJOIN] JETPACK_REJOIN=1: restarted replica loc_id=%d site_id=%d starts amnesiac: "
+           "no fast-path acks, no Pull/Accept, FinishRecovery only for a view above the backend term "
+           "learned after the restart (T_rejoin) or one it coordinates itself",
+           tag, loc_id_, site_id_);
+}
+
+bool TxLogServer::JpFinishLocally(epoch_t v, const View& target) {
+  const int cleared = command_pool_.cmd_size();
+  // n/2 others installed v with this coordinator as leader: decided.
+  if (!JpApplyFinish(v, jp::kChosenBallot, &target)) {
+    return false;
+  }
+  // As the RPC handler logs and signals an applied FinishRecovery.
+  Log_info("[JETPACK-FR] applied u=%u cleared=%d leader=%d", v, cleared, jp_installed_view_.GetLeader());
+  JpWriteFinishSignals();
+  return true;
+}
+
+void TxLogServer::JpRunTermPoller(const char* tag, const std::string& role,
+                                  const std::string& prefix,
+                                  const std::shared_ptr<JetpackLeaderProbe>& probe,
+                                  const std::shared_ptr<std::atomic<bool>>& alive) {
+  const std::string host = JpSignalHost();
+  const int poll_ms = JpLeaderPollMs();
+  // View ids must stay below 2^31 (ballot encoding).
+  JpTermTrigger rules((uint64_t) loc_id_, jp::kBallotViewLimit);
+  // Lines already on disk are history (an earlier run, the startup election).
+  rules.BaselineFromDisk(JpReadTermLine(role, host, prefix));
+  Log_info("%s watching JM_Jetpack_%s for %s:%s term=T [loc=L] every %dms, self-detection %s "
+           "(loc_id=%d site_id=%d, startup line term=%llu)",
+           tag, host.c_str(), role.c_str(), prefix.c_str(), poll_ms, probe ? "on" : "off",
+           loc_id_, site_id_, (unsigned long long) rules.line_baseline());
+  const int64_t rejoin_wait_until = JpNowUs() + kJpRejoinTermWaitUs;
+  while (alive->load()) {
+    const JpTermLine line = JpReadTermLine(role, host, prefix);
+    const JpTermProbe self = probe ? probe->Latest() : JpTermProbe();
+    const JpTermTrigger::Step s = rules.Next(line, self);
+    if (s.legacy_line && JpFirstLegacyWarning(role)) {
+      Log_warn("%s ignoring legacy term-less %s:%s on JM_Jetpack_%s: it carries no view id, so it "
+               "starts no Jetpack recovery; emitters must write %s:%s term=T [loc=L]",
+               tag, role.c_str(), prefix.c_str(), host.c_str(), role.c_str(), prefix.c_str());
+    }
+    if (s.self_baseline) {
+      Log_info("%s baseline term=%llu from the co-located node (leader=%d loc_id=%d), no recovery",
+               tag, (unsigned long long) s.self_baseline_term, (int) s.self_baseline_leader, loc_id_);
+      if (s.self_baseline_leader && loc_id_ != 0) {
+        Log_warn("%s the co-located node leads term %llu at startup, but the initial Jetpack view is "
+                 "led by locale 0 (loc_id=%d): no recovery before the next term",
+                 tag, (unsigned long long) s.self_baseline_term, loc_id_);
+      }
+    }
+    // T_rejoin = the co-located node's CURRENT term after the restart (a
+    // secondary's / follower's own newest term can be older: the probe reports
+    // it only when exact), raised to the newest term-bearing line on disk at
+    // startup.
+    if (jp_rejoin_.amnesiac() && !jp_rejoin_.term_known() && self.seq > 0 && self.ok &&
+        self.current_term > 0 && self.current_term < jp::kBallotViewLimit) {
+      JpLearnRejoinTerm(std::max<uint64_t>(self.current_term, rules.line_baseline()),
+                        role == "mongo" ? "the co-located mongod (current term)"
+                                        : "the co-located server (current epoch)");
+    }
+    if (jp_rejoin_.amnesiac() && !jp_rejoin_.term_known() && JpNowUs() >= rejoin_wait_until) {
+      JpRejoinTermUnavailable(tag, probe ? "the co-located node reported no current term within 30s"
+                                         : "no self-detection probe");
+    }
+    if (s.line_other_loc) {
+      Log_info("%s %s:%s term=%llu names loc=%llu, not this replica (loc_id=%d): not coordinating",
+               tag, role.c_str(), prefix.c_str(), (unsigned long long) s.line_term,
+               (unsigned long long) s.line_loc, loc_id_);
+    }
+    if (s.unusable_term != 0) {
+      Log_error("%s term=%llu is not a usable view id (need < 2^31): ignored", tag,
+                (unsigned long long) s.unusable_term);
+    }
+    if (s.trigger != 0) {
+      Log_info("%s failover term=%llu source=%s loc_id=%d site_id=%d", tag,
+               (unsigned long long) s.trigger,
+               s.from_line && s.from_self ? "signal+self" : (s.from_line ? "signal" : "self"),
+               loc_id_, site_id_);
+      const int n_rep = (int) Config::GetConfig()->GetPartitionSize(partition_id_);
+      // Non-yielding: joins the view locally (the freeze), then acks
+      // jetpack:leader_paused term=T and hands the recovery to the driver.
+      JetpackRecoveryEntry(View(n_rep, (int) site_id_, (epoch_t) s.trigger), /*emit_ack=*/true);
+    }
+    Reactor::CreateSpEvent<TimeoutEvent>((uint64_t) poll_ms * 1000)->Wait();
+    // Nothing of this object is touched once alive is false.
+  }
+}
+
+void TxLogServer::JpStartDriverIfNeeded() {
+  if (jp_driver_started_) {
+    return;
+  }
+  jp_driver_started_ = true;
+  jp_driver_event_ = Reactor::CreateSpEvent<IntEvent>();
+  // Runs until its first wait and returns; it never runs inside the caller's
+  // critical section beyond that.
+  auto alive = jp_alive_;
+  Coroutine::CreateRun([this, alive]() {
+    this->JpDriverLoop(alive);
+  });
+}
+
+void TxLogServer::JpDriverLoop(const std::shared_ptr<std::atomic<bool>>& alive) {
+  Log_info("[JETPACK-RECOVERY] recovery driver started site_id=%d loc_id=%d", site_id_, loc_id_);
+  while (alive->load() && !jp_driver_stop_) {
+    if (jp_pending_seq_ > jp_driven_seq_) {
+      // The newest published target (older ones it replaced are moot).
+      View t = jp_pending_target_;
+      jp_driven_seq_ = jp_pending_seq_;
+      jp_driven_view_ = t.view_id_;
+      jp_running_view_ = t.view_id_;
+      JetpackRunRecovery(t);
+      if (!alive->load()) {
+        return;
+      }
+      jp_running_view_ = 0;
+      continue;
+    }
+    // Re-arm, then a timed idle wait. The local reference keeps the event
+    // alive across the wait even if this server is deleted meanwhile.
+    auto ev = Reactor::CreateSpEvent<IntEvent>();
+    jp_driver_event_ = ev;
+    ev->Wait(JpClampWaitUs(kJpDriverIdleUs));
+    // Nothing of this object is touched once alive is false.
+  }
+}
+
+TxLogServer::JpValidity TxLogServer::JpCheckValid(epoch_t v) {
+  if (jp_driver_stop_) return kJpNotCoordinator;
+  if (oepoch_ > v) return kJpSuperseded;
+  if (jepoch_ >= v) return kJpFinishedElsewhere;
+  if (!JetpackStillCoordinator(v)) return kJpNotCoordinator;
+  return kJpValid;
+}
+
+TxLogServer::JpValidity TxLogServer::JpWaitValid(const shared_ptr<Event>& e,
+                                                 epoch_t v,
+                                                 int64_t deadline_us) {
+  while (!e->IsReady()) {
+    int64_t left = deadline_us - JpNowUs();
+    if (left <= 0) {
+      break;
+    }
+    e->Wait(JpClampWaitUs(left));
+    JpValidity r = JpCheckValid(v);
+    if (r != kJpValid) {
+      return r;
+    }
+  }
+  return JpCheckValid(v);
+}
+
+TxLogServer::JpValidity TxLogServer::JpSleepValid(epoch_t v, int64_t sleep_us) {
+  const int64_t end = JpNowUs() + sleep_us;
+  while (true) {
+    JpValidity r = JpCheckValid(v);
+    if (r != kJpValid) {
+      return r;
+    }
+    int64_t left = end - JpNowUs();
+    if (left <= 0) {
+      return kJpValid;
+    }
+    Reactor::CreateSpEvent<TimeoutEvent>(JpClampWaitUs(left))->Wait();
+  }
+}
+
+void TxLogServer::JetpackRunRecovery(const View& target) {
+  const epoch_t v = target.view_id_;
+  const int n = Config::GetConfig()->GetPartitionSize(partition_id_);
+  const int threshold = jp::RecoveryThreshold(n);
+  jetpack_recovery_start_time_ = std::chrono::steady_clock::now();
+  Log_info("[JETPACK-RECOVERY] ===== STARTING JETPACK RECOVERY ====== time=%.6fms v=%u",
+           JpWallMs(), v);
+  Log_info("[JETPACK-RECOVERY] Coordinator: site_id=%d loc_id=%d partition=%d view=%u vid=%u n=%d threshold=%d",
+           site_id_, loc_id_, partition_id_, jepoch_, oepoch_, n, threshold);
+
+  auto stop = [this, v](JpValidity r, const char* phase) {
+    Log_info("[JETPACK-RECOVERY] recovery v=%u gives up in phase %s after %lldms (view=%u vid=%u pending=%u)",
+             v, phase, JpMsSince(jetpack_recovery_start_time_), jepoch_, oepoch_, jp_pending_view_);
+    Log_info("[JETPACK-RECOVERY] ===== JETPACK RECOVERY STOPPED ====== v=%u reason=%s",
+             v, JpValidityName(r));
   };
 
-  for (const auto& tpc_cmd : cmds_to_dispatch) {
-    batch_buffer.push_back(tpc_cmd);
-    if (batch_buffer.size() >= static_cast<size_t>(batch_size)) {
-      flush_batch();
-    }
-  }
-
-  flush_batch();
-  
-  // Wait for all recovery dispatches to complete
-  if (recovery_event && recovery_event->target_ > 0) {
-    auto start_time = std::chrono::steady_clock::now();
-    recovery_event->Wait();
-    auto end_time = std::chrono::steady_clock::now();
-    auto wait_duration = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time).count();
-    Log_info("[JETPACK-RECOVERY-EVENT] Wait() completed after %ldms. Final value=%d, target=%d", 
-             wait_duration, recovery_event->value_, recovery_event->target_);
-    Log_info("[JETPACK-RECOVERY] All recovery completed");
-  }
-  
-  Log_info("[JETPACK-RECOVERY] Step 5: Broadcasting FinishRecovery to complete recovery");
-
-  // Finally, broadcast FinishRecovery to update jepoch and make fast path available
-#if defined(JETPACK_MONGODB_RECOVERY) || defined(JETPACK_ETCD_RECOVERY) || defined(JETPACK_ZOOKEEPER_RECOVERY)
-  Log_info("Mark FinishRecovery on %s", "recovery_finish");
-  jm_signal::set_key("jetpack", "recovery_finish", "recovery_finish");
-  Log_info("[JETPACK-RECOVERY] Wrote finish signal to JM_Jetpack_%s", "recovery_finish");
-  if (jm_signal::exists_key("failure", "failure_triggered", "failure_triggered")) {
-    jm_signal::set_key("jetpack", "recovery_finish_after_failure", "recovery_finish_after_failure");
-    Log_info("[JETPACK-RECOVERY] Wrote post-failure finish signal to JM_Jetpack_%s",
-              "recovery_finish_after_failure");
-  }
-#endif
-  
-  auto e = commo()->JetpackBroadcastFinishRecovery(partition_id_, site_id_, oepoch_);
-  // [Jetpack] 2026-06-07: synchronously wait for the majority of followers to
-  // ack FinishRecovery so the reported recovery duration in
-  // JetpackRecoveryEntry() includes the WAN RTT for followers to flip
-  // jetpack_status_ to READY (apples-to-apples with vanilla Raft recovery,
-  // which already counts majority log-replication ack). Same Wait() idiom
-  // already used at the intra-recovery event above (line ~1481).
-  if (e) {
-    auto fr_wait_start = std::chrono::steady_clock::now();
-    e->Wait();
-    auto fr_wait_end = std::chrono::steady_clock::now();
-    auto fr_wait_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-        fr_wait_end - fr_wait_start).count();
-    Log_info("[JETPACK-RECOVERY-FINISH-WAIT] FinishRecovery quorum ack after %ldms",
-             fr_wait_ms);
-  }
-  Log_info("[JETPACK-RECOVERY] FinishRecovery broadcast completed, fast path restored");
-}
-
-
-void TxLogServer::DispatchRecoveredBatch(
-    const std::vector<std::shared_ptr<TpcCommitCommand>>& batch,
-    shared_ptr<IntEvent> recovery_event) {
-  if (batch.empty()) {
-    return;
-  }
-  auto batch_cmd = std::make_shared<TpcBatchCommand>();
-  auto cmds = batch;
-  batch_cmd->AddCmds(cmds);
-#ifdef JETPACK_RECOVERY_DEBUG
-  Log_info("[JETPACK-RECOVERY] Dispatching recovered batch of %zu commands", batch.size());
-#endif
-  DispatchRecoveredCommand(batch_cmd, recovery_event);
-}
-
-void TxLogServer::DispatchRecoveredCommand(shared_ptr<Marshallable> cmd, shared_ptr<IntEvent> recovery_event) {
-  if (!cmd) {
-    return;
-  }
-
-  std::shared_ptr<TpcBatchCommand> batch_cmd_override = nullptr;
-  int completion_weight = 1;
-  shared_ptr<Marshallable> inner_cmd = cmd;
-
-  if (cmd->kind_ == MarshallDeputy::CMD_TPC_BATCH) {
-    batch_cmd_override = std::dynamic_pointer_cast<TpcBatchCommand>(cmd);
-    if (!batch_cmd_override || batch_cmd_override->Size() == 0) {
-      Log_error("[JETPACK-RECOVERY] Empty TpcBatchCommand during dispatch");
+  // ---- Phases 1-2: Paxos for the recovery value, retried while valid ----
+  int64_t backoff = kJpBackoffMinUs;
+  int round = 0;
+  shared_ptr<KeyCmdBatchData> value;
+  epoch_t chosen_vn = 0;
+  ballot_t chosen_b = -1;
+  // Start above the same-view promise seen here (a takeover's first Pull
+  // must beat the stalled coordinator's ballot).
+  jp_ballot_counter_ = jp::CounterAbovePromise(jp_ballot_counter_, v, jp_promised_);
+  while (true) {
+    JpValidity r = JpCheckValid(v);
+    if (r != kJpValid) {
+      stop(r, "round start");
       return;
     }
-    auto first_cmd = batch_cmd_override->cmds_.front();
-    if (!first_cmd || !first_cmd->cmd_) {
-      Log_error("[JETPACK-RECOVERY] Batch command missing inner command");
+    round++;
+    jp_ballot_counter_++;
+    if (!jp::BallotArgsOk(v, jp_ballot_counter_, loc_id_)) {
+      Log_error("[JETPACK-RECOVERY] cannot build a ballot for v=%u counter=%u loc_id=%d",
+                v, jp_ballot_counter_, loc_id_);
+      stop(kJpNotCoordinator, "ballot");
       return;
     }
-    inner_cmd = first_cmd->cmd_;
-    completion_weight = static_cast<int>(batch_cmd_override->Size());
-    for (auto& single_cmd : batch_cmd_override->cmds_) {
-      if (!single_cmd || !single_cmd->cmd_) {
-        continue;
-      }
-      auto single_vec = dynamic_pointer_cast<VecPieceData>(single_cmd->cmd_);
-      if (single_vec) {
-        single_vec->is_recovery_command_ = true;
-      }
+    const ballot_t b = jp::MakeBallot(v, jp_ballot_counter_, loc_id_);
+
+    // Phase 1: Pull = BeginRecovery + Prepare + fast-log snapshot.
+    auto pull_start = std::chrono::steady_clock::now();
+    auto pe = commo()->JetpackBroadcastPullRecovery(partition_id_, v, b, target);
+    r = JpWaitValid(pe, v, JpNowUs() + kJpPhaseDeadlineUs);
+    if (r != kJpValid) {
+      stop(r, "pull");
+      return;
     }
-  } else if (cmd->kind_ == MarshallDeputy::CMD_TPC_COMMIT) {
-    auto tpc_cmd = dynamic_pointer_cast<TpcCommitCommand>(cmd);
-    if (tpc_cmd && tpc_cmd->cmd_) {
-      inner_cmd = tpc_cmd->cmd_;
+    if (!pe->Yes()) {
+      auto cls = JpClassify(pe->replies_, v);
+      Log_info("[JETPACK-RECOVERY] PullRecovery FAILED v=%u b=%lld round=%d yes=%d no=%d errors=%d wait=%lldms",
+               v, (long long) b, round, pe->n_voted_yes_, pe->n_voted_no_, pe->n_errors_,
+               JpMsSince(pull_start));
+      if (cls.superseded) {
+        stop(kJpSuperseded, "pull");
+        return;
+      }
+      if (cls.finished) {
+        stop(kJpFinishedElsewhere, "pull");
+        return;
+      }
+      if (cls.max_promise_same_view > b) {
+        jp_ballot_counter_ = std::max(jp_ballot_counter_, jp::BallotCounter(cls.max_promise_same_view));
+      }
+      r = JpSleepValid(v, JpJitter(backoff));
+      backoff = std::min(backoff * 2, kJpBackoffMaxUs);
+      if (r != kJpValid) {
+        stop(r, "pull backoff");
+        return;
+      }
+      continue;
     }
-  }
-
-  const char* sched_type = "UNKNOWN";
-  if (rep_sched_ && this == rep_sched_) {
-    sched_type = "REP_SCHED";
-  } else if (!rep_sched_ || rep_sched_ != this) {
-    sched_type = "TX_SCHED";
-  }
-
-#ifdef JETPACK_RECOVERY_DEBUG
-  Log_info("[JETPACK-RECOVERY] Dispatching recovered command, kind=%d batch=%s size=%d",
-           cmd->kind_,
-           batch_cmd_override ? "YES" : "NO",
-           batch_cmd_override ? batch_cmd_override->Size() : 1);
-#endif
-
-  if (inner_cmd->kind_ == MarshallDeputy::CMD_VEC_PIECE) {
-    auto vec_piece_data = dynamic_pointer_cast<VecPieceData>(inner_cmd);
-    if (vec_piece_data && vec_piece_data->sp_vec_piece_data_) {
-      vec_piece_data->is_recovery_command_ = true;
-
-      auto par_id = vec_piece_data->sp_vec_piece_data_->at(0)->PartitionId();
-      auto cmd_id = vec_piece_data->sp_vec_piece_data_->at(0)->root_id_;
-
-      auto comm = commo();
-
-      auto coo = std::make_unique<CoordinatorClassic>(999999,
-                                                       Config::GetConfig()->benchmark_,
-                                                       nullptr,
-                                                       0);
-      coo->loc_id_ = site_id_;
-      coo->par_id_ = partition_id_;
-
-      auto callback = [this, par_id, recovery_event, cmd_id, completion_weight](int res, TxnOutput& output) {
-#ifdef JETPACK_RECOVERY_DEBUG
-        Log_info("[JETPACK-RECOVERY] Dispatch callback received, res=%d (target=%d current=%d weight=%d)",
-                 res,
-                 recovery_event ? recovery_event->target_ : -1,
-                 recovery_event ? recovery_event->value_ : -1,
-                 completion_weight);
-#endif
-        if (res == WRONG_LEADER) {
-#ifdef JETPACK_WRONG_LEADER_DEBUG
-          Log_error("[JETPACK-RECOVERY] Received WRONG_LEADER during recovery dispatch for partition %d.", par_id);
-#endif
-        } else if (res == REJECT) {
-          Log_info("[JETPACK-RECOVERY] Command rejected during recovery dispatch (expected if tx already processed)");
-        } else if (res != SUCCESS) {
-          Log_warn("[JETPACK-RECOVERY] Dispatch failed with result: %d", res);
+    std::vector<jp::PullOk<JpBody>> oks;
+    for (const auto& rep : pe->replies_) {
+      if (!rep.ok) continue;
+      jp::PullOk<JpBody> pk;
+      pk.view_id = rep.view_id;
+      if (!JpToEntries(rep.acked, &pk.acked)) {
+        Log_error("[JETPACK-RECOVERY] PullRecovery v=%u: unparsable acked entry from site %d", v, rep.site);
+      }
+      for (const auto& a : rep.accepted->entries_) {
+        std::vector<jp::Entry<JpBody>> val;
+        if (!JpToEntries(a.value, &val)) {
+          Log_error("[JETPACK-RECOVERY] PullRecovery v=%u: unparsable accepted entry from site %d", v, rep.site);
         }
+        pk.accepted[a.vn] = std::make_pair(a.ballot, std::move(val));
+      }
+      oks.push_back(std::move(pk));
+    }
+    auto choice = jp::ChooseRecoveryValue(oks, threshold);
+    value = std::make_shared<KeyCmdBatchData>();
+    for (const auto& e : choice.value) {
+      value->AddEntry(e.key, e.body);
+    }
+    Log_info("[JETPACK-RECOVERY] PullRecovery SUCCESS v=%u b=%lld vn=%u replies=%d set=%zu adopted=%d adopted_b=%lld wait=%lldms",
+             v, (long long) b, choice.vn, (int) oks.size(), value->Size(), (int) choice.adopted,
+             (long long) choice.adopted_ballot, JpMsSince(pull_start));
 
-        if (recovery_event) {
-          int old_value = recovery_event->value_;
-          recovery_event->Set(old_value + completion_weight);
-          if (recovery_event->value_ % 100 == 0 || recovery_event->IsReady()) {
-            Log_info("[JETPACK-RECOVERY-EVENT] After increment: new value=%d, target=%d. Event ready=%s",
-                     recovery_event->value_,
-                     recovery_event->target_,
-                     recovery_event->IsReady() ? "YES" : "NO");
+    // Phase 2: Accept at the same ballot b.
+    auto accept_start = std::chrono::steady_clock::now();
+    auto ae = commo()->JetpackBroadcastAccept(partition_id_, v, choice.vn, b, value);
+    r = JpWaitValid(ae, v, JpNowUs() + kJpPhaseDeadlineUs);
+    if (r != kJpValid) {
+      stop(r, "accept");
+      return;
+    }
+    if (!ae->Yes()) {
+      auto cls = JpClassify(ae->replies_, v);
+      Log_info("[JETPACK-RECOVERY] Accept FAILED v=%u vn=%u b=%lld round=%d yes=%d no=%d errors=%d wait=%lldms",
+               v, choice.vn, (long long) b, round, ae->n_voted_yes_, ae->n_voted_no_, ae->n_errors_,
+               JpMsSince(accept_start));
+      if (cls.superseded) {
+        stop(kJpSuperseded, "accept");
+        return;
+      }
+      if (cls.finished) {
+        stop(kJpFinishedElsewhere, "accept");
+        return;
+      }
+      if (cls.max_promise_same_view > b) {
+        jp_ballot_counter_ = std::max(jp_ballot_counter_, jp::BallotCounter(cls.max_promise_same_view));
+      }
+      // The next round re-Pulls with a new ballot and re-adopts accepted[vn]
+      // if a value was chosen meanwhile.
+      r = JpSleepValid(v, JpJitter(backoff));
+      backoff = std::min(backoff * 2, kJpBackoffMaxUs);
+      if (r != kJpValid) {
+        stop(r, "accept backoff");
+        return;
+      }
+      continue;
+    }
+    Log_info("[JETPACK-RECOVERY] Accept SUCCESS v=%u vn=%u b=%lld acks=%d/%d wait=%lldms",
+             v, choice.vn, (long long) b, ae->n_voted_yes_, n, JpMsSince(accept_start));
+    chosen_vn = choice.vn;
+    chosen_b = b;
+    break;
+  }
+
+  // From here on this coordinator aims to lead v: its own replica takes part
+  // at ballot b (one agreed leader per view, jp::FinishBallotOk).
+  JpValidity r = JpOwnAccept(target, chosen_vn, chosen_b, value);
+  if (r != kJpValid) {
+    stop(r, "own accept");
+    return;
+  }
+
+  // ---- Phase 3: resubmit every member; FinishRecovery only after all SUCCESS ----
+  r = JpResubmitAll(target, value, JpUsesStabilityMarker(), chosen_vn, chosen_b);
+  if (r != kJpValid) {
+    stop(r, "resubmit");
+    return;
+  }
+  Log_info("[JETPACK-RECOVERY] All recovery completed v=%u members=%zu", v, value->Size());
+  r = JpCheckValid(v);
+  if (r != kJpValid) {
+    stop(r, "before finish");
+    return;
+  }
+
+  // ---- Phase 4: FinishRecovery(v) until a majority applied it ----
+  // One leader per view id (etcd / MongoDB / ZooKeeper, where a takeover
+  // can give view v several coordinators): this replica installs v from its
+  // own FinishRecovery, and so starts leading v, only after n/2 other
+  // replicas installed v with this coordinator as leader; with this replica
+  // that is a majority (jp::SelfInstallAllowed). Raft has one coordinator per
+  // term and sends the FinishRecovery to itself like to everybody
+  // (JpCheckValid is not used from here on: our own applied FR sets
+  // jepoch_ = v).
+  const bool self_last = JpTakeoverEnabled();
+  bool self_installed = !self_last;
+  std::set<siteid_t> fr_done;     // applied v or are past it (pre-credited on resends)
+  std::set<siteid_t> fr_ours;     // other replicas in view v led by this coordinator
+  std::set<siteid_t> fr_foreign;  // other replicas in view v led by another coordinator
+  int64_t fr_backoff = kJpFrBackoffMinUs;
+  auto fr_wait_start = std::chrono::steady_clock::now();
+  auto self_install_step = [&]() -> JpValidity {
+    if (self_installed) return kJpValid;
+    if (jp_driver_stop_) return kJpNotCoordinator;
+    if (oepoch_ > v || jp_pending_view_ > v) return kJpSuperseded;
+    // Another coordinator's FinishRecovery installed v here: it leads v.
+    if (jepoch_ >= v) return kJpFinishedElsewhere;
+    if (jp::SelfInstallAllowed(n, (int) fr_ours.size())) {
+      if (!JpFinishLocally(v, target)) {
+        Log_error("[JETPACK-RECOVERY] FinishRecovery v=%u: cannot install v here (view=%u vid=%u amnesiac=%d)",
+                  v, jepoch_, oepoch_, (int) jp_rejoin_.amnesiac());
+        return kJpNotCoordinator;
+      }
+      self_installed = true;
+      fr_done.insert(site_id_);
+      return kJpValid;
+    }
+    if (jp::SelfInstallImpossible(n, (int) fr_foreign.size())) return kJpFinishedElsewhere;
+    return kJpValid;
+  };
+  JpValidity fr_r = self_install_step();  // n == 1: no other replica to wait for
+  if (fr_r != kJpValid) {
+    stop(fr_r, "finish");
+    return;
+  }
+  while (true) {
+    const int ours_needed = self_installed ? 0 : std::max(1, n / 2 - (int) fr_ours.size());
+    // At the ballot that chose the value: replicas where a higher same-view
+    // coordinator took part do not install it (jp::FinishBallotOk).
+    auto fe = commo()->JetpackBroadcastFinishRecovery(partition_id_, v, chosen_b, target, fr_done,
+                                                      /*wait_all=*/false,
+                                                      self_installed ? -1 : (int) site_id_,
+                                                      ours_needed);
+    const int64_t deadline = JpNowUs() + kJpPhaseDeadlineUs;
+    while (!fe->IsReady() && !jp_driver_stop_ && !JpNewerViewSeen(v) &&
+           (self_installed || jepoch_ < v)) {
+      int64_t left = deadline - JpNowUs();
+      if (left <= 0) break;
+      fe->Wait(JpClampWaitUs(left));
+    }
+    fr_done.insert(fe->done_.begin(), fe->done_.end());
+    for (const auto& rep : fe->replies_) {
+      if (rep.site == site_id_) continue;
+      if (rep.applied) {
+        fr_ours.insert(rep.site);
+      } else if (rep.view_id == v) {
+        fr_foreign.insert(rep.site);
+      }
+    }
+    fr_r = self_install_step();
+    if (fr_r != kJpValid) {
+      stop(fr_r, "finish");
+      return;
+    }
+    if (self_installed && (int) fr_done.size() >= n / 2 + 1) {
+      break;
+    }
+    if (jp_driver_stop_ || JpNewerViewSeen(v) || fe->NewerViewSeen()) {
+      // A newer recovery will unfreeze everybody.
+      stop(kJpSuperseded, "finish");
+      return;
+    }
+    std::string here;
+    if (!self_installed) {
+      here = " ours=" + std::to_string(fr_ours.size()) + " foreign=" +
+             std::to_string(fr_foreign.size()) + ", not installed here yet";
+    }
+    Log_info("[JETPACK-RECOVERY] FinishRecovery v=%u not yet applied by a majority (done=%zu/%d errors=%d%s), resend in %lldms",
+             v, fr_done.size(), n, fe->n_errors_, here.c_str(), (long long) (fr_backoff / 1000));
+    const int64_t resend_at = JpNowUs() + fr_backoff;
+    while (!jp_driver_stop_ && !JpNewerViewSeen(v) && (self_installed || jepoch_ < v) &&
+           JpNowUs() < resend_at) {
+      Reactor::CreateSpEvent<TimeoutEvent>(JpClampWaitUs(resend_at - JpNowUs()))->Wait();
+    }
+    fr_backoff = std::min(fr_backoff * 2, kJpFrBackoffMaxUs);
+  }
+  JpWriteFinishSignals();
+  Log_info("[JETPACK-RECOVERY-FINISH-WAIT] FinishRecovery quorum ack after %lldms",
+           JpMsSince(fr_wait_start));
+  Log_info("[JETPACK-RECOVERY] FinishRecovery broadcast completed, fast path restored v=%u applied=%zu/%d",
+           v, fr_done.size(), n);
+  if ((int) fr_done.size() < n) {
+    View t = target;
+    std::set<siteid_t> done = fr_done;
+    auto alive = jp_alive_;
+    Coroutine::CreateRun([this, v, t, done, alive]() {
+      this->JpFinishStragglers(v, t, done, alive);
+    });
+  }
+  Log_info("[JETPACK-RECOVERY] ===== JETPACK RECOVERY COMPLETED ====== duration=%lldms time=%.6fms v=%u",
+           JpMsSince(jetpack_recovery_start_time_), JpWallMs(), v);
+}
+
+TxLogServer::JpValidity TxLogServer::JpOwnAccept(const View& target, epoch_t vn, ballot_t b,
+                                                 const shared_ptr<KeyCmdBatchData>& value) {
+  const epoch_t v = target.view_id_;
+  if (oepoch_ > v) return kJpSuperseded;
+  if (jepoch_ >= v) return kJpFinishedElsewhere;
+  if (jp::BallotView(jp_promised_) == v && jp_promised_ > b) {
+    // A higher coordinator of v pulled this replica: it, not this one, is to
+    // lead v (it adopts the same chosen value).
+    Log_info("[JETPACK-RECOVERY] own replica promised b=%lld above b=%lld of v=%u: taken over",
+             (long long) jp_promised_, (long long) b, v);
+    return kJpTakenOver;
+  }
+  if (jp_rejoin_.RecoveryMsgAllowed() && jp::AcceptAllowed(jepoch_, oepoch_, jp_promised_, v, vn, b)) {
+    // What this coordinator's Accept RPC to its own replica does (it may still
+    // be in flight; applying it again later changes nothing).
+    JpJoin(v);
+    jp_promised_ = b;
+    jp_accepted_[vn] = JpAccepted{b, value ? value : std::make_shared<KeyCmdBatchData>()};
+  }
+  jp_fr_floor_ = b;
+  return kJpValid;
+}
+
+void TxLogServer::JpFinishStragglers(epoch_t v, View target, std::set<siteid_t> done,
+                                     std::shared_ptr<std::atomic<bool>> alive) {
+  // No try cap; capped backoff; stop when every replica is done or a
+  // newer view is pending/joined here or reported by a replica. A replica
+  // that stays down keeps this coroutine running until shutdown.
+  const int n = Config::GetConfig()->GetPartitionSize(partition_id_);
+  int64_t backoff = kJpFrBackoffMinUs;
+  int rounds = 0;
+  while ((int) done.size() < n) {
+    const int64_t resend_at = JpNowUs() + backoff;
+    while (!jp_driver_stop_ && !JpNewerViewSeen(v) && JpNowUs() < resend_at) {
+      Reactor::CreateSpEvent<TimeoutEvent>(JpClampWaitUs(resend_at - JpNowUs()))->Wait();
+      if (!alive->load()) {
+        return;  // the server is gone: touch nothing of it
+      }
+    }
+    if (jp_driver_stop_ || JpNewerViewSeen(v)) {
+      Log_info("[JETPACK-RECOVERY] FinishRecovery stragglers v=%u: newer view here, stop (done=%zu/%d)",
+               v, done.size(), n);
+      return;
+    }
+    rounds++;
+    // The leader of v is decided (a majority installed it): every replica
+    // still frozen in v may install it, whatever ballot it took part in.
+    auto fe = commo()->JetpackBroadcastFinishRecovery(partition_id_, v, jp::kChosenBallot, target, done,
+                                                      /*wait_all=*/true);
+    const int64_t deadline = JpNowUs() + kJpPhaseDeadlineUs;
+    while (!fe->IsReady()) {
+      int64_t left = deadline - JpNowUs();
+      if (left <= 0) break;
+      fe->Wait(JpClampWaitUs(left));
+      if (!alive->load()) {
+        return;
+      }
+    }
+    done.insert(fe->done_.begin(), fe->done_.end());
+    if (fe->NewerViewSeen()) {
+      Log_info("[JETPACK-RECOVERY] FinishRecovery stragglers v=%u: a replica is past v, stop (done=%zu/%d)",
+               v, done.size(), n);
+      return;
+    }
+    if (rounds == 1 || rounds % 10 == 0 || (int) done.size() == n) {
+      Log_info("[JETPACK-RECOVERY] FinishRecovery stragglers v=%u round=%d done=%zu/%d",
+               v, rounds, done.size(), n);
+    }
+    backoff = std::min(backoff * 2, kJpFrBackoffMaxUs);
+  }
+}
+
+// Duplicate-replay window (etcd / MongoDB / ZooKeeper). There the
+// state machine is the external store: a resubmitted member is a plain
+// backend write, with no exactly-once marker and no view fence (backend
+// fencing / exactly-once is not implemented here). Raft is not affected: term
+// fencing plus CommitReplicated's executed-flag dedup. On the other
+// backends a replayed member can overwrite a later write to the same key when
+//  1. it was already written through its own original path but not yet GC'd
+//     at threshold-many Pull repliers, and a later original-path write to the
+//     key landed before the replay;
+//  2. several coordinators run for one term (a shared signal file with an
+//     unknown etcd member id or a line without loc=/member=, a misconfigured
+//     loc=/member=, a coordinator takeover): a slower coordinator's
+//     resubmissions may still sit in the backend pool or be in flight after
+//     another one's FinishRecovery reopened the partition and later writes
+//     landed;
+//  3. this coordinator is superseded or stops (JpCheckValid): resubmissions
+//     already queued or in flight are not recalled;
+//  4. an ambiguous backend failure (deadline, dropped connection) is retried,
+//     although the first attempt may have been applied (at-least-once).
+// Only the exposure is reduced: one coordinator per term (etcd member=, Mongo
+// and ZooKeeper loc= lines and self-detection of the co-located node),
+// strictly newer terms only, and on MongoDB directConnection (only the replica
+// next to the primary can write).
+TxLogServer::JpValidity TxLogServer::JpResubmitAll(const View& target,
+                                                   const shared_ptr<KeyCmdBatchData>& value,
+                                                   bool with_marker,
+                                                   epoch_t vn,
+                                                   ballot_t b) {
+  const epoch_t v = target.view_id_;
+  TxLogServer* txs = tx_sched_ ? tx_sched_ : this;
+  std::vector<shared_ptr<JpMember>> members;
+  for (size_t i = 0; value && i < value->Size(); i++) {
+    auto m = std::make_shared<JpMember>();
+    m->key = value->GetKey(i);
+    m->body = JpRecoveredPieces(value->GetCommand(i));
+    if (!m->body) {
+      // Every pool entry is a VecPieceData; anything else cannot be replayed.
+      Log_error("[JETPACK-RECOVERY] Resubmit v=%u: member key=%d has no replayable body (kind=%d), skipped",
+                v, m->key, value->GetCommand(i) ? value->GetCommand(i)->kind_ : -1);
+      continue;
+    }
+    auto& piece0 = m->body->sp_vec_piece_data_->at(0);
+    m->tx_id = piece0->root_id_;
+    m->cmd_id = SimpleRWCommand::CombineInt32(piece0->client_id_, piece0->cmd_id_in_client_);
+    members.push_back(m);
+  }
+  if (with_marker) {
+    // Stability marker: committed in term v through this leader, it
+    // commits every older entry of the log before FinishRecovery(v).
+    auto piece = std::make_shared<TxPieceData>();
+    piece->id_ = kJpMarkerTxBase | (txnid_t) v;
+    piece->root_id_ = piece->id_;
+    piece->type_ = RW_BENCHMARK_R_TXN_0;
+    piece->inn_id_ = RW_BENCHMARK_R_TXN_0;
+    piece->root_type_ = RW_BENCHMARK_R_TXN;
+    piece->partition_id_ = partition_id_;
+    piece->client_id_ = kJpMarkerClientId;
+    piece->cmd_id_in_client_ = (int32_t) v;
+    piece->input[0] = Value((i32) 0);
+    auto m = std::make_shared<JpMember>();
+    m->marker = true;
+    m->key = 0;
+    m->tx_id = piece->root_id_;
+    m->cmd_id = SimpleRWCommand::CombineInt32(piece->client_id_, piece->cmd_id_in_client_);
+    m->body = std::make_shared<VecPieceData>();
+    m->body->sp_vec_piece_data_ = std::make_shared<vector<shared_ptr<TxPieceData>>>();
+    m->body->sp_vec_piece_data_->push_back(piece);
+    members.push_back(m);
+  }
+  Log_info("[JETPACK-RECOVERY] Resubmit v=%u members=%zu marker=%d via own replication coordinator",
+           v, members.size(), (int) with_marker);
+
+  // "Current wake-up event" holder: a completion Sets whatever event the
+  // loop waits on at that moment.
+  auto wake = std::make_shared<shared_ptr<IntEvent>>(Reactor::CreateSpEvent<IntEvent>());
+  auto submit = [this, v, wake, txs](const shared_ptr<JpMember>& m) {
+    if (!m->marker) {
+      // Already executed here (e.g. committed through its own Dispatch).
+      auto tx = txs->GetTx(m->tx_id);
+      if (tx && tx->committed_) {
+        m->state = JpMember::kDone;
+        m->last_code = SUCCESS;
+        return;
+      }
+    }
+    // A fresh recovery-flagged command for every attempt; the body came from
+    // an RPC reply and is shared with no pool.
+    auto vpd = std::make_shared<VecPieceData>();
+    vpd->sp_vec_piece_data_ = m->body->sp_vec_piece_data_;
+    vpd->time_sent_from_client_ = m->body->time_sent_from_client_;
+    vpd->is_recovery_command_ = true;
+    auto tpc = std::make_shared<TpcCommitCommand>();
+    tpc->tx_id_ = m->tx_id;
+    tpc->ret_ = m->marker ? REJECT : SUCCESS;
+    tpc->term = 0;
+    tpc->cmd_ = vpd;
+    m->state = JpMember::kInflight;
+    m->attempts++;
+    Coroutine::CreateRun([this, v, wake, m, tpc]() {
+      auto called = std::make_shared<bool>(false);
+      shared_ptr<Coordinator> coo{CreateRepCoord(0)};
+      shared_ptr<Marshallable> sp_m = tpc;
+      coo->Submit(sp_m, [v, wake, m, tpc, called]() {
+        *called = true;
+        const int code = tpc->ret_;
+        // Only SUCCESS counts; the marker keeps its no-op REJECT unless the
+        // coordinator bounced it (WRONG_LEADER).
+        const bool ok = m->marker ? (code == REJECT) : (code == SUCCESS);
+        m->last_code = code;
+        if (ok) {
+          m->state = JpMember::kDone;
+        } else {
+          m->state = JpMember::kFailed;
+          m->next_try_us = JpNowUs() + JpRetryBackoffUs(m->attempts);
+          if (code == REJECT) {
+            Log_error("[JETPACK-RECOVERY] Resubmit v=%u key=%d tx=%llu was REJECTed (attempt %d), retrying",
+                      v, m->key, (unsigned long long) m->tx_id, m->attempts);
+          } else if (m->attempts == 1 || m->attempts % 10 == 0) {
+            Log_info("[JETPACK-RECOVERY] Resubmit v=%u key=%d tx=%llu failed with %d (attempt %d), retrying",
+                     v, m->key, (unsigned long long) m->tx_id, code, m->attempts);
           }
         }
-      };
+        (*wake)->Set(1);
+      });
+      if (!*called && m->state == JpMember::kInflight) {
+        m->state = JpMember::kFailed;
+        m->last_code = kJpNoCallback;
+        m->next_try_us = JpNowUs() + JpRetryBackoffUs(m->attempts);
+        (*wake)->Set(1);
+      }
+    });
+  };
 
-      if (batch_cmd_override) {
-        comm->BroadcastDispatch(nullptr, coo.get(), callback, batch_cmd_override);
+  // Keepalive (etcd / MongoDB / ZooKeeper): re-send Accept(v, vn, b,
+  // value) every jp::kKeepaliveEveryUs. It is idempotent where b is still the
+  // promise and counts as recovery progress there, so frozen replicas do not
+  // take a live recovery over; its replies stop this resubmission once the
+  // recovery was superseded, finished elsewhere or taken over (a higher
+  // ballot of v: that coordinator adopts the same chosen value).
+  const bool keepalive = JpTakeoverEnabled();
+  auto ka_events = std::make_shared<std::vector<shared_ptr<JetpackAcceptQuorumEvent>>>();
+  int64_t next_keepalive = JpNowUs() + jp::kKeepaliveEveryUs;
+  auto keepalive_verdict = [&]() -> JpValidity {
+    for (auto it = ka_events->begin(); it != ka_events->end();) {
+      const auto& e = *it;
+      for (const auto& rep : e->replies_) {
+        const jp::KeepaliveVerdict kv =
+            jp::ClassifyKeepaliveReply(v, b, rep.view_id, rep.vid, rep.promised);
+        if (kv == jp::KeepaliveVerdict::kContinue) continue;
+        Log_info("[JETPACK-RECOVERY] keepalive Accept v=%u vn=%u b=%lld: site %d reports view=%u vid=%u promised=%lld",
+                 v, vn, (long long) b, rep.site, rep.view_id, rep.vid, (long long) rep.promised);
+        if (kv == jp::KeepaliveVerdict::kSuperseded) return kJpSuperseded;
+        if (kv == jp::KeepaliveVerdict::kFinishedElsewhere) return kJpFinishedElsewhere;
+        return kJpTakenOver;
+      }
+      if ((int) e->replies_.size() + e->n_errors_ >= e->n_total_) {
+        it = ka_events->erase(it);  // every reply seen
       } else {
-        comm->BroadcastDispatch(vec_piece_data->sp_vec_piece_data_, coo.get(), callback);
-      }
-#ifdef JETPACK_RECOVERY_DEBUG
-      Log_info("[JETPACK-RECOVERY] Command dispatched through communicator to leader");
-#endif
-    } else {
-      Log_error("[JETPACK-RECOVERY] DispatchRecoveredCommand failed: inner command kind=%d (expected VecPieceData)", inner_cmd->kind_);
-    }
-  } else {
-    Log_error("[JETPACK-RECOVERY] DispatchRecoveredCommand unsupported command kind=%d", inner_cmd->kind_);
-  }
-}
-
-void TxLogServer::OnJetpackPullRecovery(const MarshallDeputy& old_view,
-                                        const MarshallDeputy& new_view,
-                                        const epoch_t& jepoch,
-                                        const epoch_t& oepoch,
-                                        bool_t* ok,
-                                        epoch_t* reply_jepoch,
-                                        epoch_t* reply_oepoch,
-                                        MarshallDeputy* reply_old_view,
-                                        MarshallDeputy* reply_new_view,
-                                        shared_ptr<KeyCmdIdBatchData>& batch) {
-  if (!reply_old_view || !reply_new_view || !batch) {
-    if (ok) {
-      *ok = 0;
-    }
-    return;
-  }
-
-  OnJetpackBeginRecovery(old_view, new_view, oepoch);
-  reply_old_view->SetMarshallable(std::make_shared<ViewData>(rep_sched_->old_view_));
-  reply_new_view->SetMarshallable(std::make_shared<ViewData>(rep_sched_->new_view_));
-
-  if (jepoch >= rep_sched_->jepoch_ && oepoch >= rep_sched_->oepoch_) {
-    rep_sched_->jetpack_status_ = TxLogServer::JetpackStatus::RECOVERY;
-    *ok = 1;
-    *reply_jepoch = rep_sched_->jepoch_;
-    *reply_oepoch = rep_sched_->oepoch_;
-    Log_info("[JETPACK-RECOVERY] PullRecovery command pool candidates size=%zu pool_size=%d",
-             rep_sched_->command_pool_.candidates_.size(), rep_sched_->command_pool_.size());
-    for (const auto& kv : rep_sched_->command_pool_.candidates_) {
-      key_t key = kv.first;
-      if (rep_sched_->command_pool_.has_cmd_to_recover(key)) {
-        auto cmd = rep_sched_->command_pool_.cmd_to_recover(key);
-        if (cmd) {
-          uint64_t cmd_id = SimpleRWCommand::GetCombinedCmdID(cmd);
-          batch->AddEntry(key, cmd_id);
-        }
+        ++it;
       }
     }
-  } else {
-    *ok = 0;
-    *reply_jepoch = rep_sched_->jepoch_;
-    *reply_oepoch = rep_sched_->oepoch_;
-  }
-}
+    return kJpValid;
+  };
 
-void TxLogServer::OnJetpackBeginRecovery(const MarshallDeputy& old_view,
-                                         const MarshallDeputy& new_view, 
-                                         const epoch_t& new_view_id) {
-  rep_sched_->jetpack_status_ = TxLogServer::JetpackStatus::RECOVERY;
-  rep_sched_->oepoch_ = new_view_id;
-  auto config = Config::GetConfig();
-  
-  // Extract ViewData from MarshallDeputy parameters
-  auto sp_old_view_data = dynamic_pointer_cast<ViewData>(old_view.sp_data_);
-  auto sp_new_view_data = dynamic_pointer_cast<ViewData>(new_view.sp_data_);
-  
-  // Update the views if extraction was successful
-  if (sp_old_view_data) {
-    rep_sched_->old_view_ = sp_old_view_data->GetView();
-#ifdef JETPACK_RECOVERY_DEBUG
-    Log_info("[JETPACK-RECOVERY] Updated old_view from MarshallDeputy");
-#endif
-  } else {
-#ifdef JETPACK_RECOVERY_DEBUG
-    Log_info("[JETPACK-RECOVERY] Warning: Could not extract old_view from MarshallDeputy");
-#endif
-  }
-  
-  if (sp_new_view_data) {
-    const View& incoming_view = sp_new_view_data->GetView();
-    Log_info("[VIEW_DEBUG] OnJetpackBeginRecovery partition %d view transition %s -> %s",
-             partition_id_, rep_sched_->new_view_.ToString().c_str(), incoming_view.ToString().c_str());
-    rep_sched_->new_view_ = incoming_view;
-#ifdef JETPACK_RECOVERY_DEBUG
-    Log_info("[JETPACK-RECOVERY] Updated new_view from MarshallDeputy");
-#endif
-    
-    // Update the communicator's view immediately
-    if (commo_) {
-      auto my_comm = commo();
-      Log_info("[JETPACK-RECOVERY] This TxLogServer %p has communicator %p (loc_id=%d)", 
-               this, my_comm, my_comm ? my_comm->loc_id_ : -1);
-      if (my_comm) {
-        my_comm->UpdatePartitionView(partition_id_, sp_new_view_data);
+  const auto start = std::chrono::steady_clock::now();
+  int64_t last_log = JpNowUs();
+  while (true) {
+    const int64_t now = JpNowUs();
+    int64_t earliest = std::numeric_limits<int64_t>::max();
+    for (auto& m : members) {
+      if (m->state != JpMember::kPending && m->state != JpMember::kFailed) continue;
+      if (now >= m->next_try_us) {
+        submit(m);
+      } else {
+        earliest = std::min(earliest, m->next_try_us);
       }
     }
-    
-    // // Also update rep_sched's communicator if different
-    // if (rep_sched_ && rep_sched_ != this && rep_sched_->commo_) {
-    //   auto rep_comm = rep_sched_->commo();
-    //   Log_info("[JETPACK-RECOVERY] Also updating rep_sched %p communicator %p (loc_id=%d)", 
-    //            rep_sched_, rep_comm, rep_comm ? rep_comm->loc_id_ : -1);
-    //   if (rep_comm) {
-    //     rep_comm->UpdatePartitionView(partition_id_, sp_new_view_data);
-    //   }
-    // }
-    
-    Log_info("[JETPACK-RECOVERY] Updated communicator view(s) for partition %d during BeginRecovery: %s", 
-             partition_id_, sp_new_view_data->GetView().ToString().c_str());
-    
-    // Log leader information from the new view
-    if (!sp_new_view_data->GetView().leaders_.empty()) {
-      int new_leader = sp_new_view_data->GetView().GetLeader();
-      bool should_be_leader = (new_leader == site_id_);
-      Log_info("[JETPACK-VIEW-UPDATE] New view leader is %d, this server is %d, should_be_leader=%d", 
-               new_leader, site_id_, should_be_leader);
-      
-      // Demote immediately if the recovery view picked a different leader
-      if ((config->replica_proto_ == MODE_RAFT || config->replica_proto_ == MODE_FPGA_RAFT) && rep_sched_) {
-        if (auto* raft_server = dynamic_cast<RaftServer*>(rep_sched_)) {
-          if (new_leader != raft_server->site_id_ && raft_server->IsLeader()) {
-            Log_info("[JETPACK-VIEW-UPDATE] Stepping down due to BeginRecovery view update; new leader=%d", new_leader);
-            raft_server->setIsLeader(false);
-          }
-        }
-      }
-    } else {
-      Log_info("[JETPACK-VIEW-UPDATE] WARNING: New view has no leaders in the new view");
+    size_t done = 0;
+    for (auto& m : members) {
+      done += (m->state == JpMember::kDone) ? 1 : 0;
     }
-  } else {
-#ifdef JETPACK_RECOVERY_DEBUG
-    Log_info("[JETPACK-RECOVERY] Warning: Could not extract new_view from MarshallDeputy");
-#endif
-  }
-}
-
-void TxLogServer::OnJetpackPullIdSet(const epoch_t& jepoch,
-                                     const epoch_t& oepoch,
-                                     bool_t* ok,
-                                     epoch_t* reply_jepoch,
-                                     epoch_t* reply_oepoch,
-                                     MarshallDeputy* reply_old_view,
-                                     MarshallDeputy* reply_new_view,
-                                     shared_ptr<VecRecData> id_set) {
-  
-  
-  // Debug print command pool candidates
-#ifdef JETPACK_RECOVERY_DEBUG
-  if (rep_sched_) {
-
-    Log_info("[JETPACK-DEBUG] Command pool candidates size: %zu", rep_sched_->command_pool_.candidates_.size());
-    
-    // Print all keys in command pool candidates
-    std::stringstream pool_keys;
-    int count = 0;
-    for (const auto& kv : rep_sched_->command_pool_.candidates_) {
-      if (count++ < 20) {
-        pool_keys << kv.first << "(" << kv.second.size() << " cmds) ";
-      }
+    if (done == members.size()) {
+      Log_info("[JETPACK-RECOVERY] Resubmit v=%u done=%zu/%zu after %lldms",
+               v, done, members.size(), JpMsSince(start));
+      return kJpValid;
     }
-    if (rep_sched_->command_pool_.candidates_.size() > 20) {
-      pool_keys << "... (and " << (rep_sched_->command_pool_.candidates_.size() - 20) << " more)";
+    if (keepalive && now >= next_keepalive) {
+      next_keepalive = now + jp::kKeepaliveEveryUs;
+      // Its own coroutine: the broadcaster yields (WAN_WAIT) before sending.
+      Coroutine::CreateRun([this, v, vn, b, value, ka_events]() {
+        ka_events->push_back(commo()->JetpackBroadcastAccept(partition_id_, v, vn, b, value));
+      });
     }
-    Log_info("[JETPACK-DEBUG] Command pool candidate keys: %s", pool_keys.str().c_str());
-
-  }
-#endif
-  
-  // Initialize MarshallDeputy objects with ViewData objects
-  reply_old_view->SetMarshallable(std::make_shared<ViewData>(rep_sched_->old_view_));
-  reply_new_view->SetMarshallable(std::make_shared<ViewData>(rep_sched_->new_view_));
-  
-  if (jepoch >= rep_sched_->jepoch_ && oepoch >= rep_sched_->oepoch_) {
-    rep_sched_->jetpack_status_ = TxLogServer::JetpackStatus::RECOVERY;
-    *ok = 1;
-    *reply_jepoch = rep_sched_->jepoch_;
-    *reply_oepoch = rep_sched_->oepoch_;
-    // Copy data from command pool id_set to the response parameter
-    auto pool_id_set = rep_sched_->command_pool_.id_set();
-    id_set->key_data_ = pool_id_set->key_data_;
-    
-  } else {
-    *ok = 0;
-    *reply_jepoch = rep_sched_->jepoch_;
-    *reply_oepoch = rep_sched_->oepoch_;
-    // Initialize empty key_data_ for failed case
-    id_set->key_data_ = std::make_shared<vector<key_t>>();
-  }
-}
-
-void TxLogServer::OnJetpackPullCmd(const epoch_t& jepoch,
-                                   const epoch_t& oepoch,
-                                   const std::vector<key_t>& keys,
-                                   bool_t* ok, 
-                                   epoch_t* reply_jepoch, 
-                                   epoch_t* reply_oepoch,
-                                   MarshallDeputy* reply_old_view,
-                                   MarshallDeputy* reply_new_view,
-                                   shared_ptr<KeyCmdBatchData>& batch) {
-  
-  if (!rep_sched_ || !batch) {
-    return;
-  }
-  
-  if (!reply_old_view || !reply_new_view) {
-    return;
-  }
-  
-  reply_old_view->SetMarshallable(std::make_shared<ViewData>(rep_sched_->old_view_));
-  reply_new_view->SetMarshallable(std::make_shared<ViewData>(rep_sched_->new_view_));
-  
-  if (jepoch >= rep_sched_->jepoch_ && oepoch >= rep_sched_->oepoch_) {
-    rep_sched_->jetpack_status_ = TxLogServer::JetpackStatus::RECOVERY;
-    *ok = 1;
-    *reply_jepoch = rep_sched_->jepoch_;
-    *reply_oepoch = rep_sched_->oepoch_;
-    
-    for (const auto& key : keys) {
-#ifdef JETPACK_RECOVERY_DEBUG
-      Log_info("[JETPACK-SCHED-DEBUG] Processing batched key %d for PullCmd", key);
-#endif
-      auto& candidates = rep_sched_->command_pool_.candidates_;
-      if (candidates.find(key) == candidates.end()) {
-        continue;
-      }
-      if (rep_sched_->command_pool_.has_cmd_to_recover(key)) {
-        auto cmd = rep_sched_->command_pool_.cmd_to_recover(key);
-        if (cmd) {
-          batch->AddEntry(key, cmd);
-        }
-      }
+    int64_t wait_us = kJpSliceUs;
+    if (earliest != std::numeric_limits<int64_t>::max()) {
+      wait_us = std::min(wait_us, earliest - now);
     }
-  } else {
-    *ok = 0;
-    *reply_jepoch = rep_sched_->jepoch_;
-    *reply_oepoch = rep_sched_->oepoch_;
-  }
-  
-}
-
-void TxLogServer::OnJetpackRecordCmd(const epoch_t& jepoch, 
-                                     const epoch_t& oepoch, 
-                                     const int32_t& sid, 
-                                     shared_ptr<KeyCmdIdBatchData>& record_batch,
-                                     shared_ptr<KeyCmdIdBatchData>& missing_batch,
-                                     shared_ptr<KeyCmdBatchData>& cmd_batch) {
-  if (!rep_sched_) {
-    return;
-  }
-  if (jepoch >= rep_sched_->jepoch_ && oepoch >= rep_sched_->oepoch_) {
-    // Record incoming key-id set
-    if (record_batch) {
-      std::vector<std::pair<key_t, uint64_t>> ids;
-      ids.reserve(record_batch->Size());
-      for (size_t idx = 0; idx < record_batch->Size(); idx++) {
-        ids.emplace_back(record_batch->GetKey(idx), record_batch->GetCmdId(idx));
-      }
-      rep_sched_->rec_set_.set_rec_set(sid, ids);
+    if (keepalive) {
+      wait_us = std::min(wait_us, next_keepalive - now);
     }
-    if (missing_batch && cmd_batch) {
-      for (size_t idx = 0; idx < missing_batch->Size(); idx++) {
-        key_t key = missing_batch->GetKey(idx);
-        uint64_t cmd_id = missing_batch->GetCmdId(idx);
-        auto& candidates = rep_sched_->command_pool_.candidates_;
-        auto it = candidates.find(key);
-        if (it != candidates.end()) {
-          auto cmd = it->second.get_cmd(cmd_id);
-          if (cmd) {
-            cmd_batch->AddEntry(key, cmd);
-          }
-        }
+    (*wake)->Wait(JpClampWaitUs(wait_us));
+    // Single reactor thread: a completion that ran before this re-arm already
+    // updated its member, which the next scan sees; a later one Sets the new
+    // event.
+    *wake = Reactor::CreateSpEvent<IntEvent>();
+    JpValidity r = JpCheckValid(v);
+    if (r == kJpValid && keepalive) {
+      r = keepalive_verdict();
+    }
+    if (r != kJpValid) {
+      size_t d = 0;
+      for (auto& m : members) d += (m->state == JpMember::kDone) ? 1 : 0;
+      Log_info("[JETPACK-RECOVERY] Resubmit v=%u stopped (%s) done=%zu/%zu",
+               v, JpValidityName(r), d, members.size());
+      return r;
+    }
+    if (JpNowUs() - last_log >= kJpResubmitLogEveryUs) {
+      last_log = JpNowUs();
+      std::map<int, int> codes;
+      size_t d = 0, inflight = 0;
+      for (auto& m : members) {
+        if (m->state == JpMember::kDone) d++;
+        else if (m->state == JpMember::kInflight) inflight++;
+        else if (m->state == JpMember::kFailed) codes[m->last_code]++;
       }
+      std::ostringstream oss;
+      for (auto& kv : codes) oss << kv.first << "x" << kv.second << " ";
+      Log_info("[JETPACK-RECOVERY] resubmit v=%u done=%zu/%zu inflight=%zu failed_codes=%s",
+               v, d, members.size(), inflight, oss.str().c_str());
     }
   }
 }
 
-void TxLogServer::OnJetpackPrepare(const epoch_t& jepoch, 
-                                   const epoch_t& oepoch, 
-                                   const ballot_t& max_seen_ballot, 
-                                   bool_t* ok, 
-                                   epoch_t* reply_jepoch,
-                                   epoch_t* reply_oepoch,
-                                   MarshallDeputy* reply_old_view,
-                                   MarshallDeputy* reply_new_view,
-                                   ballot_t* reply_max_seen_ballot,
-                                   ballot_t* accepted_ballot, 
-                                   int32_t* replied_sid) {
-  // Initialize MarshallDeputy objects with ViewData objects
-  reply_old_view->SetMarshallable(std::make_shared<ViewData>(rep_sched_->old_view_));
-  reply_new_view->SetMarshallable(std::make_shared<ViewData>(rep_sched_->new_view_));
-  
-  if (max_seen_ballot > rep_sched_->command_pool_.max_seen_ballot_) {
-    rep_sched_->command_pool_.max_seen_ballot_ = max_seen_ballot;
-  }
-  *reply_max_seen_ballot = rep_sched_->command_pool_.max_seen_ballot_;
-  if (jepoch >= rep_sched_->jepoch_ && oepoch >= rep_sched_->oepoch_ && max_seen_ballot >= rep_sched_->command_pool_.max_seen_ballot_) {
-    *ok = 1;
-    *reply_jepoch = rep_sched_->jepoch_;
-    *reply_oepoch = rep_sched_->oepoch_;
-    *accepted_ballot = rep_sched_->command_pool_.max_accepted_ballot_;
-    *replied_sid = rep_sched_->command_pool_.sid_;
-  } else {
-    *ok = 0;
-    *reply_jepoch = rep_sched_->jepoch_;
-    *reply_oepoch = rep_sched_->oepoch_;
-  }
-}
-
-void TxLogServer::OnJetpackAccept(const epoch_t& jepoch, 
-                                  const epoch_t& oepoch, 
-                                  const ballot_t& max_seen_ballot, 
-                                  const int32_t& sid, 
-                                  bool_t* ok,
-                                  epoch_t* reply_jepoch,
-                                  epoch_t* reply_oepoch,
-                                  MarshallDeputy* reply_old_view,
-                                  MarshallDeputy* reply_new_view,
-                                  ballot_t* reply_max_seen_ballot) {
-  // Initialize MarshallDeputy objects with ViewData objects
-  reply_old_view->SetMarshallable(std::make_shared<ViewData>(rep_sched_->old_view_));
-  reply_new_view->SetMarshallable(std::make_shared<ViewData>(rep_sched_->new_view_));
-  
-  if (max_seen_ballot > rep_sched_->command_pool_.max_seen_ballot_) {
-    rep_sched_->command_pool_.max_seen_ballot_ = max_seen_ballot;
-  }
-  *reply_max_seen_ballot = rep_sched_->command_pool_.max_seen_ballot_;
-  if (jepoch >= rep_sched_->jepoch_ && oepoch >= rep_sched_->oepoch_ && max_seen_ballot >= rep_sched_->command_pool_.max_seen_ballot_) {
-    *ok = 1;
-    *reply_jepoch = rep_sched_->jepoch_;
-    *reply_oepoch = rep_sched_->oepoch_;
-    rep_sched_->command_pool_.max_accepted_ballot_ = max_seen_ballot;
-    rep_sched_->command_pool_.sid_ = sid;
-  } else {
-    *ok = 0;
-    *reply_jepoch = rep_sched_->jepoch_;
-    *reply_oepoch = rep_sched_->oepoch_;
-  }
-}
-
-void TxLogServer::OnJetpackCommit(const epoch_t& jepoch, 
-                                  const epoch_t& oepoch, 
-                                  const int32_t& sid) {
-  if (jepoch >= rep_sched_->jepoch_ && oepoch >= rep_sched_->oepoch_) {
-    rep_sched_->command_pool_.sid_ = sid;
-    rep_sched_->command_pool_.committed_ = true;
-  }
-}
-
-void TxLogServer::OnJetpackFinishRecovery(const epoch_t& oepoch) {
-  if (oepoch >= rep_sched_->oepoch_) {
-    rep_sched_->jepoch_ = oepoch;
-    rep_sched_->oepoch_ = oepoch;
-    rep_sched_->command_pool_.reset();
-    rep_sched_->jetpack_status_ = TxLogServer::JetpackStatus::READY;
-  }
-  // Finally, broadcast FinishRecovery to update jepoch and make fast path available
-#if defined(JETPACK_MONGODB_RECOVERY) || defined(JETPACK_ETCD_RECOVERY) || defined(JETPACK_ZOOKEEPER_RECOVERY)
-  Log_info("Mark FinishRecovery on %s", "recovery_finish");
-  jm_signal::set_key("jetpack", "recovery_finish", "recovery_finish");
-  Log_info("[JETPACK-RECOVERY] Wrote finish signal to JM_Jetpack_%s", "recovery_finish");
-  if (jm_signal::exists_key("failure", "failure_triggered", "failure_triggered")) {
-    jm_signal::set_key("jetpack", "recovery_finish_after_failure", "recovery_finish_after_failure");
-    Log_info("[JETPACK-RECOVERY] Wrote post-failure finish signal to JM_Jetpack_%s",
-              "recovery_finish_after_failure");
-  }
-#endif
-}
+/************************* Jetpack recovery end *****************************/
 
 } // namespace janus

@@ -70,14 +70,17 @@ void ClassicServiceImpl::ReElect(bool_t* success,
 }
 
 void ClassicServiceImpl::RuleSpeculativeExecute(const MarshallDeputy& md,
+                                                const epoch_t& fp_view,
                                                 bool_t* accepted,
                                                 int32_t* result,
                                                 bool_t* is_leader,
                                                 double* cpu_usage,
                                                 double* queue_depth,
+                                                epoch_t* reply_fp_view,
                                                 rrr::DeferredReply* defer) {
   shared_ptr<Marshallable> sp = md.sp_data_;
-  dtxn_sched()->OnRuleSpeculativeExecute(sp, accepted, result, is_leader, cpu_usage, queue_depth);
+  dtxn_sched()->OnRuleSpeculativeExecute(sp, fp_view, accepted, result, is_leader,
+                                         cpu_usage, queue_depth, reply_fp_view);
   if (!dtxn_sched()->paused_)
     defer->reply();
 }
@@ -97,6 +100,7 @@ void ClassicServiceImpl::Dispatch(const i64& cmd_id,
 void ClassicServiceImpl::DispatchWithRuleSpec(const i64& cmd_id,
                                               const DepId& dep_id,
                                               const MarshallDeputy& md,
+                                              const epoch_t& fp_view,
                                               int32_t* res,
                                               TxnOutput* output,
                                               uint64_t* coro_id,
@@ -106,14 +110,17 @@ void ClassicServiceImpl::DispatchWithRuleSpec(const i64& cmd_id,
                                               bool_t* is_leader,
                                               double* cpu_usage,
                                               double* queue_depth,
+                                              epoch_t* reply_fp_view,
                                               rrr::DeferredReply* defer) {
   // Fused leader-side handler: run the speculative vote first (it observes
   // pre-dispatch state, same as the split-RPC ordering when fastpath is on),
   // then drive the normal Dispatch replication pipeline. Single coroutine,
   // single reply — halves the per-txn RPC dispatch cost on the leader.
+  // Every spec output, reply_fp_view included, is set before DispatchInner
+  // yields.
   shared_ptr<Marshallable> sp = md.sp_data_;
-  dtxn_sched()->OnRuleSpeculativeExecute(sp, accepted, spec_result, is_leader,
-                                         cpu_usage, queue_depth);
+  dtxn_sched()->OnRuleSpeculativeExecute(sp, fp_view, accepted, spec_result, is_leader,
+                                         cpu_usage, queue_depth, reply_fp_view);
   // Always drive dispatch and always reply. If paused, OnRuleSpeculativeExecute
   // already set accepted=false, which the client's spec quorum will treat as a
   // rejection — the dispatch half still needs to ack so the protocol (Raft
@@ -868,133 +875,51 @@ void ClassicServiceImpl::CommitFebruus(const txid_t& tx_id,
 }
 
 
-void ClassicServiceImpl::JetpackPullRecovery(const MarshallDeputy& old_view,
+// Jetpack recovery glue. The handlers run on dtxn_sched() but read and write
+// only its rep_sched_ (the replication server owns all Jetpack state). The
+// generated wrapper's outputs start uninitialized, so every POD output is
+// filled by the handler and every deputy is set exactly once here.
+void ClassicServiceImpl::JetpackPullRecovery(const epoch_t& view_id,
+                                             const ballot_t& ballot,
                                              const MarshallDeputy& new_view,
-                                             const epoch_t& jepoch,
-                                             const epoch_t& oepoch,
                                              bool_t* ok,
-                                             epoch_t* reply_jepoch,
-                                             epoch_t* reply_oepoch,
-                                             MarshallDeputy* reply_old_view,
-                                             MarshallDeputy* reply_new_view,
-                                             MarshallDeputy* id_batch,
+                                             epoch_t* reply_view_id,
+                                             epoch_t* reply_vid,
+                                             ballot_t* reply_promised,
+                                             MarshallDeputy* acked_batch,
+                                             MarshallDeputy* accepted_map,
                                              rrr::DeferredReply* defer) {
-  auto batch_result = std::make_shared<KeyCmdIdBatchData>();
-  dtxn_sched()->OnJetpackPullRecovery(old_view, new_view, jepoch, oepoch, ok, reply_jepoch, reply_oepoch, reply_old_view, reply_new_view, batch_result);
-  id_batch->SetMarshallable(batch_result);
+  auto acked = std::make_shared<KeyCmdBatchData>();
+  auto accepted = std::make_shared<JetpackAcceptedMapData>();
+  dtxn_sched()->OnJetpackPullRecovery(view_id, ballot, new_view, ok, reply_view_id,
+                                      reply_vid, reply_promised, acked, accepted);
+  acked_batch->SetMarshallable(acked);
+  accepted_map->SetMarshallable(accepted);
   defer->reply();
 }
 
-void ClassicServiceImpl::JetpackPullIdSet(const epoch_t& jepoch,
-                                          const epoch_t& oepoch,
-                                          bool_t* ok, 
-                                          epoch_t* reply_jepoch, 
-                                          epoch_t* reply_oepoch,
-                                          MarshallDeputy* reply_old_view,
-                                          MarshallDeputy* reply_new_view,
-                                          MarshallDeputy* id_set, 
-                                          rrr::DeferredReply* defer) {
-  id_set->SetMarshallable(std::make_shared<VecRecData>());
-  shared_ptr<VecRecData> sp_ret_id_set = dynamic_pointer_cast<VecRecData>(id_set->sp_data_);
-  dtxn_sched()->OnJetpackPullIdSet(jepoch, oepoch, ok, reply_jepoch, reply_oepoch, reply_old_view, reply_new_view, sp_ret_id_set);
-  defer->reply();
-}
-
-void ClassicServiceImpl::JetpackPullCmd(const epoch_t& jepoch,
-                                        const epoch_t& oepoch, 
-                                        const MarshallDeputy& key_batch, 
-                                        bool_t* ok, 
-                                        epoch_t* reply_jepoch, 
-                                        epoch_t* reply_oepoch,
-                                        MarshallDeputy* reply_old_view,
-                                        MarshallDeputy* reply_new_view,
-                                        MarshallDeputy* cmd_batch, 
-                                        rrr::DeferredReply* defer) {
-  auto vec_keys = std::dynamic_pointer_cast<VecRecData>(key_batch.sp_data_);
-  std::vector<key_t> keys;
-  if (vec_keys && vec_keys->key_data_) {
-    keys.assign(vec_keys->key_data_->begin(), vec_keys->key_data_->end());
-  }
-  auto batch_result = std::make_shared<KeyCmdBatchData>();
-  dtxn_sched()->OnJetpackPullCmd(jepoch, oepoch, keys, ok, reply_jepoch, reply_oepoch, reply_old_view, reply_new_view, batch_result);
-  cmd_batch->SetMarshallable(batch_result);
-  defer->reply();
-
-}
-
-void ClassicServiceImpl::JetpackRecordCmd(const epoch_t& jepoch,
-                                          const epoch_t& oepoch,
-                                          const int32_t& sid,
-                                          const MarshallDeputy& record_id_md,
-                                          const MarshallDeputy& missing_id_md, 
-                                          bool_t* ok,
-                                          epoch_t* reply_jepoch,
-                                          epoch_t* reply_oepoch,
-                                          MarshallDeputy* reply_old_view,
-                                          MarshallDeputy* reply_new_view,
-                                          MarshallDeputy* cmd_md, 
-                                          rrr::DeferredReply* defer) {
-  auto record_batch = std::dynamic_pointer_cast<KeyCmdIdBatchData>(record_id_md.sp_data_);
-  if (!record_batch) {
-    record_batch = std::make_shared<KeyCmdIdBatchData>();
-  }
-  auto missing_batch = std::dynamic_pointer_cast<KeyCmdIdBatchData>(missing_id_md.sp_data_);
-  if (!missing_batch) {
-    missing_batch = std::make_shared<KeyCmdIdBatchData>();
-  }
-  auto cmd_batch = std::make_shared<KeyCmdBatchData>();
-  dtxn_sched()->OnJetpackRecordCmd(jepoch, oepoch, sid, record_batch, missing_batch, cmd_batch);
-  *ok = 1;
-  *reply_jepoch = dtxn_sched()->jepoch_;
-  *reply_oepoch = dtxn_sched()->oepoch_;
-  reply_old_view->SetMarshallable(std::make_shared<ViewData>(dtxn_sched()->old_view_));
-  reply_new_view->SetMarshallable(std::make_shared<ViewData>(dtxn_sched()->new_view_));
-  cmd_md->SetMarshallable(cmd_batch);
-  defer->reply();
-}
-
-void ClassicServiceImpl::JetpackPrepare(const epoch_t& jepoch, 
-                                        const epoch_t& oepoch, 
-                                        const ballot_t& max_seen_ballot, 
-                                        bool_t* ok, 
-                                        epoch_t* reply_jepoch,
-                                        epoch_t* reply_oepoch,
-                                        MarshallDeputy* reply_old_view,
-                                        MarshallDeputy* reply_new_view,
-                                        ballot_t* reply_max_seen_ballot,
-                                        ballot_t* accepted_ballot, 
-                                        int32_t* replied_sid, 
-                                        rrr::DeferredReply* defer) {
-  dtxn_sched()->OnJetpackPrepare(jepoch, oepoch, max_seen_ballot, ok, reply_jepoch, reply_oepoch, reply_old_view, reply_new_view, reply_max_seen_ballot, accepted_ballot, replied_sid);
-  defer->reply();
-}
-
-void ClassicServiceImpl::JetpackAccept(const epoch_t& jepoch, 
-                                       const epoch_t& oepoch, 
-                                       const ballot_t& max_seen_ballot, 
-                                       const int32_t& sid, 
-                                       bool_t* ok, 
-                                       epoch_t* reply_jepoch,
-                                       epoch_t* reply_oepoch,
-                                       MarshallDeputy* reply_old_view,
-                                       MarshallDeputy* reply_new_view,
-                                       ballot_t* reply_max_seen_ballot,
+void ClassicServiceImpl::JetpackAccept(const epoch_t& view_id,
+                                       const epoch_t& vn,
+                                       const ballot_t& ballot,
+                                       const MarshallDeputy& value,
+                                       bool_t* ok,
+                                       epoch_t* reply_view_id,
+                                       epoch_t* reply_vid,
+                                       ballot_t* reply_promised,
                                        rrr::DeferredReply* defer) {
-  dtxn_sched()->OnJetpackAccept(jepoch, oepoch, max_seen_ballot, sid, ok, reply_jepoch, reply_oepoch, reply_old_view, reply_new_view, reply_max_seen_ballot);
+  dtxn_sched()->OnJetpackAccept(view_id, vn, ballot, value, ok, reply_view_id,
+                                reply_vid, reply_promised);
   defer->reply();
 }
 
-void ClassicServiceImpl::JetpackCommit(const epoch_t& jepoch,
-                                       const epoch_t& oepoch, 
-                                       const int32_t& sid, 
-                                       rrr::DeferredReply* defer) {
-  dtxn_sched()->OnJetpackCommit(jepoch, oepoch, sid);
-  defer->reply();
-}
-
- void ClassicServiceImpl::JetpackFinishRecovery(const epoch_t& oepoch,
-                                                rrr::DeferredReply* defer) {
-  dtxn_sched()->OnJetpackFinishRecovery(oepoch);
+void ClassicServiceImpl::JetpackFinishRecovery(const epoch_t& view_id,
+                                               const ballot_t& ballot,
+                                               const MarshallDeputy& new_view,
+                                               bool_t* applied,
+                                               epoch_t* reply_view_id,
+                                               epoch_t* reply_vid,
+                                               rrr::DeferredReply* defer) {
+  dtxn_sched()->OnJetpackFinishRecovery(view_id, ballot, new_view, applied, reply_view_id, reply_vid);
   defer->reply();
 }
 

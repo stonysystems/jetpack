@@ -69,7 +69,8 @@ void RaftServer::NotifyReplicationEvents() {
 void RaftServer::LogTermChange(const char* reason,
                                uint64_t old_term,
                                uint64_t new_term,
-                               siteid_t source) {
+                               siteid_t source,
+                               bool from_peer) {
   if (old_term == new_term) {
     return;
   }
@@ -81,6 +82,11 @@ void RaftServer::LogTermChange(const char* reason,
     Log_info("[RAFT-TERM] server %d term %lu -> %lu (%s)",
              site_id_, old_term, new_term, why);
   }
+  if (from_peer) {
+    // Raft (best effort, no persistence anywhere): the first term heard
+    // from a peer after a restart is this replica's T_rejoin.
+    JpLearnRejoinTerm(new_term, "Raft traffic (first term heard from a peer)");
+  }
 }
 
 RaftServer::RaftServer(Frame * frame) {
@@ -90,88 +96,6 @@ RaftServer::RaftServer(Frame * frame) {
 #endif
   stop_ = false ;
   timer_ = new Timer() ;
-}
-
-void RaftServer::OnJetpackPullCmd(const epoch_t& jepoch,
-                                   const epoch_t& oepoch,
-                                   const std::vector<key_t>& keys,
-                                   bool_t* ok,
-                                   epoch_t* reply_jepoch,
-                                   epoch_t* reply_oepoch,
-                                   MarshallDeputy* reply_old_view,
-                                    MarshallDeputy* reply_new_view,
-                                    shared_ptr<KeyCmdBatchData>& batch) {
-  TxLogServer::OnJetpackPullCmd(jepoch, oepoch, keys, ok, reply_jepoch, reply_oepoch,
-                                reply_old_view, reply_new_view, batch);
-  if (!IsLeader()) {
-    resetTimer("JetpackPullCmd RPC");
-#ifdef RAFT_LEADER_ELECTION_DEBUG
-    // Log_info("[RAFT_TIMER] server %d reset election timer due to JetpackPullCmd (keys=%zu)",
-    //          site_id_, keys.size());
-#endif
-  }
-}
-
-void RaftServer::OnJetpackPullRecovery(const MarshallDeputy& old_view,
-                                       const MarshallDeputy& new_view,
-                                       const epoch_t& jepoch,
-                                       const epoch_t& oepoch,
-                                       bool_t* ok,
-                                       epoch_t* reply_jepoch,
-                                       epoch_t* reply_oepoch,
-                                       MarshallDeputy* reply_old_view,
-                                       MarshallDeputy* reply_new_view,
-                                       shared_ptr<KeyCmdIdBatchData>& batch) {
-  TxLogServer::OnJetpackPullRecovery(old_view, new_view, jepoch, oepoch, ok,
-                                     reply_jepoch, reply_oepoch, reply_old_view, reply_new_view, batch);
-  if (!IsLeader()) {
-    resetTimer("JetpackPullRecovery RPC");
-  }
-}
-
-void RaftServer::OnJetpackPrepare(const epoch_t& jepoch,
-                                  const epoch_t& oepoch,
-                                  const ballot_t& max_seen_ballot,
-                                  bool_t* ok,
-                                  epoch_t* reply_jepoch,
-                                  epoch_t* reply_oepoch,
-                                  MarshallDeputy* reply_old_view,
-                                  MarshallDeputy* reply_new_view,
-                                  ballot_t* reply_max_seen_ballot,
-                                  ballot_t* accepted_ballot,
-                                  int32_t* replied_sid) {
-  TxLogServer::OnJetpackPrepare(jepoch, oepoch, max_seen_ballot, ok, reply_jepoch,
-                                reply_oepoch, reply_old_view, reply_new_view, reply_max_seen_ballot,
-                                accepted_ballot, replied_sid);
-  if (!IsLeader()) {
-    resetTimer("JetpackPrepare RPC");
-  }
-}
-
-void RaftServer::OnJetpackAccept(const epoch_t& jepoch,
-                                 const epoch_t& oepoch,
-                                 const ballot_t& max_seen_ballot,
-                                 const int32_t& sid,
-                                 bool_t* ok,
-                                 epoch_t* reply_jepoch,
-                                 epoch_t* reply_oepoch,
-                                 MarshallDeputy* reply_old_view,
-                                 MarshallDeputy* reply_new_view,
-                                 ballot_t* reply_max_seen_ballot) {
-  TxLogServer::OnJetpackAccept(jepoch, oepoch, max_seen_ballot, sid, ok,
-                               reply_jepoch, reply_oepoch, reply_old_view, reply_new_view, reply_max_seen_ballot);
-  if (!IsLeader()) {
-    resetTimer("JetpackAccept RPC");
-  }
-}
-
-void RaftServer::OnJetpackCommit(const epoch_t& jepoch,
-                                 const epoch_t& oepoch,
-                                 const int32_t& sid) {
-  TxLogServer::OnJetpackCommit(jepoch, oepoch, sid);
-  if (!IsLeader()) {
-    resetTimer("JetpackCommit RPC");
-  }
 }
 
 void RaftServer::Setup() {
@@ -204,8 +128,19 @@ void RaftServer::Setup() {
       });
     }
   }
-  StartJetpackRecoveryLoop();
+  // Jetpack recovery is triggered from setIsLeader; the generic driver
+  // coroutine (TxLogServer::JpDriverLoop) starts on the first trigger.
   // Election timer will be started in Start() method when first command is submitted
+  JpLogRejoinState("[RAFT]");
+  if (jp_rejoin_.amnesiac()) {
+    // On Raft nothing (log, term, vote, Jetpack state) is persisted, so a
+    // restarted Raft replica is not supported. Best effort: it stays amnesiac
+    // until it installs a view above the first term it hears from a peer (or
+    // one it coordinates as an elected leader).
+    Log_warn("[RAFT] [JETPACK-REJOIN] JETPACK_REJOIN=1 on Raft is not supported (no persistence): "
+             "loc_id=%d stays amnesiac until a FinishRecovery above the first term heard from a peer",
+             loc_id_);
+  }
 }
 
 bool RaftServer::ConflictWithOriginalUnexecutedLog(
@@ -327,100 +262,19 @@ bool RaftServer::IsDisconnected() {
   return disconnected_;
 }
 
-void RaftServer::StartJetpackRecoveryLoop() {
-#ifndef RAFT_TEST_CORO
-  if (jetpack_recovery_loop_started_) {
-    return;
-  }
-  jetpack_recovery_loop_started_ = true;
-  {
-    std::lock_guard<std::recursive_mutex> lock(jetpack_recovery_event_mtx_);
-    jetpack_recovery_event_ = Reactor::CreateSpEvent<IntEvent>();
-  }
-  Coroutine::CreateRun([this]() {
-    this->JetpackRecoveryLoop();
-  });
-#endif
+bool RaftServer::JetpackStillCoordinator(epoch_t v) {
+  return is_leader_ && jp_elected_term_ == v;
 }
 
-void RaftServer::TriggerJetpackRecovery(const char* reason) {
-#ifndef RAFT_TEST_CORO
-	// CURP has no fast-path recovery — an optimistic attempt that the
-	// leader didn't replicate before a view change is dropped. Match
-	// that semantic by short-circuiting the Jetpack recovery trigger.
-	if (Config::GetConfig()->IsCurpMode()) {
-		Log_info("[CURP] Skipping recovery trigger (%s) — CURP does not recover lost fast-path attempts",
-						 reason ? reason : "unspecified");
-		return;
-	}
-	// Jetpack recovery only makes sense for cc:rule (jp-raft) — it
-	// rebuilds the leader's command_pool / fast-path state. For cc:none
-	// (vanilla raft + ab:raft), there is no fast-path state to recover,
-	// and worse, the recovery process puts the leader into
-	// jetpack_status_ = RECOVERY which makes CoordinatorRaft::Submit
-	// reject every client command as WRONG_LEADER until FinishRecovery
-	// completes — a state cc:none never properly transitions out of for
-	// the *leader* path because the recovery does no useful work and
-	// the rule-layer driver isn't there to drive it. Short-circuit.
-	if (Config::GetConfig()->tx_proto_ != MODE_RULE) {
-		Log_info("[JETPACK_RECOVERY] Skipping recovery trigger (%s) — tx_proto != MODE_RULE (cc:none / cc:rcc / etc. has no fast-path state to recover)",
-						 reason ? reason : "unspecified");
-		return;
-	}
-	StartJetpackRecoveryLoop();
-	const char* why = reason ? reason : "unspecified";
-	std::shared_ptr<IntEvent> ev;
-	{
-		std::lock_guard<std::recursive_mutex> lock(jetpack_recovery_event_mtx_);
-		if (!jetpack_recovery_event_) {
-			jetpack_recovery_event_ = Reactor::CreateSpEvent<IntEvent>();
-		}
-		jetpack_recovery_pending_ = 1; // we only need a single run per trigger burst
-		ev = jetpack_recovery_event_;
-	}
-	Log_info("[JETPACK_RECOVERY] site %d (loc %d) trigger (%s) pending=%d",
-					 site_id_, loc_id_, why, jetpack_recovery_pending_);
-	ev->Set(1);
-#endif
-}
-
-void RaftServer::JetpackRecoveryLoop() {
-#ifndef RAFT_TEST_CORO
-	while (!stop_) {
-		// If we already have pending triggers, skip waiting.
-		int pending = 0;
-		std::shared_ptr<IntEvent> ev;
-		{
-			std::lock_guard<std::recursive_mutex> lock(jetpack_recovery_event_mtx_);
-			if (!jetpack_recovery_event_) {
-				jetpack_recovery_event_ = Reactor::CreateSpEvent<IntEvent>();
-			}
-			ev = jetpack_recovery_event_;
-			pending = jetpack_recovery_pending_ > 0 ? 1 : 0;
-			jetpack_recovery_pending_ = 0;
-		}
-		if (pending == 0) {
-			ev->Wait();
-			if (stop_) break;
-			{
-				std::lock_guard<std::recursive_mutex> lock(jetpack_recovery_event_mtx_);
-				pending = jetpack_recovery_pending_ > 0 ? 1 : 0;
-				jetpack_recovery_pending_ = 0;
-			}
-			// If we were woken without a trigger, still avoid spurious runs.
-		}
-		if (stop_) break;
-		if (pending > 0) {
-			Log_info("[JETPACK_RECOVERY] site %d (loc %d) running recovery", site_id_, loc_id_);
-			JetpackRecoveryEntry();
-		}
-		// Re-arm the event for the next trigger.
-		{
-			std::lock_guard<std::recursive_mutex> lock(jetpack_recovery_event_mtx_);
-			jetpack_recovery_event_ = Reactor::CreateSpEvent<IntEvent>();
-		}
-	}
-#endif
+bool RaftServer::JetpackIsProposerOf(epoch_t view) {
+  bool installed_proposer = TxLogServer::JetpackIsProposerOf(view);
+  if (!JetpackRecoveryEnabled()) {
+    return installed_proposer;
+  }
+  // A leader of term t that is READY in a newer view u > t (it applied
+  // another leader's FinishRecovery(u) before Raft demoted it) does not
+  // supply the leader vote of view u.
+  return installed_proposer && is_leader_ && jp_elected_term_ == view;
 }
 
 // void RaftServer::setIsLeader(bool isLeader) {
@@ -570,12 +424,16 @@ void RaftServer::setIsLeader(bool isLeader) {
              site_id_, currentTerm, prev_is_leader, become_new_leader);
     // Only update view if we have enough information (not during initialization)
     if (partition_id_ != 0xFFFFFFFF && site_id_ != -1 && frame_ != nullptr) {
-      // Move current new_view to old_view before updating
-      old_view_ = new_view_;
-      
-      // Update new_view with this server as the leader
+      // The election term is this leader's Jetpack view id: its recovery
+      // targets View(n, this site, term).
       int n_replicas = Config::GetConfig()->GetPartitionSize(partition_id_);
-      new_view_ = View(n_replicas, site_id_, currentTerm);
+      View target(n_replicas, site_id_, (epoch_t) currentTerm);
+      // Monotone: new_view_ may already hold a newer view learned from a
+      // recovery message or FinishRecovery.
+      if (target.view_id_ > new_view_.view_id_) {
+        old_view_ = new_view_;
+        new_view_ = target;
+      }
       Log_info("[RAFT_VIEW] Server %d became leader for partition %d, term=%lu, old_view=%s, new_view=%s", 
                site_id_, partition_id_, currentTerm, 
                old_view_.ToString().c_str(), new_view_.ToString().c_str());
@@ -587,9 +445,23 @@ void RaftServer::setIsLeader(bool isLeader) {
         Log_info("[RAFT_VIEW] Updated communicator view for partition %d with new leader %d", 
                  partition_id_, site_id_);
       }
+      jp_elected_term_ = target.view_id_;
       
 #ifndef RAFT_TEST_CORO
-      TriggerJetpackRecovery("setIsLeader transition to leader");
+      if (Config::GetConfig()->IsCurpMode()) {
+        // CURP has no fast-path recovery: an optimistic attempt the leader
+        // did not replicate before a view change is dropped.
+        Log_info("[CURP] Skipping recovery trigger (setIsLeader transition to leader): CURP has no fast-path recovery");
+      } else if (!JetpackRecoveryEnabled()) {
+        // cc:none and friends have no fast-path state to recover, and a
+        // RECOVERY leader would reject every Submit until FinishRecovery.
+        Log_info("[JETPACK_RECOVERY] Skipping recovery trigger (setIsLeader transition to leader): tx_proto != MODE_RULE (cc:none / cc:rcc / etc. has no fast-path state to recover)");
+      } else {
+        // Freeze in the same step in which this node becomes leader, so it
+        // never acks in the old view while being the new leader. Non-yielding:
+        // the recovery itself runs on the driver coroutine.
+        JetpackRecoveryEntry(target, /*emit_ack=*/false);
+      }
 #endif
     }
   } else if (become_new_follower) {
@@ -1003,9 +875,6 @@ RaftServer::~RaftServer() {
 	}
   
   stop_ = true ;
-  // if (jetpack_recovery_event_) {
-  //   jetpack_recovery_event_->Set(1);
-  // }
   Log_info("site par %d, loc %d: prepare %d, accept %d, commit %d", 
       partition_id_, loc_id_, n_prepare_, n_accept_, n_commit_);
 }
@@ -1057,7 +926,8 @@ bool RaftServer::RequestVote() {
     prev_vote_for = vote_for_;
     auto prev_local_term = currentTerm;
     currentTerm++ ;
-    LogTermChange("starting election", prev_local_term, currentTerm);
+    LogTermChange("starting election", prev_local_term, currentTerm, INVALID_SITEID,
+                  /*from_peer=*/false);
     lstoff = lastLogIndex - snapidx_ ;
     if (lstoff == 0) {
       lst_idx = snapidx_;
@@ -1114,11 +984,7 @@ bool RaftServer::RequestVote() {
 #ifdef RAFT_ELECTION_ONLY_INIT_AND_POST_FAILURE_ONCE_PATCH
       MarkElectionDoneLocked(election_after_failure);
 #endif
-#ifdef RAFT_TEST_CORO
-      // Skip JetpackRecovery in test environment to avoid RPC handler issues
-#else
-      TriggerJetpackRecovery("won election");
-#endif
+      // Jetpack recovery was already triggered inside setIsLeader(true).
   		req_voting_ = false ;
 			return true;
     } else {
@@ -1360,7 +1226,8 @@ void RaftServer::OnAppendEntries(const slotid_t slot_id,
       
       // CURP mode: update follower's view on AppendEntries so local clients'
       // spec-broadcast leader-skip targets the real leader. JP mode updates
-      // every replica's view via OnJetpackBeginRecovery, but CURP skips that
+      // every replica's base view via the recovery messages (PullRecovery /
+      // FinishRecovery carry the coordinator's view), but CURP skips that
       // flow; without this block, followers keep the default view (leader=-1
       // -> falls back to locale 0 = zoo1), causing CURP spec broadcasts on
       // every host except the true leader's host to include the real leader

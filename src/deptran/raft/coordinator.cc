@@ -72,6 +72,9 @@ void CoordinatorRaft::Submit(shared_ptr<Marshallable>& cmd,
 #endif
       }
     }
+    // Never logged, so it never commits: drop the original-path placeholder
+    // its Dispatch just recorded here (Jetpack recovery only).
+    svr_->JpDropBouncedPlaceholder(cmd);
 
     func();
     svr_->app_next_(*cmd);

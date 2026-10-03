@@ -146,331 +146,131 @@ class RuleSpeculativeExecuteQuorumEvent: public QuorumEvent {
   }
 };
 
-class JetpackPullIdSetQuorumEvent: public QuorumEvent {
- public:
-  using QuorumEvent::QuorumEvent;
-  std::vector<shared_ptr<VecRecData>> id_sets_;
-  epoch_t max_jepoch_ = 0;
-  epoch_t max_oepoch_ = 0;
-  
-  void FeedResponse(bool y, epoch_t jepoch, epoch_t oepoch, const MarshallDeputy& id_set) {
-    if (y) {
-      VoteYes();
-      // If ok=true, jepoch and oepoch are not larger than local, so we can update id_sets
-      auto vec_rec_data = std::dynamic_pointer_cast<VecRecData>(id_set.sp_data_);
-      if (vec_rec_data) {
-        id_sets_.push_back(vec_rec_data);
-      }
-    } else {
-      VoteNo();
-      // If ok=false, we need to find max jepoch and oepoch for updating local values
-      if (jepoch > max_jepoch_) {
-        max_jepoch_ = jepoch;
-      }
-      if (oepoch > max_oepoch_) {
-        max_oepoch_ = oepoch;
-      }
-    }
-  }
-  
-  shared_ptr<vector<key_t>> GetMergedKeys() {
-    auto result = std::make_shared<vector<key_t>>();
-    std::set<key_t> unique_keys;
-    
-    for (const auto& id_set : id_sets_) {
-      if (id_set && id_set->key_data_) {
-        for (const auto& key : *id_set->key_data_) {
-          unique_keys.insert(key);
-        }
-      }
-    }
-    
-    for (const auto& key : unique_keys) {
-      result->push_back(key);
-    }
-    return result;
-  }
-};
-
+// Jetpack recovery quorum events. Each recovery round creates
+// fresh events and the RPC callbacks capture only that round's event, so a
+// late reply from an earlier round can never count in a later one. Every
+// reply is kept: the recovery value is computed after the quorum, not on the
+// fly. An RPC error votes No.
 class JetpackPullRecoveryQuorumEvent: public QuorumEvent {
  public:
-  JetpackPullRecoveryQuorumEvent(int n_total, int quorum)
-      : QuorumEvent(n_total, quorum) {
-    int f = (n_total_ - 1) / 2;
-    majority_threshold_ = (f + 2 + 1) / 2;
-  }
-
-  void FeedResponse(bool y, epoch_t jepoch, epoch_t oepoch, const MarshallDeputy& batch_md) {
-    if (y) {
-      VoteYes();
-      auto batch = std::dynamic_pointer_cast<KeyCmdIdBatchData>(batch_md.sp_data_);
-      if (batch) {
-        for (size_t i = 0; i < batch->Size(); i++) {
-          auto key = batch->GetKey(i);
-          auto cmd_id = batch->GetCmdId(i);
-          auto& state = key_states_[key];
-          int count = ++state.cmd_counts_[cmd_id];
-          if (count > state.max_count) {
-            state.max_count = count;
-            state.max_cmd_id = cmd_id;
-          }
-        }
-      }
-    } else {
-      VoteNo();
-      if (jepoch > max_jepoch_) {
-        max_jepoch_ = jepoch;
-      }
-      if (oepoch > max_oepoch_) {
-        max_oepoch_ = oepoch;
-      }
-    }
-  }
-
-  std::vector<std::pair<key_t, uint64_t>> GetRecoveredKeyIds() const {
-    std::vector<std::pair<key_t, uint64_t>> result;
-    result.reserve(key_states_.size());
-    for (const auto& kv : key_states_) {
-      const auto& state = kv.second;
-      if (state.max_cmd_id != static_cast<uint64_t>(-1) && state.max_count >= majority_threshold_) {
-        result.emplace_back(kv.first, state.max_cmd_id);
-      }
-    }
-    std::sort(result.begin(), result.end(),
-              [](const auto& a, const auto& b) { return a.first < b.first; });
-    return result;
-  }
-
-  epoch_t max_jepoch_ = 0;
-  epoch_t max_oepoch_ = 0;
-
- private:
-  struct KeyState {
-    std::unordered_map<uint64_t, int> cmd_counts_;
-    int max_count = 0;
-    uint64_t max_cmd_id = static_cast<uint64_t>(-1);
+  struct Reply {
+    siteid_t site = 0;
+    bool ok = false;
+    epoch_t view_id = 0;   // replier's installed fast-path view
+    epoch_t vid = 0;       // newest view the replier joined or installed
+    ballot_t promised = -1;
+    shared_ptr<KeyCmdBatchData> acked;               // acked pool entries (ok only)
+    shared_ptr<JetpackAcceptedMapData> accepted;     // acceptor state (ok only)
   };
-
-  std::unordered_map<key_t, KeyState> key_states_{};
-  int majority_threshold_{0};
-};
-
-class JetpackPullCmdQuorumEvent: public QuorumEvent {
- public:
-  JetpackPullCmdQuorumEvent(int n_total, int quorum, const std::vector<key_t>& keys)
-      : QuorumEvent(n_total, quorum), ordered_keys_(keys) {
-    key_states_.reserve(keys.size());
-    for (size_t i = 0; i < keys.size(); i++) {
-      key_index_[keys[i]] = i;
-      key_states_.push_back(KeyState{keys[i], {}, 0, nullptr});
-    }
-    int f = (n_total_ - 1) / 2;
-    majority_threshold_ = (f + 2 + 1) / 2;
-  }
-
-  void FeedResponse(bool y, epoch_t jepoch, epoch_t oepoch, const MarshallDeputy& batch_md) {
-    if (y) {
-      VoteYes();
-      auto batch = std::dynamic_pointer_cast<KeyCmdBatchData>(batch_md.sp_data_);
-      if (batch) {
-        for (size_t i = 0; i < batch->Size(); i++) {
-          auto it = key_index_.find(batch->GetKey(i));
-          if (it == key_index_.end()) {
-            continue;
-          }
-          auto cmd = batch->GetCommand(i);
-          if (!cmd) {
-            continue;
-          }
-          auto& state = key_states_[it->second];
-          uint64_t cmd_id = SimpleRWCommand::GetCombinedCmdID(cmd);
-          int count = ++state.cmd_counts_[cmd_id];
-          if (count > state.max_count) {
-            state.max_count = count;
-            state.max_cmd = cmd;
-          }
-        }
-      }
-    } else {
-      VoteNo();
-      if (jepoch > max_jepoch_) {
-        max_jepoch_ = jepoch;
-      }
-      if (oepoch > max_oepoch_) {
-        max_oepoch_ = oepoch;
-      }
-    }
-  }
-
-  std::vector<std::pair<key_t, shared_ptr<Marshallable>>> GetRecoveredCommands() const {
-    std::vector<std::pair<key_t, shared_ptr<Marshallable>>> result;
-    for (const auto& state : key_states_) {
-      if (state.max_cmd && state.max_count >= majority_threshold_) {
-        result.emplace_back(state.key, state.max_cmd);
-      }
-    }
-    return result;
-  }
-
-  const std::vector<key_t>& OrderedKeys() const { return ordered_keys_; }
-
-  epoch_t max_jepoch_ = 0;
-  epoch_t max_oepoch_ = 0;
-
- private:
-  struct KeyState {
-    key_t key;
-    std::unordered_map<uint64_t, int> cmd_counts_;
-    int max_count = 0;
-    shared_ptr<Marshallable> max_cmd = nullptr;
-  };
-
-  std::vector<key_t> ordered_keys_;
-  std::vector<KeyState> key_states_;
-  std::unordered_map<key_t, size_t> key_index_;
-  int majority_threshold_{0};
-};
-
-class JetpackRecordCmdQuorumEvent: public QuorumEvent {
- public:
   using QuorumEvent::QuorumEvent;
-  epoch_t max_jepoch_ = 0;
-  epoch_t max_oepoch_ = 0;
-  std::unordered_map<key_t, shared_ptr<Marshallable>> recovered_cmds_;
+  std::vector<Reply> replies_;
+  int n_errors_ = 0;
 
-  void FeedResponse(bool y, epoch_t jepoch, epoch_t oepoch, const MarshallDeputy& batch_md) {
+  void Feed(Reply r) {
+    bool y = r.ok;
+    replies_.push_back(std::move(r));
     if (y) {
       VoteYes();
-      auto batch = std::dynamic_pointer_cast<KeyCmdBatchData>(batch_md.sp_data_);
-      if (batch) {
-        for (size_t i = 0; i < batch->Size(); i++) {
-          key_t key = batch->GetKey(i);
-          auto cmd = batch->GetCommand(i);
-          if (cmd && !recovered_cmds_.count(key)) {
-            recovered_cmds_.emplace(key, cmd);
-          }
-        }
-      }
     } else {
       VoteNo();
-      if (jepoch > max_jepoch_) {
-        max_jepoch_ = jepoch;
-      }
-      if (oepoch > max_oepoch_) {
-        max_oepoch_ = oepoch;
-      }
     }
   }
-
-  std::vector<std::pair<key_t, shared_ptr<Marshallable>>> GetRecoveredCmds() const {
-    std::vector<std::pair<key_t, shared_ptr<Marshallable>>> res;
-    res.reserve(recovered_cmds_.size());
-    for (const auto& kv : recovered_cmds_) {
-      res.emplace_back(kv.first, kv.second);
-    }
-    return res;
+  void FeedError() {
+    n_errors_++;
+    VoteNo();
   }
-};
-
-class JetpackPrepareQuorumEvent: public QuorumEvent {
- public:
-  using QuorumEvent::QuorumEvent;
-  epoch_t max_jepoch_ = 0;
-  epoch_t max_oepoch_ = 0;
-  ballot_t max_accepted_ballot_ = -1;
-  ballot_t max_seen_ballot_ = -1;
-  int accepted_sid_ = -1;
-  bool has_accepted_value_ = false;
-  
-  void FeedResponse(bool y, epoch_t jepoch, epoch_t oepoch, ballot_t accepted_ballot, int sid, ballot_t max_seen_ballot) {
-    if (y) {
-      VoteYes();
-      // Track the highest accepted ballot and its value
-      if (accepted_ballot > max_accepted_ballot_) {
-        max_accepted_ballot_ = accepted_ballot;
-        accepted_sid_ = sid;
-        has_accepted_value_ = true;
-      }
-    } else {
-      VoteNo();
-      // Track max epochs and max_seen_ballot for local update
-      if (jepoch > max_jepoch_) {
-        max_jepoch_ = jepoch;
-      }
-      if (oepoch > max_oepoch_) {
-        max_oepoch_ = oepoch;
-      }
-      if (max_seen_ballot > max_seen_ballot_) {
-        max_seen_ballot_ = max_seen_ballot;
-      }
-    }
-  }
-  
-  bool HasValue() {
-    return has_accepted_value_;
-  }
-  
-  int GetSid() {
-    return accepted_sid_;
-  }
-  
 };
 
 class JetpackAcceptQuorumEvent: public QuorumEvent {
  public:
+  struct Reply {
+    siteid_t site = 0;
+    bool ok = false;
+    epoch_t view_id = 0;
+    epoch_t vid = 0;
+    ballot_t promised = -1;
+  };
   using QuorumEvent::QuorumEvent;
-  epoch_t max_jepoch_ = 0;
-  epoch_t max_oepoch_ = 0;
-  ballot_t max_seen_ballot_ = -1;
-  
-  void FeedResponse(bool y, epoch_t jepoch, epoch_t oepoch, ballot_t max_seen_ballot) {
-    if (y) {
+  std::vector<Reply> replies_;
+  int n_errors_ = 0;
+
+  void Feed(const Reply& r) {
+    replies_.push_back(r);
+    if (r.ok) {
       VoteYes();
     } else {
       VoteNo();
-      // Track max epochs and max_seen_ballot for local update
-      if (jepoch > max_jepoch_) {
-        max_jepoch_ = jepoch;
-      }
-      if (oepoch > max_oepoch_) {
-        max_oepoch_ = oepoch;
-      }
-      if (max_seen_ballot > max_seen_ballot_) {
-        max_seen_ballot_ = max_seen_ballot;
-      }
     }
+  }
+  void FeedError() {
+    n_errors_++;
+    VoteNo();
   }
 };
 
-class JetpackPullRecSetInsQuorumEvent: public QuorumEvent {
+// FinishRecovery(v): a reply is a yes iff the replica applied FR(v) or is
+// already in a view >= v. Sites done in an earlier send are pre-credited
+// (and not re-sent), so Yes() keeps meaning "a majority of all n replicas
+// applied or are past v" across resends. With wait_all the event is ready
+// once every sent RPC returned (straggler rounds). applied in a reply means
+// "in view v with this FinishRecovery's leader" (also from an earlier copy);
+// with ours_needed > 0 (the coordinator installs v at its own replica
+// last and is not sent the FR) the event is also ready once that many
+// replies said so.
+class JetpackFinishRecoveryQuorumEvent: public QuorumEvent {
  public:
-  using QuorumEvent::QuorumEvent;
-  epoch_t max_jepoch_ = 0;
-  epoch_t max_oepoch_ = 0;
-  shared_ptr<Marshallable> recovered_cmd_;
-  
-  void FeedResponse(bool y, epoch_t jepoch, epoch_t oepoch, const MarshallDeputy& cmd) {
-    if (y) {
+  struct Reply {
+    siteid_t site = 0;
+    bool applied = false;
+    epoch_t view_id = 0;
+    epoch_t vid = 0;
+  };
+  JetpackFinishRecoveryQuorumEvent(int n_total, int quorum, epoch_t v, bool wait_all,
+                                   int ours_needed = 0)
+      : QuorumEvent(n_total, quorum), v_(v), wait_all_(wait_all), ours_needed_(ours_needed) {}
+  epoch_t v_;
+  bool wait_all_;
+  int ours_needed_;
+  int n_sent_ = 0;
+  int n_replied_ = 0;
+  int n_errors_ = 0;
+  int n_applied_ = 0;
+  epoch_t max_view_id_ = 0;
+  epoch_t max_vid_ = 0;
+  std::set<siteid_t> done_;
+  std::vector<Reply> replies_;
+
+  void PreCredit(siteid_t site) {
+    done_.insert(site);
+    VoteYes();
+  }
+  void Feed(const Reply& r) {
+    n_replied_++;
+    replies_.push_back(r);
+    if (r.view_id > max_view_id_) max_view_id_ = r.view_id;
+    if (r.vid > max_vid_) max_vid_ = r.vid;
+    if (r.applied) n_applied_++;
+    if (r.applied || r.view_id >= v_) {
+      done_.insert(r.site);
       VoteYes();
-      // Store the recovered command if we get one
-      bool has_real_cmd = cmd.sp_data_ && cmd.kind_ != MarshallDeputy::CMD_TPC_EMPTY;
-      if (has_real_cmd && (!recovered_cmd_ || recovered_cmd_->kind_ == MarshallDeputy::CMD_TPC_EMPTY)) {
-        recovered_cmd_ = cmd.sp_data_;
-      }
     } else {
       VoteNo();
-      // Track max epochs for local update
-      if (jepoch > max_jepoch_) {
-        max_jepoch_ = jepoch;
-      }
-      if (oepoch > max_oepoch_) {
-        max_oepoch_ = oepoch;
-      }
     }
   }
-  
-  shared_ptr<Marshallable> GetRecoveredCmd() {
-    return recovered_cmd_;
+  void FeedError() {
+    n_replied_++;
+    n_errors_++;
+    VoteNo();
+  }
+  bool AllReplied() const { return n_replied_ >= n_sent_; }
+  // Some replica joined or installed a view newer than v.
+  bool NewerViewSeen() const { return max_view_id_ > v_ || max_vid_ > v_; }
+  bool IsReady() override {
+    if (wait_all_) {
+      return AllReplied();
+    }
+    return QuorumEvent::IsReady() || NewerViewSeen() ||
+           (ours_needed_ > 0 && n_applied_ >= ours_needed_);
   }
 };
 
@@ -582,8 +382,26 @@ class Communicator {
   };
   
   // View management methods (static for global access)
+  // Takes a strictly newer view id, or the same id naming a leader where the
+  // known view had none (Raft's WRONG_LEADER placeholder has leader -1).
   static void UpdatePartitionView(parid_t partition_id, const std::shared_ptr<ViewData>& view_data);
+  // WRONG_LEADER replies. Where Dispatch routing follows the view
+  // (RoutesByView), a same-id view naming another known leader also replaces
+  // the known one: the bounced replica redirects (e.g. replicas of an
+  // etcd/Mongo/ZK view led by a takeover coordinator). Elsewhere it is
+  // UpdatePartitionView.
+  static void AdoptRedirectView(parid_t partition_id, const std::shared_ptr<ViewData>& view_data);
   static View GetPartitionView(parid_t partition_id);
+  // Whether client Dispatch routing follows the leader of the newest
+  // known view. True exactly where Jetpack recovery runs
+  // (TxLogServer::JetpackRecoveryEnabled: Raft, etcd, MongoDB, ZooKeeper
+  // under cc:rule outside CURP); CURP, Copilot, Mencius, SwiftPaxos, EPaxos,
+  // FPGA-Raft and cc:none keep their routing.
+  static bool RoutesByView();
+  // Locale of the leader of the newest known view of the partition, or -1 if
+  // no view names a leader of this partition (locid_t is unsigned, hence
+  // int). Views name leaders by site id.
+  static int ViewLeaderLocale(parid_t partition_id);
   // Non-static (and const) so that client-side callers can return
   // this->loc_id_ when the protocol wants clients to hit their co-located
   // server (e.g. MODE_NAIVE_EPAXOS — every server is a leader for its
@@ -676,30 +494,31 @@ class Communicator {
       const function<void(int)>& callback);
   
   /* Jetpack recovery begin */
-  shared_ptr<JetpackPullRecoveryQuorumEvent> JetpackBroadcastPullRecovery(parid_t par_id, locid_t loc_id,
-                                                                          const View& old_view,
-                                                                          const View& new_view,
-                                                                          epoch_t jepoch,
-                                                                          epoch_t oepoch);
-  shared_ptr<JetpackPullIdSetQuorumEvent> JetpackBroadcastPullIdSet(parid_t par_id, locid_t loc_id,
-                                                                   epoch_t jepoch, epoch_t oepoch);
-  shared_ptr<JetpackPullCmdQuorumEvent> JetpackBroadcastPullCmd(parid_t par_id, locid_t loc_id, 
-                                                               const std::vector<key_t>& keys, epoch_t jepoch, epoch_t oepoch);
-  shared_ptr<JetpackRecordCmdQuorumEvent> JetpackBroadcastRecordCmd(parid_t par_id, locid_t loc_id,
-                                                                    epoch_t jepoch, epoch_t oepoch, 
-                                                                    int sid, 
-                                                                    const std::vector<std::pair<key_t, uint64_t>>& record_key_ids,
-                                                                    const std::vector<std::pair<key_t, uint64_t>>& missing_key_ids);
-  shared_ptr<JetpackPrepareQuorumEvent> JetpackBroadcastPrepare(parid_t par_id, locid_t loc_id, 
-                                                               epoch_t jepoch, epoch_t oepoch, 
-                                                               ballot_t max_seen_ballot);
-  shared_ptr<JetpackAcceptQuorumEvent> JetpackBroadcastAccept(parid_t par_id, locid_t loc_id, 
-                                                            epoch_t jepoch, epoch_t oepoch, 
-                                                            ballot_t max_seen_ballot, int sid);
-  shared_ptr<QuorumEvent> JetpackBroadcastCommit(parid_t par_id, locid_t loc_id, 
-                                                 epoch_t jepoch, epoch_t oepoch, 
-                                                 int sid);
-  shared_ptr<QuorumEvent> JetpackBroadcastFinishRecovery(parid_t par_id, locid_t loc_id, epoch_t oepoch);
+  // All message contents come from the caller's round-local values; nothing
+  // is read from replica state. Each broadcaster yields once (WAN_WAIT)
+  // before sending to every replica of the partition, this one included.
+  shared_ptr<JetpackPullRecoveryQuorumEvent> JetpackBroadcastPullRecovery(parid_t par_id,
+                                                                          epoch_t v,
+                                                                          ballot_t ballot,
+                                                                          const View& target);
+  shared_ptr<JetpackAcceptQuorumEvent> JetpackBroadcastAccept(parid_t par_id,
+                                                              epoch_t v,
+                                                              epoch_t vn,
+                                                              ballot_t ballot,
+                                                              const shared_ptr<KeyCmdBatchData>& value);
+  // Sends FinishRecovery(v) at `ballot` (the ballot that chose the value, or
+  // jp::kChosenBallot once the leader of v is decided) to every replica not in
+  // already_done; those are pre-credited as yes. exclude_site (>= 0) is
+  // neither sent nor credited (the coordinator itself until it installs
+  // v); ours_needed, see JetpackFinishRecoveryQuorumEvent.
+  shared_ptr<JetpackFinishRecoveryQuorumEvent> JetpackBroadcastFinishRecovery(parid_t par_id,
+                                                                              epoch_t v,
+                                                                              ballot_t ballot,
+                                                                              const View& target,
+                                                                              const std::set<siteid_t>& already_done,
+                                                                              bool wait_all = false,
+                                                                              int exclude_site = -1,
+                                                                              int ours_needed = 0);
   /* Jetpack recovery end */
 };
 

@@ -277,13 +277,15 @@ class EtcdConnectionThreadPool {
     auto& q = *grpc_worker_queues_[worker_id];
     GrpcWorkItem item;
     while (q.pop(item)) {
+      bool ok = false;
       try {
         if (item.is_write) {
-          (void)h->Write(item.key, item.value);
+          ok = h->Write(item.key, item.value);
         } else {
-          (void)h->Read(item.key);
+          (void)h->Read(item.key, &ok);
         }
       } catch (const std::exception& e) {
+        ok = false;
         Log_warn("[ETCD-GRPC-WORKER] op failed: %s", e.what());
       }
 #ifdef ETCD_INNER_DEBUG
@@ -294,7 +296,7 @@ class EtcdConnectionThreadPool {
         metrics_->RecordInner(0.0, handler_ms, handler_ms);
       }
 #endif
-      SignalFinished(item.cmd_content, item.start_time);
+      SignalFinished(item.cmd_content, item.start_time, ok);
     }
   }
 #endif
@@ -325,13 +327,16 @@ class EtcdConnectionThreadPool {
       for (const auto& op : ops) {
         txn_ops.emplace_back(op.is_write, op.key, op.value);
       }
+      // One Txn for the whole batch: every op shares its outcome.
+      bool ok = false;
       try {
-        handler->BatchTxn(txn_ops);
+        ok = handler->BatchTxn(txn_ops);
       } catch (const std::exception& e) {
+        ok = false;
         Log_warn("[ETCD] BatchTxn threw: %s", e.what());
       }
       for (const auto& op : ops) {
-        SignalFinished(op.cmd_content, op.start_time);
+        SignalFinished(op.cmd_content, op.start_time, ok);
       }
     }).detach();
   }
@@ -350,8 +355,13 @@ class EtcdConnectionThreadPool {
     }
   }
 
+  // etcd_finished carries the backend outcome, 1 = acked by etcd,
+  // 2 = failed (error, exception, unsupported op, or never sent). Submit
+  // derives failure only from this value, never from a timed wait (a timed-out
+  // ThreadSafeIntEvent verify(0)s on a late Set).
   void SignalFinished(const std::shared_ptr<TxPieceData>& cmd_content,
-                      const std::chrono::steady_clock::time_point& start_time) {
+                      const std::chrono::steady_clock::time_point& start_time,
+                      bool ok) {
 #ifdef ETCD_STATISTICS
     if (metrics_) {
       auto end_time = std::chrono::steady_clock::now();
@@ -362,7 +372,7 @@ class EtcdConnectionThreadPool {
     (void)start_time;
 #endif
     if (cmd_content && cmd_content->etcd_finished) {
-      cmd_content->etcd_finished->Set(1);
+      cmd_content->etcd_finished->Set(ok ? 1 : 2);
     }
     int remaining = inflight_.fetch_sub(1) - 1;
     if (remaining <= 0) {
@@ -371,9 +381,10 @@ class EtcdConnectionThreadPool {
     }
   }
 
+  // A request that never reached etcd is reported as failed (2).
   void SignalDropped(const std::shared_ptr<TxPieceData>& cmd_content) {
     if (cmd_content && cmd_content->etcd_finished) {
-      cmd_content->etcd_finished->Set(1);
+      cmd_content->etcd_finished->Set(2);
     }
   }
 
@@ -533,10 +544,12 @@ class EtcdConnectionThreadPool {
             start_time
           ](pplx::task<etcd::Response> response_task) {
           (void)cmd;
+          bool ok = false;
           try {
             auto response = response_task.get();
-            (void)response;
+            ok = EtcdKVTableHandler::ReadResponseOk(response);
           } catch (const std::exception& e) {
+            ok = false;
             Log_warn("[ETCD] read failed: %s", e.what());
           }
 #ifdef ETCD_INNER_DEBUG
@@ -547,11 +560,11 @@ class EtcdConnectionThreadPool {
             metrics_->RecordInner(0.0, handler_ms, handler_ms);
           }
 #endif
-          SignalFinished(cmd_content, start_time);
+          SignalFinished(cmd_content, start_time, ok);
         });
       } catch (const std::exception& e) {
         Log_warn("[ETCD] read enqueue failed: %s", e.what());
-        SignalFinished(cmd_content, start_time);
+        SignalFinished(cmd_content, start_time, false);
       }
 #else
       const int key = parsed_cmd.key_;
@@ -559,7 +572,8 @@ class EtcdConnectionThreadPool {
 #ifdef ETCD_INNER_DEBUG
         auto t_dequeue = std::chrono::steady_clock::now();
 #endif
-        handler_->Read(key);
+        bool ok = false;
+        (void)handler_->Read(key, &ok);
 #ifdef ETCD_INNER_DEBUG
         auto t_post = std::chrono::steady_clock::now();
         if (metrics_) {
@@ -572,7 +586,7 @@ class EtcdConnectionThreadPool {
           metrics_->RecordInner(spawn_ms, handler_ms, total_ms);
         }
 #endif
-        SignalFinished(cmd_content, start_time);
+        SignalFinished(cmd_content, start_time, ok);
       }).detach();
 #endif
     } else if (parsed_cmd.IsWrite()) {
@@ -610,10 +624,16 @@ class EtcdConnectionThreadPool {
 #ifdef ETCD_INNER_DEBUG
           auto t_callback_entry = std::chrono::steady_clock::now();
 #endif
+          bool ok = false;
           try {
             auto response = response_task.get();
-            (void)response;
+            ok = response.is_ok();
+            if (!ok) {
+              Log_warn("[ETCD] write failed: code=%d %s", response.error_code(),
+                       response.error_message().c_str());
+            }
           } catch (const std::exception& e) {
+            ok = false;
             Log_warn("[ETCD] write failed: %s", e.what());
           }
 #ifdef ETCD_INNER_DEBUG
@@ -635,11 +655,11 @@ class EtcdConnectionThreadPool {
             metrics_->RecordSubmitPhases(phase_a, phase_b, phase_c);
           }
 #endif
-          SignalFinished(cmd_content, start_time);
+          SignalFinished(cmd_content, start_time, ok);
         });
       } catch (const std::exception& e) {
         Log_warn("[ETCD] write enqueue failed: %s", e.what());
-        SignalFinished(cmd_content, start_time);
+        SignalFinished(cmd_content, start_time, false);
       }
 #else
       const int key = parsed_cmd.key_;
@@ -648,7 +668,7 @@ class EtcdConnectionThreadPool {
 #ifdef ETCD_INNER_DEBUG
         auto t_dequeue = std::chrono::steady_clock::now();
 #endif
-        handler_->Write(key, value);
+        const bool ok = handler_->Write(key, value);
 #ifdef ETCD_INNER_DEBUG
         auto t_post = std::chrono::steady_clock::now();
         if (metrics_) {
@@ -661,12 +681,12 @@ class EtcdConnectionThreadPool {
           metrics_->RecordInner(spawn_ms, handler_ms, total_ms);
         }
 #endif
-        SignalFinished(cmd_content, start_time);
+        SignalFinished(cmd_content, start_time, ok);
       }).detach();
 #endif
     } else {
       Log_warn("[ETCD] unsupported command type");
-      SignalFinished(cmd_content, start_time);
+      SignalFinished(cmd_content, start_time, false);
     }
 
     return static_cast<size_t>(depth);

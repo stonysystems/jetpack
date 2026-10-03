@@ -4,6 +4,7 @@
 #include "frame.h"
 #include "procedure.h"
 #include "coordinator.h"
+#include "rule/commo.h"
 #include "RW_command.h"
 #include "../bench/rw/workload.h"
 #include "benchmark_control_rpc.h"
@@ -749,7 +750,12 @@ void ClientWorker::DispatchRequest(Coordinator* coo, bool void_request) {
           Log_info("[CLIENT_VIEW] Extracted view data from response: %s", 
                    view_data->ToString().c_str());
 #endif
-          commo_->UpdatePartitionView(view_data->partition_id_, view_data);
+          commo_->AdoptRedirectView(view_data->partition_id_, view_data);
+          // A Jetpack client also learns the view id for its fast path
+          // (raise only; a no-op outside Jetpack recovery).
+          if (auto* rule_commo = dynamic_cast<CommunicatorRule*>(commo_)) {
+            rule_commo->AdoptBaseViewForFastPath(view_data->partition_id_, view_data);
+          }
         } else {
 #ifdef JETPACK_WRONG_LEADER_DEBUG
           Log_info("[CLIENT_VIEW] No view data in WRONG_LEADER response for tx_id: 0x%lx", reply.tx_id_);

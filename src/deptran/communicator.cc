@@ -12,6 +12,7 @@
 #include <typeinfo>
 #include "RW_command.h"
 #include "misc/marshal.hpp"
+#include "scheduler.h"
 
 namespace janus {
 
@@ -259,9 +260,12 @@ Communicator::LeaderProxyForPartition(parid_t par_id, int idx) const {
     }
   }
 
-  // If no dynamic leader, first check partition views for updated leader info
+  // If no dynamic leader, first check partition views for updated leader info.
+  // GetLeaderForPartition's 0 also means "no view"; where routing follows the
+  // view, locale 0 is an ordinary view leader and must not fall back
+  // to a stale leader_cache_ entry.
   locid_t view_leader = GetLeaderForPartition(par_id);
-  if (view_leader > 0) {
+  if (view_leader > 0 || RoutesByView()) {
     // We have a leader from the view, find the proxy for it
     auto it = rpc_par_proxies_.find(par_id);
     if (it != rpc_par_proxies_.end()) {
@@ -517,7 +521,7 @@ void Communicator::BroadcastDispatch(
         if (ret == WRONG_LEADER && view_md.sp_data_ != nullptr) {
           auto sp_view_data = dynamic_pointer_cast<ViewData>(view_md.sp_data_);
           if (sp_view_data) {
-            UpdatePartitionView(par_id, sp_view_data);
+            AdoptRedirectView(par_id, sp_view_data);
           }
         }
         callback(ret, outputs);
@@ -635,7 +639,7 @@ void Communicator::SyncBroadcastDispatch(
   if (ret == WRONG_LEADER && view_md.sp_data_ != nullptr) {
     auto sp_view_data = dynamic_pointer_cast<ViewData>(view_md.sp_data_);
     if (sp_view_data) {
-      UpdatePartitionView(par_id, sp_view_data);
+      AdoptRedirectView(par_id, sp_view_data);
     }
   }
   
@@ -700,7 +704,7 @@ std::shared_ptr<IntEvent> Communicator::BroadcastDispatch(
             if (ret == WRONG_LEADER && view_md.sp_data_ != nullptr) {
               auto sp_view_data = dynamic_pointer_cast<ViewData>(view_md.sp_data_);
               if (sp_view_data) {
-                UpdatePartitionView(par_id, sp_view_data);
+                AdoptRedirectView(par_id, sp_view_data);
               }
               coo->aborted_ = true;
               txn->commit_.store(false);
@@ -1441,335 +1445,133 @@ void Communicator::SendSimpleCmd(groupid_t gid, SimpleCommand& cmd,
 }
 
 
-shared_ptr<JetpackPullRecoveryQuorumEvent> Communicator::JetpackBroadcastPullRecovery(parid_t par_id, locid_t loc_id,
-                                                                                  const View& old_view,
-                                                                                  const View& new_view,
-                                                                                  epoch_t jepoch,
-                                                                                  epoch_t oepoch) {
+shared_ptr<JetpackPullRecoveryQuorumEvent>
+Communicator::JetpackBroadcastPullRecovery(parid_t par_id,
+                                           epoch_t v,
+                                           ballot_t ballot,
+                                           const View& target) {
   int n = Config::GetConfig()->GetPartitionSize(par_id);
   auto e = Reactor::CreateSpEvent<JetpackPullRecoveryQuorumEvent>(n, n/2+1);
   auto proxies = rpc_par_proxies_[par_id];
-  vector<Future*> fus;
-	WAN_WAIT;
-
-  MarshallDeputy old_view_deputy, new_view_deputy;
-  old_view_deputy.SetMarshallable(std::make_shared<ViewData>(old_view));
-  new_view_deputy.SetMarshallable(std::make_shared<ViewData>(new_view));
-
+  WAN_WAIT;
+  MarshallDeputy view_md(std::make_shared<ViewData>(target, par_id));
   for (auto& p : proxies) {
     auto proxy = (ClassicProxy*) p.second;
+    siteid_t site = p.first;
     FutureAttr fuattr;
-    fuattr.callback = [e](Future* fu) {
+    fuattr.callback = [e, site, v](Future* fu) {
       if (fu->get_error_code() != 0) {
-        Log_info("Get a error message in reply");
+        Log_info("[JETPACK-RECOVERY] PullRecovery v=%u RPC error from site %d (code %d)",
+                 v, site, fu->get_error_code());
+        e->FeedError();
         return;
       }
-      bool_t ok;
-      epoch_t reply_jepoch, reply_oepoch;
-      MarshallDeputy reply_old_view, reply_new_view, key_id_batch;
-      fu->get_reply() >> ok >> reply_jepoch >> reply_oepoch >> reply_old_view >> reply_new_view >> key_id_batch;
-      auto batch = std::dynamic_pointer_cast<KeyCmdIdBatchData>(key_id_batch.sp_data_);
-      Log_info("[JETPACK-RECOVERY] PullRecovery response ok=%d entries=%zu", ok, batch ? batch->Size() : 0);
-      e->FeedResponse(ok, reply_jepoch, reply_oepoch, key_id_batch);
-    };
-    auto fu = proxy->async_JetpackPullRecovery(old_view_deputy, new_view_deputy, jepoch, oepoch, fuattr);
-    fus.push_back(fu);
-  }
-
-  return e;
-}
-
-shared_ptr<JetpackPullIdSetQuorumEvent> Communicator::JetpackBroadcastPullIdSet(parid_t par_id, locid_t loc_id,
-                                                                           epoch_t jepoch, epoch_t oepoch) {
-  int n = Config::GetConfig()->GetPartitionSize(par_id);
-  auto e = Reactor::CreateSpEvent<JetpackPullIdSetQuorumEvent>(n, n/2+1);
-  auto proxies = rpc_par_proxies_[par_id];
-  vector<Future*> fus;
-	WAN_WAIT;
-  for (auto& p : proxies) {
-    // TODO: Local call optimization temporarily commented out
-    // if (p.first == loc_id) {
-    //     // Local call - call OnJetpackPullIdSet directly
-    //     bool_t ok;
-    //     epoch_t reply_jepoch, reply_oepoch;
-    //     MarshallDeputy reply_old_view, reply_new_view;
-    //     auto id_set = std::make_shared<VecRecData>();
-    //     dtxn_sched_->OnJetpackPullIdSet(jepoch, oepoch, &ok, &reply_jepoch, &reply_oepoch, 
-    //                                    &reply_old_view, &reply_new_view, id_set);
-    //     MarshallDeputy id_set_deputy;
-    //     id_set_deputy.SetMarshallable(id_set);
-    //     e->FeedResponse(ok, reply_jepoch, reply_oepoch, id_set_deputy);
-    //     continue;
-    // }
-    auto proxy = (ClassicProxy*) p.second;
-    FutureAttr fuattr;
-    fuattr.callback = [e](Future* fu) {
-      if (fu->get_error_code() != 0) {
-        Log_info("Get a error message in reply");
-        return;
+      JetpackPullRecoveryQuorumEvent::Reply r;
+      r.site = site;
+      bool_t ok = 0;
+      MarshallDeputy acked_md, accepted_md;
+      fu->get_reply() >> ok >> r.view_id >> r.vid >> r.promised >> acked_md >> accepted_md;
+      r.ok = (ok != 0);
+      r.acked = std::dynamic_pointer_cast<KeyCmdBatchData>(acked_md.sp_data_);
+      if (!r.acked) {
+        r.acked = std::make_shared<KeyCmdBatchData>();
       }
-      bool_t ok;
-      epoch_t reply_jepoch, reply_oepoch;
-      MarshallDeputy reply_old_view, reply_new_view, id_set;
-      fu->get_reply() >> ok >> reply_jepoch >> reply_oepoch >> reply_old_view >> reply_new_view >> id_set;
-      e->FeedResponse(ok, reply_jepoch, reply_oepoch, id_set);
+      r.accepted = std::dynamic_pointer_cast<JetpackAcceptedMapData>(accepted_md.sp_data_);
+      if (!r.accepted) {
+        r.accepted = std::make_shared<JetpackAcceptedMapData>();
+      }
+      Log_info("[JETPACK-RECOVERY] PullRecovery response v=%u site=%d ok=%d view=%u vid=%u promised=%lld entries=%zu accepted=%zu",
+               v, site, r.ok, r.view_id, r.vid, (long long) r.promised,
+               r.acked->Size(), r.accepted->entries_.size());
+      e->Feed(std::move(r));
     };
-    auto fu = proxy->async_JetpackPullIdSet(jepoch, oepoch, fuattr);
-    fus.push_back(fu);
+    Future::safe_release(proxy->async_JetpackPullRecovery(v, ballot, view_md, fuattr));
   }
   return e;
 }
 
-shared_ptr<JetpackPullCmdQuorumEvent> Communicator::JetpackBroadcastPullCmd(parid_t par_id, locid_t loc_id, 
-                                                                        const std::vector<key_t>& keys, epoch_t jepoch, epoch_t oepoch) {
-  // Log_info("[JETPACK-DEBUG] JetpackBroadcastPullCmd called with par_id=%d, loc_id=%d, key=%d", par_id, loc_id, key);
-  
-  int n = Config::GetConfig()->GetPartitionSize(par_id);
-  // Log_info("[JETPACK-DEBUG] Partition size n=%d", n);
-  
-  auto e = Reactor::CreateSpEvent<JetpackPullCmdQuorumEvent>(n, n/2+1, keys);
-  // if (!e) {
-  //   Log_info("[JETPACK-DEBUG] ERROR: Failed to create JetpackPullCmdQuorumEvent!");
-  // }
-  
-  // if (rpc_par_proxies_.find(par_id) == rpc_par_proxies_.end()) {
-  //   Log_info("[JETPACK-DEBUG] ERROR: No proxies found for partition %d!", par_id);
-  // }
-  
-  auto proxies = rpc_par_proxies_[par_id];
-  // Log_info("[JETPACK-DEBUG] Found %zu proxies for partition %d", proxies.size(), par_id);
-  
-  vector<Future*> fus;
-  auto key_batch = std::make_shared<VecRecData>();
-  key_batch->key_data_ = std::make_shared<vector<key_t>>(keys.begin(), keys.end());
-  MarshallDeputy key_batch_md;
-  key_batch_md.SetMarshallable(key_batch);
-	WAN_WAIT;
-  for (auto& p : proxies) {
-    // TODO: Local call optimization temporarily commented out
-    // if (p.first == loc_id) {
-    //     // Local call - call OnJetpackPullCmd directly
-    //     bool_t ok;
-    //     epoch_t reply_jepoch, reply_oepoch;
-    //     MarshallDeputy reply_old_view, reply_new_view;
-    //     auto cmd = std::make_shared<TpcCommitCommand>();
-    //     dtxn_sched_->OnJetpackPullCmd(jepoch, oepoch, key, &ok, &reply_jepoch, &reply_oepoch, 
-    //                                  &reply_old_view, &reply_new_view, cmd);
-    //     MarshallDeputy cmd_deputy;
-    //     cmd_deputy.SetMarshallable(cmd);
-    //     e->FeedResponse(ok, reply_jepoch, reply_oepoch, cmd_deputy);
-    //     continue;
-    // }
-    auto proxy = (ClassicProxy*) p.second;
-    // if (!proxy) {
-    //   Log_info("[JETPACK-DEBUG] ERROR: Proxy is NULL for site %d!", p.first);
-    // }
-    // Log_info("[JETPACK-DEBUG] Sending JetpackPullCmd to site %d", p.first);
-    
-    FutureAttr fuattr;
-    fuattr.callback = [e](Future* fu) {
-      if (fu->get_error_code() != 0) {
-        Log_info("Get a error message in reply");
-        return;
-      }
-      bool_t ok;
-      epoch_t reply_jepoch, reply_oepoch;
-      MarshallDeputy reply_old_view, reply_new_view, cmd;
-      fu->get_reply() >> ok >> reply_jepoch >> reply_oepoch >> reply_old_view >> reply_new_view >> cmd;
-      e->FeedResponse(ok, reply_jepoch, reply_oepoch, cmd);
-    };
-    
-    // Log_info("[JETPACK-DEBUG] About to call async_JetpackPullCmd");
-    auto fu = proxy->async_JetpackPullCmd(jepoch, oepoch, key_batch_md, fuattr);
-    // if (!fu) {
-    //   Log_info("[JETPACK-DEBUG] ERROR: async_JetpackPullCmd returned NULL Future!");
-    // }
-    // Log_info("[JETPACK-DEBUG] async_JetpackPullCmd returned Future, adding to list");
-    fus.push_back(fu);
-  }
-  // Log_info("[JETPACK-DEBUG] JetpackBroadcastPullCmd returning event with %zu futures", fus.size());
-  return e;
-}
-
-shared_ptr<JetpackRecordCmdQuorumEvent> Communicator::JetpackBroadcastRecordCmd(parid_t par_id, locid_t loc_id,
-                                                               epoch_t jepoch, epoch_t oepoch, 
-                                                               int sid, 
-                                                               const std::vector<std::pair<key_t, uint64_t>>& record_key_ids,
-                                                               const std::vector<std::pair<key_t, uint64_t>>& missing_key_ids) {
-  // Log_info("[JETPACK-DEBUG] JetpackBroadcastRecordCmd called: par_id=%d, loc_id=%d, sid=%d, , 
-  //          par_id, loc_id, sid);
-  
-  int n = Config::GetConfig()->GetPartitionSize(par_id);
-  auto e = Reactor::CreateSpEvent<JetpackRecordCmdQuorumEvent>(n, n/2+1);
-  auto proxies = rpc_par_proxies_[par_id];
-  vector<Future*> fus;
-	WAN_WAIT;
-  
-  auto record_batch = std::make_shared<KeyCmdIdBatchData>();
-  for (const auto& entry : record_key_ids) {
-    record_batch->AddEntry(entry.first, entry.second);
-  }
-  auto missing_batch = std::make_shared<KeyCmdIdBatchData>();
-  for (const auto& entry : missing_key_ids) {
-    missing_batch->AddEntry(entry.first, entry.second);
-  }
-  Log_info("[JETPACK-RECOVERY] RecordCmd batch entries=%zu missing=%zu sid=%d",
-           record_batch->Size(), missing_batch->Size(), sid);
-  MarshallDeputy record_md, missing_md;
-  record_md.SetMarshallable(record_batch);
-  missing_md.SetMarshallable(missing_batch);
-  
-  // Log_info("[JETPACK-DEBUG] Broadcasting RecordCmd to %zu sites, need %d votes", proxies.size(), n/2+1);
-  
-  for (auto& p : proxies) {
-    // TODO: Local call optimization temporarily commented out
-    // if (p.first == loc_id) {
-    //     // Local call - call OnJetpackRecordCmd directly
-    //     dtxn_sched_->OnJetpackRecordCmd(jepoch, oepoch, sid, rid, cmd);
-    //     e->VoteYes();
-    //     continue;
-    // }
-    auto proxy = (ClassicProxy*) p.second;
-    FutureAttr fuattr;
-    fuattr.callback = [e, p](Future* fu) {
-      if (fu->get_error_code() != 0) {
-        // Log_info("[JETPACK-DEBUG] RecordCmd error from site %d: error_code=%d", 
-        //          p.first, fu->get_error_code());
-        e->VoteNo();  // Vote no on error to prevent hanging
-        return;
-      }
-      bool_t ok;
-      epoch_t reply_jepoch, reply_oepoch;
-      MarshallDeputy reply_old_view, reply_new_view, cmd_batch;
-      fu->get_reply() >> ok >> reply_jepoch >> reply_oepoch >> reply_old_view >> reply_new_view >> cmd_batch;
-      e->FeedResponse(ok, reply_jepoch, reply_oepoch, cmd_batch);
-    };
-    // Log_info("[JETPACK-DEBUG] Sending RecordCmd to site %d", p.first);
-    auto fu = proxy->async_JetpackRecordCmd(jepoch, oepoch, sid, record_md, missing_md, fuattr);
-    fus.push_back(fu);
-  }
-  return e;
-}
-
-shared_ptr<JetpackPrepareQuorumEvent> Communicator::JetpackBroadcastPrepare(parid_t par_id, locid_t loc_id, 
-                                                                      epoch_t jepoch, epoch_t oepoch, 
-                                                                      ballot_t max_seen_ballot) {
-  int n = Config::GetConfig()->GetPartitionSize(par_id);
-  auto e = Reactor::CreateSpEvent<JetpackPrepareQuorumEvent>(n, n/2+1);
-  auto proxies = rpc_par_proxies_[par_id];
-  vector<Future*> fus;
-	WAN_WAIT;
-  for (auto& p : proxies) {
-    // TODO: Local call optimization temporarily commented out
-    // if (p.first == loc_id) {
-    //     // Local call - call OnJetpackPrepare directly
-    //     bool_t ok;
-    //     epoch_t reply_jepoch, reply_oepoch;
-    //     MarshallDeputy reply_old_view, reply_new_view;
-    //     ballot_t accepted_ballot;
-    //     int replied_sid, replied_set_size;
-    //     dtxn_sched_->OnJetpackPrepare(jepoch, oepoch, max_seen_ballot, &ok, &reply_jepoch, &reply_oepoch,
-    //                                  &reply_old_view, &reply_new_view, &accepted_ballot, &replied_sid, &replied_set_size);
-    //     e->FeedResponse(ok, reply_jepoch, reply_oepoch, accepted_ballot, replied_sid, replied_set_size, max_seen_ballot);
-    //     continue;
-    // }
-    auto proxy = (ClassicProxy*) p.second;
-    FutureAttr fuattr;
-    fuattr.callback = [e](Future* fu) {
-      if (fu->get_error_code() != 0) {
-        Log_info("Get a error message in reply");
-        return;
-      }
-      bool_t ok;
-      epoch_t reply_jepoch, reply_oepoch;
-      MarshallDeputy reply_old_view, reply_new_view;
-      ballot_t reply_max_seen_ballot;
-      ballot_t accepted_ballot;
-      int replied_sid;
-      fu->get_reply() >> ok >> reply_jepoch >> reply_oepoch >> reply_old_view >> reply_new_view 
-                     >> reply_max_seen_ballot >> accepted_ballot >> replied_sid;
-      e->FeedResponse(ok, reply_jepoch, reply_oepoch, accepted_ballot, replied_sid, reply_max_seen_ballot);
-    };
-    auto fu = proxy->async_JetpackPrepare(jepoch, oepoch, max_seen_ballot, fuattr);
-    fus.push_back(fu);
-  }
-  return e;
-}
-
-shared_ptr<JetpackAcceptQuorumEvent> Communicator::JetpackBroadcastAccept(parid_t par_id, locid_t loc_id, 
-                                                                          epoch_t jepoch, epoch_t oepoch, 
-                                                                          ballot_t max_seen_ballot, int sid) {
+shared_ptr<JetpackAcceptQuorumEvent>
+Communicator::JetpackBroadcastAccept(parid_t par_id,
+                                     epoch_t v,
+                                     epoch_t vn,
+                                     ballot_t ballot,
+                                     const shared_ptr<KeyCmdBatchData>& value) {
   int n = Config::GetConfig()->GetPartitionSize(par_id);
   auto e = Reactor::CreateSpEvent<JetpackAcceptQuorumEvent>(n, n/2+1);
   auto proxies = rpc_par_proxies_[par_id];
-  vector<Future*> fus;
-	WAN_WAIT;
+  WAN_WAIT;
+  // An empty set is a value, too.
+  MarshallDeputy value_md(value ? std::static_pointer_cast<Marshallable>(value)
+                                : std::make_shared<KeyCmdBatchData>());
   for (auto& p : proxies) {
     auto proxy = (ClassicProxy*) p.second;
+    siteid_t site = p.first;
     FutureAttr fuattr;
-    fuattr.callback = [e](Future* fu) {
+    fuattr.callback = [e, site, v](Future* fu) {
       if (fu->get_error_code() != 0) {
-        Log_info("Get a error message in reply");
+        Log_info("[JETPACK-RECOVERY] Accept v=%u RPC error from site %d (code %d)",
+                 v, site, fu->get_error_code());
+        e->FeedError();
         return;
       }
-      bool_t ok;
-      epoch_t reply_jepoch, reply_oepoch;
-      MarshallDeputy reply_old_view, reply_new_view;
-      ballot_t reply_max_seen_ballot;
-      fu->get_reply() >> ok;
-      fu->get_reply() >> reply_jepoch;
-      fu->get_reply() >> reply_oepoch;
-      fu->get_reply() >> reply_old_view;
-      fu->get_reply() >> reply_new_view;
-      fu->get_reply() >> reply_max_seen_ballot;
-      e->FeedResponse(ok, reply_jepoch, reply_oepoch, reply_max_seen_ballot);
+      JetpackAcceptQuorumEvent::Reply r;
+      r.site = site;
+      bool_t ok = 0;
+      fu->get_reply() >> ok >> r.view_id >> r.vid >> r.promised;
+      r.ok = (ok != 0);
+      e->Feed(r);
     };
-    auto fu = proxy->async_JetpackAccept(jepoch, oepoch, max_seen_ballot, sid, fuattr);
-    fus.push_back(fu);
+    Future::safe_release(proxy->async_JetpackAccept(v, vn, ballot, value_md, fuattr));
   }
   return e;
 }
 
-shared_ptr<QuorumEvent> Communicator::JetpackBroadcastCommit(parid_t par_id, locid_t loc_id, epoch_t jepoch, epoch_t oepoch, int sid) {
+shared_ptr<JetpackFinishRecoveryQuorumEvent>
+Communicator::JetpackBroadcastFinishRecovery(parid_t par_id,
+                                             epoch_t v,
+                                             ballot_t ballot,
+                                             const View& target,
+                                             const std::set<siteid_t>& already_done,
+                                             bool wait_all,
+                                             int exclude_site,
+                                             int ours_needed) {
   int n = Config::GetConfig()->GetPartitionSize(par_id);
-  auto e = Reactor::CreateSpEvent<QuorumEvent>(n, n/2+1);
+  auto e = Reactor::CreateSpEvent<JetpackFinishRecoveryQuorumEvent>(n, n/2+1, v, wait_all,
+                                                                    ours_needed);
   auto proxies = rpc_par_proxies_[par_id];
-  vector<Future*> fus;
-	WAN_WAIT;
   for (auto& p : proxies) {
-    auto proxy = (ClassicProxy*) p.second;
-    FutureAttr fuattr;
-    fuattr.callback = [e](Future* fu) {
-      if (fu->get_error_code() != 0) {
-        Log_info("Get a error message in reply");
-        return;
-      }
-      e->VoteYes();
-    };
-    auto fu = proxy->async_JetpackCommit(jepoch, oepoch, sid, fuattr);
-    fus.push_back(fu);
+    if ((int) p.first == exclude_site) {
+      continue;
+    }
+    if (already_done.count(p.first) > 0) {
+      e->PreCredit(p.first);
+    }
   }
-  return e;
-}
-
-shared_ptr<QuorumEvent> Communicator::JetpackBroadcastFinishRecovery(parid_t par_id, locid_t loc_id, epoch_t oepoch) {
-  int n = Config::GetConfig()->GetPartitionSize(par_id);
-  auto e = Reactor::CreateSpEvent<QuorumEvent>(n, n/2+1);
-  auto proxies = rpc_par_proxies_[par_id];
-  vector<Future*> fus;
-	WAN_WAIT;
+  WAN_WAIT;
+  MarshallDeputy view_md(std::make_shared<ViewData>(target, par_id));
   for (auto& p : proxies) {
+    if ((int) p.first == exclude_site || already_done.count(p.first) > 0) {
+      continue;
+    }
     auto proxy = (ClassicProxy*) p.second;
+    siteid_t site = p.first;
     FutureAttr fuattr;
-    fuattr.callback = [e](Future* fu) {
+    fuattr.callback = [e, site, v](Future* fu) {
       if (fu->get_error_code() != 0) {
-        Log_info("Get a error message in reply");
+        Log_info("[JETPACK-RECOVERY] FinishRecovery v=%u RPC error from site %d (code %d)",
+                 v, site, fu->get_error_code());
+        e->FeedError();
         return;
       }
-      e->VoteYes();
+      JetpackFinishRecoveryQuorumEvent::Reply r;
+      r.site = site;
+      bool_t applied = 0;
+      fu->get_reply() >> applied >> r.view_id >> r.vid;
+      r.applied = (applied != 0);
+      e->Feed(r);
     };
-    auto fu = proxy->async_JetpackFinishRecovery(oepoch, fuattr);
-    fus.push_back(fu);
+    e->n_sent_++;
+    Future::safe_release(proxy->async_JetpackFinishRecovery(v, ballot, view_md, fuattr));
   }
   return e;
 }
@@ -1788,8 +1590,11 @@ void Communicator::UpdatePartitionView(parid_t partition_id, const std::shared_p
   // Check if we have an existing view
   auto it = partition_views_.find(partition_id);
   if (it != partition_views_.end()) {
-    // Only update if the new view has a higher view_id
-    if (view.view_id_ > it->second.view_id_) {
+    // Only update if the new view has a higher view_id, or names the leader
+    // the known view of that id lacked (a Raft WRONG_LEADER placeholder).
+    if (view.view_id_ > it->second.view_id_ ||
+        (view.view_id_ == it->second.view_id_ && it->second.GetLeader() < 0 &&
+         view.GetLeader() >= 0)) {
       partition_views_[partition_id] = view;
     } else {
       // Log_info("[VIEW_DEBUG] partition %d ignoring stale view_id=%d (current=%d)",
@@ -1805,6 +1610,26 @@ void Communicator::UpdatePartitionView(parid_t partition_id, const std::shared_p
   // should look up the leader from the global partition_views_ when needed
 }
 
+void Communicator::AdoptRedirectView(parid_t partition_id,
+                                     const std::shared_ptr<ViewData>& view_data) {
+  if (!view_data || !RoutesByView()) {
+    UpdatePartitionView(partition_id, view_data);
+    return;
+  }
+  const View& view = view_data->view_;
+  std::lock_guard<std::mutex> lock(partition_views_mutex_);
+  auto it = partition_views_.find(partition_id);
+  if (it == partition_views_.end() ||
+      view.view_id_ > it->second.view_id_ ||
+      (view.view_id_ == it->second.view_id_ && view.GetLeader() >= 0 &&
+       view.GetLeader() != it->second.GetLeader())) {
+    if (it == partition_views_.end() || view.GetLeader() != it->second.GetLeader()) {
+      Log_info("[VIEW_DEBUG] partition %d routes to view %s", partition_id, view.ToString().c_str());
+    }
+    partition_views_[partition_id] = view;
+  }
+}
+
 View Communicator::GetPartitionView(parid_t partition_id) {
   std::lock_guard<std::mutex> lock(partition_views_mutex_);
   auto it = partition_views_.find(partition_id);
@@ -1813,6 +1638,30 @@ View Communicator::GetPartitionView(parid_t partition_id) {
   }
   // Return empty view if not found
   return View();
+}
+
+bool Communicator::RoutesByView() {
+  return TxLogServer::JetpackRecoveryEnabled();
+}
+
+int Communicator::ViewLeaderLocale(parid_t partition_id) {
+  int leader = -1;
+  {
+    std::lock_guard<std::mutex> lock(partition_views_mutex_);
+    auto it = partition_views_.find(partition_id);
+    if (it != partition_views_.end()) {
+      leader = it->second.GetLeader();
+    }
+  }
+  auto* cfg = Config::GetConfig();
+  if (leader < 0 || cfg == nullptr || leader >= cfg->NumSites(Config::SERVER)) {
+    return -1;
+  }
+  const auto& site = cfg->SiteById((uint32_t) leader);
+  if (site.partition_id_ != partition_id) {
+    return -1;
+  }
+  return (int) site.locale_id;
 }
 
 locid_t Communicator::GetLeaderForPartition(parid_t partition_id) const {
@@ -1841,6 +1690,15 @@ locid_t Communicator::GetLeaderForPartition(parid_t partition_id) const {
   // 2026-04-29 Akkio AWS run with leader on server0).
   if (Config::GetConfig()->replica_proto_ == MODE_RAFT ||
       Config::GetConfig()->replica_proto_ == MODE_FPGA_RAFT) {
+    // Under Jetpack recovery, Raft clients follow the leader of the
+    // newest view they know (WRONG_LEADER redirects, and the base views a
+    // co-located replica adopts); the static locale only until one is known.
+    if (Config::GetConfig()->replica_proto_ == MODE_RAFT && RoutesByView()) {
+      int view_leader = ViewLeaderLocale(partition_id);
+      if (view_leader >= 0) {
+        return (locid_t) view_leader;
+      }
+    }
     return Config::GetConfig()->GetRaftLeaderLocale();
   }
   // naive_epaxos: client sends to its co-located server. Resolution is
@@ -1848,15 +1706,13 @@ locid_t Communicator::GetLeaderForPartition(parid_t partition_id) const {
   // that's where we can consult the client's Config::SiteInfo to look up
   // the server on the same host — commo_->loc_id_ alone is the client's
   // own locale_id (which is NOT the same as any server's locale_id).
-  View view = GetPartitionView(partition_id);
-
-  if (!view.IsEmpty()) {
-    int leader = view.GetLeader();
-    if (leader >= 0) {
-      return leader;
-    }
+  // Views name their leader by site id; routing works on locales (they only
+  // coincide in partition 0).
+  int view_leader = ViewLeaderLocale(partition_id);
+  if (view_leader >= 0) {
+    return (locid_t) view_leader;
   }
-  
+
   // Fall back to static leader if no view or invalid leader
   return 0;
 }

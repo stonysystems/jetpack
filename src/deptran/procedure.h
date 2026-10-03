@@ -381,6 +381,55 @@ class KeyCmdIdBatchData : public Marshallable {
   }
 };
 
+// Jetpack recovery acceptor state of one replica, as carried by a
+// JetpackPullRecovery reply: accepted[vn] = (ballot, value) for every
+// recovery instance vn the replica still reports. The value is the recovery
+// set itself (keys plus command bodies); an empty set is a value, too.
+class JetpackAcceptedMapData : public Marshallable {
+ public:
+  struct Entry {
+    epoch_t vn;
+    ballot_t ballot;
+    shared_ptr<KeyCmdBatchData> value;
+  };
+  std::vector<Entry> entries_;
+
+  JetpackAcceptedMapData() : Marshallable(MarshallDeputy::CMD_JETPACK_ACCEPTED_MAP) {}
+
+  Marshal& ToMarshal(Marshal& m) const override {
+    int32_t sz = entries_.size();
+    m << sz;
+    for (const auto& e : entries_) {
+      m << e.vn;
+      m << e.ballot;
+      MarshallDeputy deputy(e.value ? std::static_pointer_cast<Marshallable>(e.value)
+                                    : std::make_shared<KeyCmdBatchData>());
+      m << deputy;
+    }
+    return m;
+  }
+
+  Marshal& FromMarshal(Marshal& m) override {
+    int32_t sz = 0;
+    m >> sz;
+    entries_.clear();
+    entries_.reserve(sz);
+    for (int32_t i = 0; i < sz; i++) {
+      Entry e;
+      m >> e.vn;
+      m >> e.ballot;
+      MarshallDeputy deputy;
+      m >> deputy;
+      e.value = std::dynamic_pointer_cast<KeyCmdBatchData>(deputy.sp_data_);
+      if (!e.value) {
+        e.value = std::make_shared<KeyCmdBatchData>();
+      }
+      entries_.push_back(e);
+    }
+    return m;
+  }
+};
+
 /**
  * input ready levels:
  *   1. shard ready

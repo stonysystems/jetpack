@@ -9,7 +9,61 @@
 #include "bsoncxx/builder/stream/document.hpp"
 #include "bsoncxx/oid.hpp"
 
+#include "jetpack_term_source.h"
+
 namespace janus {
+
+// A positive integral BSON number (int64, int32 or double), else 0.
+inline uint64_t JpMongoPositiveNumber(const bsoncxx::document::element& e) {
+  if (e && e.type() == bsoncxx::type::k_int64 && e.get_int64().value > 0) {
+    return (uint64_t) e.get_int64().value;
+  }
+  if (e && e.type() == bsoncxx::type::k_int32 && e.get_int32().value > 0) {
+    return (uint64_t) e.get_int32().value;
+  }
+  if (e && e.type() == bsoncxx::type::k_double && e.get_double().value > 0) {
+    return (uint64_t) e.get_double().value;
+  }
+  return 0;
+}
+
+// The replica-set term in a hello reply: the protocol-version-1
+// electionId (OID::fromTerm, primaries only; *from_election_id = true), else
+// lastWrite.opTime.t (the term of the node's newest oplog entry, also on a
+// secondary, where it can be older than the current term); 0 if neither (e.g.
+// a standalone mongod). *primary = isWritablePrimary (ismaster before MongoDB
+// 4.4.2).
+inline uint64_t JpMongoHelloTerm(bsoncxx::document::view v, bool* primary,
+                                 bool* from_election_id = nullptr) {
+  *primary = false;
+  if (from_election_id) *from_election_id = false;
+  auto wp = v["isWritablePrimary"];
+  if (!wp) wp = v["ismaster"];
+  if (wp && wp.type() == bsoncxx::type::k_bool) {
+    *primary = wp.get_bool().value;
+  }
+  uint64_t t = 0;
+  auto eid = v["electionId"];
+  if (eid && eid.type() == bsoncxx::type::k_oid) {
+    const bsoncxx::oid oid = eid.get_oid().value;
+    JpTermFromElectionId(reinterpret_cast<const unsigned char*>(oid.bytes()), oid.size(), &t);
+  }
+  if (t != 0) {
+    if (from_election_id) *from_election_id = true;
+    return t;
+  }
+  auto lw = v["lastWrite"];
+  if (!lw || lw.type() != bsoncxx::type::k_document) return 0;
+  auto ot = lw.get_document().value["opTime"];
+  if (!ot || ot.type() != bsoncxx::type::k_document) return 0;
+  return JpMongoPositiveNumber(ot.get_document().value["t"]);
+}
+
+// The current term this member knows, from a replSetGetStatus reply
+// ("term"); 0 if absent (e.g. a standalone mongod or an error reply).
+inline uint64_t JpMongoStatusTerm(bsoncxx::document::view v) {
+  return JpMongoPositiveNumber(v["term"]);
+}
 
 // mongocxx requires exactly one instance to exist before any driver use.
 // Uses Meyer's singleton pattern for thread-safe lazy initialization.
@@ -117,6 +171,14 @@ class MongodbKVTableHandler {
 
 
   int Read(int key) {
+    bool ok = false;
+    return Read(key, &ok);
+  }
+
+  // Read() that also reports whether the read itself succeeded (*ok): a
+  // missing document is a successful read of 0, a driver exception (e.g. the
+  // directly connected mongod is not primary) is not.
+  int Read(int key, bool* ok) {
     // char kCollectionName[10];
     // std::string str = std::to_string(key);
     // str.copy(kCollectionName, str.length());
@@ -128,9 +190,11 @@ class MongodbKVTableHandler {
     bsoncxx::document::value filter =
       filter_builder << "key" << key << bsoncxx::builder::stream::finalize;
 
+    *ok = false;
     try {
       bsoncxx::stdx::optional<bsoncxx::document::value> result =
         collection.find_one(filter.view());
+      *ok = true;
 
       if (result) {
         bsoncxx::document::view view = result->view();

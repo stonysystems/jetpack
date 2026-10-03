@@ -49,11 +49,13 @@ class ClassicServiceImpl : public ClassicService {
 							 DeferredReply* defer) override;
 
   void RuleSpeculativeExecute(const MarshallDeputy& md,
+                              const epoch_t& fp_view,
                               bool_t* accepted,
                               int32_t* result,
                               bool_t* is_leader,
                               double* cpu_usage,
                               double* queue_depth,
+                              epoch_t* reply_fp_view,
                               rrr::DeferredReply* defer) override;
 
   void Dispatch(const i64& cmd_id,
@@ -68,6 +70,7 @@ class ClassicServiceImpl : public ClassicService {
   void DispatchWithRuleSpec(const i64& cmd_id,
                             const DepId& dep_id,
                             const MarshallDeputy& cmd,
+                            const epoch_t& fp_view,
                             int32_t* res,
                             TxnOutput* output,
                             uint64_t* coro_id,
@@ -77,6 +80,7 @@ class ClassicServiceImpl : public ClassicService {
                             bool_t* is_leader,
                             double* cpu_usage,
                             double* queue_depth,
+                            epoch_t* reply_fp_view,
                             DeferredReply* defer_reply) override;
 
  private:
@@ -316,83 +320,33 @@ class ClassicServiceImpl : public ClassicService {
                      const uint64_t& timestamp,
                      int32_t* res, DeferredReply* defer) override;
 
-  void JetpackPullRecovery(const MarshallDeputy& old_view,
+  void JetpackPullRecovery(const epoch_t& view_id,
+                           const ballot_t& ballot,
                            const MarshallDeputy& new_view,
-                           const epoch_t& jepoch,
-                           const epoch_t& oepoch,
                            bool_t* ok,
-                           epoch_t* reply_jepoch,
-                           epoch_t* reply_oepoch,
-                           MarshallDeputy* reply_old_view,
-                           MarshallDeputy* reply_new_view,
-                           MarshallDeputy* id_batch,
+                           epoch_t* reply_view_id,
+                           epoch_t* reply_vid,
+                           ballot_t* reply_promised,
+                           MarshallDeputy* acked_batch,
+                           MarshallDeputy* accepted_map,
                            rrr::DeferredReply* defer) override;
-  
-  void JetpackPullIdSet(const epoch_t& jepoch,
-                        const epoch_t& oepoch,
-                        bool_t* ok,
-                        epoch_t* reply_jepoch,
-                        epoch_t* reply_oepoch,
-                        MarshallDeputy* reply_old_view,
-                        MarshallDeputy* reply_new_view,
-                        MarshallDeputy* id_set,
-                        rrr::DeferredReply* defer) override;
 
-  void JetpackPullCmd(const epoch_t& jepoch,
-                      const epoch_t& oepoch,
-                      const MarshallDeputy& key_batch,
-                      bool_t* ok,
-                      epoch_t* reply_jepoch,
-                      epoch_t* reply_oepoch,
-                      MarshallDeputy* reply_old_view,
-                      MarshallDeputy* reply_new_view,
-                      MarshallDeputy* cmd_batch,
-                      rrr::DeferredReply* defer) override;
- 
-  void JetpackRecordCmd(const epoch_t& jepoch,
-                        const epoch_t& oepoch,
-                        const int32_t& sid,
-                        const MarshallDeputy& record_id_batch,
-                        const MarshallDeputy& missing_id_batch, 
-                        bool_t* ok,
-                        epoch_t* reply_jepoch,
-                        epoch_t* reply_oepoch,
-                        MarshallDeputy* reply_old_view,
-                        MarshallDeputy* reply_new_view,
-                        MarshallDeputy* cmd_batch, 
-                        rrr::DeferredReply* defer) override;
- 
-  void JetpackPrepare(const epoch_t& jepoch,
-                      const epoch_t& oepoch,
-                      const ballot_t& max_seen_ballot,
-                      bool_t* ok,
-                      epoch_t* reply_jepoch,
-                      epoch_t* reply_oepoch,
-                      MarshallDeputy* reply_old_view,
-                      MarshallDeputy* reply_new_view,
-                      ballot_t* reply_max_seen_ballot,
-                      ballot_t* accepted_ballot,
-                      int32_t* replied_sid,
-                      rrr::DeferredReply* defer) override;
- 
-  void JetpackAccept(const epoch_t& jepoch,
-                     const epoch_t& oepoch,
-                     const ballot_t& max_seen_ballot,
-                     const int32_t& sid,
+  void JetpackAccept(const epoch_t& view_id,
+                     const epoch_t& vn,
+                     const ballot_t& ballot,
+                     const MarshallDeputy& value,
                      bool_t* ok,
-                     epoch_t* reply_jepoch,
-                     epoch_t* reply_oepoch,
-                     MarshallDeputy* reply_old_view,
-                     MarshallDeputy* reply_new_view,
-                     ballot_t* reply_max_seen_ballot,
-                     rrr::DeferredReply* defer) override;
- 
-  void JetpackCommit(const epoch_t& jepoch,
-                     const epoch_t& oepoch, 
-                     const int32_t& sid, 
+                     epoch_t* reply_view_id,
+                     epoch_t* reply_vid,
+                     ballot_t* reply_promised,
                      rrr::DeferredReply* defer) override;
 
-  void JetpackFinishRecovery(const epoch_t& oepoch,
+  void JetpackFinishRecovery(const epoch_t& view_id,
+                             const ballot_t& ballot,
+                             const MarshallDeputy& new_view,
+                             bool_t* applied,
+                             epoch_t* reply_view_id,
+                             epoch_t* reply_vid,
                              rrr::DeferredReply* defer) override;
 
  protected:

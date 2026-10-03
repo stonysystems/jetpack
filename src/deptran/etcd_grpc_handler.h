@@ -100,12 +100,20 @@ class EtcdGrpcHandler {
   }
 
   int Read(int key) {
+    bool ok = false;
+    return Read(key, &ok);
+  }
+
+  // Read() that also reports whether the read itself succeeded (*ok); a
+  // missing key is a successful read of 0.
+  int Read(int key, bool* ok) {
     etcdserverpb::RangeRequest req;
     req.set_key(MakeKey(key));
     etcdserverpb::RangeResponse resp;
     grpc::ClientContext ctx;
     SetDeadline(ctx);
     grpc::Status status = kv_stub_->Range(&ctx, req, &resp);
+    *ok = status.ok();
     if (!status.ok()) {
       std::cerr << "EtcdGrpc Read error: " << status.error_message()
                 << std::endl;

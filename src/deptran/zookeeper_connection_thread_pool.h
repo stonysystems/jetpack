@@ -32,7 +32,7 @@ namespace janus {
 //   * Per-worker ZookeeperKVTableHandler (own libzookeeper-mt session)
 //   * ZookeeperRequest() is round-robin push(cmd) — no inline blocking
 //   * Worker loop blocks on pop(), runs sync handler->Write/Read, signals
-//     zookeeper_finished->Set(1).
+//     zookeeper_finished->Set(1) (2 if the operation failed).
 // libzookeeper-mt is documented thread-safe per session; multiple
 // independent sessions to the same ensemble are fine (each is its own
 // TCP connection).
@@ -213,12 +213,17 @@ class ZookeeperConnectionThreadPool {
       // committed via ZAB (majority quorum). The 2026-05-03 sync-API change
       // (vs zoo_aset / zoo_aget) is retained for apples-to-apples fairness
       // with the leader-replies-after-commit rule.
-      if (parsed_cmd.IsRead())
-        (void)zk_handlers_[thread_id]->Read(parsed_cmd.key_);
-      else if (parsed_cmd.IsWrite())
-        (void)zk_handlers_[thread_id]->Write(parsed_cmd.key_, parsed_cmd.value_);
-      else
-        break;
+      // The outcome goes back through zookeeper_finished (1 = done by
+      // ZooKeeper, 2 = failed); an unsupported command fails instead of
+      // ending this worker without a signal.
+      bool ok = false;
+      if (parsed_cmd.IsRead()) {
+        (void)zk_handlers_[thread_id]->Read(parsed_cmd.key_, &ok);
+      } else if (parsed_cmd.IsWrite()) {
+        ok = zk_handlers_[thread_id]->Write(parsed_cmd.key_, parsed_cmd.value_);
+      } else {
+        Log_warn("[ZOOKEEPER] unsupported command type");
+      }
 
 #ifdef ZOOKEEPER_STATISTICS
       auto end_time = std::chrono::high_resolution_clock::now();
@@ -230,13 +235,13 @@ class ZookeeperConnectionThreadPool {
 
       shared_ptr<TxPieceData> cmd_content = *(((VecPieceData*)(dynamic_pointer_cast<TpcCommitCommand>(cmd)->cmd_.get()))->sp_vec_piece_data_->begin());
 #ifdef ZOOKEEPER_DEBUG
-      Log_info("Before cmd_content->zookeeper_finished->Set(1);");
+      Log_info("Before cmd_content->zookeeper_finished->Set(%d);", ok ? 1 : 2);
 #endif
       if (cmd_content && cmd_content->zookeeper_finished) {
-        cmd_content->zookeeper_finished->Set(1);
+        cmd_content->zookeeper_finished->Set(ok ? 1 : 2);
       }
 #ifdef ZOOKEEPER_DEBUG
-      Log_info("After cmd_content->zookeeper_finished->Set(1);");
+      Log_info("After cmd_content->zookeeper_finished->Set(%d);", ok ? 1 : 2);
 #endif
     }
   }
@@ -281,12 +286,13 @@ class ZookeeperConnectionThreadPool {
 
   size_t ZookeeperRequest(const shared_ptr<Marshallable>& cmd) {
     if (thread_num_ == 0) {
+      // Never sent: report it as failed (2).
       Log_warn("[ZOOKEEPER][POOL] thread_num is 0, dropping ZooKeeper request");
       auto tpc_cmd = dynamic_pointer_cast<TpcCommitCommand>(cmd);
       if (tpc_cmd) {
         auto cmd_content = *(((VecPieceData*)(tpc_cmd->cmd_.get()))->sp_vec_piece_data_->begin());
         if (cmd_content && cmd_content->zookeeper_finished) {
-          cmd_content->zookeeper_finished->Set(1);
+          cmd_content->zookeeper_finished->Set(2);
         }
       }
       return 0;

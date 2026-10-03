@@ -16,9 +16,13 @@ CommunicatorRule::LeaderProxyForPartition(parid_t par_id, int idx) const {
     return ret;
   }
 
-  // First check if we have updated view information
+  // First check if we have updated view information. Where Dispatch routing
+  // follows the view (Raft, etcd, MongoDB, ZooKeeper under Jetpack
+  // recovery) the view's leader may be locale 0 as well; for the others 0
+  // means "no view" and the static leaders below apply (e.g. Copilot's
+  // pilot + copilot).
   locid_t view_leader = GetLeaderForPartition(par_id);
-  if (view_leader > 0) {
+  if (view_leader > 0 || RoutesByView()) {
     // We have a leader from the view, find the proxy for it
     auto it = rpc_par_proxies_.find(par_id);
     if (it != rpc_par_proxies_.end()) {
@@ -136,6 +140,30 @@ std::vector<int> CommunicatorRule::LeadersForPartition(parid_t par_id) const {
 //   return proxy_pairs;  
 // }
 
+epoch_t CommunicatorRule::FastPathView(parid_t par_id) const {
+  auto it = fp_view_.find(par_id);
+  return it == fp_view_.end() ? 0 : it->second;
+}
+
+void CommunicatorRule::AdoptFastPathView(parid_t par_id, epoch_t view) {
+  epoch_t& cur = fp_view_[par_id];
+  if (view <= cur) {
+    return;
+  }
+  // Rare: once per worker per view change.
+  Log_info("[JETPACK-FP-VIEW] par=%u adopt %u -> %u",
+           (unsigned) par_id, (unsigned) cur, (unsigned) view);
+  cur = view;
+}
+
+void CommunicatorRule::AdoptBaseViewForFastPath(parid_t par_id,
+                                                const shared_ptr<ViewData>& view_data) {
+  if (!view_data || !TxLogServer::JetpackRecoveryEnabled()) {
+    return;
+  }
+  AdoptFastPathView(par_id, view_data->GetView().view_id_);
+}
+
 shared_ptr<RuleSpeculativeExecuteQuorumEvent>
 CommunicatorRule::BroadcastRuleSpeculativeExecute(shared_ptr<vector<shared_ptr<SimpleCommand>>> vec_piece_data) {
   verify(!vec_piece_data->empty());
@@ -160,13 +188,16 @@ CommunicatorRule::BroadcastRuleSpeculativeExecute(shared_ptr<vector<shared_ptr<S
   int n_rpc = n_total;
   int n_leaders_rpc = n_leaders_total;
 
+  // The attempt's fast-path view, read once (before WAN_WAIT yields) and
+  // captured by value.
+  const epoch_t req_view = FastPathView(par_id);
   auto e = Reactor::CreateSpEvent<RuleSpeculativeExecuteQuorumEvent>(
       n_rpc, SimpleRWCommand::RuleSuperMajority(n_rpc), n_leaders_rpc);
   WAN_WAIT;
   for (auto& pair : rpc_par_proxies_[par_id]) {
     rrr::FutureAttr fuattr;
     fuattr.callback =
-        [e, this](Future* fu) {
+        [e, this, par_id, req_view](Future* fu) {
           if (fu->get_error_code() != 0) {
             Log_info("Get a error message in reply");
             return;
@@ -176,8 +207,13 @@ CommunicatorRule::BroadcastRuleSpeculativeExecute(shared_ptr<vector<shared_ptr<S
           bool_t is_leader;
           double cpu_usage;
           double queue_depth;
-          fu->get_reply() >> accepted >> result >> is_leader >> cpu_usage >> queue_depth;
-          e->FeedResponse(accepted, result, is_leader, cpu_usage, queue_depth);
+          epoch_t reply_view;
+          fu->get_reply() >> accepted >> result >> is_leader >> cpu_usage >> queue_depth
+                          >> reply_view;
+          AdoptFastPathView(par_id, reply_view);
+          // A yes counts only if it was given in the view the request carried.
+          e->FeedResponse(accepted && reply_view == req_view, result, is_leader,
+                          cpu_usage, queue_depth);
         };
 
     DepId di;
@@ -191,7 +227,7 @@ CommunicatorRule::BroadcastRuleSpeculativeExecute(shared_ptr<vector<shared_ptr<S
     gettimeofday(&tp, NULL);
     sp_vpd->time_sent_from_client_ = tp.tv_sec * 1000 + tp.tv_usec / 1000.0;
 
-    auto future = proxy->async_RuleSpeculativeExecute(md, fuattr);
+    auto future = proxy->async_RuleSpeculativeExecute(md, req_view, fuattr);
     Future::safe_release(future);
   }
 
@@ -214,7 +250,8 @@ CommunicatorRule::BroadcastRuleSpeculativeExecute(shared_ptr<vector<shared_ptr<S
 // The fused Dispatch reply still arrives eventually; it drives the slowpath
 // if the fastpath quorum is not reached.
 shared_ptr<RuleSpeculativeExecuteQuorumEvent>
-CommunicatorRule::BroadcastRuleSpeculativeExecuteSkipLeader(shared_ptr<vector<shared_ptr<SimpleCommand>>> vec_piece_data) {
+CommunicatorRule::BroadcastRuleSpeculativeExecuteSkipLeader(shared_ptr<vector<shared_ptr<SimpleCommand>>> vec_piece_data,
+                                                            epoch_t req_view) {
   verify(!vec_piece_data->empty());
   // Hard invariant: only safe under CURP. Under cc:rule (Jetpack)
   // skipping the leader violates the proposing-replica-in-quorum rule
@@ -240,7 +277,7 @@ CommunicatorRule::BroadcastRuleSpeculativeExecuteSkipLeader(shared_ptr<vector<sh
     if (pair.first == leader_site_id) continue;  // leader handled by fused RPC
     rrr::FutureAttr fuattr;
     fuattr.callback =
-        [e, this](Future* fu) {
+        [e, this, par_id, req_view](Future* fu) {
           if (fu->get_error_code() != 0) {
             Log_info("Get a error message in reply");
             return;
@@ -250,8 +287,12 @@ CommunicatorRule::BroadcastRuleSpeculativeExecuteSkipLeader(shared_ptr<vector<sh
           bool_t is_leader;
           double cpu_usage;
           double queue_depth;
-          fu->get_reply() >> accepted >> result >> is_leader >> cpu_usage >> queue_depth;
-          e->FeedResponse(accepted, result, is_leader, cpu_usage, queue_depth);
+          epoch_t reply_view;
+          fu->get_reply() >> accepted >> result >> is_leader >> cpu_usage >> queue_depth
+                          >> reply_view;
+          AdoptFastPathView(par_id, reply_view);
+          e->FeedResponse(accepted && reply_view == req_view, result, is_leader,
+                          cpu_usage, queue_depth);
         };
 
     DepId di;
@@ -265,7 +306,7 @@ CommunicatorRule::BroadcastRuleSpeculativeExecuteSkipLeader(shared_ptr<vector<sh
     gettimeofday(&tp, NULL);
     sp_vpd->time_sent_from_client_ = tp.tv_sec * 1000 + tp.tv_usec / 1000.0;
 
-    auto future = proxy->async_RuleSpeculativeExecute(md, fuattr);
+    auto future = proxy->async_RuleSpeculativeExecute(md, req_view, fuattr);
     Future::safe_release(future);
   }
 
@@ -306,7 +347,8 @@ void CommunicatorRule::BroadcastDispatch(
         if (ret == WRONG_LEADER && view_md.sp_data_ != nullptr) {
           auto sp_view_data = dynamic_pointer_cast<ViewData>(view_md.sp_data_);
           if (sp_view_data) {
-            UpdatePartitionView(par_id, sp_view_data);
+            AdoptRedirectView(par_id, sp_view_data);
+            AdoptBaseViewForFastPath(par_id, sp_view_data);
           }
         }
         
@@ -367,7 +409,8 @@ void CommunicatorRule::BroadcastDispatchWithRuleSpec(
     shared_ptr<vector<shared_ptr<TxPieceData>>> sp_vec_piece,
     Coordinator* coo,
     shared_ptr<RuleSpeculativeExecuteQuorumEvent> spec_event,
-    const function<void(int, TxnOutput&)> & callback) {
+    const function<void(int, TxnOutput&)> & callback,
+    epoch_t req_view) {
   Log_debug("Do a fused dispatch+rule-spec on client worker");
   cmdid_t cmd_id = sp_vec_piece->at(0)->root_id_;
   verify(!sp_vec_piece->empty());
@@ -389,14 +432,17 @@ void CommunicatorRule::BroadcastDispatchWithRuleSpec(
         bool_t is_leader;
         double cpu_usage;
         double queue_depth;
+        epoch_t reply_fp_view;
         fu->get_reply() >> ret >> outputs >> coro_id >> view_md
                         >> accepted >> spec_result >> is_leader
-                        >> cpu_usage >> queue_depth;
+                        >> cpu_usage >> queue_depth >> reply_fp_view;
+        AdoptFastPathView(par_id, reply_fp_view);
 
         if (ret == WRONG_LEADER && view_md.sp_data_ != nullptr) {
           auto sp_view_data = dynamic_pointer_cast<ViewData>(view_md.sp_data_);
           if (sp_view_data) {
-            UpdatePartitionView(par_id, sp_view_data);
+            AdoptRedirectView(par_id, sp_view_data);
+            AdoptBaseViewForFastPath(par_id, sp_view_data);
           }
         }
 
@@ -442,7 +488,7 @@ void CommunicatorRule::BroadcastDispatchWithRuleSpec(
   auto pair_leader_proxies = LeaderProxyForPartition(par_id);
   for (auto pair_leader_proxy : pair_leader_proxies) {
     auto proxy = pair_leader_proxy.second;
-    auto future = proxy->async_DispatchWithRuleSpec(cmd_id, di, md, fuattr);
+    auto future = proxy->async_DispatchWithRuleSpec(cmd_id, di, md, req_view, fuattr);
     Future::safe_release(future);
   }
 }

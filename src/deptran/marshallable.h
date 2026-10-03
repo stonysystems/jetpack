@@ -50,6 +50,7 @@ class MarshallDeputy {
     CMD_KEY_CMD_ID_BATCH = 16,
     CMD_SWIFT_RECOVERY_STATE = 17,
     CMD_SWIFT_BATCHED_ACKS = 18,
+    CMD_JETPACK_ACCEPTED_MAP = 19,
   };
   /**
    * This should be called by the rpc layer.

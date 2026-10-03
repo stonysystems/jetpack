@@ -5,6 +5,7 @@
 #include <memory>
 #include <string>
 #include <thread>
+#include <vector>
 
 #include "mongocxx/client.hpp"
 #include "mongocxx/uri.hpp"
@@ -15,6 +16,7 @@
 #include "mongocxx/events/server_description.hpp"
 
 #include "../../jm_file_signal.h"
+#include "mongodb_kv_table_handler.h"
 
 namespace janus {
 
@@ -24,18 +26,25 @@ namespace janus {
 // elected (topology transitions to "ReplicaSetWithPrimary"), this watcher
 // writes a file signal so that Jetpack replicas can trigger recovery.
 //
+// The signal carries the new primary's replica-set term (the view id),
+// "mongo:primary_elected term=T", plus loc=L when the primary's host is the
+// host of replica locale L, so that with a shared signal file only that
+// replica coordinates. No term in the primary's hello: no signal. The
+// callback only parses and appends a line; it issues no driver commands.
+//
 // The mongocxx driver's SDAM (Server Discovery And Monitoring) background
 // thread automatically monitors the replica set topology. APM callbacks fire
 // on that thread when topology changes occur.
 //
 // Usage:
-//   auto watcher = std::make_shared<MongodbLeaderWatcher>(mongo_uri, hostname);
+//   auto watcher = std::make_shared<MongodbLeaderWatcher>(mongo_uri, hostname, replica_hosts);
 //   watcher->Start();
 //   // ... later ...
 //   watcher->Stop();
 class MongodbLeaderWatcher {
   std::string mongo_uri_;
   std::string local_host_;
+  std::vector<std::string> replica_hosts_;  // locale order, host part only
   std::atomic<bool> running_{false};
   std::atomic<bool> had_no_primary_{false};
 
@@ -56,36 +65,65 @@ class MongodbLeaderWatcher {
              prev_type.c_str(), new_type.c_str());
 
     // Track whether we've seen a state without primary.
-    // We only signal recovery when transitioning FROM no-primary TO with-primary.
+    // We only signal recovery when transitioning FROM no-primary TO with-primary
+    // (the first discovery, from Unknown, counts: the watcher starts after the
+    // kill). A repeated signal is harmless: the pollers act only on terms
+    // above the ones they handled.
     if (new_type == "ReplicaSetNoPrimary" || new_type == "Unknown") {
       had_no_primary_.store(true);
     }
 
-    if (new_type == "ReplicaSetWithPrimary" && had_no_primary_.load()) {
+    if (new_type == "ReplicaSetWithPrimary" &&
+        (had_no_primary_.load() || prev_type == "Unknown")) {
       had_no_primary_.store(false);
 
-      // Find the new primary's host from the server descriptions.
+      // Find the new primary's host and term from the server descriptions.
       std::string primary_host;
+      uint64_t term = 0;
+      int loc = -1;
       auto servers = new_desc.servers();
       for (auto& server : servers) {
         std::string server_type(server.type().data(), server.type().size());
         if (server_type == "RSPrimary") {
-          primary_host = std::string(server.host().data(), server.host().size()) +
-                         ":" + std::to_string(server.port());
+          const std::string h(server.host().data(), server.host().size());
+          primary_host = h + ":" + std::to_string(server.port());
+          bool is_primary = false;
+          term = JpMongoHelloTerm(server.hello(), &is_primary);
+          for (size_t i = 0; i < replica_hosts_.size(); i++) {
+            if (replica_hosts_[i] == h) {
+              loc = (int) i;
+              break;
+            }
+          }
           break;
         }
       }
 
-      Log_info("[MONGODB-HOOKER] New primary elected: %s", primary_host.c_str());
-      jm_signal::set_key("mongo", "primary_elected", local_host_);
-      Log_info("[MONGODB-HOOKER] Signaled primary_elected for host=%s",
-               local_host_.c_str());
+      Log_info("[MONGODB-HOOKER] New primary elected: %s term=%llu loc=%d", primary_host.c_str(),
+               (unsigned long long) term, loc);
+      if (term == 0) {
+        Log_warn("[MONGODB-HOOKER] no replica-set term in the new primary's hello: no signal "
+                 "(a term-less primary_elected starts no recovery)");
+        return;
+      }
+      std::string value = "primary_elected term=" + std::to_string(term);
+      if (loc >= 0) {
+        value += " loc=" + std::to_string(loc);
+      }
+      try {
+        jm_signal::set_key("mongo", value, local_host_);
+        Log_info("[MONGODB-HOOKER] Signaled mongo:%s for host=%s", value.c_str(),
+                 local_host_.c_str());
+      } catch (const std::exception& e) {
+        Log_warn("[MONGODB-HOOKER] failed to signal mongo:%s: %s", value.c_str(), e.what());
+      }
     }
   }
 
  public:
-  MongodbLeaderWatcher(const std::string& mongo_uri, const std::string& local_host)
-      : mongo_uri_(mongo_uri), local_host_(local_host) {}
+  MongodbLeaderWatcher(const std::string& mongo_uri, const std::string& local_host,
+                       const std::vector<std::string>& replica_hosts = {})
+      : mongo_uri_(mongo_uri), local_host_(local_host), replica_hosts_(replica_hosts) {}
 
   ~MongodbLeaderWatcher() { Stop(); }
 

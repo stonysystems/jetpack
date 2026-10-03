@@ -331,9 +331,17 @@ void CoordinatorRule::GotoNextPhase() {
                    txn->id_, txn->reply_.res_, aborted_, current_phase,
                    dispatch_time_ - clientworker_creation_time_);
 #endif
+        // The Dispatch was refused (WRONG_LEADER or REJECT), so the
+        // transaction ends here. As in the commit branch below, the phase
+        // cycle is completed, so that the coordinator's next transaction
+        // starts at INIT_END, and the switch is left: End() deletes the
+        // TxData, so it must run exactly once per transaction.
+        phase_++;
+        verify(phase_ % n_phase == Phase::INIT_END);
         client_worker_->rule_outstanding_dispatches_.fetch_sub(
             1, std::memory_order_relaxed);  // Fix 1
         End();
+        break;
       }
       if (fast_path_success_ || dispatch_ack_) {
         committed_ = true;
@@ -477,6 +485,14 @@ void CoordinatorRule::BroadcastRuleSpeculativeExecute(int phase) {
     // e = commo()->BroadcastRuleSpeculativeExecute(sp_vec_piece);
   }
   e->Wait();
+  // A Dispatch reply can end this attempt's transaction while the attempt
+  // waits (committed through the original path, or refused). End() has then
+  // deleted the TxData, and the coordinator may already run its next
+  // transaction. Such an attempt is still counted in the fast-path
+  // statistics below (categories 0 and 1 include attempts that are slower
+  // than the original path), but it reads no TxData and leaves
+  // fast_path_success_, result_ and the phase to the current transaction.
+  const bool current_attempt = (phase == phase_);
   // Log_info("[CPU] AvgCpuAll=%.2f AvgCpuLeaders=%.2f", e->AvgCpuAll(), e->AvgCpuLeaders());
   if (client_worker_) {
     if (e->AvgCpuAll() > 0.0) {
@@ -500,7 +516,8 @@ void CoordinatorRule::BroadcastRuleSpeculativeExecute(int phase) {
 #endif
   bool latency_window = dispatch_duration_3_times_ > Config::GetConfig()->duration_ * 1000 &&
                         dispatch_duration_3_times_ < Config::GetConfig()->duration_ * 2 * 1000;
-  bool skip_latency = latency_window && (txn->reply_.res_ == WRONG_LEADER || aborted_);
+  bool skip_latency = latency_window &&
+                      ((current_attempt && txn->reply_.res_ == WRONG_LEADER) || aborted_);
   // if (skip_latency) {
   //   Log_info("[CLIENT-LATENCY] Skip cli2cli logging due to %s (res=%d, aborted=%d)",
   //            txn->reply_.res_ == WRONG_LEADER ? "WRONG_LEADER" : "ABORTED",
@@ -509,21 +526,23 @@ void CoordinatorRule::BroadcastRuleSpeculativeExecute(int phase) {
   if (latency_window && !skip_latency) {
     client_worker_->cli2cli_[0].append(SimpleRWCommand::GetCurrentMsTime() - dispatch_time_);
   }
+  bool attempt_success = false;
   if (e->Yes()) {
-    fast_path_success_ = true;
+    attempt_success = true;
     if (latency_window && !skip_latency)
       client_worker_->cli2cli_[1].append(SimpleRWCommand::GetCurrentMsTime() - dispatch_time_);
     if (!skip_latency) {
       client_worker_->cli2cli_[6+cmd_is_write_].append(SimpleRWCommand::GetCurrentMsTime() - dispatch_time_);
     }
   } else if (e->No() || e->timeouted_) {
-    fast_path_success_ = false;
+    attempt_success = false;
   } else {
     verify(0);
   }
+  if (phase != phase_) return;
+  fast_path_success_ = attempt_success;
   result_ = e->GetResult();
   // fast_path_success_ = false;
-  if (phase != phase_) return;
   if (fast_path_success_)
     GotoNextPhase();
 }
@@ -562,8 +581,11 @@ void CoordinatorRule::DispatchAndSpeculativeExecuteFused(int phase) {
              SimpleRWCommand::GetCmdID(sp_vpd_).first,
              SimpleRWCommand::GetCmdID(sp_vpd_).second);
 #endif
+    // One fast-path view for both legs of this attempt, read once here
+    // (the follower broadcast yields in WAN_WAIT before the fused send).
+    const epoch_t req_view = ((CommunicatorRule *)commo())->FastPathView(par_id);
     e = ((CommunicatorRule *)commo())
-            ->BroadcastRuleSpeculativeExecuteSkipLeader(sp_vec_piece);
+            ->BroadcastRuleSpeculativeExecuteSkipLeader(sp_vec_piece, req_view);
 
     // 2) Fused leader RPC: carries both Dispatch and RuleSpeculativeExecute
     //    payload in a single round trip. The leader's spec vote in the
@@ -579,11 +601,16 @@ void CoordinatorRule::DispatchAndSpeculativeExecuteFused(int phase) {
                   phase_,
                   dispatch_time_,
                   std::placeholders::_1,
-                  std::placeholders::_2));
+                  std::placeholders::_2),
+        req_view);
   }  // release mtx_ before waiting
 
   // 3) Wait for spec quorum from the N-1 follower votes.
   e->Wait();
+  // As in BroadcastRuleSpeculativeExecute: the fused Dispatch reply can end
+  // the transaction before the follower quorum. Such an attempt is counted
+  // in the statistics, but reads no TxData and changes no transaction state.
+  const bool current_attempt = (phase == phase_);
   if (client_worker_) {
     if (e->AvgCpuAll() > 0.0) {
       client_worker_->cpu_usage_all_.append(e->AvgCpuAll());
@@ -609,24 +636,27 @@ void CoordinatorRule::DispatchAndSpeculativeExecuteFused(int phase) {
 
   bool latency_window = dispatch_duration_3_times_ > Config::GetConfig()->duration_ * 1000 &&
                         dispatch_duration_3_times_ < Config::GetConfig()->duration_ * 2 * 1000;
-  bool skip_latency = latency_window && (txn->reply_.res_ == WRONG_LEADER || aborted_);
+  bool skip_latency = latency_window &&
+                      ((current_attempt && txn->reply_.res_ == WRONG_LEADER) || aborted_);
   if (latency_window && !skip_latency) {
     client_worker_->cli2cli_[0].append(SimpleRWCommand::GetCurrentMsTime() - dispatch_time_);
   }
+  bool attempt_success = false;
   if (e->Yes()) {
-    fast_path_success_ = true;
+    attempt_success = true;
     if (latency_window && !skip_latency)
       client_worker_->cli2cli_[1].append(SimpleRWCommand::GetCurrentMsTime() - dispatch_time_);
     if (!skip_latency) {
       client_worker_->cli2cli_[6+cmd_is_write_].append(SimpleRWCommand::GetCurrentMsTime() - dispatch_time_);
     }
   } else if (e->No() || e->timeouted_) {
-    fast_path_success_ = false;
+    attempt_success = false;
   } else {
     verify(0);
   }
-  result_ = e->GetResult();
   if (phase != phase_) return;
+  fast_path_success_ = attempt_success;
+  result_ = e->GetResult();
   if (fast_path_success_)
     GotoNextPhase();
 }

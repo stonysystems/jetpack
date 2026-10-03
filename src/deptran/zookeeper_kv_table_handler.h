@@ -130,6 +130,12 @@ class ZookeeperKVTableHandler {
       rc = zoo_create(zh_, path.c_str(), val.c_str(),
                       static_cast<int>(val.size()),
                       &ZOO_OPEN_ACL_UNSAFE, 0, nullptr, 0);
+      if (rc == ZNODEEXISTS) {
+        // A concurrent writer created the node first: update it instead,
+        // so the race is not reported as a failed write.
+        rc = zoo_set(zh_, path.c_str(), val.c_str(),
+                     static_cast<int>(val.size()), -1);
+      }
     } else if (rc == ZOK) {
       rc = zoo_set(zh_, path.c_str(), val.c_str(),
                    static_cast<int>(val.size()), -1);
@@ -143,12 +149,21 @@ class ZookeeperKVTableHandler {
   }
 
   int Read(int key) {
+    bool ok = false;
+    return Read(key, &ok);
+  }
+
+  // Read() that also reports whether the read itself succeeded (*ok): a
+  // missing node is a successful read of 0.
+  int Read(int key, bool* ok) {
+    *ok = false;
     if (!zh_) return 0;
     std::string path = MakeKey(key);
     char buffer[256];
     int buffer_len = sizeof(buffer);
     struct Stat stat;
     int rc = zoo_get(zh_, path.c_str(), 0, buffer, &buffer_len, &stat);
+    *ok = (rc == ZOK || rc == ZNONODE);
     if (rc != ZOK || buffer_len <= 0) {
       return 0;
     }

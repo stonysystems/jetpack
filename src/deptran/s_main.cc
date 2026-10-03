@@ -70,6 +70,8 @@ static void KillMongodbPrimary() {
 
 #ifdef JETPACK_MONGODB_SIMULATION
   // Simulate MongoDB electing a new primary (server1) after a short delay.
+  // The line carries a term, one above the newest one in the file, and
+  // loc=1, and goes to the file the pollers read (0.0.0.0 under AWS).
   std::this_thread::sleep_for(std::chrono::milliseconds(100));
   auto cfg = Config::GetConfig();
   auto hosts = cfg->GetReplicaHosts(0);
@@ -79,8 +81,19 @@ static void KillMongodbPrimary() {
     if (pos != std::string::npos) {
       new_primary_host = new_primary_host.substr(0, pos);
     }
-    jm_signal::set_key("mongo", "primary_elected", new_primary_host);
-    Log_info("[MONGODB-FAILOVER] Simulated new mongo primary: %s", new_primary_host.c_str());
+#ifdef AWS
+    new_primary_host = "0.0.0.0";
+#endif
+    uint64_t last_term = 0;
+    jm_signal::read_latest_term("mongo", new_primary_host, "primary_elected", &last_term, nullptr);
+    const std::string line = "primary_elected term=" + std::to_string(last_term + 1) + " loc=1";
+    try {
+      jm_signal::set_key("mongo", line, new_primary_host);
+      Log_info("[MONGODB-FAILOVER] Simulated new mongo primary: mongo:%s on JM_Jetpack_%s",
+               line.c_str(), new_primary_host.c_str());
+    } catch (const std::exception& e) {
+      Log_warn("[MONGODB-FAILOVER] failed to write the simulated primary_elected: %s", e.what());
+    }
   }
 #else
   // Start real MongoDB leader watcher to detect when replica set elects a new
@@ -107,7 +120,8 @@ static void KillMongodbPrimary() {
     }
     mongo_uri = oss.str();
   }
-  // Determine the local hostname that Jetpack replicas are polling for.
+  // Determine the local hostname that Jetpack replicas are polling for (the
+  // pollers' rule: 0.0.0.0 under AWS).
   std::string signal_host = host;
   if (hosts.size() > 1) {
     auto pos = hosts[1].find(':');
@@ -117,8 +131,17 @@ static void KillMongodbPrimary() {
       signal_host = hosts[1];
     }
   }
+#ifdef AWS
+  signal_host = "0.0.0.0";
+#endif
+  // Replica hosts in locale order: the watcher names the new primary's
+  // locale (loc=) when its host is one of them.
+  std::vector<std::string> replica_hosts;
+  for (auto& h : hosts) {
+    replica_hosts.push_back(h.substr(0, h.find(':')));
+  }
   mongodb_leader_watcher_g = std::make_shared<janus::MongodbLeaderWatcher>(
-      mongo_uri, signal_host);
+      mongo_uri, signal_host, replica_hosts);
   mongodb_leader_watcher_g->Start();
 #endif
 }
@@ -149,7 +172,10 @@ static void KillEtcdPrimary() {
   std::system(kill_cmd.c_str());
 
 #ifdef JETPACK_ETCD_SIMULATION
-  // Simulate etcd electing a new primary after a short delay.
+  // Simulate etcd electing a new primary after a short delay. The poller
+  // reads only viewchange lines (term-less lines never trigger), so write
+  // one with a term one above the newest in the file, addressed to locale 1
+  // (loc=, no member=), to the file the pollers read (0.0.0.0 under AWS).
   std::this_thread::sleep_for(std::chrono::milliseconds(100));
   auto cfg = Config::GetConfig();
   auto hosts = cfg->GetReplicaHosts(0);
@@ -159,9 +185,19 @@ static void KillEtcdPrimary() {
     if (pos != std::string::npos) {
       new_primary_host = new_primary_host.substr(0, pos);
     }
-    jm_signal::set_key("etcd", "primary_elected", new_primary_host);
-    Log_info("[ETCD-FAILOVER] Simulated new etcd primary: %s",
-             new_primary_host.c_str());
+#ifdef AWS
+    new_primary_host = "0.0.0.0";
+#endif
+    uint64_t last_term = 0;
+    jm_signal::read_latest_term("etcd", new_primary_host, "viewchange", &last_term, nullptr);
+    const std::string line = "viewchange term=" + std::to_string(last_term + 1) + " loc=1";
+    try {
+      jm_signal::set_key("etcd", line, new_primary_host);
+      Log_info("[ETCD-FAILOVER] Simulated new etcd primary: etcd:%s on JM_Jetpack_%s",
+               line.c_str(), new_primary_host.c_str());
+    } catch (const std::exception& e) {
+      Log_warn("[ETCD-FAILOVER] failed to write the simulated viewchange: %s", e.what());
+    }
   }
 #else
   // Start real etcd leader watcher to detect when etcd elects a new leader.

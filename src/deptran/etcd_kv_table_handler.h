@@ -25,6 +25,7 @@
 #endif
 #include <etcd/Response.hpp>
 #include <etcd/v3/Transaction.hpp>
+#include <etcd/v3/action_constants.hpp>
 
 namespace janus {
 
@@ -84,7 +85,22 @@ class EtcdKVTableHandler {
   }
 
   int Read(int key) {
+    bool ok = false;
+    return Read(key, &ok);
+  }
+
+  // A read succeeded unless etcd or the transport reported an error. A
+  // missing key is a successful read of 0 (etcd-cpp-apiv3 reports it as
+  // ERROR_KEY_NOT_FOUND).
+  static bool ReadResponseOk(const etcd::Response& response) {
+    return response.is_ok() ||
+           response.error_code() == etcdv3::ERROR_KEY_NOT_FOUND;
+  }
+
+  // Read() that also reports whether the read itself succeeded (*ok).
+  int Read(int key, bool* ok) {
     const auto key_str = MakeKey(key);
+    *ok = false;
 
     try {
 #if JANUS_ETCD_HAS_PPLX
@@ -92,6 +108,7 @@ class EtcdKVTableHandler {
 #else
       auto response = client_.get(key_str);
 #endif
+      *ok = ReadResponseOk(response);
       if (!response.is_ok()) {
         return 0;
       }

@@ -543,8 +543,9 @@ run_recovery_test() {
     log_info "Current ZooKeeper leader: $leader"
 
     # Start Jetpack WITHOUT failover config — external kill handles recovery.
-    # JETPACK_ZOOKEEPER_RECOVERY is compiled in, so non-leader servers poll for
-    # primary_elected signal and trigger JetpackRecoveryEntry() when found.
+    # JETPACK_ZOOKEEPER_RECOVERY is compiled in, so every server polls for the
+    # term-bearing primary_elected signal (with Jetpack recovery also for its
+    # co-located ZooKeeper server becoming leader) and calls JetpackRecoveryEntry().
     local jetpack_pids=()
     if [ "$recovery_latency" -gt 0 ] 2>/dev/null; then
         log_info "Starting Jetpack (3-process WAN mode: h1=127.0.0.1, h2=127.0.0.2, h3=127.0.0.3)"
@@ -614,9 +615,26 @@ run_recovery_test() {
         new_leader_ns=$(date +%s%N)
         zk_downtime_ms=$(( (new_leader_ns - kill_ns) / 1000000 ))
 
-        # Write primary_elected signal (AWS mode uses 0.0.0.0)
-        echo "zookeeper:primary_elected" > /tmp/JM_Jetpack_0.0.0.0
-        log_info "Wrote primary_elected signal to /tmp/JM_Jetpack_0.0.0.0"
+        # Write the term-bearing primary_elected signal (AWS mode uses 0.0.0.0):
+        # term = the new leader's ZAB epoch (its currentEpoch file; the Jetpack
+        # view id), loc = the Jetpack locale co-located with it (ensemble node
+        # i <-> locale i), so only that replica coordinates. A term-less line
+        # starts no recovery. Append: '>' would truncate the Jetpack acks.
+        local new_leader new_leader_ip new_epoch="" new_loc=""
+        new_leader=$(get_zookeeper_leader 2>/dev/null || true)
+        new_leader_ip="${new_leader%%:*}"
+        for i in "${!ENSEMBLE_IPS[@]}"; do
+            if [ -n "$new_leader_ip" ] && [ "${ENSEMBLE_IPS[$i]}" = "$new_leader_ip" ]; then
+                new_loc="$i"
+                new_epoch=$(tr -dc '0-9' 2>/dev/null < "${ENSEMBLE_DATA_DIRS[$i]:-/tmp/zk-ensemble-${i}}/version-2/currentEpoch" || true)
+            fi
+        done
+        if [ -n "$new_epoch" ]; then
+            echo "zookeeper:primary_elected term=${new_epoch}${new_loc:+ loc=${new_loc}}" >> /tmp/JM_Jetpack_0.0.0.0
+            log_info "Wrote zookeeper:primary_elected term=${new_epoch}${new_loc:+ loc=${new_loc}} to /tmp/JM_Jetpack_0.0.0.0"
+        else
+            log_warn "Could not read the new leader's epoch: no primary_elected signal written"
+        fi
         log_info "ZooKeeper downtime: ${zk_downtime_ms}ms"
     else
         log_error "No new ZooKeeper leader within timeout"

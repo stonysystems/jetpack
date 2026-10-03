@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <fstream>
+#include <stdexcept>
 #include <string>
 #include <thread>
 #include <type_traits>
@@ -133,23 +134,74 @@ inline std::string read_latest_value(const std::string& role,
 }
 
 // Parse the unsigned integer following "<key>=" in s, e.g. key="term" in
-// "viewchange term=6 nonce=17 lead=9" -> 6. Returns false if the key is absent
-// or is not followed by at least one digit.
+// "viewchange term=6 nonce=17 lead=9" -> 6. "<key>=" counts only at position 0
+// or right after a space, so key="term" does not read "xterm=6" and key="lead"
+// does not read "mislead=3"; the first such occurrence decides. Returns false
+// if the key is absent, is not followed by at least one digit, or the number
+// does not fit in 64 bits.
 inline bool parse_uint_field(const std::string& s,
                              const std::string& key,
                              uint64_t& out) {
   const std::string pat = key + "=";
   auto pos = s.find(pat);
+  while (pos != std::string::npos && pos != 0 && s[pos - 1] != ' ') {
+    pos = s.find(pat, pos + 1);
+  }
   if (pos == std::string::npos) return false;
   pos += pat.size();
   uint64_t v = 0;
   bool any = false;
   for (; pos < s.size() && s[pos] >= '0' && s[pos] <= '9'; ++pos) {
-    v = v * 10 + static_cast<uint64_t>(s[pos] - '0');
+    const uint64_t d = static_cast<uint64_t>(s[pos] - '0');
+    if (v > (UINT64_MAX - d) / 10) return false;  // overflow
+    v = v * 10 + d;
     any = true;
   }
   if (!any) return false;
   out = v;
+  return true;
+}
+
+// Newest "<role>:<prefix>" line (the prefix followed by the end of the line or
+// a space, so "viewchange" does not match "viewchanged ...") and the term it
+// carries: "mongo:primary_elected term=7 loc=1" -> *term = 7. *nonce (may be
+// null) gets nonce= if present, else 0. *value_out (may be null) gets the
+// newest matching value even when it carries no term, so a caller can tell a
+// legacy term-less line ("mongo:primary_elected") from no line at all.
+// Returns false if there is no matching line or the newest one has no term=;
+// an older term-bearing line is then NOT used (the newest line wins).
+inline bool read_latest_term(const std::string& role,
+                             const std::string& host,
+                             const std::string& prefix,
+                             uint64_t* term,
+                             uint64_t* nonce,
+                             std::string* value_out = nullptr) {
+  const auto path = FilePath(role, host);
+  const std::string line_prefix = role + ":" + prefix;
+  std::string latest;
+  bool found = false;
+  std::ifstream in(path);
+  if (in.is_open()) {
+    std::string line;
+    while (std::getline(in, line)) {
+      if (!line.empty() && line.back() == '\r') line.pop_back();
+      if (line.compare(0, line_prefix.size(), line_prefix) == 0 &&
+          (line.size() == line_prefix.size() || line[line_prefix.size()] == ' ')) {
+        latest = line.substr(role.size() + 1);  // strip "<role>:"
+        found = true;
+      }
+    }
+  }
+  if (value_out != nullptr) *value_out = found ? latest : std::string();
+  if (nonce != nullptr) *nonce = 0;
+  if (!found) return false;
+  uint64_t t = 0;
+  if (!parse_uint_field(latest, "term", t)) return false;
+  *term = t;
+  if (nonce != nullptr) {
+    uint64_t n = 0;
+    if (parse_uint_field(latest, "nonce", n)) *nonce = n;
+  }
   return true;
 }
 

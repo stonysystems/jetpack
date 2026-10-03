@@ -1,6 +1,7 @@
 --- a/zookeeper-server/src/main/java/org/apache/zookeeper/server/quorum/Leader.java
 +++ b/zookeeper-server/src/main/java/org/apache/zookeeper/server/quorum/Leader.java
-@@ -25,6 +25,11 @@
+@@ -24,7 +24,11 @@
+ import java.io.ByteArrayOutputStream;
  import java.io.DataInputStream;
  import java.io.DataOutputStream;
 +import java.io.BufferedReader;
@@ -10,16 +11,20 @@
 +import java.io.PrintWriter;
  import java.net.InetSocketAddress;
  import java.net.ServerSocket;
-@@ -765,6 +770,46 @@
+ import java.net.Socket;
+@@ -765,6 +769,62 @@
              self.setZabState(QuorumPeer.ZabState.BROADCAST);
              self.adminServer.setZooKeeperServer(zk);
-
-+            // Jetpack signal: notify that ZooKeeper leader election is complete.
-+            // Write "zookeeper:primary_elected" to /tmp/JM_Jetpack_<host> so
-+            // Jetpack servers can detect the new leader and trigger recovery.
-+            // Then wait for Jetpack to confirm fast path is stopped.  This
-+            // blocks the leader broadcast setup thread but does NOT affect the
-+            // quorum follower handler threads which run independently.
+ 
++            // Jetpack signal: this server leads ZAB epoch `epoch` (the Jetpack view
++            // id). Append "zookeeper:primary_elected term=<epoch>" (plus
++            // " loc=<JM_SIGNAL_LOC>" if that env var names the co-located Jetpack
++            // replica's locale, for signal files shared by several replicas) to
++            // $JM_SIGNAL_DIR/JM_Jetpack_<JM_SIGNAL_HOST>, then wait until the
++            // Jetpack replica acks "jetpack:leader_paused term=<epoch>" (its fast
++            // path is stopped for this epoch). This blocks the leader broadcast
++            // setup thread but does NOT affect the quorum follower handler
++            // threads which run independently.
 +            try {
 +                String signalDir = System.getenv("JM_SIGNAL_DIR");
 +                if (signalDir == null || signalDir.isEmpty()) {
@@ -30,14 +35,19 @@
 +                    signalHost = "0.0.0.0";
 +                }
 +                String signalPath = signalDir + "/JM_Jetpack_" + signalHost;
-+                try (PrintWriter pw = new PrintWriter(new FileWriter(signalPath, true))) {
-+                    pw.println("zookeeper:primary_elected");
++                String signal = "zookeeper:primary_elected term=" + epoch;
++                String signalLoc = System.getenv("JM_SIGNAL_LOC");
++                if (signalLoc != null && !signalLoc.isEmpty()) {
++                    signal += " loc=" + signalLoc;
 +                }
-+                LOG.info("Jetpack signal written: zookeeper:primary_elected -> {}", signalPath);
++                try (PrintWriter pw = new PrintWriter(new FileWriter(signalPath, true))) {
++                    pw.println(signal);
++                }
++                LOG.info("Jetpack signal written: {} -> {}", signal, signalPath);
 +
-+                // Wait for Jetpack to confirm fast path is stopped.
++                // Wait for the Jetpack ack of this epoch.
 +                // Timeout after 5 seconds to avoid deadlock.
-+                String needle = "jetpack:fastpath_stopped";
++                String needle = "jetpack:leader_paused term=" + epoch;
 +                long deadline = System.currentTimeMillis() + 5000;
 +                boolean observed = false;
 +                while (System.currentTimeMillis() < deadline) {
@@ -54,12 +64,14 @@
 +                    Thread.sleep(1);
 +                }
 +                if (observed) {
-+                    LOG.info("Jetpack fastpath_stopped observed, resuming request processing");
++                    LOG.info("Jetpack {} observed, resuming request processing", needle);
 +                } else {
-+                    LOG.warn("Timed out waiting for Jetpack fastpath_stopped, resuming anyway");
++                    LOG.warn("Timed out waiting for Jetpack {}, resuming anyway", needle);
 +                }
 +            } catch (Exception e) {
 +                LOG.warn("Failed to write Jetpack signal file", e);
 +            }
 +
              // We ping twice a tick, so we only update the tick every other
+             // iteration
+             boolean tickSkip = true;

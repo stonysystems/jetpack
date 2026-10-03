@@ -65,7 +65,10 @@ class RaftServer : public TxLogServer {
   void timer_thread(bool *vote) ;
   Timer *timer_;
   uint64_t last_heartbeat_time_ = 0;
-  void LogTermChange(const char* reason, uint64_t old_term, uint64_t new_term, siteid_t source = INVALID_SITEID);
+  // from_peer: the new term came from Raft traffic (not this node's own
+  // election); the first such term is T_rejoin of a restarted replica.
+  void LogTermChange(const char* reason, uint64_t old_term, uint64_t new_term,
+                     siteid_t source = INVALID_SITEID, bool from_peer = true);
   bool stop_ = false ;
   siteid_t vote_for_ = INVALID_SITEID ;
   bool init_ = false ;
@@ -93,17 +96,14 @@ class RaftServer : public TxLogServer {
   bool heartbeat_ = true;
   bool heartbeat_setup_ = false;
 	enum { STOPPED, RUNNING } status_;
-  std::shared_ptr<IntEvent> jetpack_recovery_event_{nullptr};
-  std::recursive_mutex jetpack_recovery_event_mtx_;
-  int jetpack_recovery_pending_{0};
-  bool jetpack_recovery_loop_started_{false};
-  
+  // Term in which this node last became leader. With Jetpack view ids equal
+  // to Raft terms it names the recovery this node coordinates and the
+  // fast-path view it may propose in.
+  epoch_t jp_elected_term_ = 0;
+
 	bool RequestVote() ;
 
 	void Setup();
-  void StartJetpackRecoveryLoop();
-  void JetpackRecoveryLoop();
-  void TriggerJetpackRecovery(const char* reason);
 	void HeartbeatLoop(siteid_t follower_site_id);
   std::shared_ptr<IntEvent> CreateReplicationEvent(siteid_t follower_site_id);
   RaftCommo* commo() {
@@ -162,50 +162,6 @@ class RaftServer : public TxLogServer {
       counter_.store(0);
     }
   }
-  void OnJetpackPullCmd(const epoch_t& jepoch,
-                        const epoch_t& oepoch,
-                        const std::vector<key_t>& keys,
-                        bool_t* ok,
-                        epoch_t* reply_jepoch,
-                        epoch_t* reply_oepoch,
-                        MarshallDeputy* reply_old_view,
-                        MarshallDeputy* reply_new_view,
-                        shared_ptr<KeyCmdBatchData>& batch) override;
-  void OnJetpackPullRecovery(const MarshallDeputy& old_view,
-                             const MarshallDeputy& new_view,
-                             const epoch_t& jepoch,
-                             const epoch_t& oepoch,
-                             bool_t* ok,
-                             epoch_t* reply_jepoch,
-                             epoch_t* reply_oepoch,
-                             MarshallDeputy* reply_old_view,
-                             MarshallDeputy* reply_new_view,
-                             shared_ptr<KeyCmdIdBatchData>& batch) override;
-  void OnJetpackPrepare(const epoch_t& jepoch,
-                        const epoch_t& oepoch,
-                        const ballot_t& max_seen_ballot,
-                        bool_t* ok,
-                        epoch_t* reply_jepoch,
-                        epoch_t* reply_oepoch,
-                        MarshallDeputy* reply_old_view,
-                        MarshallDeputy* reply_new_view,
-                        ballot_t* reply_max_seen_ballot,
-                        ballot_t* accepted_ballot,
-                        int32_t* replied_sid) override;
-  void OnJetpackAccept(const epoch_t& jepoch,
-                       const epoch_t& oepoch,
-                       const ballot_t& max_seen_ballot,
-                       const int32_t& sid,
-                       bool_t* ok,
-                       epoch_t* reply_jepoch,
-                       epoch_t* reply_oepoch,
-                       MarshallDeputy* reply_old_view,
-                       MarshallDeputy* reply_new_view,
-                       ballot_t* reply_max_seen_ballot) override;
-  void OnJetpackCommit(const epoch_t& jepoch,
-                       const epoch_t& oepoch,
-                       const int32_t& sid) override;
-
   void resetTimer(const char* reason = "unspecified") {
     const char* why = reason ? reason : "unspecified";
     // Log_info("[RAFT_TIMER] server %d (loc %d) reset election timer (%s) failover=%d is_leader=%d",
@@ -423,6 +379,12 @@ class RaftServer : public TxLogServer {
   // the command pool only tracks fast-path attempts and original-path
   // commands have to be detected via this side-index instead.
   bool ConflictWithOriginalUnexecutedLog(const shared_ptr<Marshallable>& cmd) override;
+
+  // A Raft coordinator stays valid while it is the leader of the term in
+  // which it was elected (== the recovery's view id).
+  bool JetpackStillCoordinator(epoch_t v) override;
+  // Proposer of fast-path view u = the leader elected in term u.
+  bool JetpackIsProposerOf(epoch_t view) override;
 
   void Disconnect(const bool disconnect = true);
 

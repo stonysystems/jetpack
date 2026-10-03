@@ -81,6 +81,9 @@ class SchedulerClassic: public TxLogServer {
 
   int PrepareReplicated(TpcPrepareCommand& prepare_cmd);
   int CommitReplicated(TpcCommitCommand& commit_cmd);
+  // CommitReplicated of a WRONG_LEADER bounce: wakes the tx's own waiter
+  // and forgets the tx id; never finalizes it.
+  int BounceReplicated(TpcCommitCommand& commit_cmd);
 
   bool CheckCommitted(Marshallable& commit_cmd) override;
 

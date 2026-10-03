@@ -258,8 +258,10 @@ int SchedulerClassic::OnCommit(txnid_t tx_id,
     
     sp_tx->commit_result->Wait();
 
-    // Check if Submit failed due to WRONG_LEADER
-    if (cmd->ret_ == WRONG_LEADER)
+    // Check if Submit failed due to WRONG_LEADER. A tx that another
+    // occurrence of it (e.g. its recovered copy) already executed here is
+    // committed even though this submission bounced.
+    if (cmd->ret_ == WRONG_LEADER && !sp_tx->committed_)
       return WRONG_LEADER;
 
     gettimeofday(&tp, NULL);
@@ -299,22 +301,84 @@ void SchedulerClassic::DoAbort(Tx& tx_box) {
   tx_box.mdb_txn_ = nullptr;
 }
 
+int SchedulerClassic::BounceReplicated(TpcCommitCommand& tpc_commit_cmd) {
+  // A WRONG_LEADER bounce (the command was never logged or written) must
+  // never finalize its tx id.
+  auto tx_id = tpc_commit_cmd.tx_id_;
+  auto sp_tx = dynamic_pointer_cast<TxClassic>(GetTx(tx_id));
+  // No tx here, or one an earlier occurrence already finalized: nothing waits
+  // on this bounce, and an executed tx stays executed.
+  if (!sp_tx || sp_tx->committed_ || sp_tx->aborted_) {
+    return 0;
+  }
+  // Only the bounce of the tx's own submission (OnCommit's command carries
+  // the tx's cmd_) ends its wait. A bounce of another submission of this tx
+  // id, e.g. a Jetpack recovery resubmission (its own body; its caller reads
+  // ret_ from its own command), leaves the tx alone.
+  if (tpc_commit_cmd.cmd_ != sp_tx->cmd_) {
+    return 0;
+  }
+#ifdef JETPACK_WRONG_LEADER_DEBUG
+  Log_info("[WRONG_LEADER] Scheduler received WRONG_LEADER for tx_id: %lu", tx_id);
+#endif
+  // The view goes back to the client through the waiter (OnCommit's caller
+  // reads it from its reference to this tx).
+  if (tpc_commit_cmd.sp_view_data_) {
+#ifdef JETPACK_WRONG_LEADER_DEBUG
+    Log_info("[WRONG_LEADER] View data available in scheduler: %s",
+             tpc_commit_cmd.sp_view_data_->ToString().c_str());
+#endif
+    sp_tx->sp_view_data_ = tpc_commit_cmd.sp_view_data_;
+  }
+  // Forget the tx id: abort what its mdb txn holds (2PL locks, OCC state;
+  // under cc:none the pieces already wrote through TxnUnsafe, which cannot
+  // roll back) and drop the tx, so a later committed occurrence of this tx id
+  // gets a fresh tx and executes normally. The waiter keeps its reference.
+  auto mit = mdb_txns_.find(tx_id);
+  if (mit != mdb_txns_.end()) {
+    if (sp_tx->mdb_txn_ == mit->second) {
+      DoAbort(*sp_tx);
+    } else {
+      mdb::Txn* mtxn = mit->second;
+      mdb_txns_.erase(mit);
+      mtxn->abort();
+      delete mtxn;
+    }
+  }
+  sp_tx->mdb_txn_ = nullptr;
+  DestroyTx(tx_id);
+  sp_tx->commit_result->Set(1);
+  sp_tx->ev_execute_ready_->Set(1);
+  return 0;
+}
+
 int SchedulerClassic::CommitReplicated(TpcCommitCommand& tpc_commit_cmd) {
   std::lock_guard<std::recursive_mutex> lock(mtx_);
   auto tx_id = tpc_commit_cmd.tx_id_;
   // Log_info("[EXECUTION] CommitReplicated called for tx_id: %lu (This is actual execution)", tx_id);
+  int commit_or_abort = tpc_commit_cmd.ret_;
+  if (commit_or_abort == WRONG_LEADER) {
+    return BounceReplicated(tpc_commit_cmd);
+  }
   auto sp_tx = dynamic_pointer_cast<TxClassic>(GetOrCreateTx(tx_id));
   /**
    * In Copilot, the same cmd commits twice, one in pilot log, another
-   * in copilot log. Must omit the second attempt to commit
+   * in copilot log; a Jetpack command can commit both through its own
+   * Dispatch and as a recovered command. Must omit the second attempt to
+   * commit. Dedup on "finalized" (executed or aborted), never on commit_result
+   * readiness: a WRONG_LEADER bounce finalizes nothing (BounceReplicated).
    */
-  if (sp_tx->commit_result->IsReady())
+  if (sp_tx->committed_ || sp_tx->aborted_) {
+    if (!sp_tx->commit_result->IsReady())
+      sp_tx->commit_result->Set(1);
     return 0;
-  int commit_or_abort = tpc_commit_cmd.ret_;
+  }
   if (!sp_tx->cmd_)
     sp_tx->cmd_ = tpc_commit_cmd.cmd_;
   if (!sp_tx->is_leader_hint_) {
     if (commit_or_abort == REJECT) {
+      // Nothing was executed here; finalized as aborted.
+      sp_tx->aborted_ = true;
       sp_tx->commit_result->Set(1);
       return 0;
     } else {
@@ -333,25 +397,6 @@ int SchedulerClassic::CommitReplicated(TpcCommitCommand& tpc_commit_cmd) {
     Log_info("[REJECT] Scheduler received REJECT for tx_id: %lu", tx_id);
     sp_tx->aborted_ = true;
     DoAbort(*sp_tx);
-  } else if (commit_or_abort == WRONG_LEADER) {
-    // Handle WRONG_LEADER case - don't commit or abort, just return the error
-#ifdef JETPACK_WRONG_LEADER_DEBUG
-    Log_info("[WRONG_LEADER] Scheduler received WRONG_LEADER for tx_id: %lu", tx_id);
-#endif
-    sp_tx->aborted_ = true;  // Mark as aborted to clean up resources
-    // The view information is in tpc_commit_cmd.sp_view_data_
-    // It will be propagated to client through the coordinator
-    if (tpc_commit_cmd.sp_view_data_) {
-#ifdef JETPACK_WRONG_LEADER_DEBUG
-      Log_info("[WRONG_LEADER] View data available in scheduler: %s", 
-               tpc_commit_cmd.sp_view_data_->ToString().c_str());
-#endif
-      sp_tx->sp_view_data_ = tpc_commit_cmd.sp_view_data_;
-    } else {
-#ifdef JETPACK_WRONG_LEADER_DEBUG
-      Log_info("[WRONG_LEADER] No view data available in scheduler for tx_id: %lu", tx_id);
-#endif
-    }
   } else {
     verify(0);
   }

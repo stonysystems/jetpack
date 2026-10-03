@@ -25,11 +25,15 @@ int32_t SchedulerNone::Dispatch(cmdid_t cmd_id, shared_ptr<Marshallable> cmd,
 	// OnCommit Raft replication round-trip. Single-key, read-only
 	// requests are eligible; everything else falls through to the
 	// existing replicated path.
+	// Under Jetpack the leader must also be READY with no acked fast-path
+	// write of the key still in its pool: such a write may be fast-committed
+	// but not yet applied here, and in RECOVERY recovered writes are missing.
 	if (Config::GetConfig()->IsRaftReadLease() && rep_sched_ != nullptr) {
 		key_t k; uint64_t cid; bool is_write = true;
 		if (SimpleRWCommand::ExtractPoolKeys(cmd, &k, &cid, &is_write) && !is_write) {
 			auto* raft_svr = dynamic_cast<RaftServer*>(rep_sched_);
-			if (raft_svr != nullptr && raft_svr->HasReadLease()) {
+			if (raft_svr != nullptr && raft_svr->HasReadLease() &&
+					raft_svr->JetpackLeaseReadAllowed(k)) {
 				view_data = sp_tx->sp_view_data_;
 				return SUCCESS;
 			}

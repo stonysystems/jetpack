@@ -37,6 +37,12 @@ static int volatile x5 =
                                      return new KeyCmdIdBatchData;
                                    });
 
+static int volatile x6 =
+    MarshallDeputy::RegInitializer(MarshallDeputy::CMD_JETPACK_ACCEPTED_MAP,
+                                   [] () -> Marshallable* {
+                                     return new JetpackAcceptedMapData;
+                                   });
+
 TxWorkspace::TxWorkspace() {
   values_ = std::make_shared<map<int32_t, Value>>();
 }

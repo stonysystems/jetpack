@@ -184,12 +184,17 @@ class MongodbConnectionThreadPool {
       auto start_time = std::chrono::high_resolution_clock::now();
 #endif
 
-      if (parsed_cmd.IsRead())
-        mongodb_handlers_[thread_id]->Read(parsed_cmd.key_);
-      else if (parsed_cmd.IsWrite())
-        mongodb_handlers_[thread_id]->Write(parsed_cmd.key_, parsed_cmd.value_);
-      else
-        break;
+      // The outcome goes back through mongodb_finished (1 = acked by
+      // mongod, 2 = failed); an unsupported command fails instead of ending
+      // this worker without a signal.
+      bool ok = false;
+      if (parsed_cmd.IsRead()) {
+        (void)mongodb_handlers_[thread_id]->Read(parsed_cmd.key_, &ok);
+      } else if (parsed_cmd.IsWrite()) {
+        ok = mongodb_handlers_[thread_id]->Write(parsed_cmd.key_, parsed_cmd.value_);
+      } else {
+        Log_warn("[MONGODB] unsupported command type");
+      }
 
 #ifdef MONGODB_STATISTICS
       auto end_time = std::chrono::high_resolution_clock::now();
@@ -202,11 +207,11 @@ class MongodbConnectionThreadPool {
       // finished_queue_.push(cmd);
       shared_ptr<TxPieceData> cmd_content = *(((VecPieceData*)(dynamic_pointer_cast<TpcCommitCommand>(cmd)->cmd_.get()))->sp_vec_piece_data_->begin());
 #ifdef MONGODB_DEBUG
-      Log_info("Before cmd_content->mongodb_finished->Set(1);");
+      Log_info("Before cmd_content->mongodb_finished->Set(%d);", ok ? 1 : 2);
 #endif
-      cmd_content->mongodb_finished->Set(1);
+      cmd_content->mongodb_finished->Set(ok ? 1 : 2);
 #ifdef MONGODB_DEBUG
-      Log_info("After cmd_content->mongodb_finished->Set(1);");
+      Log_info("After cmd_content->mongodb_finished->Set(%d);", ok ? 1 : 2);
 #endif
     }
   }
@@ -245,7 +250,15 @@ class MongodbConnectionThreadPool {
 
   size_t MongodbRequest(const shared_ptr<Marshallable>& cmd) {
     if (thread_num_ == 0) {
+      // Never sent: report it as failed, so that its waiter does not block.
       Log_warn("[MONGODB][POOL] thread_num is 0, dropping MongoDB request");
+      auto tpc_cmd = dynamic_pointer_cast<TpcCommitCommand>(cmd);
+      if (tpc_cmd) {
+        auto cmd_content = *(((VecPieceData*)(tpc_cmd->cmd_.get()))->sp_vec_piece_data_->begin());
+        if (cmd_content && cmd_content->mongodb_finished) {
+          cmd_content->mongodb_finished->Set(2);
+        }
+      }
       return 0;
     }
     auto depth = request_queues_[round_robin_]->push(cmd);

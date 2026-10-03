@@ -617,8 +617,9 @@ run_recovery_test() {
     rm -f /tmp/JM_Jetpack_* 2>/dev/null || true
 
     # Start Jetpack WITHOUT failover config — the script handles the kill externally.
-    # JETPACK_MONGODB_RECOVERY is compiled in, so non-leader servers poll for
-    # primary_elected signal and trigger JetpackRecoveryEntry() when found.
+    # JETPACK_MONGODB_RECOVERY is compiled in, so every server polls for the
+    # term-bearing primary_elected signal (with Jetpack recovery also for its
+    # co-located mongod becoming primary) and calls JetpackRecoveryEntry().
     local jetpack_pids=()
     if [ "$recovery_latency" -gt 0 ] 2>/dev/null; then
         log_info "Starting Jetpack (3-process WAN mode: h1=127.0.0.1, h2=127.0.0.2, h3=127.0.0.3)"
@@ -697,9 +698,25 @@ run_recovery_test() {
     if [ "$mongodb_downtime_ms" != "N/A" ] && [ -n "$new_primary_ip" ]; then
         log_info "MongoDB downtime: ${mongodb_downtime_ms}ms (new primary: $new_primary_ip)"
 
-        # Write primary_elected signal (AWS mode uses 0.0.0.0)
-        echo "mongo:primary_elected" > /tmp/JM_Jetpack_0.0.0.0
-        log_info "Wrote primary_elected signal to /tmp/JM_Jetpack_0.0.0.0"
+        # Write the term-bearing primary_elected signal (AWS mode uses 0.0.0.0):
+        # term = the new primary's replica-set term (the Jetpack view id), loc =
+        # the Jetpack locale co-located with it (mongod i <-> locale i), so only
+        # that replica coordinates. A term-less line starts no recovery.
+        # Append: '>' would truncate the Jetpack acks in the same file.
+        local new_term new_loc=""
+        new_term=$(mongosh --host "${new_primary_ip}:27017" --quiet \
+            --eval 'print(String(rs.status().term))' 2>/dev/null | grep -oE '[0-9]+' | tail -1 || true)
+        for i in "${!REPLSET_IPS[@]}"; do
+            if [ "${REPLSET_IPS[$i]}" = "$new_primary_ip" ]; then
+                new_loc="$i"
+            fi
+        done
+        if [ -n "$new_term" ]; then
+            echo "mongo:primary_elected term=${new_term}${new_loc:+ loc=${new_loc}}" >> /tmp/JM_Jetpack_0.0.0.0
+            log_info "Wrote mongo:primary_elected term=${new_term}${new_loc:+ loc=${new_loc}} to /tmp/JM_Jetpack_0.0.0.0"
+        else
+            log_warn "Could not read the new primary's term: no primary_elected signal written"
+        fi
     else
         log_error "No new MongoDB primary within 30 seconds"
         mongodb_downtime_ms="N/A"

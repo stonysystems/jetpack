@@ -180,7 +180,7 @@ check_file_contains "Has Stop method" "$PROJECT_DIR/src/deptran/mongodb_leader_w
 check_file_exists "mongodb_kv_table_handler.h" "$PROJECT_DIR/src/deptran/mongodb_kv_table_handler.h"
 check_file_exists "mongodb_connection_thread_pool.h" "$PROJECT_DIR/src/deptran/mongodb_connection_thread_pool.h"
 check_file_exists "mongodb/server.h" "$PROJECT_DIR/src/deptran/mongodb/server.h"
-check_file_contains "MongoDB server has recovery hooker" "$PROJECT_DIR/src/deptran/mongodb/server.h" 'exists_key.*mongo.*primary_elected'
+check_file_contains "MongoDB server has recovery hooker" "$PROJECT_DIR/src/deptran/mongodb/server.h" 'JpRunTermPoller.*mongo.*primary_elected'
 check_file_contains "s_main.cc includes mongodb_leader_watcher.h" "$PROJECT_DIR/src/deptran/s_main.cc" 'mongodb_leader_watcher.h'
 check_file_contains "s_main.cc has MongodbLeaderWatcher global" "$PROJECT_DIR/src/deptran/s_main.cc" 'mongodb_leader_watcher_g'
 check_file_contains "s_main.cc starts MongodbLeaderWatcher" "$PROJECT_DIR/src/deptran/s_main.cc" 'mongodb_leader_watcher_g->Start'

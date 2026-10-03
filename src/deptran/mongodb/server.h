@@ -12,12 +12,13 @@
 
 #ifdef JETPACK_MONGODB_RECOVERY
 #include "../../../jm_file_signal.h"
+#include "../jetpack_term_source.h"
 #endif
 
 namespace janus {
 
 class MongodbServer : public TxLogServer {
-  
+
 #ifdef AWS
   const int mongodb_connection_ = 2500; // maximum connection maybe limited by ulimit, increase ulimit may solve connection limit problem. 2000 is designed for 0.66s latency 3000 clients open loop, change to 2500 to saturate CPU usage
 #endif
@@ -27,6 +28,55 @@ class MongodbServer : public TxLogServer {
   std::string mongo_uri_{kMongoDbUri};
   shared_ptr<MongodbConnectionThreadPool> mongodb_;
   std::thread execution_thread;
+#ifdef JETPACK_MONGODB_RECOVERY
+  // Self-detection probe (only with Jetpack recovery) and the poller's
+  // liveness flag (cleared by the destructor, read by the poller coroutine).
+  std::shared_ptr<JetpackLeaderProbe> jp_probe_;
+  std::shared_ptr<std::atomic<bool>> jp_poller_alive_;
+
+  // Self-detection: `hello` on the co-located mongod (JpMongoHelloTerm:
+  // isWritablePrimary and the replica-set term). Runs on the probe thread with
+  // its own client: a mongocxx::client must not be shared between threads.
+  // A driver exception (mongod down) is a failed probe. The current term
+  // (T_rejoin) is a primary's electionId term; on a secondary hello only has
+  // its last write's term, so a restarted (amnesiac) replica also asks
+  // replSetGetStatus for the term this member knows, until it has one.
+  static JetpackLeaderProbe::FnEx MongoHelloProbe(const std::string& uri, bool want_current_term) {
+    auto client = std::make_shared<std::unique_ptr<mongocxx::client>>();
+    auto need_status = std::make_shared<bool>(want_current_term);
+    return [uri, client, need_status](JetpackLeaderProbe::Answer* a, std::string* err) -> bool {
+      (void) err;
+      GetMongoInstance();
+      if (!*client) {
+        client->reset(new mongocxx::client(mongocxx::uri(uri)));
+      }
+      bsoncxx::document::value cmd =
+          bsoncxx::builder::stream::document{} << "hello" << 1 << bsoncxx::builder::stream::finalize;
+      bsoncxx::document::value reply = (**client)["admin"].run_command(cmd.view());
+      // A standalone mongod reports term 0: it never baselines and never
+      // triggers, which is right, since it has no failover.
+      bool from_election_id = false;
+      a->term = JpMongoHelloTerm(reply.view(), &a->leader, &from_election_id);
+      if (a->leader && from_election_id) {
+        a->current_term = a->term;
+      }
+      if (*need_status) {
+        try {
+          bsoncxx::document::value st_cmd = bsoncxx::builder::stream::document{}
+                                            << "replSetGetStatus" << 1 << bsoncxx::builder::stream::finalize;
+          bsoncxx::document::value st = (**client)["admin"].run_command(st_cmd.view());
+          a->current_term = std::max<uint64_t>(a->current_term, JpMongoStatusTerm(st.view()));
+        } catch (const std::exception&) {
+          // No status (e.g. a standalone mongod): the current term stays unknown.
+        }
+        if (a->current_term != 0) {
+          *need_status = false;  // T_rejoin takes only the first one
+        }
+      }
+      return true;
+    };
+  }
+#endif
 
   static void ExecutionHandler(MongodbServer* svr, shared_ptr<MongodbConnectionThreadPool>& db) {
     Log_info("Enter ExecutionHandler");
@@ -66,8 +116,9 @@ class MongodbServer : public TxLogServer {
     //   Each of server0..server4 runs its own mongod, all in one replica set
     //   (jetpack-rs) with server0 = PRIMARY (enforced by
     //   start_mongodb_cluster.sh's stepDown loop, plus member[0].priority=2.0
-    //   from init_mongodb_replicaset.sh). Only loc_id_==0 (server0) opens
-    //   driver connections — all replication to followers happens server-side
+    //   from init_mongodb_replicaset.sh). Without Jetpack recovery only
+    //   loc_id_==0 (server0) opens driver connections (see below for the
+    //   Jetpack case); all replication to followers happens server-side
     //   via the replica-set channel using public IPs in rs.config.
     //
     //   We connect via 127.0.0.1 with directConnection=true because:
@@ -95,10 +146,16 @@ class MongodbServer : public TxLogServer {
                  "&serverSelectionTryOnce=false"
                  "&serverSelectionTimeoutMS=10000"
                  "&" JANUS_MONGO_LINEARIZABLE_OPTS;
-    Log_info("mongo_uri_:%s, loc_id_:%d, mongodb_connection_:%d", mongo_uri_.c_str(), loc_id_, mongodb_connection_);
-    // Only the leader (loc_id_==0) needs actual MongoDB connections for writes.
-    // Non-leaders use 0 connections so they don't overwhelm mongod in WAN mode.
-    mongodb_ = make_shared<MongodbConnectionThreadPool>(loc_id_ == 0 ? mongodb_connection_ : 0, mongo_uri_);
+    // Without Jetpack recovery only the static leader (loc_id_==0) submits, so
+    // the others use 0 connections and do not overwhelm mongod in WAN mode.
+    // With it the leader follows the installed view, so every replica
+    // opens loc0's pool to its local mongod. directConnection means only the
+    // replica next to the primary can write; elsewhere mongod refuses and the
+    // Submit fails (it answers WRONG_LEADER), which is the natural fencing.
+    const bool open_pool = loc_id_ == 0 || JetpackRecoveryEnabled();
+    Log_info("mongo_uri_:%s, loc_id_:%d, mongodb_connection_:%d", mongo_uri_.c_str(), loc_id_,
+             open_pool ? mongodb_connection_ : 0);
+    mongodb_ = make_shared<MongodbConnectionThreadPool>(open_pool ? mongodb_connection_ : 0, mongo_uri_);
 #else
     // Default legacy behavior: only leader connects using the legacy fixed URI.
     mongo_uri_ = kMongoDbUri;
@@ -111,58 +168,70 @@ class MongodbServer : public TxLogServer {
     // execution_thread = std::thread(ExecutionHandler, this, std::ref(mongodb_));
 
 #ifdef JETPACK_MONGODB_RECOVERY
-	  // Coroutine-based waiter for MongoDB signal with periodic timeout.
-    if (loc_id_ != 0) {
-      Coroutine::CreateRun([this]() {
-        std::string host;
-        if (frame_ && frame_->site_info_) {
-          auto* si = frame_->site_info_;
-          if (!si->host.empty()) {
-            host = si->host;
-          } else if (!si->proc_name.empty()) {
-            host = si->proc_name;
-          } else if (!si->name.empty()) {
-          host = si->name;
-        }
-      }
-#ifdef AWS
-      host = "0.0.0.0";
-#endif
-      Log_info("[MONGODB-FAILOVER] Waiting for mongo signal on JM_Jetpack_%s", host.c_str());
-        while (true) {
-        if (jm_signal::exists_key("mongo", "primary_elected", host)) {
-          Log_info("[MONGODB-FAILOVER] Received mongo signal on JM_Jetpack_%s", host.c_str());
-          JetpackRecoveryEntry();
-          break;
-        }
-          auto sp_e = Reactor::CreateSpEvent<TimeoutEvent>(1 * 1000); // 1ms (reduced from 10ms)
-          sp_e->Wait();
-        }
+    // Every replica runs the term poller (nobody knows in advance whose
+    // mongod wins an election). View id = the replica-set term. Sources:
+    //  - self-detection (only with Jetpack recovery): the co-located mongod,
+    //    the one this replica's pool writes to, is the writable primary of a
+    //    newer term; so the coordinator, and with it the leader of the view
+    //    it installs, sits next to the primary (directConnection: only that
+    //    replica's Submits can write);
+    //  - term-bearing lines "mongo:primary_elected term=T [loc=L]" (patched
+    //    mongod, docker harness, simulation, MongodbLeaderWatcher); with
+    //    recovery disabled they still get the leader_paused ack.
+    // The startup state is a baseline, not a failover (the initial primary is
+    // assumed co-located with locale 0, whose view is the initial one).
+    jp_poller_alive_ = std::make_shared<std::atomic<bool>>(true);
+    if (JetpackRecoveryEnabled()) {
+      // The mongod of mongo_uri_, with short timeouts of its own.
+      const std::string probe_uri =
+          "mongodb://127.0.0.1:27017/?directConnection=true"
+          "&connectTimeoutMS=1000&socketTimeoutMS=1000&serverSelectionTimeoutMS=1000";
+      jp_probe_ = std::make_shared<JetpackLeaderProbe>(
+          "[MONGODB-FAILOVER]", MongoHelloProbe(probe_uri, /*want_current_term=*/jp_rejoin_.amnesiac()),
+          JpLeaderPollMs());
+      jp_probe_->Start();
+    }
+    {
+      auto alive = jp_poller_alive_;
+      auto probe = jp_probe_;
+      Coroutine::CreateRun([this, alive, probe]() {
+        JpRunTermPoller("[MONGODB-FAILOVER]", "mongo", "primary_elected", probe, alive);
       });
     }
+    // Rejoin startup state (T_rejoin comes from the probe, in the poller),
+    // then the takeover timer (with Jetpack recovery). A takeover runs only
+    // next to the primary of the frozen term (JpTakeoverAllowedHere), since
+    // only that replica can write (directConnection).
+    JpLogRejoinState("[MONGODB-FAILOVER]");
+    JpStartTakeoverTimer(jp_poller_alive_);
 #endif
 
   }
+  // The leader of the installed fast-path view (static locale 0 without
+  // Jetpack recovery); see EtcdServer::IsLeader.
   bool IsLeader() override {
-    return loc_id_ == 0;
+    return JpBackendIsLeader();
   }
-  void Submit(const shared_ptr<Marshallable>& cmd) {
-    bool is_recovery_cmd = SimpleRWCommand(cmd).IsRecoveryCommand();
-
-    if (!is_recovery_cmd &&
-        jetpack_status_ == TxLogServer::JetpackStatus::RECOVERY) {
-      if (cmd->kind_ == MarshallDeputy::CMD_TPC_COMMIT) {
-        auto tpc_cmd = dynamic_pointer_cast<TpcCommitCommand>(cmd);
-        if (tpc_cmd) {
-#ifdef JETPACK_WRONG_LEADER_DEBUG
-          Log_info("[WRONG_LEADER_FLOW] MongodbServer rejecting tx_id=%lu at loc_id=%d because status=RECOVERY",
-                   tpc_cmd->tx_id_, loc_id_);
+#ifdef JETPACK_MONGODB_RECOVERY
+  // Takeover on MongoDB: only the replica next to the primary can write
+  // (directConnection), so a takeover of view v installs a leader that can
+  // write only if its co-located mongod is the primary of term v. Elsewhere it
+  // would leave the partition READY behind a leader whose writes all fail
+  // (with an empty recovery set nothing even fails before FinishRecovery).
+  bool JpTakeoverAllowedHere(epoch_t v, std::string* why) override {
+    if (!jp_probe_) {
+      *why = "no self-detection probe";
+      return false;
+    }
+    return JpProbeLeadsTerm(jp_probe_->Latest(), v, why);
+  }
 #endif
-          tpc_cmd->ret_ = WRONG_LEADER;
-        }
-      }
+  // Returns true iff the command is durable in MongoDB; see
+  // EtcdServer::Submit.
+  bool Submit(const shared_ptr<Marshallable>& cmd) {
+    if (JpBackendBounce(cmd, "MongodbServer")) {
       app_next_(*cmd);
-      return;
+      return false;
     }
 #ifdef MONGODB_DEBUG
     Log_info("%.2f Submit <%d, %d> loc_id %d", SimpleRWCommand::GetMsTimeElaps(), SimpleRWCommand::GetCmdID(cmd).first, SimpleRWCommand::GetCmdID(cmd).second, loc_id_);
@@ -183,11 +252,20 @@ class MongodbServer : public TxLogServer {
 // #ifdef MONGODB_DEBUG
 //     Log_info("%.2f xxxxx <%d, %d>", SimpleRWCommand::GetMsTimeElaps(), SimpleRWCommand::GetCmdID(cmd).first, SimpleRWCommand::GetCmdID(cmd).second);
 // #endif
+    // Untimed: the pool always signals, 1 = acked by mongod, 2 = failed.
     cmd_content->mongodb_finished->Wait();
 #ifdef MONGODB_DEBUG
     Log_info("%.2f After cmd_content->mongodb_finished->Wait() <%d, %d>", SimpleRWCommand::GetMsTimeElaps(), SimpleRWCommand::GetCmdID(cmd).first, SimpleRWCommand::GetCmdID(cmd).second);
 #endif
+    const bool durable = cmd_content->mongodb_finished->get() == 1;
     WAN_WAIT
+    if (!durable) {
+      // Possibly applied (e.g. a w:majority timeout): keep it in the pool and
+      // let the client retry, at-least-once.
+      JpMarkWrongLeader(cmd);
+      app_next_(*cmd);
+      return false;
+    }
 #ifdef MONGODB_DEBUG
     Log_info("%.2f Before RuleCommandPoolGC <%d, %d>", SimpleRWCommand::GetMsTimeElaps(), SimpleRWCommand::GetCmdID(cmd).first, SimpleRWCommand::GetCmdID(cmd).second);
 #endif
@@ -199,8 +277,13 @@ class MongodbServer : public TxLogServer {
 #ifdef MONGODB_DEBUG
     Log_info("%.2f After app_next_ <%d, %d>", SimpleRWCommand::GetMsTimeElaps(), SimpleRWCommand::GetCmdID(cmd).first, SimpleRWCommand::GetCmdID(cmd).second);
 #endif
+    return true;
   }
   ~MongodbServer() {
+#ifdef JETPACK_MONGODB_RECOVERY
+    if (jp_poller_alive_) jp_poller_alive_->store(false);
+    if (jp_probe_) jp_probe_->Stop();
+#endif
     mongodb_->Close();
     // execution_thread.join();
   }

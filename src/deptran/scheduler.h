@@ -12,6 +12,7 @@
 #include "RW_command.h"
 #include "config.h"
 #include "curp/witness.h"
+#include "jetpack_rules.h"
 #include <chrono>
 #include <fstream>
 #include <limits>
@@ -19,6 +20,7 @@
 namespace janus {
 
 class TxLogServer;
+class JetpackLeaderProbe;  // jetpack_term_source.h
 
 struct UniqueCmdID {
   int32_t client_id_;
@@ -161,27 +163,33 @@ class RevoveryCandidates {
  public:
   // Entry cached per cmd_id. Storing is_write here avoids re-parsing the
   // Marshallable during remove() (the old code constructed a full
-  // SimpleRWCommand just to call IsWrite()). 8-byte shared_ptr + 1 bool
-  // (padded to 16 bytes) per entry.
+  // SimpleRWCommand just to call IsWrite()). acked records the fast-path
+  // verdict given when the entry was inserted, so a redelivered request gets
+  // the same answer. shared_ptr + 2 bools (padded to 16 bytes).
   struct Entry {
     shared_ptr<Marshallable> cmd;
     bool is_write;
+    bool acked;
   };
  private:
   // <cmd_id, entry>
   unordered_map<uint64_t, Entry> candidates_;
   unordered_map<uint64_t, bool> appeared_;
   int total_write_ = 0;
+  // The acked write of this key, i.e. the entry recovery reports. Only an
+  // acked write becomes to_recover; total_write_ == 0 => to_recover_id_ == -1.
   uint64_t to_recover_id_ = -1;
  public:
   RevoveryCandidates() {}
-  void push_back(uint64_t cmd_id, shared_ptr<Marshallable> cmd, bool is_write);
+  void insert(uint64_t cmd_id, shared_ptr<Marshallable> cmd, bool is_write, bool acked);
+  const Entry* find(uint64_t cmd_id) const;
   bool remove(uint64_t cmd_id);
   bool has_appeared(uint64_t cmd_id);
   size_t size() const;
-  int total_write();
+  int total_write() const;
   bool has_cmd_to_recover() const;
-  shared_ptr<Marshallable> cmd_to_recover();
+  // nullptr if the reported write was already GC'd (it committed).
+  shared_ptr<Marshallable> cmd_to_recover() const;
   shared_ptr<Marshallable> get_cmd(uint64_t cmd_id) const;
 };
 
@@ -225,17 +233,19 @@ class JetpackCommandPool {
   vector<CommandPoolLog> pool_log_;
 #endif
  public:
+  // The fast-path log of the installed view (the log is the pool).
+  // Recovery acceptor state lives on TxLogServer (jp_promised_/jp_accepted_),
+  // not here, so clearing the pool never wipes it.
   unordered_map<key_t, RevoveryCandidates> candidates_;
-  /* Recover related begin */
-  ballot_t max_seen_ballot_ = -1, max_accepted_ballot_ = -1;
-  int sid_ = -1;
-  bool committed_ = false;
-  /* Recover related end */
 
   JetpackCommandPool() {};
   ~JetpackCommandPool();
-  // return whether meet conflict, but not whether push_back success
-  bool push_back(const shared_ptr<Marshallable>& cmd);
+  // Records cmd and returns the fast-path verdict: true iff cmd is acked
+  // (allow_ack and no conflicting entry). allow_ack == false records the
+  // command as a conflict guard without acking it. A redelivered cmd_id gets
+  // its first verdict back and changes nothing. In RECOVERY nothing is
+  // inserted and the result is false.
+  bool push_back(const shared_ptr<Marshallable>& cmd, bool allow_ack = true);
   // return how many cmd have been removed (cmd may be CMD_TPC_BATCH)
   int remove(const shared_ptr<Marshallable>& cmd);
   // return whether all cmds appeared before
@@ -247,14 +257,15 @@ class JetpackCommandPool {
   int size() const { return pool_size_; }
   int cmd_size() const { return pool_cmd_count_; }
   /* Recover related begin */
-  bool has_cmd_to_recover(key_t key) {
-    return candidates_[key].has_cmd_to_recover();
-  }
-  shared_ptr<Marshallable> cmd_to_recover(key_t key) {
-    return candidates_[key].cmd_to_recover();
-  }
-  shared_ptr<VecRecData> id_set();
-  void reset();
+  // Appends (key, body) of every acked, not yet GC'd write (one per key).
+  void AckedSnapshot(KeyCmdBatchData& out) const;
+  // Whether key's bucket still records an acked write (it may have been
+  // fast-committed but not yet applied here). Conservative: also true while a
+  // GC'd acked write's bucket still holds a later write. Never creates a bucket.
+  bool HasAckedWrite(key_t key) const;
+  // Empties the pool. Called only when an applied FinishRecovery advances the
+  // installed view (JpApplyFinish).
+  void ClearPool();
   /* Recover related end */
 #ifdef COMMAND_POOL_LOG_DEBUG
   void print_log();
@@ -329,42 +340,6 @@ struct ResponseData {
   }
 };
 
-class RecoverySet {
-  std::unordered_map<int, std::vector<std::pair<key_t, uint64_t>>> rec_set_; // Form locally and distribute
-  // std::unordered_map<int, std::vector<key_t>> matched_key_set_;
-  std::unordered_map<int, std::vector<std::pair<key_t, shared_ptr<Marshallable>>>> missed_key_cmd_set_;
- public:
-  void set_rec_set(int sid, const std::vector<std::pair<key_t, uint64_t>>& rec_set) {
-    rec_set_[sid] = rec_set;
-  }
-  // void set_matched_key_set(int sid, const std::vector<key_t>& matched_key_set) {
-  //   matched_key_set_[sid] = matched_key_set;
-  // }
-  void set_missed_key_cmd_set(int sid, const std::vector<std::pair<key_t, shared_ptr<Marshallable>>>& missed_key_cmd_set) {
-    missed_key_cmd_set_[sid] = missed_key_cmd_set;
-  }
-  void clear(int sid) {
-    rec_set_.erase(sid);
-    // matched_key_set_.erase(sid);
-    missed_key_cmd_set_.erase(sid);
-  }
-  const std::vector<std::pair<key_t, uint64_t>>* get_rec_set(int sid) const {
-    auto it = rec_set_.find(sid);
-    if (it == rec_set_.end()) return nullptr;
-    return &it->second;
-  }
-  // const std::vector<key_t>* get_matched_key_set(int sid) const {
-  //   auto it = matched_key_set_.find(sid);
-  //   if (it == matched_key_set_.end()) return nullptr;
-  //   return &it->second;
-  // }
-  const std::vector<std::pair<key_t, shared_ptr<Marshallable>>>* get_missed_key_cmd_set(int sid) const {
-    auto it = missed_key_cmd_set_.find(sid);
-    if (it == missed_key_cmd_set_.end()) return nullptr;
-    return &it->second;
-  }
-};
-
 // View class is defined in view.h
 
 
@@ -392,15 +367,80 @@ class TxLogServer {
  public:
 
   /* Some Jetpack elements begin */
+  // All Jetpack replica state lives on the replication server (rep_sched_);
+  // handlers running on tx_sched_ must go through rep_sched_.
   enum JetpackStatus {RECOVERY, READY};
+  // Written only by JpJoin (-> RECOVERY) and JpApplyFinish (-> READY).
+  // Invariant: RECOVERY <=> oepoch_ > jepoch_.
   int jetpack_status_ = JetpackStatus::READY;
+  // jepoch_ = view.id, the installed fast-path view (the fast path acks only
+  // in it); written only by JpApplyFinish. oepoch_ = vid, the newest recovery
+  // view joined or installed; written only by JpJoin and JpApplyFinish.
+  // Both are non-decreasing and jepoch_ <= oepoch_.
   epoch_t jepoch_ = 0, oepoch_ = 0;
+  // Base (original-path) view for WRONG_LEADER replies and routing. new_view_
+  // only moves to a newer view (JpAdoptBaseView); the CURP-only follower
+  // writer in RaftServer::OnAppendEntries is the one exception. No
+  // Jetpack guard reads these.
   View old_view_, new_view_;
-  int sid, rid, sid_cnt_ = 0;
-  RecoverySet rec_set_;
+  // Paxos acceptor state of the recovery instances: one promise shared
+  // by every instance, and accepted[vn] = (ballot, value). Written only by
+  // the Pull/Accept handlers after their guard passed. Entries below the
+  // installed view are dropped by JpApplyFinish; nothing else clears them.
+  ballot_t jp_promised_ = -1;
+  struct JpAccepted {
+    ballot_t ballot;
+    shared_ptr<KeyCmdBatchData> value;
+  };
+  std::map<epoch_t, JpAccepted> jp_accepted_;
+  // The installed fast-path View (its leader is the fast-path proposer).
+  // Set by JpApplyFinish; empty before the first applied FinishRecovery, in
+  // which case JpInstalledView() returns the static view led by locale 0.
+  View jp_installed_view_;
+  // Fast-path requests not acked because of the view gate, split by
+  // cause: this replica was in RECOVERY, or READY in a view other than the
+  // request's. Printed at shutdown next to the pool statistics.
+  uint64_t jp_fp_not_ready_ = 0;
+  uint64_t jp_fp_view_mismatch_ = 0;
+  // Steady-clock time (us) of this replica's newest recovery progress: a
+  // join (a passed Pull/Accept or a local trigger) or an applied
+  // FinishRecovery. The takeover timer counts from it.
+  int64_t jp_progress_us_ = 0;
+  // The ballot of this replica's own recovery coordinator, set when its
+  // Accept succeeded (it then aims to lead that view): a lower same-view
+  // FinishRecovery is not installed here (JpFinishLevel). -1 = none.
+  ballot_t jp_fr_floor_ = -1;
+  // Amnesia (rejoin) state: amnesiac from construction when
+  // JETPACK_REJOIN=1 and Jetpack recovery is enabled (jp::RejoinState).
+  jp::RejoinState jp_rejoin_;
+  bool jp_rejoin_error_logged_ = false;
   bool simulated_fail_ = false;
   std::chrono::steady_clock::time_point jetpack_recovery_start_time_{};
   /* Some Jetpack elements end */
+
+  /* Jetpack recovery coordinator: touched only by JetpackRecoveryEntry and the
+     driver coroutine, never by the replica handlers. */
+  bool jp_driver_started_ = false;
+  bool jp_driver_stop_ = false;
+  shared_ptr<IntEvent> jp_driver_event_{nullptr};
+  // Cleared by ~TxLogServer. ServerWorker::ShutDown deletes the replication
+  // server while the reactor keeps running, so the long-lived coroutines that
+  // hold `this` (the driver's timed idle wait, the FinishRecovery stragglers)
+  // check their copy after every wait and then touch nothing of this object.
+  std::shared_ptr<std::atomic<bool>> jp_alive_ = std::make_shared<std::atomic<bool>>(true);
+  epoch_t jp_pending_view_ = 0;   // newest joined trigger
+  View jp_pending_target_;
+  // A target is pending while jp_pending_seq_ > jp_driven_seq_; a same-view
+  // takeover publishes the view it already drove once more.
+  uint64_t jp_pending_seq_ = 0;
+  uint64_t jp_driven_seq_ = 0;
+  epoch_t jp_driven_view_ = 0;    // newest view the driver started
+  epoch_t jp_running_view_ = 0;   // view the driver runs now; 0 = idle
+  uint32_t jp_ballot_counter_ = 0;
+  // Coordinator takeover timer (etcd / MongoDB / ZooKeeper only).
+  bool jp_takeover_started_ = false;
+  jp::TakeoverClock jp_takeover_clock_;
+  epoch_t jp_takeover_refused_view_ = 0;  // logged "cannot lead" once per view
 
   // CPU monitor for RuleSpeculativeExecute responses (lazy-start).
   bool cpu_monitor_started_{false};
@@ -674,13 +714,17 @@ class TxLogServer {
   // Single-threaded coroutine reactor → no atomics / mutex needed.
   std::unordered_map<int /*key*/, std::vector<InflightOriginalEntry>> inflight_original_path_;
 
-  // For Rule usage
+  // For Rule usage. Fast-path vote of the command in the client's view
+  // req_view: acks only if this replica is READY in view req_view.
+  // *reply_view is always set to the installed view (jepoch_).
   void OnRuleSpeculativeExecute(const shared_ptr<Marshallable>& cmd,
+                                epoch_t req_view,
                                 bool_t* accepted,
                                 value_t* result,
                                 bool_t* is_leader,
                                 double* cpu_usage,
-                                double* queue_depth);
+                                double* queue_depth,
+                                epoch_t* reply_view);
 
   void OriginalPathUnexecutedCmdConflictPlaceHolder(const shared_ptr<Marshallable>& cmd);
 
@@ -699,91 +743,202 @@ class TxLogServer {
     return false;
   }
 
-  // etcd_view/etcd_nonce are set only by the etcd Route 2a poller; they carry
-  // the raft term and per-boot nonce that the "leader_paused" ack must echo so
-  // etcd's view barrier releases. Other backends (Raft/Mongo/ZK) use the
-  // defaults, which suppress the ack.
-  void JetpackRecoveryEntry(epoch_t etcd_view = 0, uint64_t etcd_nonce = 0);
+  /* Jetpack recovery begin */
 
-  void JetpackRecovery();
+  // The single "Jetpack recovery enabled" predicate. True only for
+  // cc:rule outside CURP mode on a replication protocol whose recovery path
+  // exists (Raft, etcd, MongoDB, ZooKeeper). Every Jetpack-recovery gate uses
+  // it, so other modes (CURP, Copilot, Mencius, SwiftPaxos, EPaxos, FPGA-Raft,
+  // cc:none) never take a Jetpack-recovery path.
+  static bool JetpackRecoveryEnabled();
 
-  void JetpackCommit(int sid);
+  // ---- replica rules (as rs-> in the handlers, as this-> in the coordinator)
+  bool JpRecoveryMsgAllowed(epoch_t v, ballot_t b, jp::BallotRule r) const {
+    return jp::RecoveryMsgAllowed(jepoch_, oepoch_, jp_promised_, v, b, r);
+  }
+  // vid := v and RECOVERY, in one step. Caller checked v > jepoch_ && v >= oepoch_.
+  void JpJoin(epoch_t v);
+  // FinishRecovery(u) at ballot b with the coordinator's target view w (may
+  // be null). Applies only if u >= vid && u > view.id and b reaches this
+  // replica's FinishRecovery level for u (jp::FinishBallotOk; kChosenBallot
+  // always does); the only place that clears the pool and the only writer of
+  // jepoch_. Non-yielding.
+  bool JpApplyFinish(epoch_t u, ballot_t b, const View* w);
+  // The ballot a FinishRecovery(u) must reach here: the highest ballot of
+  // view u this replica accepted, and the ballot of this replica's own
+  // coordinator of u once its Accept succeeded (jp_fr_floor_).
+  ballot_t JpFinishLevel(epoch_t u) const;
+  // Monotone base-view adoption. allow_same_id lets an applied FR replace a
+  // base view of the same id (a takeover coordinator's leader).
+  void JpAdoptBaseView(const View& w, bool allow_same_id = false);
+  const View& JpInstalledView();
+  // Whether this replica supplies the proposer (leader) vote of fast-path
+  // view `view` (the is_leader of a fast-path reply).
+  virtual bool JetpackIsProposerOf(epoch_t view);
+  // Whether a Raft lease read of `key` may be served from local state.
+  // With Jetpack recovery enabled: only in READY and only while the key's pool
+  // bucket holds no acked write. Always true otherwise.
+  bool JetpackLeaseReadAllowed(key_t key) const;
+  // Whether this server may still coordinate the recovery for view v.
+  // RaftServer: still leader of the term in which it was elected (== v).
+  virtual bool JetpackStillCoordinator(epoch_t v) { return true; }
 
-  void JetpackResubmit(int sid);
-  void DispatchRecoveredBatch(const std::vector<std::shared_ptr<TpcCommitCommand>>& batch,
-                              std::shared_ptr<IntEvent> recovery_event = nullptr);
-  void DispatchRecoveredCommand(shared_ptr<Marshallable> cmd, shared_ptr<IntEvent> recovery_event = nullptr);
-  
-  virtual void OnJetpackPullRecovery(const MarshallDeputy& old_view,
-                                     const MarshallDeputy& new_view,
-                                     const epoch_t& jepoch,
-                                     const epoch_t& oepoch,
-                                     bool_t* ok,
-                                     epoch_t* reply_jepoch,
-                                     epoch_t* reply_oepoch,
-                                     MarshallDeputy* reply_old_view,
-                                     MarshallDeputy* reply_new_view,
-                                     shared_ptr<KeyCmdIdBatchData>& id_batch);
-  void OnJetpackBeginRecovery(const MarshallDeputy& old_view,
-                                      const MarshallDeputy& new_view, 
-                                      const epoch_t& new_view_id);
-  
-  void OnJetpackPullIdSet(const epoch_t& jepoch,
-                          const epoch_t& oepoch,
-                          bool_t* ok,
-                          epoch_t* reply_jepoch,
-                          epoch_t* reply_oepoch,
-                          MarshallDeputy* reply_old_view,
-                          MarshallDeputy* reply_new_view,
-                          shared_ptr<VecRecData> id_set);
-  
-  virtual void OnJetpackPullCmd(const epoch_t& jepoch,
-                        const epoch_t& oepoch,
-                        const std::vector<key_t>& keys,
-                        bool_t* ok, 
-                        epoch_t* reply_jepoch, 
-                        epoch_t* reply_oepoch,
-                        MarshallDeputy* reply_old_view,
-                        MarshallDeputy* reply_new_view,
-                        shared_ptr<KeyCmdBatchData>& batch);
-  
-  void OnJetpackRecordCmd(const epoch_t& jepoch, 
-                          const epoch_t& oepoch, 
-                          const int32_t& sid, 
-                          shared_ptr<KeyCmdIdBatchData>& id_batch,
-                          shared_ptr<KeyCmdIdBatchData>& missing_batch,
-                          shared_ptr<KeyCmdBatchData>& cmd_batch);
-  
-  virtual void OnJetpackPrepare(const epoch_t& jepoch, 
-                                const epoch_t& oepoch, 
-                                const ballot_t& max_seen_ballot, 
-                                bool_t* ok, 
-                                epoch_t* reply_jepoch,
-                                epoch_t* reply_oepoch,
-                                MarshallDeputy* reply_old_view,
-                                MarshallDeputy* reply_new_view,
-                                ballot_t* reply_max_seen_ballot,
-                                ballot_t* accepted_ballot, 
-                                int32_t* replied_sid);
-  
-  virtual void OnJetpackAccept(const epoch_t& jepoch, 
-                               const epoch_t& oepoch, 
-                               const ballot_t& max_seen_ballot, 
-                               const int32_t& sid, 
-                               bool_t* ok,
-                               epoch_t* reply_jepoch,
-                               epoch_t* reply_oepoch,
-                               MarshallDeputy* reply_old_view,
-                               MarshallDeputy* reply_new_view,
-                               ballot_t* reply_max_seen_ballot);
-  
-  virtual void OnJetpackCommit(const epoch_t& jepoch, 
-                               const epoch_t& oepoch, 
-                               const int32_t& sid);
-  
-  void OnJetpackFinishRecovery(const epoch_t& oepoch);
+  // ---- etcd / MongoDB / ZooKeeper backends
+  // IsLeader() of a backend server. With Jetpack recovery: this replica
+  // leads its installed fast-path view (initially the static view led by
+  // locale 0). Without: the static locale 0.
+  bool JpBackendIsLeader();
+  // The base view a WRONG_LEADER reply carries: new_view_, or the installed
+  // view while no base view was ever adopted.
+  View JpReplyBaseView();
+  // Marks a TpcCommitCommand WRONG_LEADER and attaches JpReplyBaseView().
+  void JpMarkWrongLeader(const shared_ptr<Marshallable>& cmd);
+  // Backend Submit gate: a client command (not a recovered one) is bounced
+  // while this replica is in RECOVERY or, with Jetpack recovery, when it is
+  // an original-path-only command and this replica does not lead its
+  // installed view (fast-path-attempted commands are written by any READY
+  // replica). Returns true if cmd was bounced (marked WRONG_LEADER with the
+  // base view; the caller still hands it to app_next_). Nothing was sent to
+  // the backend, so the bounced command's own original-path placeholder is
+  // dropped here (JpDropBouncedPlaceholder).
+  bool JpBackendBounce(const shared_ptr<Marshallable>& cmd, const char* who);
+  // A command bounced before it was submitted (never logged or written) never
+  // commits, so the original-path placeholder its Dispatch just recorded at
+  // this replica would block fast-path acks on its key until the next
+  // FinishRecovery. Drops it; only original-path-only commands (no fast-path
+  // ack of them exists anywhere) and only with Jetpack recovery.
+  void JpDropBouncedPlaceholder(const shared_ptr<Marshallable>& cmd);
 
+  // ---- coordinator
+  // Single non-yielding trigger for every backend (Raft setIsLeader, etcd /
+  // Mongo / ZK pollers, the takeover timer). target = View(n, this site,
+  // backend term). Joins the target locally (freezes the fast path) and hands
+  // it to the driver coroutine. emit_ack writes the leader_paused (and legacy
+  // fastpath_stopped) signal after the freeze, with the etcd nonce if any.
+  // takeover: target is the view this replica is frozen in; the driver
+  // runs it again even if this node already drove it.
+  void JetpackRecoveryEntry(const View& target, bool emit_ack,
+                            uint64_t ack_nonce = 0, bool ack_has_nonce = false,
+                            bool takeover = false);
+  // Coordinator takeover and the Accept keepalive run only on etcd,
+  // MongoDB and ZooKeeper with Jetpack recovery. Raft relies on its own
+  // elections (term-v resubmissions need the term-v leader).
+  static bool JpTakeoverEnabled();
+  bool JpDriverBusy() const {
+    return jp_running_view_ != 0 || jp_pending_seq_ > jp_driven_seq_;
+  }
+  // Starts the takeover timer coroutine of this replica (once; a no-op
+  // unless JpTakeoverEnabled()). It stops once *alive is false.
+  void JpStartTakeoverTimer(const std::shared_ptr<std::atomic<bool>>& alive);
+  // One timer tick: if this replica is frozen (vid > view.id) without
+  // recovery progress for its takeover delay (jp::TakeoverClock, rank =
+  // loc_id_), the driver is idle and JpTakeoverAllowedHere(vid), re-runs the
+  // recovery of view vid with this replica as coordinator. Returns the view
+  // taken over, or 0.
+  epoch_t JpTakeoverTick(int64_t now_us);
+  // Whether this replica can lead view v if it takes v over (else *why).
+  // MongodbServer: only next to the primary of term v (directConnection).
+  virtual bool JpTakeoverAllowedHere(epoch_t v, std::string* why) { return true; }
+  // JETPACK_REJOIN=1 (a restarted replica) and Jetpack recovery enabled.
+  static bool JpRejoinRequested();
+  // T_rejoin = the backend term learned after the restart (the first
+  // one counts); logs. No-op unless amnesiac.
+  void JpLearnRejoinTerm(uint64_t term, const char* source);
+  // T_rejoin cannot be learned: stays amnesiac, Log_error once.
+  void JpRejoinTermUnavailable(const char* tag, const char* why);
+  // The rejoin startup line of a replication server (from its Setup).
+  void JpLogRejoinState(const char* tag);
+  // Installs FinishRecovery(v) of this coordinator's own recovery at its own
+  // replica (only after n/2 other replicas installed it); logs and
+  // writes the replica-side finish signals like the RPC handler.
+  bool JpFinishLocally(epoch_t v, const View& target);
+  // The MongoDB / ZooKeeper term poller, one coroutine per replica (all
+  // locales), every JpLeaderPollMs(). Sources: the term-bearing signal line
+  // "<role>:<prefix> term=T [loc=L]" (acted on only without loc= or with
+  // loc= this locale) and, if probe is set, self-detection of the co-located
+  // backend node leading term T. Each term above everything handled or
+  // baselined (JpTermTrigger) calls JetpackRecoveryEntry(View(n, site_id_, T),
+  // emit_ack=true) once. Legacy term-less lines are ignored with one warning
+  // per process. Returns once *alive is false (server destroyed).
+  void JpRunTermPoller(const char* tag, const std::string& role, const std::string& prefix,
+                       const std::shared_ptr<JetpackLeaderProbe>& probe,
+                       const std::shared_ptr<std::atomic<bool>>& alive);
+  enum JpValidity {
+    kJpValid = 0,
+    kJpSuperseded,          // joined a newer recovery
+    kJpFinishedElsewhere,   // v (or newer) is already installed here
+    kJpNotCoordinator,      // demoted (Raft) or shut down
+    kJpTakenOver,           // another coordinator of v promised a higher ballot
+  };
+  static const char* JpValidityName(JpValidity r);
+  JpValidity JpCheckValid(epoch_t v);
+  void JpStartDriverIfNeeded();
+  // Returns once *alive is false (the server was deleted).
+  void JpDriverLoop(const std::shared_ptr<std::atomic<bool>>& alive);
+  // One recovery for target.view_id_ with round-local state only.
+  void JetpackRunRecovery(const View& target);
+  // Right after this coordinator's Accept(v, vn, b) succeeded: its own
+  // replica takes part at ballot b too (its own Accept may still be in
+  // flight), so no lower same-view FinishRecovery installs another leader
+  // here (jp_fr_floor_). An amnesiac replica only raises the floor. Not
+  // valid (and nothing changed) if the own replica is past v or promised a
+  // higher ballot of v (taken over).
+  JpValidity JpOwnAccept(const View& target, epoch_t vn, ballot_t b,
+                         const shared_ptr<KeyCmdBatchData>& value);
+  // Waits for e in slices, re-validating after every slice. Returns kJpValid
+  // when e is ready or the deadline passed.
+  JpValidity JpWaitValid(const shared_ptr<Event>& e, epoch_t v, int64_t deadline_us);
+  JpValidity JpSleepValid(epoch_t v, int64_t sleep_us);
+  // Resubmits every member of the chosen value (plus, for Raft, the term-v
+  // stability marker) through this server's own replication coordinator.
+  // Returns kJpValid once every member returned SUCCESS. (vn, b) is the
+  // instance and ballot at which the value was chosen: with takeover
+  // enabled (JpTakeoverEnabled) the Accept is re-sent every
+  // jp::kKeepaliveEveryUs while resubmitting, and its replies
+  // stop the resubmission when the recovery was superseded, finished
+  // elsewhere or taken over.
+  JpValidity JpResubmitAll(const View& target, const shared_ptr<KeyCmdBatchData>& value,
+                           bool with_marker, epoch_t vn, ballot_t b);
+  // Resends FinishRecovery(v) to the replicas not yet done until all
+  // are done or a newer view shows up. Runs as its own coroutine; returns
+  // once *alive is false (the server was deleted).
+  void JpFinishStragglers(epoch_t v, View target, std::set<siteid_t> done,
+                          std::shared_ptr<std::atomic<bool>> alive);
+  // True if the driver/coordinator must stop resending FR(v).
+  bool JpNewerViewSeen(epoch_t v) const {
+    return jp_pending_view_ > v || oepoch_ > v || jepoch_ > v;
+  }
+  bool JpUsesStabilityMarker() const;
+  std::string JpSignalHost();
+  void JpWriteFinishSignals();
 
+  // ---- replica handlers (non-yielding; all state through rep_sched_)
+  void OnJetpackPullRecovery(const epoch_t& v,
+                             const ballot_t& b,
+                             const MarshallDeputy& new_view,
+                             bool_t* ok,
+                             epoch_t* reply_view_id,
+                             epoch_t* reply_vid,
+                             ballot_t* reply_promised,
+                             const shared_ptr<KeyCmdBatchData>& acked,
+                             const shared_ptr<JetpackAcceptedMapData>& accepted);
+
+  void OnJetpackAccept(const epoch_t& v,
+                       const epoch_t& vn,
+                       const ballot_t& b,
+                       const MarshallDeputy& value,
+                       bool_t* ok,
+                       epoch_t* reply_view_id,
+                       epoch_t* reply_vid,
+                       ballot_t* reply_promised);
+
+  void OnJetpackFinishRecovery(const epoch_t& u,
+                               const ballot_t& b,
+                               const MarshallDeputy& new_view,
+                               bool_t* applied,
+                               epoch_t* reply_view_id,
+                               epoch_t* reply_vid);
+  /* Jetpack recovery end */
 };
 
 } // namespace janus

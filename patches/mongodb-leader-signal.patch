@@ -1,6 +1,6 @@
 --- a/src/mongo/db/repl/replication_coordinator_impl.cpp
 +++ b/src/mongo/db/repl/replication_coordinator_impl.cpp
-@@ -37,6 +37,9 @@
+@@ -37,4 +37,7 @@
  #include <algorithm>
 +#include <chrono>
 +#include <cstdlib>
@@ -8,27 +8,36 @@
 +#include <fstream>
  #include <functional>
  #include <limits>
-@@ -1438,6 +1441,59 @@
+@@ -1438,4 +1441,73 @@
      LOGV2(21331,
            "Transition to primary complete; database writes are now permitted",
            "term"_attr = _termShadow.load());
 +
-+    // Jetpack signal: notify that MongoDB primary step-up is complete.
-+    // Write "mongodb:primary_elected" to /tmp/JM_Jetpack_<host> so
-+    // Jetpack servers can detect the new primary and trigger recovery.
++    // Jetpack signal: this node is now the primary of term T, the Jetpack view
++    // id. Append "mongo:primary_elected term=<T>" (plus " loc=<JM_SIGNAL_LOC>"
++    // if that env var names the co-located Jetpack replica's locale, for
++    // signal files shared by several replicas) to
++    // $JM_SIGNAL_DIR/JM_Jetpack_<JM_SIGNAL_HOST> so that Jetpack replica
++    // triggers its recovery for term T.
 +    {
++        const long long jetpackTerm = _termShadow.load();
 +        const char* signalDir = std::getenv("JM_SIGNAL_DIR");
 +        std::string dir = (signalDir && *signalDir) ? signalDir : "/tmp";
 +        const char* signalHost = std::getenv("JM_SIGNAL_HOST");
 +        std::string host = (signalHost && *signalHost) ? signalHost : "0.0.0.0";
 +        std::string signalPath = dir + "/JM_Jetpack_" + host;
++        std::string signal = "mongo:primary_elected term=" + std::to_string(jetpackTerm);
++        const char* signalLoc = std::getenv("JM_SIGNAL_LOC");
++        if (signalLoc && *signalLoc) {
++            signal += std::string(" loc=") + signalLoc;
++        }
 +        std::ofstream out(signalPath, std::ios::app);
 +        if (out.is_open()) {
-+            out << "mongodb:primary_elected\n";
++            out << signal << "\n";
 +            out.flush();
 +            LOGV2(9999901,
 +                  "Jetpack signal written",
-+                  "signal"_attr = "mongodb:primary_elected",
++                  "signal"_attr = signal,
 +                  "path"_attr = signalPath);
 +        } else {
 +            LOGV2_WARNING(9999902,
@@ -36,11 +45,12 @@
 +                          "path"_attr = signalPath);
 +        }
 +
-+        // Wait for Jetpack to confirm fast path is stopped before allowing
-+        // write traffic.  This blocks the primary step-up thread but does NOT
-+        // affect heartbeat or replication threads which run independently.
++        // Wait for the Jetpack ack of this term, "jetpack:leader_paused
++        // term=<T>" (its fast path is stopped), before allowing write traffic.
++        // This blocks the primary step-up thread but does NOT affect heartbeat
++        // or replication threads which run independently.
 +        // Timeout after 5 seconds to avoid deadlock if Jetpack is unavailable.
-+        const std::string needle = "jetpack:fastpath_stopped";
++        const std::string needle = "jetpack:leader_paused term=" + std::to_string(jetpackTerm);
 +        auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
 +        bool observed = false;
 +        while (std::chrono::steady_clock::now() < deadline) {
@@ -59,12 +69,14 @@
 +        }
 +        if (observed) {
 +            LOGV2(9999903,
-+                  "Jetpack fastpath_stopped observed, resuming request processing",
++                  "Jetpack leader_paused observed, resuming request processing",
++                  "term"_attr = jetpackTerm,
 +                  "path"_attr = signalPath);
 +        } else {
 +            LOGV2_WARNING(9999904,
-+                          "Timed out waiting for Jetpack fastpath_stopped, "
++                          "Timed out waiting for Jetpack leader_paused, "
 +                          "resuming request processing anyway",
++                          "term"_attr = jetpackTerm,
 +                          "path"_attr = signalPath);
 +        }
 +    }

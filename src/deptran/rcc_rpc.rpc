@@ -192,18 +192,23 @@ abstract service Classic {
 //                 TxnOutput output);
 
 	defer ReElect(| bool_t success);
-  defer RuleSpeculativeExecute(MarshallDeputy md |
+  // Jetpack fast path: fp_view is the client's fast-path view of the
+  // partition; a replica acks only if READY and fp_view == its installed
+  // view, and always replies its installed view in reply_fp_view.
+  defer RuleSpeculativeExecute(MarshallDeputy md,
+                               epoch_t fp_view |
                                bool_t accepted,
                                int32_t result,
                                bool_t is_leader,
                                double cpu_usage,
-                               double queue_depth);
+                               double queue_depth,
+                               epoch_t reply_fp_view);
   defer Dispatch(i64 tid, DepId dep_id, MarshallDeputy cmd |
                  i32 res, TxnOutput output, uint64_t coro_id, MarshallDeputy view_data);
-  defer DispatchWithRuleSpec(i64 tid, DepId dep_id, MarshallDeputy cmd |
+  defer DispatchWithRuleSpec(i64 tid, DepId dep_id, MarshallDeputy cmd, epoch_t fp_view |
                              i32 res, TxnOutput output, uint64_t coro_id, MarshallDeputy view_data,
                              bool_t accepted, int32_t spec_result, bool_t is_leader,
-                             double cpu_usage, double queue_depth);
+                             double cpu_usage, double queue_depth, epoch_t reply_fp_view);
   defer Prepare(i64 tid, 
                 vector<i32> sids,
                 DepId dep_id | 
@@ -354,76 +359,38 @@ abstract service Classic {
 
   defer CommitFebruus(txid_t tx_id, uint64_t timestamp | i32 ret);
 
-  defer JetpackPullRecovery(MarshallDeputy old_view,
-                            MarshallDeputy new_view,
-                            epoch_t jepoch,
-                            epoch_t oepoch |
+  // Jetpack recovery (Pull = BeginRecovery + Prepare + fast-log
+  // snapshot; Accept at the Pull ballot; FinishRecovery installs view_id).
+  // acked_batch is a KeyCmdBatchData of the replier's acked pool entries and
+  // accepted_map a JetpackAcceptedMapData; both are empty when ok == 0.
+  defer JetpackPullRecovery(epoch_t view_id,
+                            ballot_t ballot,
+                            MarshallDeputy new_view |
                             bool_t ok,
-                            epoch_t reply_jepoch,
-                            epoch_t reply_oepoch,
-                            MarshallDeputy reply_old_view,
-                            MarshallDeputy reply_new_view,
-                            MarshallDeputy key_id_batch);
+                            epoch_t reply_view_id,
+                            epoch_t reply_vid,
+                            ballot_t reply_promised,
+                            MarshallDeputy acked_batch,
+                            MarshallDeputy accepted_map);
 
-  defer JetpackPullIdSet(epoch_t jepoch,
-                         epoch_t oepoch |
-                         bool_t ok,
-                         epoch_t reply_jepoch,
-                         epoch_t reply_oepoch,
-                         MarshallDeputy reply_old_view,
-                         MarshallDeputy reply_new_view,
-                         MarshallDeputy id_set);
-  
-  defer JetpackPullCmd(epoch_t jepoch,
-                       epoch_t oepoch,
-                       MarshallDeputy key_batch |
-                       bool_t ok,
-                       epoch_t reply_jepoch,
-                       epoch_t reply_oepoch,
-                       MarshallDeputy reply_old_view,
-                       MarshallDeputy reply_new_view,
-                       MarshallDeputy cmd_batch);
-  
-  defer JetpackRecordCmd(epoch_t jepoch,
-                         epoch_t oepoch,
-                         int32_t sid,
-                         MarshallDeputy record_id_batch,
-                         MarshallDeputy missing_id_batch |
-                         bool_t ok,
-                         epoch_t reply_jepoch,
-                         epoch_t reply_oepoch,
-                         MarshallDeputy reply_old_view,
-                         MarshallDeputy reply_new_view,
-                         MarshallDeputy cmd_batch);
-
-  defer JetpackPrepare(epoch_t jepoch,
-                       epoch_t oepoch,
-                       ballot_t max_seen_ballot |
-                       bool_t ok,
-                       epoch_t reply_jepoch,
-                       epoch_t reply_oepoch,
-                       MarshallDeputy reply_old_view,
-                       MarshallDeputy reply_new_view,
-                       ballot_t reply_max_seen_ballot,
-                       ballot_t accepted_ballot,
-                       int32_t replied_sid);
-
-  defer JetpackAccept(epoch_t jepoch,
-                      epoch_t oepoch,
-                      ballot_t max_seen_ballot,
-                      int32_t sid |
+  // value is a KeyCmdBatchData (an empty set is a value).
+  defer JetpackAccept(epoch_t view_id,
+                      epoch_t vn,
+                      ballot_t ballot,
+                      MarshallDeputy value |
                       bool_t ok,
-                      epoch_t reply_jepoch,
-                      epoch_t reply_oepoch,
-                      MarshallDeputy reply_old_view,
-                      MarshallDeputy reply_new_view,
-                      ballot_t reply_max_seen_ballot);
+                      epoch_t reply_view_id,
+                      epoch_t reply_vid,
+                      ballot_t reply_promised);
 
-  defer JetpackCommit(epoch_t jepoch,
-                      epoch_t oepoch,
-                      int32_t sid);
-
-  defer JetpackFinishRecovery(epoch_t oepoch);
+  // ballot: the one at which the coordinator's Accept chose the value, or
+  // the maximum ballot once the view's leader is decided (straggler copies).
+  defer JetpackFinishRecovery(epoch_t view_id,
+                              ballot_t ballot,
+                              MarshallDeputy new_view |
+                              bool_t applied,
+                              epoch_t reply_view_id,
+                              epoch_t reply_vid);
 }
 
 abstract service SwiftPaxosService {
