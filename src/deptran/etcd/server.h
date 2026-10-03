@@ -52,34 +52,97 @@ class EtcdServer : public TxLogServer {
 #endif
 
 #ifdef JETPACK_ETCD_RECOVERY
-    if (loc_id_ != 0) {
-      Coroutine::CreateRun([this]() {
-        std::string host;
-        if (frame_ && frame_->site_info_) {
-          auto* si = frame_->site_info_;
-          if (!si->host.empty()) {
-            host = si->host;
-          } else if (!si->proc_name.empty()) {
-            host = si->proc_name;
-          } else if (!si->name.empty()) {
-            host = si->name;
-          }
+    // Route 2a. The poller runs on EVERY replica, not just loc_id_ != 0: nobody
+    // knows in advance whose etcd wins an election, and the old guard meant a
+    // failover won by loc0's etcd had no coordinator at all. The signal file is
+    // MACHINE-LOCAL, so only the replica co-located with the new etcd leader
+    // ever observes a viewchange -> exactly one recovery coordinator.
+    Coroutine::CreateRun([this]() {
+      std::string host;
+      if (frame_ && frame_->site_info_) {
+        auto* si = frame_->site_info_;
+        if (!si->host.empty()) {
+          host = si->host;
+        } else if (!si->proc_name.empty()) {
+          host = si->proc_name;
+        } else if (!si->name.empty()) {
+          host = si->name;
         }
+      }
 #ifdef AWS
-        host = "0.0.0.0";
+      host = "0.0.0.0";
 #endif
-        Log_info("[ETCD-FAILOVER] Waiting for etcd signal on JM_Jetpack_%s", host.c_str());
-        while (true) {
-          if (jm_signal::exists_key("etcd", "primary_elected", host)) {
-            Log_info("[ETCD-FAILOVER] Received etcd signal on JM_Jetpack_%s", host.c_str());
-            JetpackRecoveryEntry();
-            break;
-          }
-          auto sp_e = Reactor::CreateSpEvent<TimeoutEvent>(1 * 1000); // 1ms (reduced from 10ms)
-          sp_e->Wait();
+      Log_info("[ETCD-FAILOVER] watching JM_Jetpack_%s for etcd view-change (loc_id=%d)",
+               host.c_str(), loc_id_);
+      // Establish the baseline ONCE, from what is already on disk at startup --
+      // not from the first viewchange that happens to arrive later.
+      //
+      // Suppressing "the first viewchange I ever see" does not suit a replica
+      // whose etcd was not the startup leader: it has no viewchange at all
+      // until a failover promotes it, so its first-ever viewchange IS the
+      // failover and would be taken as the baseline, and recovery would not
+      // run on the only replica that can coordinate it.
+      //
+      // This assumes deptran starts after the etcd cluster is healthy, which is
+      // what every launch path does (scripts/start_etcd_cluster.sh waits for
+      // health before deptran comes up).
+      epoch_t last_handled_view = 0;
+      {
+        std::string v0 = jm_signal::read_latest_value("etcd", host, "viewchange");
+        if (!v0.empty()) {
+          uint64_t t0 = 0, n0 = 0;
+          jm_signal::parse_uint_field(v0, "term", t0);
+          jm_signal::parse_uint_field(v0, "nonce", n0);
+          last_handled_view = (epoch_t) t0;
+          // Our co-located etcd led the startup election. Nothing failed, so no
+          // recovery -- but still ack, because that etcd may be sitting in its
+          // view barrier waiting for us.
+          jm_signal::set_key("jetpack",
+              "leader_paused term=" + std::to_string(t0) +
+              " nonce=" + std::to_string(n0), host);
+          Log_info("[ETCD-FAILOVER] baseline term=%lu from startup election (loc_id=%d), acked, no recovery",
+                   (unsigned long) t0, loc_id_);
+        } else {
+          Log_info("[ETCD-FAILOVER] no viewchange at startup (loc_id=%d): co-located etcd is not "
+                   "the startup leader, so any viewchange from here is a real failover", loc_id_);
         }
-      });
-    }
+      }
+      while (true) {
+        // "viewchange term=6 nonce=1723... lead=9 member=9"
+        std::string v = jm_signal::read_latest_value("etcd", host, "viewchange");
+        if (!v.empty()) {
+          uint64_t term = 0, nonce = 0, lead = 0;
+          jm_signal::parse_uint_field(v, "term", term);
+          jm_signal::parse_uint_field(v, "nonce", nonce);
+          jm_signal::parse_uint_field(v, "lead", lead);
+          if (term != 0 && (epoch_t) term != last_handled_view) {
+            last_handled_view = (epoch_t) term;
+            // Real failover: the etcd co-located with this replica is the new
+            // leader, so this replica coordinates recovery.
+            Log_info("[ETCD-FAILOVER] failover view term=%lu lead=%lu loc_id=%d site_id=%d",
+                     (unsigned long) term, (unsigned long) lead, loc_id_, site_id_);
+            int n_rep = (int) Config::GetConfig()->GetPartitionSize(partition_id_);
+            old_view_ = new_view_;
+            // leaders_ holds site ids (OnJetpackBeginRecovery compares
+            // GetLeader() against site_id_), and this replica is the one
+            // co-located with the new etcd leader. Stamping view_id_ with the
+            // real raft term is what makes Communicator::UpdatePartitionView
+            // accept the view at all -- it only takes strictly higher ids, so
+            // the old always-zero view was silently dropped every time.
+            new_view_ = View(n_rep, (int) site_id_, (epoch_t) term);
+            if ((epoch_t) term > oepoch_) oepoch_ = (epoch_t) term;
+            // The term+nonce ack is emitted inside, right after RECOVERY is set
+            // and before the multi-phase protocol runs, so etcd's raft loop
+            // unblocks in ~ms and the recovery's own resubmits (which replay
+            // through etcd) are never blocked.
+            JetpackRecoveryEntry((epoch_t) term, nonce);
+            // Deliberately no break: keep watching for subsequent failovers.
+          }
+        }
+        auto sp_e = Reactor::CreateSpEvent<TimeoutEvent>(1 * 1000); // 1ms
+        sp_e->Wait();
+      }
+    });
 #endif
   }
   bool IsLeader() override {

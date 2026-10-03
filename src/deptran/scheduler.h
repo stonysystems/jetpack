@@ -394,7 +394,7 @@ class TxLogServer {
   /* Some Jetpack elements begin */
   enum JetpackStatus {RECOVERY, READY};
   int jetpack_status_ = JetpackStatus::READY;
-  epoch_t jepoch_, oepoch_;
+  epoch_t jepoch_ = 0, oepoch_ = 0;
   View old_view_, new_view_;
   int sid, rid, sid_cnt_ = 0;
   RecoverySet rec_set_;
@@ -699,7 +699,11 @@ class TxLogServer {
     return false;
   }
 
-  void JetpackRecoveryEntry();
+  // etcd_view/etcd_nonce are set only by the etcd Route 2a poller; they carry
+  // the raft term and per-boot nonce that the "leader_paused" ack must echo so
+  // etcd's view barrier releases. Other backends (Raft/Mongo/ZK) use the
+  // defaults, which suppress the ack.
+  void JetpackRecoveryEntry(epoch_t etcd_view = 0, uint64_t etcd_nonce = 0);
 
   void JetpackRecovery();
 

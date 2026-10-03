@@ -200,14 +200,33 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     iproute2 \
     && rm -rf /var/lib/apt/lists/*
 
-# Install etcd server binary (v3.5.17)
-ARG ETCD_VERSION=v3.5.17
-ADD https://github.com/etcd-io/etcd/releases/download/${ETCD_VERSION}/etcd-${ETCD_VERSION}-linux-amd64.tar.gz /tmp/etcd.tar.gz
-RUN mkdir -p /opt/etcd && \
-    tar xzf /tmp/etcd.tar.gz -C /opt/etcd --strip-components=1 && \
-    rm /tmp/etcd.tar.gz && \
-    ln -s /opt/etcd/etcd /usr/local/bin/etcd && \
-    ln -s /opt/etcd/etcdctl /usr/local/bin/etcdctl
+# Build etcd from source with the Jetpack patches applied.
+#
+# The patched etcd writes the leader-change signal that
+# src/deptran/etcd/server.h polls for, so recovery in this container is
+# triggered by etcd itself rather than by the test harness.
+#
+# Pinned to v3.5.13 (not 3.5.17) because patches/etcd-*.patch are cut against
+# that tree; ETCD_LEADER_MODE picks which leader-change mechanism is patched in
+# (see scripts/build_etcd_patched.sh).
+ARG ETCD_VERSION=v3.5.13
+ARG ETCD_LEADER_MODE=viewbarrier
+ARG GO_VERSION=1.21.8
+ADD https://go.dev/dl/go${GO_VERSION}.linux-amd64.tar.gz /tmp/go.tar.gz
+COPY patches/ /tmp/jetpack/patches/
+COPY scripts/build_etcd_patched.sh /tmp/jetpack/scripts/
+# git is needed only to apply the patches (`git apply`); drop it again so it
+# does not linger in the runtime image.
+RUN apt-get update && apt-get install -y --no-install-recommends git && \
+    tar -xzf /tmp/go.tar.gz -C /usr/local && rm /tmp/go.tar.gz && \
+    PATH=/usr/local/go/bin:$PATH \
+      /tmp/jetpack/scripts/build_etcd_patched.sh \
+        --version "${ETCD_VERSION}" \
+        --leader  "${ETCD_LEADER_MODE}" \
+        --prefix  /usr/local/bin \
+        --src     /tmp/etcd-src && \
+    apt-get purge -y git && apt-get autoremove -y && rm -rf /var/lib/apt/lists/* && \
+    rm -rf /usr/local/go /tmp/etcd-src /tmp/jetpack /root/local
 
 # Copy built libraries from builder (all backends)
 COPY --from=builder /usr/local/lib/libmongoc* /usr/local/lib/

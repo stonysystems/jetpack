@@ -108,27 +108,29 @@ sudo systemctl restart mongod
 echo "[setup] mongod installed + bound 0.0.0.0:27017 with replSet=jetpack-rs and CPUAffinity=1"
 
 # ─────────────────────────────────────────────────────────────────────────
-# 2. etcd: install vanilla v3 release into ~/.local/bin/etcd
+# 2. etcd: build from source with the Jetpack patches applied
+#
+# A release binary does not write the leader-change signal that
+# src/deptran/etcd/server.h polls for, so etcd is built from source:
+# scripts/build_etcd_patched.sh applies patches/etcd-*.patch and caches the
+# result, so re-running setup is cheap.
+#
+# ETCD_LEADER_MODE selects which leader-change mechanism gets patched in:
+#   viewbarrier  (default) Route 2a term+nonce view barrier. This is what
+#                src/deptran/etcd/server.h polls for; the deptran side acks with
+#                "jetpack:leader_paused term=<T> nonce=<N>".
+#   signal       the earlier "etcd:primary_elected" mechanism. NOTE: the deptran
+#                poller does not read it, so recovery will NOT trigger in this
+#                mode; kept only for comparison.
+#   none         plain upstream etcd (recovery will not trigger).
 # ─────────────────────────────────────────────────────────────────────────
-ETCD_VER="v3.5.13"
-mkdir -p "$HOME/.local/bin"
-if [[ ! -x "$HOME/.local/bin/etcd" ]]; then
-    echo "[setup] downloading etcd ${ETCD_VER}..."
-    arch=$(dpkg --print-architecture)   # amd64 / arm64
-    case "$arch" in
-        amd64) etcd_arch="amd64" ;;
-        arm64) etcd_arch="arm64" ;;
-        *) echo "[setup] unknown arch '$arch' for etcd"; exit 1 ;;
-    esac
-    tmpd=$(mktemp -d)
-    curl -fsSL "https://github.com/etcd-io/etcd/releases/download/${ETCD_VER}/etcd-${ETCD_VER}-linux-${etcd_arch}.tar.gz" \
-        -o "$tmpd/etcd.tar.gz"
-    tar -xzf "$tmpd/etcd.tar.gz" -C "$tmpd"
-    cp "$tmpd/etcd-${ETCD_VER}-linux-${etcd_arch}/etcd"     "$HOME/.local/bin/etcd"
-    cp "$tmpd/etcd-${ETCD_VER}-linux-${etcd_arch}/etcdctl"  "$HOME/.local/bin/etcdctl"
-    chmod +x "$HOME/.local/bin/etcd" "$HOME/.local/bin/etcdctl"
-    rm -rf "$tmpd"
-fi
+ETCD_VER="${ETCD_VER:-v3.5.13}"
+ETCD_LEADER_MODE="${ETCD_LEADER_MODE:-viewbarrier}"
+SETUP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+"${SETUP_DIR}/build_etcd_patched.sh" \
+    --version "$ETCD_VER" \
+    --leader  "$ETCD_LEADER_MODE" \
+    --prefix  "$HOME/.local/bin"
 echo "[setup] etcd at $HOME/.local/bin/etcd ($("$HOME/.local/bin/etcd" --version | head -1))"
 
 # ─────────────────────────────────────────────────────────────────────────

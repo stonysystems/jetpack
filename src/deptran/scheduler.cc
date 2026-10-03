@@ -1091,7 +1091,7 @@ void JetpackCommandPool::print_log() {
 #endif
 
 
-void TxLogServer::JetpackRecoveryEntry() {
+void TxLogServer::JetpackRecoveryEntry(epoch_t etcd_view, uint64_t etcd_nonce) {
   jetpack_recovery_start_time_ = std::chrono::steady_clock::now();
   struct timeval recovery_start_tv;
   gettimeofday(&recovery_start_tv, nullptr);
@@ -1123,6 +1123,18 @@ void TxLogServer::JetpackRecoveryEntry() {
     jm_signal::set_key("jetpack", "fastpath_stopped", host);
     Log_info("[JETPACK-RECOVERY] Emitted jetpack:fastpath_stopped on JM_Jetpack_%s",
              host.c_str());
+    // Route 2a: the term+nonce-matched ack that releases the etcd new-leader
+    // barrier (etcd's jetpackViewBarrier polls for exactly this line). Echoing
+    // etcd's per-boot nonce makes it robust against a stale ack left in the
+    // append-only signal file by a previous run, whose terms restart small.
+    // etcd_view == 0 for non-etcd callers -> no ack.
+    if (etcd_view != 0) {
+      jm_signal::set_key("jetpack",
+          "leader_paused term=" + std::to_string(etcd_view) +
+          " nonce=" + std::to_string(etcd_nonce), host);
+      Log_info("[JETPACK-RECOVERY] Emitted jetpack:leader_paused term=%u nonce=%llu on JM_Jetpack_%s",
+               (unsigned) etcd_view, (unsigned long long) etcd_nonce, host.c_str());
+    }
   }
 
   // Combined recovery RPC: updates views and pulls commands

@@ -150,8 +150,8 @@ class JetpackPullIdSetQuorumEvent: public QuorumEvent {
  public:
   using QuorumEvent::QuorumEvent;
   std::vector<shared_ptr<VecRecData>> id_sets_;
-  epoch_t max_jepoch_ = -1;
-  epoch_t max_oepoch_ = -1;
+  epoch_t max_jepoch_ = 0;
+  epoch_t max_oepoch_ = 0;
   
   void FeedResponse(bool y, epoch_t jepoch, epoch_t oepoch, const MarshallDeputy& id_set) {
     if (y) {
@@ -241,8 +241,8 @@ class JetpackPullRecoveryQuorumEvent: public QuorumEvent {
     return result;
   }
 
-  epoch_t max_jepoch_ = -1;
-  epoch_t max_oepoch_ = -1;
+  epoch_t max_jepoch_ = 0;
+  epoch_t max_oepoch_ = 0;
 
  private:
   struct KeyState {
@@ -314,8 +314,8 @@ class JetpackPullCmdQuorumEvent: public QuorumEvent {
 
   const std::vector<key_t>& OrderedKeys() const { return ordered_keys_; }
 
-  epoch_t max_jepoch_ = -1;
-  epoch_t max_oepoch_ = -1;
+  epoch_t max_jepoch_ = 0;
+  epoch_t max_oepoch_ = 0;
 
  private:
   struct KeyState {
@@ -334,8 +334,8 @@ class JetpackPullCmdQuorumEvent: public QuorumEvent {
 class JetpackRecordCmdQuorumEvent: public QuorumEvent {
  public:
   using QuorumEvent::QuorumEvent;
-  epoch_t max_jepoch_ = -1;
-  epoch_t max_oepoch_ = -1;
+  epoch_t max_jepoch_ = 0;
+  epoch_t max_oepoch_ = 0;
   std::unordered_map<key_t, shared_ptr<Marshallable>> recovered_cmds_;
 
   void FeedResponse(bool y, epoch_t jepoch, epoch_t oepoch, const MarshallDeputy& batch_md) {
@@ -375,8 +375,8 @@ class JetpackRecordCmdQuorumEvent: public QuorumEvent {
 class JetpackPrepareQuorumEvent: public QuorumEvent {
  public:
   using QuorumEvent::QuorumEvent;
-  epoch_t max_jepoch_ = -1;
-  epoch_t max_oepoch_ = -1;
+  epoch_t max_jepoch_ = 0;
+  epoch_t max_oepoch_ = 0;
   ballot_t max_accepted_ballot_ = -1;
   ballot_t max_seen_ballot_ = -1;
   int accepted_sid_ = -1;
@@ -419,8 +419,8 @@ class JetpackPrepareQuorumEvent: public QuorumEvent {
 class JetpackAcceptQuorumEvent: public QuorumEvent {
  public:
   using QuorumEvent::QuorumEvent;
-  epoch_t max_jepoch_ = -1;
-  epoch_t max_oepoch_ = -1;
+  epoch_t max_jepoch_ = 0;
+  epoch_t max_oepoch_ = 0;
   ballot_t max_seen_ballot_ = -1;
   
   void FeedResponse(bool y, epoch_t jepoch, epoch_t oepoch, ballot_t max_seen_ballot) {
@@ -445,8 +445,8 @@ class JetpackAcceptQuorumEvent: public QuorumEvent {
 class JetpackPullRecSetInsQuorumEvent: public QuorumEvent {
  public:
   using QuorumEvent::QuorumEvent;
-  epoch_t max_jepoch_ = -1;
-  epoch_t max_oepoch_ = -1;
+  epoch_t max_jepoch_ = 0;
+  epoch_t max_oepoch_ = 0;
   shared_ptr<Marshallable> recovered_cmd_;
   
   void FeedResponse(bool y, epoch_t jepoch, epoch_t oepoch, const MarshallDeputy& cmd) {

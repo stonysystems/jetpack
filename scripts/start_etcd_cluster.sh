@@ -57,3 +57,19 @@ for i in "${!IPS[@]}"; do
     ssh "ztang@$ip" "tail -20 /tmp/etcd-${name}.log" 2>&1 | sed "s/^/    /"
   fi
 done
+
+# Clear the Jetpack signal files AFTER the cluster is up but BEFORE deptran
+# starts. Two reasons this ordering is load-bearing now that we run a patched
+# etcd (scripts/build_etcd_patched.sh):
+#   1. The cluster's *startup* election is a leadership change like any other,
+#      so etcd writes "etcd:primary_elected" even though nothing failed.
+#   2. The file is append-only and lives in /tmp across runs, and the deptran
+#      poller matches any line anywhere in it (jm_signal::exists_key).
+# Leave either behind and every deptran replica fires a bogus recovery the
+# moment it starts.
+echo "[etcd] clearing stale Jetpack signal files..."
+for ip in "${IPS[@]}"; do
+  ssh -o ConnectTimeout=5 "ztang@$ip" "rm -f /tmp/JM_Jetpack_*" &
+done
+wait
+echo "[etcd] ready - start deptran now (signal files are clean)"

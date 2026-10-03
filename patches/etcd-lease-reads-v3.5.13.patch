@@ -1,0 +1,64 @@
+--- a/server/etcdserver/raft.go
++++ b/server/etcdserver/raft.go
+@@ -19,7 +19,9 @@
+ 	"expvar"
+ 	"fmt"
+ 	"log"
++	"os"
+ 	"sort"
++	"strings"
+ 	"sync"
+ 	"time"
+ 
+@@ -509,6 +511,7 @@
+ 		PreVote:         cfg.PreVote,
+ 		Logger:          NewRaftLoggerZap(cfg.Logger.Named("raft")),
+ 	}
++	jetpackApplyReadOnlyOption(c, cfg.Logger)
+ 	if len(peers) == 0 {
+ 		n = raft.RestartNode(c)
+ 	} else {
+@@ -552,6 +555,7 @@
+ 		PreVote:         cfg.PreVote,
+ 		Logger:          NewRaftLoggerZap(cfg.Logger.Named("raft")),
+ 	}
++	jetpackApplyReadOnlyOption(c, cfg.Logger)
+ 
+ 	n := raft.RestartNode(c)
+ 	raftStatusMu.Lock()
+@@ -626,6 +630,7 @@
+ 		PreVote:         cfg.PreVote,
+ 		Logger:          NewRaftLoggerZap(cfg.Logger.Named("raft")),
+ 	}
++	jetpackApplyReadOnlyOption(c, cfg.Logger)
+ 
+ 	n := raft.RestartNode(c)
+ 	raftStatus = n.Status
+@@ -734,3 +739,27 @@
+ 
+ 	return ents
+ }
++
++// jetpackApplyReadOnlyOption selects raft's linearizable-read strategy from the
++// ETCD_READ_ONLY_OPTION environment variable. Upstream etcd leaves
++// raft.Config.ReadOnlyOption at its zero value, ReadOnlySafe (ReadIndex,
++// quorum-confirmed). Setting ETCD_READ_ONLY_OPTION=lease selects
++// ReadOnlyLeaseBased, which answers linearizable reads from the leader's lease
++// without the ReadIndex round trip. Any other value falls back to safe.
++func jetpackApplyReadOnlyOption(c *raft.Config, lg *zap.Logger) {
++	switch strings.ToLower(strings.TrimSpace(os.Getenv("ETCD_READ_ONLY_OPTION"))) {
++	case "", "safe":
++		c.ReadOnlyOption = raft.ReadOnlySafe
++	case "lease", "lease-based", "leasebased":
++		c.ReadOnlyOption = raft.ReadOnlyLeaseBased
++		if lg != nil {
++			lg.Warn("ETCD_READ_ONLY_OPTION=lease: using lease-based linearizable reads (non-default)")
++		}
++	default:
++		if lg != nil {
++			lg.Warn("unrecognized ETCD_READ_ONLY_OPTION; falling back to safe (ReadIndex)",
++				zap.String("value", os.Getenv("ETCD_READ_ONLY_OPTION")))
++		}
++		c.ReadOnlyOption = raft.ReadOnlySafe
++	}
++}
