@@ -1,0 +1,16 @@
+== 2026-10-31T14:43Z verus --crate-type=lib verus/jetpack/lib.rs
+verification results:: 40 verified, 0 errors
+== 2026-10-31T15:05Z verus --crate-type=lib verus/jetpack/lib.rs (all four theorems of top.rs)
+verification results:: 109 verified, 0 errors
+== 2026-10-31T15:07Z verus --crate-type=lib verus/jetpack/lib.rs (final: theorems 1-5 of top.rs)
+verification results:: 115 verified, 0 errors
+-- no-cheating grep (assume/admit/external_body):
+none
+-- check_english:
+ok: 0 file(s) with CJK characters
+== 2026-10-31T15:20Z verus --no-cheating --crate-type=lib verus/jetpack/lib.rs (theorems 1-5 + witnesses W1, W2)
+verification results:: 147 verified, 0 errors
+-- grep assume/admit/external_body:
+none
+-- check_english:
+ok: 0 file(s) with CJK characters
