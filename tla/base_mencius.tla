@@ -30,6 +30,12 @@ Nil == "Nil"
 NilCmd == [tag |-> "NilCmd"]
 NoOp == [cmd_id |-> "NoOp", key |-> "NoOp"]
 
+\* Log entry kind. Every chosen slot becomes an AppendCommand entry whose
+\* .value is the slot's value (a command, or NoOp for a skipped slot), the
+\* same shape as base_raft / base_mongodb entries, so jetpack.tla's EntryCmds
+\* can read Mencius logs.
+AppendCommand == "AppendCommand"
+
 \* Server states.
 Follower   == "Follower"
 Candidate  == "Candidate"
@@ -128,7 +134,9 @@ ExtendLogForProposer(i, j, newSS, newSV) ==
                         SlotFor(j, n+1) > MaxSlot \/
                         newSS[SlotFor(j, n+1)] \notin {Learned, Skipped})
         newEntries == [k \in 1..(maxExt - curLen) |->
-                        [term |-> currentTerm[i], value |-> newSV[SlotFor(j, curLen + k)]]]
+                        [command |-> AppendCommand,
+                         term    |-> currentTerm[i],
+                         value   |-> newSV[SlotFor(j, curLen + k)]]]
     IN log[i][j] \o newEntries
 
 \* Message bag helpers.
