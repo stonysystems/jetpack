@@ -383,9 +383,13 @@ ClientRequest(i, v) ==
     /\ UNCHANGED <<messages, serverVars, candidateVars, leaderVars,
                    commitIndex, pending_reconfig, auxVars>>
 
+\* Replication keeps running while the leader is paused by Jetpack
+\* (ToBeLeader, the pseudocode (docs/pseudocode.md) T1-T2): the paused leader still sends
+\* AppendEntries (heartbeats and its own Recovered entry) and still commits.
+\* Only proposing new client commands (ClientRequest, RequestReconfig) waits.
 AppendEntries(i, j) ==
     /\ i /= j
-    /\ ostate[i] = Leader
+    /\ ostate[i] \in {Leader, ToBeLeader}
     /\ j \in config[i].members
     /\ nextIndex[i][j] >= 1
     /\ LET prevLogIndex == nextIndex[i][j] - 1
@@ -506,7 +510,7 @@ HandleAppendEntriesResponse ==
         /\ ReceivableMessage(m, AppendEntriesResponse, EqualTerm)
         /\ LET i == m.mdest
                j == m.msource
-           IN /\ ostate[i] = Leader
+           IN /\ ostate[i] \in {Leader, ToBeLeader}
               /\ \/ /\ m.mresult = Ok
                     /\ nextIndex'  = [nextIndex EXCEPT ![i][j] = m.mmatchIndex + 1]
                     /\ matchIndex' = [matchIndex EXCEPT ![i][j] = m.mmatchIndex]
@@ -532,7 +536,7 @@ IsRemovedFromCluster(i, newCommitIndex) ==
         /\ i \notin ServerLog(i)[index].value.members
 
 AdvanceCommitIndex(i) ==
-    /\ ostate[i] = Leader
+    /\ ostate[i] \in {Leader, ToBeLeader}
     /\ LET soleLog == ServerLog(i)
            Agree(index, memberSet) ==
                IF i \in memberSet
@@ -559,18 +563,19 @@ AdvanceCommitIndex(i) ==
     /\ UNCHANGED <<messages, currentTerm, votedFor, log, pending_reconfig, auxVars>>
 
 (***************************************************************************)
-(* Reconfiguration: two-step, gated by Jetpack recovery                    *)
+(* Reconfiguration: the config entry starts the new view (the pseudocode T1-T2)       *)
 (*                                                                         *)
-(*   Leader ──RequestReconfig──▶ ToBeLeader                                *)
+(*   Leader ──RequestReconfig──▶ ToBeLeader (paused)                       *)
 (*                                  │                                      *)
-(*                            Jetpack recovery runs                        *)
-(*                            (round over the new member set)              *)
+(*       AppendPendingReconfigToLog ──▶ config entry appended; it starts   *)
+(*                                      view (term, its index)             *)
 (*                                  │                                      *)
-(*                          FinishRecovery sets ostate = Leader            *)
+(*                            Jetpack recovery runs for that view;         *)
+(*                            Recovered(S) is the next entry               *)
 (*                                  │                                      *)
-(*       AppendPendingReconfigToLog ──▶ entry appended to log              *)
+(*                   Recovered(S) committed: ostate = Leader (resume)      *)
 (*                                                                         *)
-(* The wrapper provides the view update; this module only mutates the      *)
+(* The wrapper provides the view; this module only mutates the             *)
 (* protocol-layer variables (ostate, pending_reconfig, counters).          *)
 (***************************************************************************)
 
@@ -599,10 +604,10 @@ RequestReconfig(i, op, target) ==
     /\ UNCHANGED <<messages, config, currentTerm, votedFor, candidateVars,
                    leaderVars, logVars, electionCtr, restartCtr>>
 
-\* Fired only after Jetpack recovery completes (FinishRecovery has set
-\* ostate back to Leader). Emits the actual config-log entry.
+\* Emits the config-log entry while the leader is paused (ToBeLeader); the
+\* entry starts the new view, and Jetpack's recovery for it runs next.
 AppendPendingReconfigToLog(i) ==
-    /\ ostate[i] = Leader
+    /\ ostate[i] = ToBeLeader
     /\ pending_reconfig[i] /= NoReconfig
     /\ LET pr        == pending_reconfig[i]
            cmdTag    == IF pr.op = ReconfigAdd THEN AddServerCommand ELSE RemoveServerCommand

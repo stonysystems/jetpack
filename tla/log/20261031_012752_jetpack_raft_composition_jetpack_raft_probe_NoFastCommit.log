@@ -1,0 +1,382 @@
+=== TLC Run ===
+Spec:      jetpack_raft_composition.tla
+Config:    jetpack_raft_probe_NoFastCommit.cfg
+Mode:      local
+Detected total memory: 24576MB
+Auto 1/3 memory cap: 8192MB
+Configured TLC memory cap: 8192MB
+Local Java bitness: 64
+Enforced TLC memory cap: 7372MB
+JVM heap cap: 7372MB
+Log:       /Users/mintgreen/Repos/jetpack/tla/log/20261031_012752_jetpack_raft_composition_jetpack_raft_probe_NoFastCommit.log
+Started:   2026-10-31T01:27:52-04:00
+===============
+Using config: jetpack_raft_probe_NoFastCommit.cfg
+--- Config contents ---
+\* Small config for jetpack_raft_composition (v10): 3 servers, one election,
+\* no reconfiguration. Exhaustive in minutes.
+SPECIFICATION Spec
+
+CONSTANTS
+  Server = {s1, s2, s3}
+  Client = {c1}
+  CmdId = {id1}
+  Key = {k1}
+  InitialMembers = {s1, s2, s3}
+  MinClusterSize = 2
+  MaxClusterSize = 3
+  MaxElections = 1
+  MaxRestarts = 0
+  MaxAddReconfigs = 0
+  MaxRemoveReconfigs = 0
+  IncludeThesisBug = FALSE
+
+CONSTRAINT SmallStateConstraint
+
+INVARIANT Probe_NoFastCommit
+--- End config ---
+
+Running: tlc2.TLC -nowarning -deadlock -config /Users/mintgreen/Repos/jetpack/tla/jetpack_raft_probe_NoFastCommit.cfg jetpack_raft_composition.tla -workers 4
+
+TLC2 Version 2.16 of 31 December 2020 (rev: cdddf55)
+Running breadth-first search Model-Checking with fp 116 and seed -8347206576922391091 with 4 workers on 8 cores with 6556MB heap and 64MB offheap memory (Mac OS X 14.5 aarch64, Oracle Corporation 1.8.0_503 x86_64, MSBDiskFPSet, DiskStateQueue).
+Parsing file /Users/mintgreen/Repos/jetpack/tla/jetpack_raft_composition.tla
+Parsing file /private/var/folders/cn/4cff675n3fx0_ns__f97kngc0000gn/T/Integers.tla
+Parsing file /private/var/folders/cn/4cff675n3fx0_ns__f97kngc0000gn/T/Naturals.tla
+Parsing file /private/var/folders/cn/4cff675n3fx0_ns__f97kngc0000gn/T/FiniteSets.tla
+Parsing file /private/var/folders/cn/4cff675n3fx0_ns__f97kngc0000gn/T/Sequences.tla
+Parsing file /private/var/folders/cn/4cff675n3fx0_ns__f97kngc0000gn/T/TLC.tla
+Parsing file /Users/mintgreen/Repos/jetpack/tla/base_raft.tla
+Parsing file /Users/mintgreen/Repos/jetpack/tla/jetpack.tla
+Semantic processing of module Naturals
+Semantic processing of module Integers
+Semantic processing of module Sequences
+Semantic processing of module FiniteSets
+Semantic processing of module TLC
+Semantic processing of module base_raft
+Semantic processing of module jetpack
+Semantic processing of module jetpack_raft_composition
+Starting... (2026-10-31 01:27:52)
+Computing initial states...
+Finished computing initial states: 1 distinct state generated at 2026-10-31 01:27:52.
+Error: Invariant Probe_NoFastCommit is violated.
+Error: The behavior up to this point is:
+State 1: <Initial predicate>
+/\ config = ( s1 :> [members |-> {s1, s2, s3}, id |-> 1, committed |-> TRUE] @@
+  s2 :> [members |-> {s1, s2, s3}, id |-> 1, committed |-> TRUE] @@
+  s3 :> [members |-> {s1, s2, s3}, id |-> 1, committed |-> TRUE] )
+/\ original_execution_cmds = <<>>
+/\ electionCtr = 0
+/\ applied = [sole |-> 0]
+/\ restartCtr = 0
+/\ removeReconfigCtr = 0
+/\ client_pending = (c1 :> [tag |-> "NilCmd"])
+/\ execution_cmds = <<>>
+/\ pending_reconfig = ( s1 :> [op |-> "None", target |-> "Nil"] @@
+  s2 :> [op |-> "None", target |-> "Nil"] @@
+  s3 :> [op |-> "None", target |-> "Nil"] )
+/\ ostate = (s1 :> "Leader" @@ s2 :> "Follower" @@ s3 :> "Follower")
+/\ addReconfigCtr = 0
+/\ fast_committed = {}
+/\ subm = ( s1 :> [epoch |-> 0, set |-> {}, done |-> TRUE] @@
+  s2 :> [epoch |-> 0, set |-> {}, done |-> TRUE] @@
+  s3 :> [epoch |-> 0, set |-> {}, done |-> TRUE] )
+/\ nextIndex = ( s1 :> (s1 :> 2 @@ s2 :> 2 @@ s3 :> 2) @@
+  s2 :> (s1 :> 1 @@ s2 :> 1 @@ s3 :> 1) @@
+  s3 :> (s1 :> 1 @@ s2 :> 1 @@ s3 :> 1) )
+/\ currentTerm = (s1 :> 1 @@ s2 :> 1 @@ s3 :> 1)
+/\ client_heard_from = (c1 :> {})
+/\ client_successes = (c1 :> {})
+/\ votedFor = (s1 :> "Nil" @@ s2 :> "Nil" @@ s3 :> "Nil")
+/\ cstate = (s1 :> [view |-> [epoch |-> 0, replica_ids |-> {}, proposing_replica_ids |-> {}], vn |-> [epoch |-> 0, replica_ids |-> {}, proposing_replica_ids |-> {}], k |-> 0, acc |-> (s1 :> FALSE @@ s2 :> FALSE @@ s3 :> FALSE), phase |-> "Idle", rset |-> {}, br |-> (s1 :> "Nil" @@ s2 :> "Nil" @@ s3 :> "Nil"), prep |-> (s1 :> "Nil" @@ s2 :> "Nil" @@ s3 :> "Nil"), fin |-> (s1 :> FALSE @@ s2 :> FALSE @@ s3 :> FALSE)] @@ s2 :> [view |-> [epoch |-> 0, replica_ids |-> {}, proposing_replica_ids |-> {}], vn |-> [epoch |-> 0, replica_ids |-> {}, proposing_replica_ids |-> {}], k |-> 0, acc |-> (s1 :> FALSE @@ s2 :> FALSE @@ s3 :> FALSE), phase |-> "Idle", rset |-> {}, br |-> (s1 :> "Nil" @@ s2 :> "Nil" @@ s3 :> "Nil"), prep |-> (s1 :> "Nil" @@ s2 :> "Nil" @@ s3 :> "Nil"), fin |-> (s1 :> FALSE @@ s2 :> FALSE @@ s3 :> FALSE)] @@ s3 :> [view |-> [epoch |-> 0, replica_ids |-> {}, proposing_replica_ids |-> {}], vn |-> [epoch |-> 0, replica_ids |-> {}, proposing_replica_ids |-> {}], k |-> 0, acc |-> (s1 :> FALSE @@ s2 :> FALSE @@ s3 :> FALSE), phase |-> "Idle", rset |-> {}, br |-> (s1 :> "Nil" @@ s2 :> "Nil" @@ s3 :> "Nil"), prep |-> (s1 :> "Nil" @@ s2 :> "Nil" @@ s3 :> "Nil"), fin |-> (s1 :> FALSE @@ s2 :> FALSE @@ s3 :> FALSE)])
+/\ matchIndex = ( s1 :> (s1 :> 1 @@ s2 :> 1 @@ s3 :> 1) @@
+  s2 :> (s1 :> 0 @@ s2 :> 0 @@ s3 :> 0) @@
+  s3 :> (s1 :> 0 @@ s2 :> 0 @@ s3 :> 0) )
+/\ client_view = (c1 :> [epoch |-> 17, replica_ids |-> {s1, s2, s3}, proposing_replica_ids |-> {s1}])
+/\ rstate = (s1 :> [lnv |-> [epoch |-> 17, replica_ids |-> {s1, s2, s3}, proposing_replica_ids |-> {s1}], nv |-> [epoch |-> 17, replica_ids |-> {s1, s2, s3}, proposing_replica_ids |-> {s1}], mode |-> "Normal", pool |-> {}, msb |-> {}, acc |-> {}] @@ s2 :> [lnv |-> [epoch |-> 17, replica_ids |-> {s1, s2, s3}, proposing_replica_ids |-> {s1}], nv |-> [epoch |-> 17, replica_ids |-> {s1, s2, s3}, proposing_replica_ids |-> {s1}], mode |-> "Normal", pool |-> {}, msb |-> {}, acc |-> {}] @@ s3 :> [lnv |-> [epoch |-> 17, replica_ids |-> {s1, s2, s3}, proposing_replica_ids |-> {s1}], nv |-> [epoch |-> 17, replica_ids |-> {s1, s2, s3}, proposing_replica_ids |-> {s1}], mode |-> "Normal", pool |-> {}, msb |-> {}, acc |-> {}])
+/\ commitIndex = (s1 :> [sole |-> 1] @@ s2 :> [sole |-> 1] @@ s3 :> [sole |-> 1])
+/\ client_issued = {}
+/\ messages = << >>
+/\ log = (s1 :> [sole |-> <<[term |-> 1, command |-> "InitClusterCommand", value |-> [members |-> {s1, s2, s3}, cmd_id |-> "Nil", id |-> 1, key |-> "Nil"]]>>] @@ s2 :> [sole |-> <<[term |-> 1, command |-> "InitClusterCommand", value |-> [members |-> {s1, s2, s3}, cmd_id |-> "Nil", id |-> 1, key |-> "Nil"]]>>] @@ s3 :> [sole |-> <<[term |-> 1, command |-> "InitClusterCommand", value |-> [members |-> {s1, s2, s3}, cmd_id |-> "Nil", id |-> 1, key |-> "Nil"]]>>])
+/\ votesGranted = (s1 :> {} @@ s2 :> {} @@ s3 :> {})
+
+State 2: <WClientSendFastCmd line 189, col 5 to line 190, col 29 of module jetpack_raft_composition>
+/\ config = ( s1 :> [members |-> {s1, s2, s3}, id |-> 1, committed |-> TRUE] @@
+  s2 :> [members |-> {s1, s2, s3}, id |-> 1, committed |-> TRUE] @@
+  s3 :> [members |-> {s1, s2, s3}, id |-> 1, committed |-> TRUE] )
+/\ original_execution_cmds = <<>>
+/\ electionCtr = 0
+/\ applied = [sole |-> 0]
+/\ restartCtr = 0
+/\ removeReconfigCtr = 0
+/\ client_pending = (c1 :> [cmd_id |-> id1, key |-> k1])
+/\ execution_cmds = <<>>
+/\ pending_reconfig = ( s1 :> [op |-> "None", target |-> "Nil"] @@
+  s2 :> [op |-> "None", target |-> "Nil"] @@
+  s3 :> [op |-> "None", target |-> "Nil"] )
+/\ ostate = (s1 :> "Leader" @@ s2 :> "Follower" @@ s3 :> "Follower")
+/\ addReconfigCtr = 0
+/\ fast_committed = {}
+/\ subm = ( s1 :> [epoch |-> 0, set |-> {}, done |-> TRUE] @@
+  s2 :> [epoch |-> 0, set |-> {}, done |-> TRUE] @@
+  s3 :> [epoch |-> 0, set |-> {}, done |-> TRUE] )
+/\ nextIndex = ( s1 :> (s1 :> 2 @@ s2 :> 2 @@ s3 :> 2) @@
+  s2 :> (s1 :> 1 @@ s2 :> 1 @@ s3 :> 1) @@
+  s3 :> (s1 :> 1 @@ s2 :> 1 @@ s3 :> 1) )
+/\ currentTerm = (s1 :> 1 @@ s2 :> 1 @@ s3 :> 1)
+/\ client_heard_from = (c1 :> {})
+/\ client_successes = (c1 :> {})
+/\ votedFor = (s1 :> "Nil" @@ s2 :> "Nil" @@ s3 :> "Nil")
+/\ cstate = (s1 :> [view |-> [epoch |-> 0, replica_ids |-> {}, proposing_replica_ids |-> {}], vn |-> [epoch |-> 0, replica_ids |-> {}, proposing_replica_ids |-> {}], k |-> 0, acc |-> (s1 :> FALSE @@ s2 :> FALSE @@ s3 :> FALSE), phase |-> "Idle", rset |-> {}, br |-> (s1 :> "Nil" @@ s2 :> "Nil" @@ s3 :> "Nil"), prep |-> (s1 :> "Nil" @@ s2 :> "Nil" @@ s3 :> "Nil"), fin |-> (s1 :> FALSE @@ s2 :> FALSE @@ s3 :> FALSE)] @@ s2 :> [view |-> [epoch |-> 0, replica_ids |-> {}, proposing_replica_ids |-> {}], vn |-> [epoch |-> 0, replica_ids |-> {}, proposing_replica_ids |-> {}], k |-> 0, acc |-> (s1 :> FALSE @@ s2 :> FALSE @@ s3 :> FALSE), phase |-> "Idle", rset |-> {}, br |-> (s1 :> "Nil" @@ s2 :> "Nil" @@ s3 :> "Nil"), prep |-> (s1 :> "Nil" @@ s2 :> "Nil" @@ s3 :> "Nil"), fin |-> (s1 :> FALSE @@ s2 :> FALSE @@ s3 :> FALSE)] @@ s3 :> [view |-> [epoch |-> 0, replica_ids |-> {}, proposing_replica_ids |-> {}], vn |-> [epoch |-> 0, replica_ids |-> {}, proposing_replica_ids |-> {}], k |-> 0, acc |-> (s1 :> FALSE @@ s2 :> FALSE @@ s3 :> FALSE), phase |-> "Idle", rset |-> {}, br |-> (s1 :> "Nil" @@ s2 :> "Nil" @@ s3 :> "Nil"), prep |-> (s1 :> "Nil" @@ s2 :> "Nil" @@ s3 :> "Nil"), fin |-> (s1 :> FALSE @@ s2 :> FALSE @@ s3 :> FALSE)])
+/\ matchIndex = ( s1 :> (s1 :> 1 @@ s2 :> 1 @@ s3 :> 1) @@
+  s2 :> (s1 :> 0 @@ s2 :> 0 @@ s3 :> 0) @@
+  s3 :> (s1 :> 0 @@ s2 :> 0 @@ s3 :> 0) )
+/\ client_view = (c1 :> [epoch |-> 17, replica_ids |-> {s1, s2, s3}, proposing_replica_ids |-> {s1}])
+/\ rstate = (s1 :> [lnv |-> [epoch |-> 17, replica_ids |-> {s1, s2, s3}, proposing_replica_ids |-> {s1}], nv |-> [epoch |-> 17, replica_ids |-> {s1, s2, s3}, proposing_replica_ids |-> {s1}], mode |-> "Normal", pool |-> {}, msb |-> {}, acc |-> {}] @@ s2 :> [lnv |-> [epoch |-> 17, replica_ids |-> {s1, s2, s3}, proposing_replica_ids |-> {s1}], nv |-> [epoch |-> 17, replica_ids |-> {s1, s2, s3}, proposing_replica_ids |-> {s1}], mode |-> "Normal", pool |-> {}, msb |-> {}, acc |-> {}] @@ s3 :> [lnv |-> [epoch |-> 17, replica_ids |-> {s1, s2, s3}, proposing_replica_ids |-> {s1}], nv |-> [epoch |-> 17, replica_ids |-> {s1, s2, s3}, proposing_replica_ids |-> {s1}], mode |-> "Normal", pool |-> {}, msb |-> {}, acc |-> {}])
+/\ commitIndex = (s1 :> [sole |-> 1] @@ s2 :> [sole |-> 1] @@ s3 :> [sole |-> 1])
+/\ client_issued = {[cmd_id |-> id1, key |-> k1]}
+/\ messages = ([mdest |-> s1, mtype |-> "FastCmd", mview |-> [epoch |-> 17, replica_ids |-> {s1, s2, s3}, proposing_replica_ids |-> {s1}], msource |-> c1, mcmd |-> [cmd_id |-> id1, key |-> k1]] :> 1 @@ [mdest |-> s2, mtype |-> "FastCmd", mview |-> [epoch |-> 17, replica_ids |-> {s1, s2, s3}, proposing_replica_ids |-> {s1}], msource |-> c1, mcmd |-> [cmd_id |-> id1, key |-> k1]] :> 1 @@ [mdest |-> s3, mtype |-> "FastCmd", mview |-> [epoch |-> 17, replica_ids |-> {s1, s2, s3}, proposing_replica_ids |-> {s1}], msource |-> c1, mcmd |-> [cmd_id |-> id1, key |-> k1]] :> 1)
+/\ log = (s1 :> [sole |-> <<[term |-> 1, command |-> "InitClusterCommand", value |-> [members |-> {s1, s2, s3}, cmd_id |-> "Nil", id |-> 1, key |-> "Nil"]]>>] @@ s2 :> [sole |-> <<[term |-> 1, command |-> "InitClusterCommand", value |-> [members |-> {s1, s2, s3}, cmd_id |-> "Nil", id |-> 1, key |-> "Nil"]]>>] @@ s3 :> [sole |-> <<[term |-> 1, command |-> "InitClusterCommand", value |-> [members |-> {s1, s2, s3}, cmd_id |-> "Nil", id |-> 1, key |-> "Nil"]]>>])
+/\ votesGranted = (s1 :> {} @@ s2 :> {} @@ s3 :> {})
+
+State 3: <Next line 264, col 8 to line 264, col 51 of module jetpack_raft_composition>
+/\ config = ( s1 :> [members |-> {s1, s2, s3}, id |-> 1, committed |-> TRUE] @@
+  s2 :> [members |-> {s1, s2, s3}, id |-> 1, committed |-> TRUE] @@
+  s3 :> [members |-> {s1, s2, s3}, id |-> 1, committed |-> TRUE] )
+/\ original_execution_cmds = <<>>
+/\ electionCtr = 0
+/\ applied = [sole |-> 0]
+/\ restartCtr = 0
+/\ removeReconfigCtr = 0
+/\ client_pending = (c1 :> [cmd_id |-> id1, key |-> k1])
+/\ execution_cmds = <<>>
+/\ pending_reconfig = ( s1 :> [op |-> "None", target |-> "Nil"] @@
+  s2 :> [op |-> "None", target |-> "Nil"] @@
+  s3 :> [op |-> "None", target |-> "Nil"] )
+/\ ostate = (s1 :> "Leader" @@ s2 :> "Follower" @@ s3 :> "Follower")
+/\ addReconfigCtr = 0
+/\ fast_committed = {}
+/\ subm = ( s1 :> [epoch |-> 0, set |-> {}, done |-> TRUE] @@
+  s2 :> [epoch |-> 0, set |-> {}, done |-> TRUE] @@
+  s3 :> [epoch |-> 0, set |-> {}, done |-> TRUE] )
+/\ nextIndex = ( s1 :> (s1 :> 2 @@ s2 :> 2 @@ s3 :> 2) @@
+  s2 :> (s1 :> 1 @@ s2 :> 1 @@ s3 :> 1) @@
+  s3 :> (s1 :> 1 @@ s2 :> 1 @@ s3 :> 1) )
+/\ currentTerm = (s1 :> 1 @@ s2 :> 1 @@ s3 :> 1)
+/\ client_heard_from = (c1 :> {})
+/\ client_successes = (c1 :> {})
+/\ votedFor = (s1 :> "Nil" @@ s2 :> "Nil" @@ s3 :> "Nil")
+/\ cstate = (s1 :> [view |-> [epoch |-> 0, replica_ids |-> {}, proposing_replica_ids |-> {}], vn |-> [epoch |-> 0, replica_ids |-> {}, proposing_replica_ids |-> {}], k |-> 0, acc |-> (s1 :> FALSE @@ s2 :> FALSE @@ s3 :> FALSE), phase |-> "Idle", rset |-> {}, br |-> (s1 :> "Nil" @@ s2 :> "Nil" @@ s3 :> "Nil"), prep |-> (s1 :> "Nil" @@ s2 :> "Nil" @@ s3 :> "Nil"), fin |-> (s1 :> FALSE @@ s2 :> FALSE @@ s3 :> FALSE)] @@ s2 :> [view |-> [epoch |-> 0, replica_ids |-> {}, proposing_replica_ids |-> {}], vn |-> [epoch |-> 0, replica_ids |-> {}, proposing_replica_ids |-> {}], k |-> 0, acc |-> (s1 :> FALSE @@ s2 :> FALSE @@ s3 :> FALSE), phase |-> "Idle", rset |-> {}, br |-> (s1 :> "Nil" @@ s2 :> "Nil" @@ s3 :> "Nil"), prep |-> (s1 :> "Nil" @@ s2 :> "Nil" @@ s3 :> "Nil"), fin |-> (s1 :> FALSE @@ s2 :> FALSE @@ s3 :> FALSE)] @@ s3 :> [view |-> [epoch |-> 0, replica_ids |-> {}, proposing_replica_ids |-> {}], vn |-> [epoch |-> 0, replica_ids |-> {}, proposing_replica_ids |-> {}], k |-> 0, acc |-> (s1 :> FALSE @@ s2 :> FALSE @@ s3 :> FALSE), phase |-> "Idle", rset |-> {}, br |-> (s1 :> "Nil" @@ s2 :> "Nil" @@ s3 :> "Nil"), prep |-> (s1 :> "Nil" @@ s2 :> "Nil" @@ s3 :> "Nil"), fin |-> (s1 :> FALSE @@ s2 :> FALSE @@ s3 :> FALSE)])
+/\ matchIndex = ( s1 :> (s1 :> 1 @@ s2 :> 1 @@ s3 :> 1) @@
+  s2 :> (s1 :> 0 @@ s2 :> 0 @@ s3 :> 0) @@
+  s3 :> (s1 :> 0 @@ s2 :> 0 @@ s3 :> 0) )
+/\ client_view = (c1 :> [epoch |-> 17, replica_ids |-> {s1, s2, s3}, proposing_replica_ids |-> {s1}])
+/\ rstate = (s1 :> [lnv |-> [epoch |-> 17, replica_ids |-> {s1, s2, s3}, proposing_replica_ids |-> {s1}], nv |-> [epoch |-> 17, replica_ids |-> {s1, s2, s3}, proposing_replica_ids |-> {s1}], mode |-> "Normal", pool |-> {[cmd_id |-> id1, key |-> k1]}, msb |-> {}, acc |-> {}] @@ s2 :> [lnv |-> [epoch |-> 17, replica_ids |-> {s1, s2, s3}, proposing_replica_ids |-> {s1}], nv |-> [epoch |-> 17, replica_ids |-> {s1, s2, s3}, proposing_replica_ids |-> {s1}], mode |-> "Normal", pool |-> {}, msb |-> {}, acc |-> {}] @@ s3 :> [lnv |-> [epoch |-> 17, replica_ids |-> {s1, s2, s3}, proposing_replica_ids |-> {s1}], nv |-> [epoch |-> 17, replica_ids |-> {s1, s2, s3}, proposing_replica_ids |-> {s1}], mode |-> "Normal", pool |-> {}, msb |-> {}, acc |-> {}])
+/\ commitIndex = (s1 :> [sole |-> 1] @@ s2 :> [sole |-> 1] @@ s3 :> [sole |-> 1])
+/\ client_issued = {[cmd_id |-> id1, key |-> k1]}
+/\ messages = ([mdest |-> s2, mtype |-> "FastCmd", mview |-> [epoch |-> 17, replica_ids |-> {s1, s2, s3}, proposing_replica_ids |-> {s1}], msource |-> c1, mcmd |-> [cmd_id |-> id1, key |-> k1]] :> 1 @@ [mdest |-> s3, mtype |-> "FastCmd", mview |-> [epoch |-> 17, replica_ids |-> {s1, s2, s3}, proposing_replica_ids |-> {s1}], msource |-> c1, mcmd |-> [cmd_id |-> id1, key |-> k1]] :> 1 @@ [mdest |-> c1, mtype |-> "FastAck", mview |-> [epoch |-> 17, replica_ids |-> {s1, s2, s3}, proposing_replica_ids |-> {s1}], msource |-> s1, mcmd |-> [cmd_id |-> id1, key |-> k1]] :> 1)
+/\ log = (s1 :> [sole |-> <<[term |-> 1, command |-> "InitClusterCommand", value |-> [members |-> {s1, s2, s3}, cmd_id |-> "Nil", id |-> 1, key |-> "Nil"]], [term |-> 1, command |-> "AppendCommand", value |-> [cmd_id |-> id1, key |-> k1]]>>] @@ s2 :> [sole |-> <<[term |-> 1, command |-> "InitClusterCommand", value |-> [members |-> {s1, s2, s3}, cmd_id |-> "Nil", id |-> 1, key |-> "Nil"]]>>] @@ s3 :> [sole |-> <<[term |-> 1, command |-> "InitClusterCommand", value |-> [members |-> {s1, s2, s3}, cmd_id |-> "Nil", id |-> 1, key |-> "Nil"]]>>])
+/\ votesGranted = (s1 :> {} @@ s2 :> {} @@ s3 :> {})
+
+State 4: <Next line 264, col 8 to line 264, col 51 of module jetpack_raft_composition>
+/\ config = ( s1 :> [members |-> {s1, s2, s3}, id |-> 1, committed |-> TRUE] @@
+  s2 :> [members |-> {s1, s2, s3}, id |-> 1, committed |-> TRUE] @@
+  s3 :> [members |-> {s1, s2, s3}, id |-> 1, committed |-> TRUE] )
+/\ original_execution_cmds = <<>>
+/\ electionCtr = 0
+/\ applied = [sole |-> 0]
+/\ restartCtr = 0
+/\ removeReconfigCtr = 0
+/\ client_pending = (c1 :> [cmd_id |-> id1, key |-> k1])
+/\ execution_cmds = <<>>
+/\ pending_reconfig = ( s1 :> [op |-> "None", target |-> "Nil"] @@
+  s2 :> [op |-> "None", target |-> "Nil"] @@
+  s3 :> [op |-> "None", target |-> "Nil"] )
+/\ ostate = (s1 :> "Leader" @@ s2 :> "Follower" @@ s3 :> "Follower")
+/\ addReconfigCtr = 0
+/\ fast_committed = {}
+/\ subm = ( s1 :> [epoch |-> 0, set |-> {}, done |-> TRUE] @@
+  s2 :> [epoch |-> 0, set |-> {}, done |-> TRUE] @@
+  s3 :> [epoch |-> 0, set |-> {}, done |-> TRUE] )
+/\ nextIndex = ( s1 :> (s1 :> 2 @@ s2 :> 2 @@ s3 :> 2) @@
+  s2 :> (s1 :> 1 @@ s2 :> 1 @@ s3 :> 1) @@
+  s3 :> (s1 :> 1 @@ s2 :> 1 @@ s3 :> 1) )
+/\ currentTerm = (s1 :> 1 @@ s2 :> 1 @@ s3 :> 1)
+/\ client_heard_from = (c1 :> {})
+/\ client_successes = (c1 :> {})
+/\ votedFor = (s1 :> "Nil" @@ s2 :> "Nil" @@ s3 :> "Nil")
+/\ cstate = (s1 :> [view |-> [epoch |-> 0, replica_ids |-> {}, proposing_replica_ids |-> {}], vn |-> [epoch |-> 0, replica_ids |-> {}, proposing_replica_ids |-> {}], k |-> 0, acc |-> (s1 :> FALSE @@ s2 :> FALSE @@ s3 :> FALSE), phase |-> "Idle", rset |-> {}, br |-> (s1 :> "Nil" @@ s2 :> "Nil" @@ s3 :> "Nil"), prep |-> (s1 :> "Nil" @@ s2 :> "Nil" @@ s3 :> "Nil"), fin |-> (s1 :> FALSE @@ s2 :> FALSE @@ s3 :> FALSE)] @@ s2 :> [view |-> [epoch |-> 0, replica_ids |-> {}, proposing_replica_ids |-> {}], vn |-> [epoch |-> 0, replica_ids |-> {}, proposing_replica_ids |-> {}], k |-> 0, acc |-> (s1 :> FALSE @@ s2 :> FALSE @@ s3 :> FALSE), phase |-> "Idle", rset |-> {}, br |-> (s1 :> "Nil" @@ s2 :> "Nil" @@ s3 :> "Nil"), prep |-> (s1 :> "Nil" @@ s2 :> "Nil" @@ s3 :> "Nil"), fin |-> (s1 :> FALSE @@ s2 :> FALSE @@ s3 :> FALSE)] @@ s3 :> [view |-> [epoch |-> 0, replica_ids |-> {}, proposing_replica_ids |-> {}], vn |-> [epoch |-> 0, replica_ids |-> {}, proposing_replica_ids |-> {}], k |-> 0, acc |-> (s1 :> FALSE @@ s2 :> FALSE @@ s3 :> FALSE), phase |-> "Idle", rset |-> {}, br |-> (s1 :> "Nil" @@ s2 :> "Nil" @@ s3 :> "Nil"), prep |-> (s1 :> "Nil" @@ s2 :> "Nil" @@ s3 :> "Nil"), fin |-> (s1 :> FALSE @@ s2 :> FALSE @@ s3 :> FALSE)])
+/\ matchIndex = ( s1 :> (s1 :> 1 @@ s2 :> 1 @@ s3 :> 1) @@
+  s2 :> (s1 :> 0 @@ s2 :> 0 @@ s3 :> 0) @@
+  s3 :> (s1 :> 0 @@ s2 :> 0 @@ s3 :> 0) )
+/\ client_view = (c1 :> [epoch |-> 17, replica_ids |-> {s1, s2, s3}, proposing_replica_ids |-> {s1}])
+/\ rstate = (s1 :> [lnv |-> [epoch |-> 17, replica_ids |-> {s1, s2, s3}, proposing_replica_ids |-> {s1}], nv |-> [epoch |-> 17, replica_ids |-> {s1, s2, s3}, proposing_replica_ids |-> {s1}], mode |-> "Normal", pool |-> {[cmd_id |-> id1, key |-> k1]}, msb |-> {}, acc |-> {}] @@ s2 :> [lnv |-> [epoch |-> 17, replica_ids |-> {s1, s2, s3}, proposing_replica_ids |-> {s1}], nv |-> [epoch |-> 17, replica_ids |-> {s1, s2, s3}, proposing_replica_ids |-> {s1}], mode |-> "Normal", pool |-> {[cmd_id |-> id1, key |-> k1]}, msb |-> {}, acc |-> {}] @@ s3 :> [lnv |-> [epoch |-> 17, replica_ids |-> {s1, s2, s3}, proposing_replica_ids |-> {s1}], nv |-> [epoch |-> 17, replica_ids |-> {s1, s2, s3}, proposing_replica_ids |-> {s1}], mode |-> "Normal", pool |-> {}, msb |-> {}, acc |-> {}])
+/\ commitIndex = (s1 :> [sole |-> 1] @@ s2 :> [sole |-> 1] @@ s3 :> [sole |-> 1])
+/\ client_issued = {[cmd_id |-> id1, key |-> k1]}
+/\ messages = ([mdest |-> s3, mtype |-> "FastCmd", mview |-> [epoch |-> 17, replica_ids |-> {s1, s2, s3}, proposing_replica_ids |-> {s1}], msource |-> c1, mcmd |-> [cmd_id |-> id1, key |-> k1]] :> 1 @@ [mdest |-> c1, mtype |-> "FastAck", mview |-> [epoch |-> 17, replica_ids |-> {s1, s2, s3}, proposing_replica_ids |-> {s1}], msource |-> s1, mcmd |-> [cmd_id |-> id1, key |-> k1]] :> 1 @@ [mdest |-> c1, mtype |-> "FastAck", mview |-> [epoch |-> 17, replica_ids |-> {s1, s2, s3}, proposing_replica_ids |-> {s1}], msource |-> s2, mcmd |-> [cmd_id |-> id1, key |-> k1]] :> 1)
+/\ log = (s1 :> [sole |-> <<[term |-> 1, command |-> "InitClusterCommand", value |-> [members |-> {s1, s2, s3}, cmd_id |-> "Nil", id |-> 1, key |-> "Nil"]], [term |-> 1, command |-> "AppendCommand", value |-> [cmd_id |-> id1, key |-> k1]]>>] @@ s2 :> [sole |-> <<[term |-> 1, command |-> "InitClusterCommand", value |-> [members |-> {s1, s2, s3}, cmd_id |-> "Nil", id |-> 1, key |-> "Nil"]]>>] @@ s3 :> [sole |-> <<[term |-> 1, command |-> "InitClusterCommand", value |-> [members |-> {s1, s2, s3}, cmd_id |-> "Nil", id |-> 1, key |-> "Nil"]]>>])
+/\ votesGranted = (s1 :> {} @@ s2 :> {} @@ s3 :> {})
+
+State 5: <Next line 264, col 8 to line 264, col 51 of module jetpack_raft_composition>
+/\ config = ( s1 :> [members |-> {s1, s2, s3}, id |-> 1, committed |-> TRUE] @@
+  s2 :> [members |-> {s1, s2, s3}, id |-> 1, committed |-> TRUE] @@
+  s3 :> [members |-> {s1, s2, s3}, id |-> 1, committed |-> TRUE] )
+/\ original_execution_cmds = <<>>
+/\ electionCtr = 0
+/\ applied = [sole |-> 0]
+/\ restartCtr = 0
+/\ removeReconfigCtr = 0
+/\ client_pending = (c1 :> [cmd_id |-> id1, key |-> k1])
+/\ execution_cmds = <<>>
+/\ pending_reconfig = ( s1 :> [op |-> "None", target |-> "Nil"] @@
+  s2 :> [op |-> "None", target |-> "Nil"] @@
+  s3 :> [op |-> "None", target |-> "Nil"] )
+/\ ostate = (s1 :> "Leader" @@ s2 :> "Follower" @@ s3 :> "Follower")
+/\ addReconfigCtr = 0
+/\ fast_committed = {}
+/\ subm = ( s1 :> [epoch |-> 0, set |-> {}, done |-> TRUE] @@
+  s2 :> [epoch |-> 0, set |-> {}, done |-> TRUE] @@
+  s3 :> [epoch |-> 0, set |-> {}, done |-> TRUE] )
+/\ nextIndex = ( s1 :> (s1 :> 2 @@ s2 :> 2 @@ s3 :> 2) @@
+  s2 :> (s1 :> 1 @@ s2 :> 1 @@ s3 :> 1) @@
+  s3 :> (s1 :> 1 @@ s2 :> 1 @@ s3 :> 1) )
+/\ currentTerm = (s1 :> 1 @@ s2 :> 1 @@ s3 :> 1)
+/\ client_heard_from = (c1 :> {})
+/\ client_successes = (c1 :> {})
+/\ votedFor = (s1 :> "Nil" @@ s2 :> "Nil" @@ s3 :> "Nil")
+/\ cstate = (s1 :> [view |-> [epoch |-> 0, replica_ids |-> {}, proposing_replica_ids |-> {}], vn |-> [epoch |-> 0, replica_ids |-> {}, proposing_replica_ids |-> {}], k |-> 0, acc |-> (s1 :> FALSE @@ s2 :> FALSE @@ s3 :> FALSE), phase |-> "Idle", rset |-> {}, br |-> (s1 :> "Nil" @@ s2 :> "Nil" @@ s3 :> "Nil"), prep |-> (s1 :> "Nil" @@ s2 :> "Nil" @@ s3 :> "Nil"), fin |-> (s1 :> FALSE @@ s2 :> FALSE @@ s3 :> FALSE)] @@ s2 :> [view |-> [epoch |-> 0, replica_ids |-> {}, proposing_replica_ids |-> {}], vn |-> [epoch |-> 0, replica_ids |-> {}, proposing_replica_ids |-> {}], k |-> 0, acc |-> (s1 :> FALSE @@ s2 :> FALSE @@ s3 :> FALSE), phase |-> "Idle", rset |-> {}, br |-> (s1 :> "Nil" @@ s2 :> "Nil" @@ s3 :> "Nil"), prep |-> (s1 :> "Nil" @@ s2 :> "Nil" @@ s3 :> "Nil"), fin |-> (s1 :> FALSE @@ s2 :> FALSE @@ s3 :> FALSE)] @@ s3 :> [view |-> [epoch |-> 0, replica_ids |-> {}, proposing_replica_ids |-> {}], vn |-> [epoch |-> 0, replica_ids |-> {}, proposing_replica_ids |-> {}], k |-> 0, acc |-> (s1 :> FALSE @@ s2 :> FALSE @@ s3 :> FALSE), phase |-> "Idle", rset |-> {}, br |-> (s1 :> "Nil" @@ s2 :> "Nil" @@ s3 :> "Nil"), prep |-> (s1 :> "Nil" @@ s2 :> "Nil" @@ s3 :> "Nil"), fin |-> (s1 :> FALSE @@ s2 :> FALSE @@ s3 :> FALSE)])
+/\ matchIndex = ( s1 :> (s1 :> 1 @@ s2 :> 1 @@ s3 :> 1) @@
+  s2 :> (s1 :> 0 @@ s2 :> 0 @@ s3 :> 0) @@
+  s3 :> (s1 :> 0 @@ s2 :> 0 @@ s3 :> 0) )
+/\ client_view = (c1 :> [epoch |-> 17, replica_ids |-> {s1, s2, s3}, proposing_replica_ids |-> {s1}])
+/\ rstate = (s1 :> [lnv |-> [epoch |-> 17, replica_ids |-> {s1, s2, s3}, proposing_replica_ids |-> {s1}], nv |-> [epoch |-> 17, replica_ids |-> {s1, s2, s3}, proposing_replica_ids |-> {s1}], mode |-> "Normal", pool |-> {[cmd_id |-> id1, key |-> k1]}, msb |-> {}, acc |-> {}] @@ s2 :> [lnv |-> [epoch |-> 17, replica_ids |-> {s1, s2, s3}, proposing_replica_ids |-> {s1}], nv |-> [epoch |-> 17, replica_ids |-> {s1, s2, s3}, proposing_replica_ids |-> {s1}], mode |-> "Normal", pool |-> {[cmd_id |-> id1, key |-> k1]}, msb |-> {}, acc |-> {}] @@ s3 :> [lnv |-> [epoch |-> 17, replica_ids |-> {s1, s2, s3}, proposing_replica_ids |-> {s1}], nv |-> [epoch |-> 17, replica_ids |-> {s1, s2, s3}, proposing_replica_ids |-> {s1}], mode |-> "Normal", pool |-> {[cmd_id |-> id1, key |-> k1]}, msb |-> {}, acc |-> {}])
+/\ commitIndex = (s1 :> [sole |-> 1] @@ s2 :> [sole |-> 1] @@ s3 :> [sole |-> 1])
+/\ client_issued = {[cmd_id |-> id1, key |-> k1]}
+/\ messages = ([mdest |-> c1, mtype |-> "FastAck", mview |-> [epoch |-> 17, replica_ids |-> {s1, s2, s3}, proposing_replica_ids |-> {s1}], msource |-> s1, mcmd |-> [cmd_id |-> id1, key |-> k1]] :> 1 @@ [mdest |-> c1, mtype |-> "FastAck", mview |-> [epoch |-> 17, replica_ids |-> {s1, s2, s3}, proposing_replica_ids |-> {s1}], msource |-> s2, mcmd |-> [cmd_id |-> id1, key |-> k1]] :> 1 @@ [mdest |-> c1, mtype |-> "FastAck", mview |-> [epoch |-> 17, replica_ids |-> {s1, s2, s3}, proposing_replica_ids |-> {s1}], msource |-> s3, mcmd |-> [cmd_id |-> id1, key |-> k1]] :> 1)
+/\ log = (s1 :> [sole |-> <<[term |-> 1, command |-> "InitClusterCommand", value |-> [members |-> {s1, s2, s3}, cmd_id |-> "Nil", id |-> 1, key |-> "Nil"]], [term |-> 1, command |-> "AppendCommand", value |-> [cmd_id |-> id1, key |-> k1]]>>] @@ s2 :> [sole |-> <<[term |-> 1, command |-> "InitClusterCommand", value |-> [members |-> {s1, s2, s3}, cmd_id |-> "Nil", id |-> 1, key |-> "Nil"]]>>] @@ s3 :> [sole |-> <<[term |-> 1, command |-> "InitClusterCommand", value |-> [members |-> {s1, s2, s3}, cmd_id |-> "Nil", id |-> 1, key |-> "Nil"]]>>])
+/\ votesGranted = (s1 :> {} @@ s2 :> {} @@ s3 :> {})
+
+State 6: <Next line 265, col 8 to line 265, col 51 of module jetpack_raft_composition>
+/\ config = ( s1 :> [members |-> {s1, s2, s3}, id |-> 1, committed |-> TRUE] @@
+  s2 :> [members |-> {s1, s2, s3}, id |-> 1, committed |-> TRUE] @@
+  s3 :> [members |-> {s1, s2, s3}, id |-> 1, committed |-> TRUE] )
+/\ original_execution_cmds = <<>>
+/\ electionCtr = 0
+/\ applied = [sole |-> 0]
+/\ restartCtr = 0
+/\ removeReconfigCtr = 0
+/\ client_pending = (c1 :> [cmd_id |-> id1, key |-> k1])
+/\ execution_cmds = <<>>
+/\ pending_reconfig = ( s1 :> [op |-> "None", target |-> "Nil"] @@
+  s2 :> [op |-> "None", target |-> "Nil"] @@
+  s3 :> [op |-> "None", target |-> "Nil"] )
+/\ ostate = (s1 :> "Leader" @@ s2 :> "Follower" @@ s3 :> "Follower")
+/\ addReconfigCtr = 0
+/\ fast_committed = {}
+/\ subm = ( s1 :> [epoch |-> 0, set |-> {}, done |-> TRUE] @@
+  s2 :> [epoch |-> 0, set |-> {}, done |-> TRUE] @@
+  s3 :> [epoch |-> 0, set |-> {}, done |-> TRUE] )
+/\ nextIndex = ( s1 :> (s1 :> 2 @@ s2 :> 2 @@ s3 :> 2) @@
+  s2 :> (s1 :> 1 @@ s2 :> 1 @@ s3 :> 1) @@
+  s3 :> (s1 :> 1 @@ s2 :> 1 @@ s3 :> 1) )
+/\ currentTerm = (s1 :> 1 @@ s2 :> 1 @@ s3 :> 1)
+/\ client_heard_from = (c1 :> {s1})
+/\ client_successes = (c1 :> {s1})
+/\ votedFor = (s1 :> "Nil" @@ s2 :> "Nil" @@ s3 :> "Nil")
+/\ cstate = (s1 :> [view |-> [epoch |-> 0, replica_ids |-> {}, proposing_replica_ids |-> {}], vn |-> [epoch |-> 0, replica_ids |-> {}, proposing_replica_ids |-> {}], k |-> 0, acc |-> (s1 :> FALSE @@ s2 :> FALSE @@ s3 :> FALSE), phase |-> "Idle", rset |-> {}, br |-> (s1 :> "Nil" @@ s2 :> "Nil" @@ s3 :> "Nil"), prep |-> (s1 :> "Nil" @@ s2 :> "Nil" @@ s3 :> "Nil"), fin |-> (s1 :> FALSE @@ s2 :> FALSE @@ s3 :> FALSE)] @@ s2 :> [view |-> [epoch |-> 0, replica_ids |-> {}, proposing_replica_ids |-> {}], vn |-> [epoch |-> 0, replica_ids |-> {}, proposing_replica_ids |-> {}], k |-> 0, acc |-> (s1 :> FALSE @@ s2 :> FALSE @@ s3 :> FALSE), phase |-> "Idle", rset |-> {}, br |-> (s1 :> "Nil" @@ s2 :> "Nil" @@ s3 :> "Nil"), prep |-> (s1 :> "Nil" @@ s2 :> "Nil" @@ s3 :> "Nil"), fin |-> (s1 :> FALSE @@ s2 :> FALSE @@ s3 :> FALSE)] @@ s3 :> [view |-> [epoch |-> 0, replica_ids |-> {}, proposing_replica_ids |-> {}], vn |-> [epoch |-> 0, replica_ids |-> {}, proposing_replica_ids |-> {}], k |-> 0, acc |-> (s1 :> FALSE @@ s2 :> FALSE @@ s3 :> FALSE), phase |-> "Idle", rset |-> {}, br |-> (s1 :> "Nil" @@ s2 :> "Nil" @@ s3 :> "Nil"), prep |-> (s1 :> "Nil" @@ s2 :> "Nil" @@ s3 :> "Nil"), fin |-> (s1 :> FALSE @@ s2 :> FALSE @@ s3 :> FALSE)])
+/\ matchIndex = ( s1 :> (s1 :> 1 @@ s2 :> 1 @@ s3 :> 1) @@
+  s2 :> (s1 :> 0 @@ s2 :> 0 @@ s3 :> 0) @@
+  s3 :> (s1 :> 0 @@ s2 :> 0 @@ s3 :> 0) )
+/\ client_view = (c1 :> [epoch |-> 17, replica_ids |-> {s1, s2, s3}, proposing_replica_ids |-> {s1}])
+/\ rstate = (s1 :> [lnv |-> [epoch |-> 17, replica_ids |-> {s1, s2, s3}, proposing_replica_ids |-> {s1}], nv |-> [epoch |-> 17, replica_ids |-> {s1, s2, s3}, proposing_replica_ids |-> {s1}], mode |-> "Normal", pool |-> {[cmd_id |-> id1, key |-> k1]}, msb |-> {}, acc |-> {}] @@ s2 :> [lnv |-> [epoch |-> 17, replica_ids |-> {s1, s2, s3}, proposing_replica_ids |-> {s1}], nv |-> [epoch |-> 17, replica_ids |-> {s1, s2, s3}, proposing_replica_ids |-> {s1}], mode |-> "Normal", pool |-> {[cmd_id |-> id1, key |-> k1]}, msb |-> {}, acc |-> {}] @@ s3 :> [lnv |-> [epoch |-> 17, replica_ids |-> {s1, s2, s3}, proposing_replica_ids |-> {s1}], nv |-> [epoch |-> 17, replica_ids |-> {s1, s2, s3}, proposing_replica_ids |-> {s1}], mode |-> "Normal", pool |-> {[cmd_id |-> id1, key |-> k1]}, msb |-> {}, acc |-> {}])
+/\ commitIndex = (s1 :> [sole |-> 1] @@ s2 :> [sole |-> 1] @@ s3 :> [sole |-> 1])
+/\ client_issued = {[cmd_id |-> id1, key |-> k1]}
+/\ messages = ([mdest |-> c1, mtype |-> "FastAck", mview |-> [epoch |-> 17, replica_ids |-> {s1, s2, s3}, proposing_replica_ids |-> {s1}], msource |-> s2, mcmd |-> [cmd_id |-> id1, key |-> k1]] :> 1 @@ [mdest |-> c1, mtype |-> "FastAck", mview |-> [epoch |-> 17, replica_ids |-> {s1, s2, s3}, proposing_replica_ids |-> {s1}], msource |-> s3, mcmd |-> [cmd_id |-> id1, key |-> k1]] :> 1)
+/\ log = (s1 :> [sole |-> <<[term |-> 1, command |-> "InitClusterCommand", value |-> [members |-> {s1, s2, s3}, cmd_id |-> "Nil", id |-> 1, key |-> "Nil"]], [term |-> 1, command |-> "AppendCommand", value |-> [cmd_id |-> id1, key |-> k1]]>>] @@ s2 :> [sole |-> <<[term |-> 1, command |-> "InitClusterCommand", value |-> [members |-> {s1, s2, s3}, cmd_id |-> "Nil", id |-> 1, key |-> "Nil"]]>>] @@ s3 :> [sole |-> <<[term |-> 1, command |-> "InitClusterCommand", value |-> [members |-> {s1, s2, s3}, cmd_id |-> "Nil", id |-> 1, key |-> "Nil"]]>>])
+/\ votesGranted = (s1 :> {} @@ s2 :> {} @@ s3 :> {})
+
+State 7: <Next line 265, col 8 to line 265, col 51 of module jetpack_raft_composition>
+/\ config = ( s1 :> [members |-> {s1, s2, s3}, id |-> 1, committed |-> TRUE] @@
+  s2 :> [members |-> {s1, s2, s3}, id |-> 1, committed |-> TRUE] @@
+  s3 :> [members |-> {s1, s2, s3}, id |-> 1, committed |-> TRUE] )
+/\ original_execution_cmds = <<>>
+/\ electionCtr = 0
+/\ applied = [sole |-> 0]
+/\ restartCtr = 0
+/\ removeReconfigCtr = 0
+/\ client_pending = (c1 :> [cmd_id |-> id1, key |-> k1])
+/\ execution_cmds = <<>>
+/\ pending_reconfig = ( s1 :> [op |-> "None", target |-> "Nil"] @@
+  s2 :> [op |-> "None", target |-> "Nil"] @@
+  s3 :> [op |-> "None", target |-> "Nil"] )
+/\ ostate = (s1 :> "Leader" @@ s2 :> "Follower" @@ s3 :> "Follower")
+/\ addReconfigCtr = 0
+/\ fast_committed = {}
+/\ subm = ( s1 :> [epoch |-> 0, set |-> {}, done |-> TRUE] @@
+  s2 :> [epoch |-> 0, set |-> {}, done |-> TRUE] @@
+  s3 :> [epoch |-> 0, set |-> {}, done |-> TRUE] )
+/\ nextIndex = ( s1 :> (s1 :> 2 @@ s2 :> 2 @@ s3 :> 2) @@
+  s2 :> (s1 :> 1 @@ s2 :> 1 @@ s3 :> 1) @@
+  s3 :> (s1 :> 1 @@ s2 :> 1 @@ s3 :> 1) )
+/\ currentTerm = (s1 :> 1 @@ s2 :> 1 @@ s3 :> 1)
+/\ client_heard_from = (c1 :> {s1, s2})
+/\ client_successes = (c1 :> {s1, s2})
+/\ votedFor = (s1 :> "Nil" @@ s2 :> "Nil" @@ s3 :> "Nil")
+/\ cstate = (s1 :> [view |-> [epoch |-> 0, replica_ids |-> {}, proposing_replica_ids |-> {}], vn |-> [epoch |-> 0, replica_ids |-> {}, proposing_replica_ids |-> {}], k |-> 0, acc |-> (s1 :> FALSE @@ s2 :> FALSE @@ s3 :> FALSE), phase |-> "Idle", rset |-> {}, br |-> (s1 :> "Nil" @@ s2 :> "Nil" @@ s3 :> "Nil"), prep |-> (s1 :> "Nil" @@ s2 :> "Nil" @@ s3 :> "Nil"), fin |-> (s1 :> FALSE @@ s2 :> FALSE @@ s3 :> FALSE)] @@ s2 :> [view |-> [epoch |-> 0, replica_ids |-> {}, proposing_replica_ids |-> {}], vn |-> [epoch |-> 0, replica_ids |-> {}, proposing_replica_ids |-> {}], k |-> 0, acc |-> (s1 :> FALSE @@ s2 :> FALSE @@ s3 :> FALSE), phase |-> "Idle", rset |-> {}, br |-> (s1 :> "Nil" @@ s2 :> "Nil" @@ s3 :> "Nil"), prep |-> (s1 :> "Nil" @@ s2 :> "Nil" @@ s3 :> "Nil"), fin |-> (s1 :> FALSE @@ s2 :> FALSE @@ s3 :> FALSE)] @@ s3 :> [view |-> [epoch |-> 0, replica_ids |-> {}, proposing_replica_ids |-> {}], vn |-> [epoch |-> 0, replica_ids |-> {}, proposing_replica_ids |-> {}], k |-> 0, acc |-> (s1 :> FALSE @@ s2 :> FALSE @@ s3 :> FALSE), phase |-> "Idle", rset |-> {}, br |-> (s1 :> "Nil" @@ s2 :> "Nil" @@ s3 :> "Nil"), prep |-> (s1 :> "Nil" @@ s2 :> "Nil" @@ s3 :> "Nil"), fin |-> (s1 :> FALSE @@ s2 :> FALSE @@ s3 :> FALSE)])
+/\ matchIndex = ( s1 :> (s1 :> 1 @@ s2 :> 1 @@ s3 :> 1) @@
+  s2 :> (s1 :> 0 @@ s2 :> 0 @@ s3 :> 0) @@
+  s3 :> (s1 :> 0 @@ s2 :> 0 @@ s3 :> 0) )
+/\ client_view = (c1 :> [epoch |-> 17, replica_ids |-> {s1, s2, s3}, proposing_replica_ids |-> {s1}])
+/\ rstate = (s1 :> [lnv |-> [epoch |-> 17, replica_ids |-> {s1, s2, s3}, proposing_replica_ids |-> {s1}], nv |-> [epoch |-> 17, replica_ids |-> {s1, s2, s3}, proposing_replica_ids |-> {s1}], mode |-> "Normal", pool |-> {[cmd_id |-> id1, key |-> k1]}, msb |-> {}, acc |-> {}] @@ s2 :> [lnv |-> [epoch |-> 17, replica_ids |-> {s1, s2, s3}, proposing_replica_ids |-> {s1}], nv |-> [epoch |-> 17, replica_ids |-> {s1, s2, s3}, proposing_replica_ids |-> {s1}], mode |-> "Normal", pool |-> {[cmd_id |-> id1, key |-> k1]}, msb |-> {}, acc |-> {}] @@ s3 :> [lnv |-> [epoch |-> 17, replica_ids |-> {s1, s2, s3}, proposing_replica_ids |-> {s1}], nv |-> [epoch |-> 17, replica_ids |-> {s1, s2, s3}, proposing_replica_ids |-> {s1}], mode |-> "Normal", pool |-> {[cmd_id |-> id1, key |-> k1]}, msb |-> {}, acc |-> {}])
+/\ commitIndex = (s1 :> [sole |-> 1] @@ s2 :> [sole |-> 1] @@ s3 :> [sole |-> 1])
+/\ client_issued = {[cmd_id |-> id1, key |-> k1]}
+/\ messages = ([mdest |-> c1, mtype |-> "FastAck", mview |-> [epoch |-> 17, replica_ids |-> {s1, s2, s3}, proposing_replica_ids |-> {s1}], msource |-> s3, mcmd |-> [cmd_id |-> id1, key |-> k1]] :> 1)
+/\ log = (s1 :> [sole |-> <<[term |-> 1, command |-> "InitClusterCommand", value |-> [members |-> {s1, s2, s3}, cmd_id |-> "Nil", id |-> 1, key |-> "Nil"]], [term |-> 1, command |-> "AppendCommand", value |-> [cmd_id |-> id1, key |-> k1]]>>] @@ s2 :> [sole |-> <<[term |-> 1, command |-> "InitClusterCommand", value |-> [members |-> {s1, s2, s3}, cmd_id |-> "Nil", id |-> 1, key |-> "Nil"]]>>] @@ s3 :> [sole |-> <<[term |-> 1, command |-> "InitClusterCommand", value |-> [members |-> {s1, s2, s3}, cmd_id |-> "Nil", id |-> 1, key |-> "Nil"]]>>])
+/\ votesGranted = (s1 :> {} @@ s2 :> {} @@ s3 :> {})
+
+State 8: <Next line 265, col 8 to line 265, col 51 of module jetpack_raft_composition>
+/\ config = ( s1 :> [members |-> {s1, s2, s3}, id |-> 1, committed |-> TRUE] @@
+  s2 :> [members |-> {s1, s2, s3}, id |-> 1, committed |-> TRUE] @@
+  s3 :> [members |-> {s1, s2, s3}, id |-> 1, committed |-> TRUE] )
+/\ original_execution_cmds = <<>>
+/\ electionCtr = 0
+/\ applied = [sole |-> 0]
+/\ restartCtr = 0
+/\ removeReconfigCtr = 0
+/\ client_pending = (c1 :> [tag |-> "NilCmd"])
+/\ execution_cmds = <<[cmd_id |-> id1, key |-> k1]>>
+/\ pending_reconfig = ( s1 :> [op |-> "None", target |-> "Nil"] @@
+  s2 :> [op |-> "None", target |-> "Nil"] @@
+  s3 :> [op |-> "None", target |-> "Nil"] )
+/\ ostate = (s1 :> "Leader" @@ s2 :> "Follower" @@ s3 :> "Follower")
+/\ addReconfigCtr = 0
+/\ fast_committed = {[epoch |-> 17, cmd |-> [cmd_id |-> id1, key |-> k1]]}
+/\ subm = ( s1 :> [epoch |-> 0, set |-> {}, done |-> TRUE] @@
+  s2 :> [epoch |-> 0, set |-> {}, done |-> TRUE] @@
+  s3 :> [epoch |-> 0, set |-> {}, done |-> TRUE] )
+/\ nextIndex = ( s1 :> (s1 :> 2 @@ s2 :> 2 @@ s3 :> 2) @@
+  s2 :> (s1 :> 1 @@ s2 :> 1 @@ s3 :> 1) @@
+  s3 :> (s1 :> 1 @@ s2 :> 1 @@ s3 :> 1) )
+/\ currentTerm = (s1 :> 1 @@ s2 :> 1 @@ s3 :> 1)
+/\ client_heard_from = (c1 :> {})
+/\ client_successes = (c1 :> {})
+/\ votedFor = (s1 :> "Nil" @@ s2 :> "Nil" @@ s3 :> "Nil")
+/\ cstate = (s1 :> [view |-> [epoch |-> 0, replica_ids |-> {}, proposing_replica_ids |-> {}], vn |-> [epoch |-> 0, replica_ids |-> {}, proposing_replica_ids |-> {}], k |-> 0, acc |-> (s1 :> FALSE @@ s2 :> FALSE @@ s3 :> FALSE), phase |-> "Idle", rset |-> {}, br |-> (s1 :> "Nil" @@ s2 :> "Nil" @@ s3 :> "Nil"), prep |-> (s1 :> "Nil" @@ s2 :> "Nil" @@ s3 :> "Nil"), fin |-> (s1 :> FALSE @@ s2 :> FALSE @@ s3 :> FALSE)] @@ s2 :> [view |-> [epoch |-> 0, replica_ids |-> {}, proposing_replica_ids |-> {}], vn |-> [epoch |-> 0, replica_ids |-> {}, proposing_replica_ids |-> {}], k |-> 0, acc |-> (s1 :> FALSE @@ s2 :> FALSE @@ s3 :> FALSE), phase |-> "Idle", rset |-> {}, br |-> (s1 :> "Nil" @@ s2 :> "Nil" @@ s3 :> "Nil"), prep |-> (s1 :> "Nil" @@ s2 :> "Nil" @@ s3 :> "Nil"), fin |-> (s1 :> FALSE @@ s2 :> FALSE @@ s3 :> FALSE)] @@ s3 :> [view |-> [epoch |-> 0, replica_ids |-> {}, proposing_replica_ids |-> {}], vn |-> [epoch |-> 0, replica_ids |-> {}, proposing_replica_ids |-> {}], k |-> 0, acc |-> (s1 :> FALSE @@ s2 :> FALSE @@ s3 :> FALSE), phase |-> "Idle", rset |-> {}, br |-> (s1 :> "Nil" @@ s2 :> "Nil" @@ s3 :> "Nil"), prep |-> (s1 :> "Nil" @@ s2 :> "Nil" @@ s3 :> "Nil"), fin |-> (s1 :> FALSE @@ s2 :> FALSE @@ s3 :> FALSE)])
+/\ matchIndex = ( s1 :> (s1 :> 1 @@ s2 :> 1 @@ s3 :> 1) @@
+  s2 :> (s1 :> 0 @@ s2 :> 0 @@ s3 :> 0) @@
+  s3 :> (s1 :> 0 @@ s2 :> 0 @@ s3 :> 0) )
+/\ client_view = (c1 :> [epoch |-> 17, replica_ids |-> {s1, s2, s3}, proposing_replica_ids |-> {s1}])
+/\ rstate = (s1 :> [lnv |-> [epoch |-> 17, replica_ids |-> {s1, s2, s3}, proposing_replica_ids |-> {s1}], nv |-> [epoch |-> 17, replica_ids |-> {s1, s2, s3}, proposing_replica_ids |-> {s1}], mode |-> "Normal", pool |-> {[cmd_id |-> id1, key |-> k1]}, msb |-> {}, acc |-> {}] @@ s2 :> [lnv |-> [epoch |-> 17, replica_ids |-> {s1, s2, s3}, proposing_replica_ids |-> {s1}], nv |-> [epoch |-> 17, replica_ids |-> {s1, s2, s3}, proposing_replica_ids |-> {s1}], mode |-> "Normal", pool |-> {[cmd_id |-> id1, key |-> k1]}, msb |-> {}, acc |-> {}] @@ s3 :> [lnv |-> [epoch |-> 17, replica_ids |-> {s1, s2, s3}, proposing_replica_ids |-> {s1}], nv |-> [epoch |-> 17, replica_ids |-> {s1, s2, s3}, proposing_replica_ids |-> {s1}], mode |-> "Normal", pool |-> {[cmd_id |-> id1, key |-> k1]}, msb |-> {}, acc |-> {}])
+/\ commitIndex = (s1 :> [sole |-> 1] @@ s2 :> [sole |-> 1] @@ s3 :> [sole |-> 1])
+/\ client_issued = {[cmd_id |-> id1, key |-> k1]}
+/\ messages = << >>
+/\ log = (s1 :> [sole |-> <<[term |-> 1, command |-> "InitClusterCommand", value |-> [members |-> {s1, s2, s3}, cmd_id |-> "Nil", id |-> 1, key |-> "Nil"]], [term |-> 1, command |-> "AppendCommand", value |-> [cmd_id |-> id1, key |-> k1]]>>] @@ s2 :> [sole |-> <<[term |-> 1, command |-> "InitClusterCommand", value |-> [members |-> {s1, s2, s3}, cmd_id |-> "Nil", id |-> 1, key |-> "Nil"]]>>] @@ s3 :> [sole |-> <<[term |-> 1, command |-> "InitClusterCommand", value |-> [members |-> {s1, s2, s3}, cmd_id |-> "Nil", id |-> 1, key |-> "Nil"]]>>])
+/\ votesGranted = (s1 :> {} @@ s2 :> {} @@ s3 :> {})
+
+19554 states generated, 3590 distinct states found, 1178 states left on queue.
+The depth of the complete state graph search is 10.
+The average outdegree of the complete state graph is 1 (minimum is 0, the maximum 7 and the 95th percentile is 4).
+Finished in 02s at (2026-10-31 01:27:54)
+
+Finished:  2026-10-31T01:27:54-04:00
+Exit code: 12

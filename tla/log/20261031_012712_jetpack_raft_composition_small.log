@@ -1,0 +1,86 @@
+=== TLC Run ===
+Spec:      jetpack_raft_composition.tla
+Config:    jetpack_raft_small.cfg
+Mode:      local
+Detected total memory: 24576MB
+Auto 1/3 memory cap: 8192MB
+Configured TLC memory cap: 8192MB
+Local Java bitness: 64
+Enforced TLC memory cap: 7372MB
+JVM heap cap: 7372MB
+Log:       /Users/mintgreen/Repos/jetpack/tla/log/20261031_012712_jetpack_raft_composition_small.log
+Started:   2026-10-31T01:27:12-04:00
+===============
+Using config: jetpack_raft_small.cfg
+--- Config contents ---
+\* Small config for jetpack_raft_composition (v10): 3 servers, one election,
+\* no reconfiguration. Exhaustive in minutes.
+SPECIFICATION Spec
+
+CONSTANTS
+  Server = {s1, s2, s3}
+  Client = {c1}
+  CmdId = {id1}
+  Key = {k1}
+  InitialMembers = {s1, s2, s3}
+  MinClusterSize = 2
+  MaxClusterSize = 3
+  MaxElections = 1
+  MaxRestarts = 0
+  MaxAddReconfigs = 0
+  MaxRemoveReconfigs = 0
+  IncludeThesisBug = FALSE
+
+CONSTRAINT SmallStateConstraint
+
+INVARIANTS
+  CommittedLogAgreement
+  LogOrderMatchesExecution
+  ExecutionDedupMatches
+  ReplicaInvariants
+  RecoveredAgreement
+  FastCommitDurability
+  PoolsConflictFree
+  NoLogDivergence
+  MaxOneReconfigurationAtATime
+  ElectionSafety
+  Principle2Raft
+  EpochDeterminesMembership
+--- End config ---
+
+Running: tlc2.TLC -nowarning -deadlock -config /Users/mintgreen/Repos/jetpack/tla/jetpack_raft_small.cfg jetpack_raft_composition.tla -workers 4
+
+TLC2 Version 2.16 of 31 December 2020 (rev: cdddf55)
+Running breadth-first search Model-Checking with fp 99 and seed 739642183946284895 with 4 workers on 8 cores with 6556MB heap and 64MB offheap memory (Mac OS X 14.5 aarch64, Oracle Corporation 1.8.0_503 x86_64, MSBDiskFPSet, DiskStateQueue).
+Parsing file /Users/mintgreen/Repos/jetpack/tla/jetpack_raft_composition.tla
+Parsing file /private/var/folders/cn/4cff675n3fx0_ns__f97kngc0000gn/T/Integers.tla
+Parsing file /private/var/folders/cn/4cff675n3fx0_ns__f97kngc0000gn/T/Naturals.tla
+Parsing file /private/var/folders/cn/4cff675n3fx0_ns__f97kngc0000gn/T/FiniteSets.tla
+Parsing file /private/var/folders/cn/4cff675n3fx0_ns__f97kngc0000gn/T/Sequences.tla
+Parsing file /private/var/folders/cn/4cff675n3fx0_ns__f97kngc0000gn/T/TLC.tla
+Parsing file /Users/mintgreen/Repos/jetpack/tla/base_raft.tla
+Parsing file /Users/mintgreen/Repos/jetpack/tla/jetpack.tla
+Semantic processing of module Naturals
+Semantic processing of module Integers
+Semantic processing of module Sequences
+Semantic processing of module FiniteSets
+Semantic processing of module TLC
+Semantic processing of module base_raft
+Semantic processing of module jetpack
+Semantic processing of module jetpack_raft_composition
+Starting... (2026-10-31 01:27:12)
+Computing initial states...
+Finished computing initial states: 1 distinct state generated at 2026-10-31 01:27:12.
+Progress(13) at 2026-10-31 01:27:15: 84,423 states generated (84,423 s/min), 11,949 distinct states found (11,949 ds/min), 1,997 states left on queue.
+Model checking completed. No error has been found.
+  Estimates of the probability that TLC did not check all reachable states
+  because two distinct states had the same fingerprint:
+  calculated (optimistic):  val = 4.1E-10
+  based on the actual fingerprints:  val = 3.5E-11
+267191 states generated, 32150 distinct states found, 0 states left on queue.
+The depth of the complete state graph search is 28.
+The average outdegree of the complete state graph is 1 (minimum is 0, the maximum 7 and the 95th percentile is 3).
+Finished in 07s at (2026-10-31 01:27:19)
+
+Finished:  2026-10-31T01:27:20-04:00
+Exit code: 0
