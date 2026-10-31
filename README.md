@@ -456,58 +456,23 @@ python3 scripts/parse_cpustat.py <result_dir> <label> [core_id]
 python3 results_processor.py <directory name under results/>
 ```
 
-## 7. TLA+ Model Checking
+## 7. Pseudocode, TLA+ and Verus
 
-TLA+ specifications live in `tla/`. All model checking runs in Docker via `tla/run-tlc.sh`.
+The complete pseudocode of the protocol is [`docs/pseudocode.md`](docs/pseudocode.md). The
+paper is the abbreviated version; `docs/pseudocode.md` §5 lists every place the paper
+shortens and what the full protocol says there, and
+[`docs/recovery-notes.md`](docs/recovery-notes.md) explains the two recovery conditions the
+paper's figure leaves implicit. The models and the implementation follow the pseudocode.
 
-### Specifications
-
-| Spec | Description | Config |
-|---|---|---|
-| `raft.tla` | Standalone Raft protocol | `raft.cfg` / `raft_small.cfg` |
-| `copilot.tla` | Standalone CoPilot protocol | `copilot.cfg` / `copilot_small.cfg` |
-| `mencius.tla` | Standalone Mencius protocol | `mencius.cfg` / `mencius_small.cfg` |
-| `base_raft.tla` | Raft base module (INSTANCE'd by wrapper) | - |
-| `base_copilot.tla` | CoPilot base module (INSTANCE'd by wrapper) | - |
-| `base_mencius.tla` | Mencius base module (INSTANCE'd by wrapper) | - |
-| `jetpack.tla` | Jetpack plugin layer (shared across all wrappers) | - |
-| `jetpack_raft.tla` | Jetpack + Raft composition | `jetpack_raft.cfg` / `jetpack_raft_small.cfg` |
-| `jetpack_copilot.tla` | Jetpack + CoPilot composition | `jetpack_copilot.cfg` / `jetpack_copilot_small.cfg` |
-| `jetpack_mencius.tla` | Jetpack + Mencius composition | `jetpack_mencius.cfg` / `jetpack_mencius_small.cfg` |
-| `raft_ongaro.tla` | Original Diego Ongaro Raft (reference) | - |
-
-### Run model checking
-
-```bash
-# Build Docker image (auto-built by helper script if needed)
-docker build -t tlaplus tla/
-
-# Run via helper script
-tla/run-tlc.sh raft.tla
-tla/run-tlc.sh raft.tla -config raft_small.cfg
-tla/run-tlc.sh raft.tla -workers 4
-tla/run-tlc.sh jetpack_raft.tla
-tla/run-tlc.sh jetpack_copilot.tla
-tla/run-tlc.sh jetpack_mencius.tla
-
-# Or run Docker directly
-docker run --rm --privileged -v $(pwd)/tla:/tla tlaplus \
-  tlc2.TLC -nowarning -deadlock -config raft.cfg raft.tla
-```
-
-### Verified properties
-
-Standalone base protocols (5 servers, 3 cmds, 2 keys):
-- **Raft**: CommittedLogAgreement, ElectionSafety, LogOrderMatchesExecution (21M+ states)
-- **CoPilot**: CommittedLogAgreement, ActiveProposerBound, LogOrderMatchesExecution (11M+ states)
-- **Mencius**: SlotAgreement, CommittedLogAgreement, LogOrderMatchesExecution (13M+ states)
-
-Jetpack compositions (5 servers, 3 cmds, 2 keys):
-- **Jetpack + Raft**: CommittedLogAgreement, MultiSequenceLogAgreement, LogOrderMatchesExecution, ExecutionDedupMatches (2.9M+ states)
-- **Jetpack + CoPilot**: CommittedLogAgreement, MultiSequenceLogAgreement, LogOrderMatchesExecution, ExecutionDedupMatches, ActiveProposerBound (2.4M+ states)
-- **Jetpack + Mencius**: CommittedLogAgreement, MultiSequenceLogAgreement, LogOrderMatchesExecution, ExecutionDedupMatches, SlotAgreement (1.5M+ states)
-
-Jetpack wrappers use a shared 3D log projection (`Log[i][j][k]`) where `i` = server, `j` = proposer, `k` = per-sequence position. See `tla/TLA_PLUS_BIG_PICTURE.md` for the design. TLC logs are saved in `tla/log/`.
+- **TLA+** (`tla/`): `jetpack.tla` is the shim written from the pseudocode (its line tags are
+  in the comments), composed with Raft, MongoDB, Copilot and Mencius base modules. Checked
+  properties include `RecoveredAgreement`, `FastCommitDurability` (paper C1), Principle 2 and
+  the pseudocode's replica invariants, besides the log/execution agreement properties. How to
+  run TLC (locally with `tla2tools.jar`, or in Docker), the configurations and the recorded
+  results are in [`tla/README.md`](tla/README.md).
+- **Verus** (`verus/`): a model of the three-phase recovery over an abstract original
+  protocol with machine-checked proofs of the same properties
+  (`147 verified, 0 errors` with `--no-cheating`). See [`verus/README.md`](verus/README.md).
 
 ## 8. Failure Recovery
 
