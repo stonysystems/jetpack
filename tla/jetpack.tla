@@ -833,10 +833,13 @@ CommittedLogAgreement ==
             IN \A k \in 1..limit : log[i][p][k] = log[i2][p][k]
 
 \* Committed log order (entries expanded to commands) matches the execution
-\* trace for conflicting commands.
+\* trace for conflicting commands. A command can recur in a committed sequence
+\* (proposed at ack time and again inside a Recovered entry, or by two
+\* proposers); only its first occurrence executes (N25), so the sequence is
+\* deduplicated first.
 LogOrderMatchesExecution ==
     \A i \in Server : \A p \in Proposer :
-        ConflictOrderPreserved(FilterNoOps(CommittedCmdSeq(i, p)), FilterNoOps(execution_cmds))
+        ConflictOrderPreserved(Dedup(FilterNoOps(CommittedCmdSeq(i, p))), FilterNoOps(execution_cmds))
 
 ExecutionDedupMatches ==
     LET origDedup == Dedup(FilterNoOps(original_execution_cmds))

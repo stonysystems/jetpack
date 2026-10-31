@@ -21,8 +21,10 @@ committing but proposes no client command.
 
 `raft.tla`, `raft_ongaro.tla`, `copilot.tla`, `mencius.tla` and `mongodb.tla` are standalone
 base protocols kept for reference. `archive/` holds the pre-reconfiguration Raft files.
-The Copilot composition is being brought to the new `jetpack.tla` interface (two coordinators
-per view, pilot-ballot view ids); until that lands it does not parse against the new core.
+In the Copilot composition every pilot change pauses both pilots (T1 for both), each runs a
+coordinator, and a pilot resumes only when its own Recovered entry of the current view is
+committed (T2); execution follows Copilot's dependency order through `jetpack.tla`'s
+per-sequence `applied` counters.
 
 ## What `jetpack.tla` models
 
@@ -100,6 +102,12 @@ FinishRecovery → view installed; `log/20261031_104739_*_probe_recovery_NoViewI
 | Raft, `jetpack_raft_recovery.cfg` | exhaustive run in progress at the time of writing; see the newest `*_jetpack_raft_recovery.log` |
 | MongoDB, `jetpack_mongodb_probe_NoViewInstalled.cfg` | trace found (42 states, simulation mode) |
 | Mencius, `jetpack_mencius_probe_NoFastCommit.cfg` | trace found (8 states): every server acks and proposes the command in its own slot |
+| Copilot, `jetpack_copilot_probe_NoViewInstalled_sim.cfg` | trace found (53 states, simulation mode): a pilot raises its ballot, both pilots pause, Recovered(∅) commits, the pilot resumes and installs the view |
+| Copilot, `jetpack_copilot_small.cfg` / `jetpack_copilot.cfg` | simulation sweeps (depth 100, 150 s each): 491,458 and 285,748 states, no violation; bounded BFS stopped after 10 min without violation |
+
+`LogOrderMatchesExecution` deduplicates a committed sequence before comparing it with the
+execution trace: a command may recur in a sequence (proposed at ack time and again inside a
+Recovered entry, or by two proposers), and only its first occurrence executes.
 
 Earlier results (the pre-pseudocode specifications, up to 2026-10-02) are in the older logs
 and in the git history of this directory.

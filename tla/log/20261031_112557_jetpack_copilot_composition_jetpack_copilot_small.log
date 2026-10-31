@@ -1,0 +1,85 @@
+=== TLC Run ===
+Spec:      jetpack_copilot_composition.tla
+Config:    jetpack_copilot_small.cfg
+Mode:      local
+Detected total memory: 24576MB
+Auto 1/3 memory cap: 8192MB
+Configured TLC memory cap: 8192MB
+Local Java bitness: 64
+Enforced TLC memory cap: 7372MB
+JVM heap cap: 7372MB
+Log:       /Users/mintgreen/Repos/jetpack/tla/log/20261031_112557_jetpack_copilot_composition_jetpack_copilot_small.log
+Started:   2026-10-31T11:25:57-04:00
+===============
+Using config: jetpack_copilot_small.cfg
+--- Config contents ---
+\* Small config for jetpack_copilot_composition (v10): 3 servers, one client,
+\* one command on one key, one pilot change (EmptyViewChange or
+\* FastTakeover), no restart. No SYMMETRY: base_copilot picks the initial
+\* pilots and ranks servers with CHOOSE over Server.
+SPECIFICATION Spec
+
+CONSTANTS
+  Server = {s1, s2, s3}
+  Client = {c1}
+  CmdId = {id1}
+  Key = {k1}
+  MaxPilotChanges = 1
+  MaxRestarts = 0
+
+CONSTRAINT SmallStateConstraint
+
+INVARIANTS
+  CommittedLogAgreement
+  LogOrderMatchesExecution
+  LogOrderMatchesExecutionCopilot
+  ExecutionDedupMatches
+  ReplicaInvariants
+  RecoveredAgreement
+  FastCommitDurability
+  PoolsConflictFree
+  TwoPilots
+  TermIsViewEpoch
+  CommitIndexWithinLog
+  Principle2Copilot
+  ResumeOnlyAfterOwnRecovered
+  OnlyPilotsLead
+  EpochDeterminesMembership
+--- End config ---
+
+Running: tlc2.TLC -nowarning -deadlock -config /Users/mintgreen/Repos/jetpack/tla/jetpack_copilot_small.cfg jetpack_copilot_composition.tla -workers 1
+
+TLC2 Version 2.16 of 31 December 2020 (rev: cdddf55)
+Running breadth-first search Model-Checking with fp 2 and seed 4062282572838299687 with 1 worker on 8 cores with 6556MB heap and 64MB offheap memory (Mac OS X 14.5 aarch64, Oracle Corporation 1.8.0_503 x86_64, MSBDiskFPSet, DiskStateQueue).
+Parsing file /Users/mintgreen/Repos/jetpack/tla/jetpack_copilot_composition.tla
+Parsing file /private/var/folders/cn/4cff675n3fx0_ns__f97kngc0000gn/T/Integers.tla
+Parsing file /private/var/folders/cn/4cff675n3fx0_ns__f97kngc0000gn/T/Naturals.tla
+Parsing file /private/var/folders/cn/4cff675n3fx0_ns__f97kngc0000gn/T/FiniteSets.tla
+Parsing file /private/var/folders/cn/4cff675n3fx0_ns__f97kngc0000gn/T/Sequences.tla
+Parsing file /private/var/folders/cn/4cff675n3fx0_ns__f97kngc0000gn/T/TLC.tla
+Parsing file /Users/mintgreen/Repos/jetpack/tla/base_copilot.tla
+Parsing file /Users/mintgreen/Repos/jetpack/tla/jetpack.tla
+Semantic processing of module Naturals
+Semantic processing of module Integers
+Semantic processing of module Sequences
+Semantic processing of module FiniteSets
+Semantic processing of module TLC
+Semantic processing of module base_copilot
+Semantic processing of module jetpack
+Semantic processing of module jetpack_copilot_composition
+Starting... (2026-10-31 11:25:57)
+Computing initial states...
+Finished computing initial states: 1 distinct state generated at 2026-10-31 11:25:58.
+Progress(7) at 2026-10-31 11:26:01: 8,133 states generated (8,133 s/min), 4,019 distinct states found (4,019 ds/min), 2,803 states left on queue.
+Progress(10) at 2026-10-31 11:27:01: 386,672 states generated (378,539 s/min), 120,882 distinct states found (116,863 ds/min), 74,550 states left on queue.
+Progress(11) at 2026-10-31 11:28:01: 686,492 states generated (299,820 s/min), 203,435 distinct states found (82,553 ds/min), 122,955 states left on queue.
+Progress(11) at 2026-10-31 11:29:01: 1,054,059 states generated (367,567 s/min), 293,899 distinct states found (90,464 ds/min), 172,226 states left on queue.
+Progress(11) at 2026-10-31 11:30:01: 1,486,568 states generated (432,509 s/min), 396,806 distinct states found (102,907 ds/min), 228,555 states left on queue.
+Progress(12) at 2026-10-31 11:31:01: 1,884,183 states generated (397,615 s/min), 500,736 distinct states found (103,930 ds/min), 283,231 states left on queue.
+Progress(12) at 2026-10-31 11:32:01: 2,236,296 states generated (352,113 s/min), 577,776 distinct states found (77,040 ds/min), 320,484 states left on queue.
+Progress(12) at 2026-10-31 11:33:01: 2,632,510 states generated (396,214 s/min), 662,476 distinct states found (84,700 ds/min), 367,447 states left on queue.
+Progress(12) at 2026-10-31 11:34:01: 2,926,169 states generated (293,659 s/min), 718,871 distinct states found (56,395 ds/min), 395,594 states left on queue.
+Progress(12) at 2026-10-31 11:35:01: 3,267,354 states generated (341,185 s/min), 796,923 distinct states found (78,052 ds/min), 436,565 states left on queue.
+
+Finished:  2026-10-31T11:35:58-04:00
+Exit code: 143
