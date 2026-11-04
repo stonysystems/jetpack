@@ -89,7 +89,7 @@ Coordinator C (a Jetpack replica co-located with a proposer of the new view, T1;
                C is also in replicas(·) and handles its own messages by the same replica rules):
   C.view            // the new view v
   C.v_n             // last normal view, learned from the replicas' last_normal_view (L9)
-  C.k               // C's current ballot within C.view
+  C.k               // C's current ballot within C.view; the only persisted coordinator variable (§0 Persistence)
   C.rset            // recovery set C proposes for C.v_n
 
 Client K:
@@ -108,7 +108,11 @@ Persistence: R's whole Jetpack state (last_normal_view, new_view, mode, pool, ma
   Every state change is written before the message that depends on it is sent: pool insert
   before FastAck (N16), promise before PrepareOK (L16), accept before AcceptOK (L37),
   join/learn before any reply. A restarted replica reloads this state and continues as a slow
-  replica; there is no amnesia mode. (If the original protocol keeps its log in memory only,
+  replica; there is no amnesia mode. A coordinator's state is volatile except its ballot:
+  C.k is on stable storage before the Prepare that carries it is sent (L2, L46), and a
+  coordinator that lost its state starts again at T1 with C.k ← its persisted ballot for v + 1.
+  So one coordinator never sends two values at one (view, k): replies to its earlier run that
+  are still in the network match no ballot of the new run. (If the original protocol keeps its log in memory only,
   so does Jetpack: same guarantee as the original, a constant factor more writes, no added
   latency relative to a WAN round trip.)
 
@@ -242,7 +246,7 @@ T2   resume proposing only after P's own Recovered(S) is committed, where S is v
 ```text
 Coordinator C, on T1 with new view v:
 L1   C.view ← v
-L2   C.k ← 0
+L2   C.k ← 0, or after a restart its persisted ballot for v + 1   // persisted before L10 (§0)
 L3   send BeginRecovery(v) to replicas(v); retry until maj(v) reply
 
 Any Jetpack replica R, on receiving BeginRecovery(v) from coordinator C:
@@ -304,7 +308,7 @@ L42      stop coordinating            // a newer view exists: its proposers take
 L43  else if last_normal_view' > C.v_n then
 L44      C.v_n ← last_normal_view'; go to L10  // C.v_n was already recovered: recover the newer view
 L45  else if k' ≠ ⊥ and k' ≥ C.k then
-L46      C.k ← k' + 1; after a random backoff, go to L10   // same view, another coordinator
+L46      C.k ← k' + 1 (persisted); after a random backoff, go to L10   // same view, another coordinator
 ```
 
 Notes.
@@ -476,4 +480,4 @@ makes explicit. The models and the implementation follow this document.
 | 12 | Where views come from, per protocol | "Provided by the original protocol" | Raft/MongoDB (term, config index); Copilot (pilot 0 ballot, pilot 1 ballot); Mencius one static view: if a server is down the fast path stops and the original path is unaffected (§0) |
 | 13 | Delivery of FinishRecovery | No S, no ack, no retransmission | Carries S; FinishRecoveryOK; asynchronous retransmission until every replica acknowledged (L48–L49, L54), without which a proposer that missed it never obtains S |
 | 14 | The merged two-RPC recovery | B.2 says the three operations "do not depend on one another" | With v_n unknown the promise covers every w, one ballot per replica, every accepted value travels, and a removed replica gets a Prepare (§3) |
-| 15 | Persistence | Not stated | Jetpack state is persisted together with the original protocol's, written before the reply (§0) |
+| 15 | Persistence | Not stated | Jetpack state is persisted together with the original protocol's, written before the reply; a coordinator persists only its ballot and restarts above it (§0) |
