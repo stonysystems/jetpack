@@ -1,0 +1,321 @@
+=== TLC Run ===
+Spec:      jetpack_raft_composition.tla
+Config:    jetpack_raft.cfg
+Mode:      local
+Detected total memory: 96498MB
+Auto 1/3 memory cap: 32166MB
+Configured TLC memory cap: 5000MB
+Local Java bitness: 64
+Enforced TLC memory cap: 4500MB
+JVM heap cap: 4500MB
+Log:       /home/users/ztang/JetPack/tla/log/20261031_160602_jetpack_raft_composition_jetpack_raft.log
+Started:   2026-10-31T16:06:02+00:00
+===============
+Using config: jetpack_raft.cfg
+--- Config contents ---
+\* Default config for jetpack_raft_composition: 3 servers, two commands
+\* on one key, one election, one restart, one add + one remove reconfig.
+SPECIFICATION Spec
+
+CONSTANTS
+  Server = {s1, s2, s3, s4}
+  Client = {c1}
+  CmdId = {id1, id2}
+  Key = {k1}
+  InitialMembers = {s1, s2, s3}
+  MinClusterSize = 2
+  MaxClusterSize = 4
+  MaxElections = 1
+  MaxRestarts = 1
+  MaxAddReconfigs = 1
+  MaxRemoveReconfigs = 1
+  IncludeThesisBug = FALSE
+
+CONSTRAINT StateConstraint
+
+INVARIANTS
+  CommittedLogAgreement
+  LogOrderMatchesExecution
+  ExecutionDedupMatches
+  ReplicaInvariants
+  RecoveredAgreement
+  FastCommitDurability
+  PoolsConflictFree
+  NoLogDivergence
+  MaxOneReconfigurationAtATime
+  ElectionSafety
+  Principle2Raft
+  EpochDeterminesMembership
+--- End config ---
+
+Running: tlc2.TLC -nowarning -deadlock -config /home/users/ztang/JetPack/tla/jetpack_raft.cfg jetpack_raft_composition.tla -simulate -depth 150 -workers 3
+
+TLC2 Version 2026.10.30.154139 (rev: 090e85c)
+Running Random Simulation with seed -8295439321386582405 with 3 workers on 64 cores with 4500MB heap and 64MB offheap memory [pid: 3215748] (Linux 7.0.0-29-generic amd64, Eclipse Adoptium 21.0.12 64bit).
+Parsing file /home/users/ztang/JetPack/tla/jetpack_raft_composition.tla
+Parsing file /tmp/tlc-1148399429907372948/Integers.tla (jar:file:/home/users/ztang/JetPack/tla/tla2tools.jar!/tla2sany/StandardModules/Integers.tla)
+Parsing file /tmp/tlc-1148399429907372948/Naturals.tla (jar:file:/home/users/ztang/JetPack/tla/tla2tools.jar!/tla2sany/StandardModules/Naturals.tla)
+Parsing file /tmp/tlc-1148399429907372948/FiniteSets.tla (jar:file:/home/users/ztang/JetPack/tla/tla2tools.jar!/tla2sany/StandardModules/FiniteSets.tla)
+Parsing file /tmp/tlc-1148399429907372948/Sequences.tla (jar:file:/home/users/ztang/JetPack/tla/tla2tools.jar!/tla2sany/StandardModules/Sequences.tla)
+Parsing file /tmp/tlc-1148399429907372948/TLC.tla (jar:file:/home/users/ztang/JetPack/tla/tla2tools.jar!/tla2sany/StandardModules/TLC.tla)
+Parsing file /tmp/tlc-1148399429907372948/_TLCTrace.tla (jar:file:/home/users/ztang/JetPack/tla/tla2tools.jar!/tla2sany/StandardModules/_TLCTrace.tla)
+Parsing file /home/users/ztang/JetPack/tla/base_raft.tla
+Parsing file /home/users/ztang/JetPack/tla/jetpack.tla
+Parsing file /tmp/tlc-1148399429907372948/TLCExt.tla (jar:file:/home/users/ztang/JetPack/tla/tla2tools.jar!/tla2sany/StandardModules/TLCExt.tla)
+Semantic processing of module Naturals
+Semantic processing of module Integers
+Semantic processing of module Sequences
+Semantic processing of module FiniteSets
+Semantic processing of module TLC
+Semantic processing of module TLCExt
+Semantic processing of module _TLCTrace
+Semantic processing of module base_raft
+Semantic processing of module jetpack
+Semantic processing of module jetpack_raft_composition
+Linting of module TLCExt
+Linting of module _TLCTrace
+Linting of module base_raft
+Linting of module jetpack
+Linting of module jetpack_raft_composition
+Starting... (2026-10-31 16:06:03)
+Computed 1 initial states...
+Finished computing initial states: 1 distinct state generated at 2026-10-31 16:06:03.
+Progress: 440146 states checked, 10722 traces generated (trace length: mean=15, var(x)=159, sd=13)
+Progress: 891886 states checked, 21646 traces generated (trace length: mean=15, var(x)=165, sd=13)
+Progress: 1360960 states checked, 32864 traces generated (trace length: mean=15, var(x)=172, sd=13)
+Progress: 1834097 states checked, 44223 traces generated (trace length: mean=15, var(x)=172, sd=13)
+Progress: 2340361 states checked, 56510 traces generated (trace length: mean=15, var(x)=171, sd=13)
+Progress: 2835500 states checked, 68590 traces generated (trace length: mean=15, var(x)=168, sd=13)
+Progress: 3325853 states checked, 80370 traces generated (trace length: mean=15, var(x)=170, sd=13)
+Progress: 3812673 states checked, 91970 traces generated (trace length: mean=15, var(x)=172, sd=13)
+Progress: 4312604 states checked, 104311 traces generated (trace length: mean=15, var(x)=169, sd=13)
+Progress: 4817378 states checked, 116636 traces generated (trace length: mean=15, var(x)=168, sd=13)
+Progress: 5315645 states checked, 128660 traces generated (trace length: mean=15, var(x)=170, sd=13)
+Progress: 5818987 states checked, 140989 traces generated (trace length: mean=15, var(x)=168, sd=13)
+Progress: 6311513 states checked, 152881 traces generated (trace length: mean=15, var(x)=168, sd=13)
+Progress: 6800504 states checked, 164660 traces generated (trace length: mean=15, var(x)=169, sd=13)
+Progress: 7296912 states checked, 176774 traces generated (trace length: mean=15, var(x)=168, sd=13)
+Progress: 7787182 states checked, 188565 traces generated (trace length: mean=15, var(x)=169, sd=13)
+Progress: 8278331 states checked, 200383 traces generated (trace length: mean=15, var(x)=169, sd=13)
+Progress: 8772751 states checked, 212145 traces generated (trace length: mean=15, var(x)=170, sd=13)
+Progress: 9267962 states checked, 224048 traces generated (trace length: mean=15, var(x)=171, sd=13)
+Progress: 9769616 states checked, 236354 traces generated (trace length: mean=15, var(x)=170, sd=13)
+Progress: 10251576 states checked, 247876 traces generated (trace length: mean=15, var(x)=171, sd=13)
+Progress: 10739266 states checked, 259461 traces generated (trace length: mean=15, var(x)=172, sd=13)
+Progress: 11222621 states checked, 271142 traces generated (trace length: mean=15, var(x)=172, sd=13)
+Progress: 11711717 states checked, 283156 traces generated (trace length: mean=15, var(x)=171, sd=13)
+Progress: 12197330 states checked, 294928 traces generated (trace length: mean=15, var(x)=171, sd=13)
+Progress: 12687044 states checked, 306799 traces generated (trace length: mean=15, var(x)=170, sd=13)
+Progress: 13181921 states checked, 318745 traces generated (trace length: mean=15, var(x)=170, sd=13)
+Progress: 13678318 states checked, 330660 traces generated (trace length: mean=15, var(x)=171, sd=13)
+Progress: 14179531 states checked, 342808 traces generated (trace length: mean=15, var(x)=170, sd=13)
+Progress: 14687365 states checked, 355203 traces generated (trace length: mean=15, var(x)=170, sd=13)
+Progress: 15184383 states checked, 367071 traces generated (trace length: mean=15, var(x)=170, sd=13)
+Progress: 15687216 states checked, 379287 traces generated (trace length: mean=15, var(x)=170, sd=13)
+Progress: 16184290 states checked, 391249 traces generated (trace length: mean=15, var(x)=171, sd=13)
+Progress: 16679363 states checked, 403320 traces generated (trace length: mean=15, var(x)=170, sd=13)
+Progress: 17181745 states checked, 415691 traces generated (trace length: mean=15, var(x)=170, sd=13)
+Progress: 17682346 states checked, 427809 traces generated (trace length: mean=15, var(x)=170, sd=13)
+Progress: 18179313 states checked, 439909 traces generated (trace length: mean=15, var(x)=169, sd=13)
+Progress: 18679526 states checked, 452130 traces generated (trace length: mean=15, var(x)=169, sd=13)
+Progress: 19178321 states checked, 464303 traces generated (trace length: mean=15, var(x)=169, sd=13)
+Progress: 19682068 states checked, 476573 traces generated (trace length: mean=15, var(x)=168, sd=13)
+Progress: 20073460 states checked, 486024 traces generated (trace length: mean=15, var(x)=168, sd=13)
+Progress: 20448519 states checked, 495023 traces generated (trace length: mean=15, var(x)=168, sd=13)
+Progress: 20857769 states checked, 504877 traces generated (trace length: mean=15, var(x)=168, sd=13)
+Progress: 21359782 states checked, 516993 traces generated (trace length: mean=15, var(x)=169, sd=13)
+Progress: 21865250 states checked, 529255 traces generated (trace length: mean=15, var(x)=168, sd=13)
+Progress: 22374908 states checked, 541461 traces generated (trace length: mean=15, var(x)=169, sd=13)
+Progress: 22884470 states checked, 553711 traces generated (trace length: mean=15, var(x)=169, sd=13)
+Progress: 23366730 states checked, 565663 traces generated (trace length: mean=15, var(x)=168, sd=13)
+Progress: 23867988 states checked, 577692 traces generated (trace length: mean=15, var(x)=169, sd=13)
+Progress: 24323262 states checked, 588530 traces generated (trace length: mean=15, var(x)=169, sd=13)
+Progress: 24712465 states checked, 598088 traces generated (trace length: mean=15, var(x)=169, sd=13)
+Progress: 25158838 states checked, 608816 traces generated (trace length: mean=15, var(x)=169, sd=13)
+Progress: 25566197 states checked, 618703 traces generated (trace length: mean=15, var(x)=169, sd=13)
+Progress: 25959415 states checked, 628137 traces generated (trace length: mean=15, var(x)=169, sd=13)
+Progress: 26352772 states checked, 637680 traces generated (trace length: mean=15, var(x)=169, sd=13)
+Progress: 26785751 states checked, 648183 traces generated (trace length: mean=15, var(x)=169, sd=13)
+Progress: 27186674 states checked, 657895 traces generated (trace length: mean=15, var(x)=169, sd=13)
+Progress: 27607567 states checked, 667875 traces generated (trace length: mean=15, var(x)=169, sd=13)
+Progress: 28061971 states checked, 678736 traces generated (trace length: mean=15, var(x)=169, sd=13)
+Progress: 28553249 states checked, 690643 traces generated (trace length: mean=15, var(x)=169, sd=13)
+Progress: 29098018 states checked, 703840 traces generated (trace length: mean=15, var(x)=169, sd=13)
+Progress: 29637272 states checked, 716835 traces generated (trace length: mean=15, var(x)=170, sd=13)
+Progress: 30181019 states checked, 729865 traces generated (trace length: mean=15, var(x)=170, sd=13)
+Progress: 30717743 states checked, 742747 traces generated (trace length: mean=15, var(x)=170, sd=13)
+Progress: 31263748 states checked, 756062 traces generated (trace length: mean=15, var(x)=170, sd=13)
+Progress: 31806110 states checked, 769108 traces generated (trace length: mean=15, var(x)=170, sd=13)
+Progress: 32350123 states checked, 782287 traces generated (trace length: mean=15, var(x)=170, sd=13)
+Progress: 32890024 states checked, 795406 traces generated (trace length: mean=15, var(x)=170, sd=13)
+Progress: 33436157 states checked, 808836 traces generated (trace length: mean=15, var(x)=170, sd=13)
+Progress: 33980380 states checked, 822121 traces generated (trace length: mean=15, var(x)=170, sd=13)
+Progress: 34527641 states checked, 835431 traces generated (trace length: mean=15, var(x)=170, sd=13)
+Progress: 35072817 states checked, 848608 traces generated (trace length: mean=15, var(x)=170, sd=13)
+Progress: 35616095 states checked, 861591 traces generated (trace length: mean=15, var(x)=170, sd=13)
+Progress: 36161860 states checked, 874743 traces generated (trace length: mean=15, var(x)=170, sd=13)
+Progress: 36705537 states checked, 887513 traces generated (trace length: mean=15, var(x)=170, sd=13)
+Progress: 37250305 states checked, 900818 traces generated (trace length: mean=15, var(x)=170, sd=13)
+Progress: 37794613 states checked, 914155 traces generated (trace length: mean=15, var(x)=170, sd=13)
+Progress: 38340510 states checked, 927599 traces generated (trace length: mean=15, var(x)=169, sd=13)
+Progress: 38881933 states checked, 940836 traces generated (trace length: mean=15, var(x)=169, sd=13)
+Progress: 39420817 states checked, 953869 traces generated (trace length: mean=15, var(x)=169, sd=13)
+Progress: 39961693 states checked, 966999 traces generated (trace length: mean=15, var(x)=169, sd=13)
+Progress: 40511015 states checked, 980486 traces generated (trace length: mean=15, var(x)=169, sd=13)
+Progress: 41046500 states checked, 993268 traces generated (trace length: mean=15, var(x)=169, sd=13)
+Progress: 41586737 states checked, 1006283 traces generated (trace length: mean=15, var(x)=169, sd=13)
+Progress: 42128654 states checked, 1019261 traces generated (trace length: mean=15, var(x)=169, sd=13)
+Progress: 42673968 states checked, 1032304 traces generated (trace length: mean=15, var(x)=169, sd=13)
+Progress: 43222938 states checked, 1045440 traces generated (trace length: mean=15, var(x)=170, sd=13)
+Progress: 43765631 states checked, 1058660 traces generated (trace length: mean=15, var(x)=170, sd=13)
+Progress: 44312514 states checked, 1072057 traces generated (trace length: mean=15, var(x)=169, sd=13)
+Progress: 44863859 states checked, 1085127 traces generated (trace length: mean=15, var(x)=170, sd=13)
+Progress: 45412864 states checked, 1098444 traces generated (trace length: mean=15, var(x)=169, sd=13)
+Progress: 45957031 states checked, 1111836 traces generated (trace length: mean=15, var(x)=169, sd=13)
+Progress: 46492943 states checked, 1124915 traces generated (trace length: mean=15, var(x)=169, sd=13)
+Progress: 47033743 states checked, 1137943 traces generated (trace length: mean=15, var(x)=169, sd=13)
+Progress: 47578536 states checked, 1150960 traces generated (trace length: mean=15, var(x)=169, sd=13)
+Progress: 48126995 states checked, 1164078 traces generated (trace length: mean=15, var(x)=170, sd=13)
+Progress: 48673111 states checked, 1177186 traces generated (trace length: mean=15, var(x)=170, sd=13)
+Progress: 49222692 states checked, 1190545 traces generated (trace length: mean=15, var(x)=170, sd=13)
+Progress: 49768910 states checked, 1203775 traces generated (trace length: mean=15, var(x)=169, sd=13)
+Progress: 50311413 states checked, 1217021 traces generated (trace length: mean=15, var(x)=169, sd=13)
+Progress: 50855630 states checked, 1230246 traces generated (trace length: mean=15, var(x)=169, sd=13)
+Progress: 51395165 states checked, 1243335 traces generated (trace length: mean=15, var(x)=169, sd=13)
+Progress: 51947751 states checked, 1256755 traces generated (trace length: mean=15, var(x)=169, sd=13)
+Progress: 52489621 states checked, 1269940 traces generated (trace length: mean=15, var(x)=169, sd=13)
+Progress: 53036083 states checked, 1282949 traces generated (trace length: mean=15, var(x)=169, sd=13)
+Progress: 53582902 states checked, 1296040 traces generated (trace length: mean=15, var(x)=170, sd=13)
+Progress: 54122793 states checked, 1309308 traces generated (trace length: mean=15, var(x)=169, sd=13)
+Progress: 54665775 states checked, 1322452 traces generated (trace length: mean=15, var(x)=169, sd=13)
+Progress: 55210909 states checked, 1335697 traces generated (trace length: mean=15, var(x)=169, sd=13)
+Progress: 55756253 states checked, 1349020 traces generated (trace length: mean=15, var(x)=169, sd=13)
+Progress: 56306879 states checked, 1362430 traces generated (trace length: mean=15, var(x)=169, sd=13)
+Progress: 56855480 states checked, 1375408 traces generated (trace length: mean=15, var(x)=170, sd=13)
+Progress: 57405262 states checked, 1388958 traces generated (trace length: mean=15, var(x)=169, sd=13)
+Progress: 57950431 states checked, 1402205 traces generated (trace length: mean=15, var(x)=169, sd=13)
+Progress: 58498531 states checked, 1415458 traces generated (trace length: mean=15, var(x)=169, sd=13)
+Progress: 59037275 states checked, 1428294 traces generated (trace length: mean=15, var(x)=169, sd=13)
+Progress: 59580756 states checked, 1441400 traces generated (trace length: mean=15, var(x)=169, sd=13)
+Progress: 60124147 states checked, 1454537 traces generated (trace length: mean=15, var(x)=169, sd=13)
+Progress: 60667286 states checked, 1467847 traces generated (trace length: mean=15, var(x)=169, sd=13)
+Progress: 61212129 states checked, 1481171 traces generated (trace length: mean=15, var(x)=169, sd=13)
+Progress: 61758160 states checked, 1494357 traces generated (trace length: mean=15, var(x)=169, sd=13)
+Progress: 62300651 states checked, 1507517 traces generated (trace length: mean=15, var(x)=169, sd=13)
+Progress: 62844932 states checked, 1520339 traces generated (trace length: mean=15, var(x)=169, sd=13)
+Progress: 63395341 states checked, 1533683 traces generated (trace length: mean=15, var(x)=169, sd=13)
+Progress: 63934924 states checked, 1546680 traces generated (trace length: mean=15, var(x)=169, sd=13)
+Progress: 64489018 states checked, 1560079 traces generated (trace length: mean=15, var(x)=169, sd=13)
+Progress: 65035034 states checked, 1573123 traces generated (trace length: mean=15, var(x)=169, sd=13)
+Progress: 65582472 states checked, 1586588 traces generated (trace length: mean=15, var(x)=169, sd=13)
+Progress: 66126463 states checked, 1599937 traces generated (trace length: mean=15, var(x)=169, sd=13)
+Progress: 66671043 states checked, 1613059 traces generated (trace length: mean=15, var(x)=169, sd=13)
+Progress: 67205444 states checked, 1626053 traces generated (trace length: mean=15, var(x)=169, sd=13)
+Progress: 67721801 states checked, 1638642 traces generated (trace length: mean=15, var(x)=169, sd=13)
+Progress: 68194308 states checked, 1650138 traces generated (trace length: mean=15, var(x)=169, sd=13)
+Progress: 68635810 states checked, 1660792 traces generated (trace length: mean=15, var(x)=169, sd=13)
+Progress: 69084248 states checked, 1671539 traces generated (trace length: mean=15, var(x)=169, sd=13)
+Progress: 69552312 states checked, 1683019 traces generated (trace length: mean=15, var(x)=169, sd=13)
+Progress: 70014236 states checked, 1694124 traces generated (trace length: mean=15, var(x)=169, sd=13)
+Progress: 70500765 states checked, 1705693 traces generated (trace length: mean=15, var(x)=169, sd=13)
+Progress: 71009826 states checked, 1717787 traces generated (trace length: mean=15, var(x)=169, sd=13)
+Progress: 71502900 states checked, 1729509 traces generated (trace length: mean=15, var(x)=169, sd=13)
+Progress: 72008408 states checked, 1741610 traces generated (trace length: mean=15, var(x)=169, sd=13)
+Progress: 72510506 states checked, 1753778 traces generated (trace length: mean=15, var(x)=169, sd=13)
+Progress: 73037230 states checked, 1766330 traces generated (trace length: mean=15, var(x)=170, sd=13)
+Progress: 73586998 states checked, 1779836 traces generated (trace length: mean=15, var(x)=170, sd=13)
+Progress: 74117476 states checked, 1792660 traces generated (trace length: mean=15, var(x)=169, sd=13)
+Progress: 74655757 states checked, 1805648 traces generated (trace length: mean=15, var(x)=170, sd=13)
+Progress: 75196032 states checked, 1818708 traces generated (trace length: mean=15, var(x)=170, sd=13)
+Progress: 75689807 states checked, 1830639 traces generated (trace length: mean=15, var(x)=170, sd=13)
+Progress: 76161521 states checked, 1842231 traces generated (trace length: mean=15, var(x)=169, sd=13)
+Progress: 76578486 states checked, 1852270 traces generated (trace length: mean=15, var(x)=169, sd=13)
+Progress: 77012012 states checked, 1862790 traces generated (trace length: mean=15, var(x)=169, sd=13)
+Progress: 77438984 states checked, 1873257 traces generated (trace length: mean=15, var(x)=169, sd=13)
+Progress: 77822862 states checked, 1882353 traces generated (trace length: mean=15, var(x)=169, sd=13)
+Progress: 78220117 states checked, 1892156 traces generated (trace length: mean=15, var(x)=169, sd=13)
+Progress: 78622329 states checked, 1901978 traces generated (trace length: mean=15, var(x)=169, sd=13)
+Progress: 79024893 states checked, 1911680 traces generated (trace length: mean=15, var(x)=169, sd=13)
+Progress: 79497578 states checked, 1923181 traces generated (trace length: mean=15, var(x)=169, sd=13)
+Progress: 79990403 states checked, 1935375 traces generated (trace length: mean=15, var(x)=169, sd=13)
+Progress: 80356188 states checked, 1944178 traces generated (trace length: mean=15, var(x)=169, sd=13)
+Progress: 80706679 states checked, 1952510 traces generated (trace length: mean=15, var(x)=169, sd=13)
+Progress: 81112711 states checked, 1962405 traces generated (trace length: mean=15, var(x)=169, sd=13)
+Progress: 81645693 states checked, 1975013 traces generated (trace length: mean=15, var(x)=169, sd=13)
+Progress: 82157021 states checked, 1987343 traces generated (trace length: mean=15, var(x)=170, sd=13)
+Progress: 82680125 states checked, 1999938 traces generated (trace length: mean=15, var(x)=170, sd=13)
+Progress: 83215270 states checked, 2013080 traces generated (trace length: mean=15, var(x)=169, sd=13)
+Progress: 83720062 states checked, 2024968 traces generated (trace length: mean=15, var(x)=170, sd=13)
+Progress: 84230587 states checked, 2037279 traces generated (trace length: mean=15, var(x)=170, sd=13)
+Progress: 84776286 states checked, 2050632 traces generated (trace length: mean=15, var(x)=170, sd=13)
+Progress: 85316561 states checked, 2063686 traces generated (trace length: mean=15, var(x)=170, sd=13)
+Progress: 85862775 states checked, 2076862 traces generated (trace length: mean=15, var(x)=170, sd=13)
+Progress: 86408353 states checked, 2089900 traces generated (trace length: mean=15, var(x)=170, sd=13)
+Progress: 86945883 states checked, 2102775 traces generated (trace length: mean=15, var(x)=170, sd=13)
+Progress: 87483358 states checked, 2115847 traces generated (trace length: mean=15, var(x)=170, sd=13)
+Progress: 88026595 states checked, 2128981 traces generated (trace length: mean=15, var(x)=170, sd=13)
+Progress: 88570635 states checked, 2142101 traces generated (trace length: mean=15, var(x)=170, sd=13)
+Progress: 89114122 states checked, 2155423 traces generated (trace length: mean=15, var(x)=170, sd=13)
+Progress: 89659272 states checked, 2168830 traces generated (trace length: mean=15, var(x)=170, sd=13)
+Progress: 90202598 states checked, 2181966 traces generated (trace length: mean=15, var(x)=170, sd=13)
+Progress: 90744931 states checked, 2195197 traces generated (trace length: mean=15, var(x)=170, sd=13)
+Progress: 91292163 states checked, 2208720 traces generated (trace length: mean=15, var(x)=169, sd=13)
+Progress: 91841077 states checked, 2221975 traces generated (trace length: mean=15, var(x)=169, sd=13)
+Progress: 92357071 states checked, 2234612 traces generated (trace length: mean=15, var(x)=169, sd=13)
+Progress: 92837279 states checked, 2245970 traces generated (trace length: mean=15, var(x)=169, sd=13)
+Progress: 93385883 states checked, 2259345 traces generated (trace length: mean=15, var(x)=169, sd=13)
+Progress: 93935566 states checked, 2272624 traces generated (trace length: mean=15, var(x)=169, sd=13)
+Progress: 94477959 states checked, 2285545 traces generated (trace length: mean=15, var(x)=170, sd=13)
+Progress: 95016732 states checked, 2298619 traces generated (trace length: mean=15, var(x)=170, sd=13)
+Progress: 95526525 states checked, 2310904 traces generated (trace length: mean=15, var(x)=170, sd=13)
+Progress: 96048453 states checked, 2323607 traces generated (trace length: mean=15, var(x)=170, sd=13)
+Progress: 96588553 states checked, 2336647 traces generated (trace length: mean=15, var(x)=170, sd=13)
+Progress: 97138332 states checked, 2350044 traces generated (trace length: mean=15, var(x)=170, sd=13)
+Progress: 97537482 states checked, 2359579 traces generated (trace length: mean=15, var(x)=170, sd=13)
+Progress: 97923979 states checked, 2369064 traces generated (trace length: mean=15, var(x)=170, sd=13)
+Progress: 98406243 states checked, 2380918 traces generated (trace length: mean=15, var(x)=170, sd=13)
+Progress: 98933820 states checked, 2393778 traces generated (trace length: mean=15, var(x)=169, sd=13)
+Progress: 99483424 states checked, 2406986 traces generated (trace length: mean=15, var(x)=169, sd=13)
+Progress: 100031146 states checked, 2420305 traces generated (trace length: mean=15, var(x)=169, sd=13)
+Progress: 100577013 states checked, 2433314 traces generated (trace length: mean=15, var(x)=170, sd=13)
+Progress: 101112521 states checked, 2446375 traces generated (trace length: mean=15, var(x)=169, sd=13)
+Progress: 101667208 states checked, 2459870 traces generated (trace length: mean=15, var(x)=169, sd=13)
+Progress: 102216436 states checked, 2472951 traces generated (trace length: mean=15, var(x)=170, sd=13)
+Progress: 102762835 states checked, 2486151 traces generated (trace length: mean=15, var(x)=170, sd=13)
+Progress: 103312933 states checked, 2499413 traces generated (trace length: mean=15, var(x)=170, sd=13)
+Progress: 103856694 states checked, 2512291 traces generated (trace length: mean=15, var(x)=170, sd=13)
+Progress: 104403487 states checked, 2525443 traces generated (trace length: mean=15, var(x)=170, sd=13)
+Progress: 104949337 states checked, 2538530 traces generated (trace length: mean=15, var(x)=170, sd=13)
+Progress: 105489861 states checked, 2551470 traces generated (trace length: mean=15, var(x)=170, sd=13)
+Progress: 106035274 states checked, 2564812 traces generated (trace length: mean=15, var(x)=170, sd=13)
+Progress: 106588839 states checked, 2578203 traces generated (trace length: mean=15, var(x)=170, sd=13)
+Progress: 107129631 states checked, 2591262 traces generated (trace length: mean=15, var(x)=170, sd=13)
+Progress: 107668850 states checked, 2604631 traces generated (trace length: mean=15, var(x)=170, sd=13)
+Progress: 108218303 states checked, 2617711 traces generated (trace length: mean=15, var(x)=170, sd=13)
+Progress: 108762184 states checked, 2630975 traces generated (trace length: mean=15, var(x)=170, sd=13)
+Progress: 109305822 states checked, 2644265 traces generated (trace length: mean=15, var(x)=170, sd=13)
+Progress: 109856382 states checked, 2657471 traces generated (trace length: mean=15, var(x)=170, sd=13)
+Progress: 110397947 states checked, 2670808 traces generated (trace length: mean=15, var(x)=170, sd=13)
+Progress: 110941376 states checked, 2684002 traces generated (trace length: mean=15, var(x)=170, sd=13)
+Progress: 111481401 states checked, 2696823 traces generated (trace length: mean=15, var(x)=170, sd=13)
+Progress: 112027865 states checked, 2710026 traces generated (trace length: mean=15, var(x)=170, sd=13)
+Progress: 112572262 states checked, 2723127 traces generated (trace length: mean=15, var(x)=170, sd=13)
+Progress: 113121433 states checked, 2736206 traces generated (trace length: mean=15, var(x)=170, sd=13)
+Progress: 113657489 states checked, 2749267 traces generated (trace length: mean=15, var(x)=170, sd=13)
+Progress: 114194013 states checked, 2762217 traces generated (trace length: mean=15, var(x)=170, sd=13)
+Progress: 114740932 states checked, 2775482 traces generated (trace length: mean=15, var(x)=170, sd=13)
+Progress: 115284249 states checked, 2788555 traces generated (trace length: mean=15, var(x)=170, sd=13)
+Progress: 115833757 states checked, 2801861 traces generated (trace length: mean=15, var(x)=170, sd=13)
+Progress: 116382505 states checked, 2815000 traces generated (trace length: mean=15, var(x)=170, sd=13)
+Progress: 116930340 states checked, 2828147 traces generated (trace length: mean=15, var(x)=170, sd=13)
+Progress: 117478132 states checked, 2841121 traces generated (trace length: mean=15, var(x)=170, sd=13)
+Progress: 118026225 states checked, 2854300 traces generated (trace length: mean=15, var(x)=170, sd=13)
+Progress: 118577497 states checked, 2867908 traces generated (trace length: mean=15, var(x)=170, sd=13)
+Progress: 119130149 states checked, 2881321 traces generated (trace length: mean=15, var(x)=170, sd=13)
+Progress: 119671268 states checked, 2894340 traces generated (trace length: mean=15, var(x)=170, sd=13)
+Progress: 120217865 states checked, 2907575 traces generated (trace length: mean=15, var(x)=170, sd=13)
+Progress: 120761869 states checked, 2920568 traces generated (trace length: mean=15, var(x)=170, sd=13)
+Progress: 121313553 states checked, 2933930 traces generated (trace length: mean=15, var(x)=170, sd=13)
+Progress: 121854027 states checked, 2946823 traces generated (trace length: mean=15, var(x)=170, sd=13)
+Progress: 122400066 states checked, 2960041 traces generated (trace length: mean=15, var(x)=170, sd=13)
+Progress: 122939232 states checked, 2973131 traces generated (trace length: mean=15, var(x)=170, sd=13)
