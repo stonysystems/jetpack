@@ -328,6 +328,17 @@ NoLogDivergence ==
                         log[s1]["sole"][index] = log[s2]["sole"][index]
                ELSE TRUE
 
+\* A config entry counts as committed once it is in the logs of a majority of
+\* the members it names (Raft commits a config entry under its own config).
+\* commitIndex is volatile (Restart resets it to 0), so a restarted leader's
+\* commitIndex says nothing about the entries committed before its restart.
+ConfigEntryCommitted(i, ind) ==
+    LET entry   == log[i]["sole"][ind]
+        members == entry.value.members
+        have    == {s \in members : /\ ind \in DOMAIN log[s]["sole"]
+                                     /\ log[s]["sole"][ind] = entry}
+    IN Cardinality(have) * 2 > Cardinality(members)
+
 MaxOneReconfigurationAtATime ==
     ~\E i \in Server :
         /\ ostate[i] \in {Leader, ToBeLeader}
@@ -335,8 +346,8 @@ MaxOneReconfigurationAtATime ==
             /\ ind1 # ind2
             /\ B!IsConfigCommand(log[i]["sole"], ind1)
             /\ B!IsConfigCommand(log[i]["sole"], ind2)
-            /\ commitIndex[i]["sole"] < ind1
-            /\ commitIndex[i]["sole"] < ind2
+            /\ ~ConfigEntryCommitted(i, ind1)
+            /\ ~ConfigEntryCommitted(i, ind2)
 
 \* At most one Leader (or paused leader) per term.
 ElectionSafety ==

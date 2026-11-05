@@ -344,10 +344,18 @@ ClientRequest(i, v) ==
 \* by Jetpack (ToBeLeader, the pseudocode (docs/pseudocode.md) T1-T2): it must commit its own
 \* Recovered entry (and a config entry) to resume. Only proposing new client
 \* commands (ClientRequest, BeginReconfig) waits.
+\* A member counts toward commitment only while it is in the primary's term:
+\* in MongoDB a member that has moved to a newer term reports that term with
+\* its position and the primary steps down instead of advancing the commit
+\* point (MongoStaticRaft / MongoRaftReconfig: CommitEntry requires
+\* currentTerm[s] = currentTerm[i] for every s in the quorum). Without it a
+\* member that voted in a newer term and then pulled an entry from the old
+\* primary would let that primary commit an entry the new term rolls back.
 AdvanceCommitIndex(i) ==
     /\ ostate[i] \in {Leader, ToBeLeader}
     /\ LET Agree(index) ==
                {i} \cup {k \in ServerViewOn(i) :
+                           /\ currentTerm[k] = currentTerm[i]
                            /\ Len(log[k]["sole"]) >= index
                            /\ LogTerm(i, index) = LogTerm(k, index)}
            agreeIndexes == {index \in 1..Len(log[i]["sole"]) :
