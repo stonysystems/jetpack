@@ -194,6 +194,10 @@ WClientSendFastCmd(c) ==
     /\ J!ClientSendFastCmd(c)
     /\ UNCHANGED raftOnlyVars
 
+WClientResendFastCmd(c) ==
+    /\ J!ClientResendFastCmd(c)
+    /\ UNCHANGED raftOnlyVars
+
 WGC(i, cmd) ==
     /\ J!GC(i, cmd)
     /\ UNCHANGED raftOnlyVars
@@ -257,6 +261,7 @@ Next ==
 
     \* Jetpack
     \/ \E c \in Client : WClientSendFastCmd(c)
+    \/ \E c \in Client : WClientResendFastCmd(c)
     \/ \E i \in Server, cmd \in J!Commands : WGC(i, cmd)
     \/ \E i \in Server : WApplyCommitted(i)
     \/ \E i \in Server : WStartRecovery(i)
@@ -295,6 +300,27 @@ RecoveryStateConstraint ==
 \* Message bound: a recovery phase broadcasts to 3 replicas on top of the
 \* election's and the fast path's leftovers; below ~10 the recovery never
 \* completes (checked with the probes below).
+\* n = 5 (the smallest n where the fast quorum sq is smaller than n), two
+\* clients, two keys: the bounds only stop runaway behaviours in long
+\* simulation runs (two 5-replica broadcasts per client command, recovery
+\* broadcasts to 5 replicas, two elections).
+N5StateConstraint ==
+    /\ \A i \in Server : currentTerm[i] <= 3
+    /\ \A m \in DOMAIN messages : messages[m] <= 1
+    /\ Cardinality({m \in DOMAIN messages : messages[m] > 0}) <= 30
+    /\ \A i \in Server : Len(log[i]["sole"]) <= 6
+    /\ Len(original_execution_cmds) <= 6
+    /\ Len(execution_cmds) <= 6
+
+\* Staged variant: at most two commands are issued before some replica installs
+\* a view after the initial one, so a random simulation still has commands left
+\* to fast-commit in the views that follow a recovery (uniform action choice
+\* otherwise issues every command long before a recovery completes). A subset
+\* of the behaviours above.
+N5StagedConstraint ==
+    /\ N5StateConstraint
+    /\ (\A i \in Server : rstate[i].lnv.epoch = EpochOf(1, 1)) => Cardinality(client_issued) <= 2
+
 SmallStateConstraint ==
     /\ \A i \in Server : currentTerm[i] <= 2
     /\ \A m \in DOMAIN messages : messages[m] <= 1

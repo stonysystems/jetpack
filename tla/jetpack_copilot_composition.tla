@@ -226,6 +226,10 @@ WStartRecovery(i) ==
     /\ J!StartRecovery(i, ViewOf(i))
     /\ UNCHANGED <<copilotOnlyVars, firstSeq>>
 
+WClientResendFastCmd(c) ==
+    /\ J!ClientResendFastCmd(c)
+    /\ UNCHANGED <<copilotOnlyVars, firstSeq>>
+
 WClientSendFastCmd(c) ==
     /\ J!ClientSendFastCmd(c)
     /\ UNCHANGED <<copilotOnlyVars, firstSeq>>
@@ -291,6 +295,7 @@ Next ==
 
     \* Jetpack
     \/ \E c \in Client : WClientSendFastCmd(c)
+    \/ \E c \in Client : WClientResendFastCmd(c)
     \/ \E i \in Server, cmd \in J!Commands : WGC(i, cmd)
     \/ \E i, j \in Server : WApplyCommitted(i, j)
     \/ \E i \in Server : WStartRecovery(i)
@@ -315,6 +320,23 @@ StateConstraint ==
     /\ \A i \in Server : \A j \in Server : Len(log[i][j]) <= 4
     /\ Len(original_execution_cmds) <= 4
     /\ Len(execution_cmds) <= 4
+
+\* n = 5, two clients, two keys (see jetpack_raft_composition.tla).
+N5StateConstraint ==
+    /\ \A m \in DOMAIN messages : messages[m] <= 1
+    /\ Cardinality(DOMAIN messages) <= 30
+    /\ \A i \in Server : \A j \in Server : Len(log[i][j]) <= 5
+    /\ Len(original_execution_cmds) <= 6
+    /\ Len(execution_cmds) <= 6
+
+\* Staged variant: at most two commands are issued before some replica installs
+\* a view after the initial one, so a random simulation still has commands left
+\* to fast-commit in the views that follow a recovery (uniform action choice
+\* otherwise issues every command long before a recovery completes). A subset
+\* of the behaviours above.
+N5StagedConstraint ==
+    /\ N5StateConstraint
+    /\ (\A i \in Server : rstate[i].lnv.epoch = InitialEpoch) => Cardinality(client_issued) <= 2
 
 \* Tighter constraint for quick exhaustive checking.
 SmallStateConstraint ==

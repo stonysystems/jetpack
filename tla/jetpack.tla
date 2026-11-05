@@ -39,7 +39,8 @@
 \*   - A conflict alone gets no reply in the pseudocode (N18 comment); the model sends a
 \*     FastNack with mconflict = TRUE so the client's "timeout" is explicit.
 \*     This only affects liveness.
-\*   - Client resends (N10) are not modeled; every command id is used once.
+\*   - Client resends (N10) are modeled by ClientResendFastCmd; ClientSendFastCmd
+\*     uses every command id once.
 \*   - Random backoff (L46) is not modeled: TLC explores all interleavings.
 \*   - FinishRecovery carries v_n as metadata (mvn) so RecoveredAgreement can
 \*     be stated per v_n; the protocol does not need it.
@@ -393,6 +394,27 @@ ClientSendFastCmd(c) ==
              /\ client_heard_from' = [client_heard_from EXCEPT ![c] = {}]
              /\ client_issued' = client_issued \cup {cmd}
              /\ UNCHANGED <<baseVars, jetpackVars, client_view, executionVars>>
+
+\* N10: an attempt that ended without a fast commit (FastNack with a newer
+\* view, N8-N9, or the modeled timeout, N7) leaves the command waiting for the
+\* original path; on timeout the client resends it with the same id in its
+\* current view K.view. The model does not record which client issued a
+\* command, so any idle client may resend any issued command that is not yet
+\* executed or fast-committed and that no client is currently waiting on.
+ClientResendFastCmd(c) ==
+    /\ client_pending[c] = NilCmd
+    /\ \E cmd \in client_issued :
+          /\ cmd \notin Executed
+          /\ cmd \notin {fc.cmd : fc \in fast_committed}
+          /\ \A d \in Client : client_pending[d] /= cmd
+          /\ LET view == client_view[c]
+                 msgSet == { [mtype |-> FastCmd, msource |-> c, mdest |-> s,
+                              mview |-> view, mcmd |-> cmd] : s \in view.replica_ids }
+             IN /\ messages' = AddMessages(msgSet, messages)
+                /\ client_pending'   = [client_pending EXCEPT ![c] = cmd]
+                /\ client_successes' = [client_successes EXCEPT ![c] = {}]
+                /\ client_heard_from' = [client_heard_from EXCEPT ![c] = {}]
+                /\ UNCHANGED <<baseVars, jetpackVars, client_view, client_issued, executionVars>>
 
 \* N12–N20: a replica handles FastCmd(v, c).
 HandleFastCmd(i, m) ==
@@ -796,6 +818,7 @@ StopCoordinating(i) ==
 
 JetpackLocalNext ==
     \/ \E c \in Client : ClientSendFastCmd(c)
+    \/ \E c \in Client : ClientResendFastCmd(c)
     \/ \E i \in Server, cmd \in Commands : GC(i, cmd)
     \/ \E i \in Server, j \in Proposer : ApplyCommitted(i, j)
     \/ \E i \in Server : CompleteBeginRecovery(i)

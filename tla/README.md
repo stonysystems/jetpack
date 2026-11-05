@@ -86,6 +86,7 @@ Configurations (Raft; the other compositions have the same `_small` / default pa
 | `jetpack_raft_recovery.cfg` | 3 servers, no clients, 1 election | `RecoveryStateConstraint` (≤ 12 messages) | the recovery protocol alone (Recovered(∅) marker, Nack/learn paths) |
 | `jetpack_raft.cfg` | 4 servers (3 initial), 2 commands, 1 election, 1 restart, 1 add + 1 remove | `StateConstraint` | reconfiguration |
 | `jetpack_raft_probe_*.cfg` | as small / recovery | | reachability traces |
+| `jetpack_*_n5.cfg` / `jetpack_*_n5_staged.cfg` | 5 servers, 2 clients, 3 commands, 2 keys, 2 elections (Copilot: 2 pilot changes), 1 restart | `N5StateConstraint`; `_staged` also issues at most 2 commands before a view after the initial one is installed | the smallest n where the fast quorum (4) is smaller than n; long simulation runs |
 | `jetpack_raft_ci.cfg` | as small, but `MaxElections = 0` | `CiStateConstraint` (term ≤ 1, ≤ 10 messages, log ≤ 2) | the fast path without an election, exhaustive in under a minute (CI) |
 | `jetpack_raft_probe_ci_NoFastCommittedInRecovered.cfg` | as small | `CiProbeConstraint` (see the module) | a Recovered(S) containing the fast-committed command, submitted by the new leader while the old leader's proposal is uncommitted; reached in about a minute (CI) |
 

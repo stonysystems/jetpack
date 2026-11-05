@@ -321,6 +321,10 @@ WClientSendFastCmd(c) ==
     /\ J!ClientSendFastCmd(c)
     /\ UNCHANGED <<menciusExtraVars, auxVars>>
 
+WClientResendFastCmd(c) ==
+    /\ J!ClientResendFastCmd(c)
+    /\ UNCHANGED <<menciusExtraVars, auxVars>>
+
 \* N21 / N24: a Normal replica drops an executed command from its pool.
 WGC(i, cmd) ==
     /\ J!GC(i, cmd)
@@ -421,6 +425,7 @@ Next ==
 
           \* Jetpack (fast path only: no view change, hence no recovery)
           \/ \E c \in Client : WClientSendFastCmd(c)
+          \/ \E c \in Client : WClientResendFastCmd(c)
           \/ \E i \in Server, cmd \in J!Commands : WGC(i, cmd)
           \/ \E i \in Server : ApplyCommitted(i)
 
@@ -444,6 +449,15 @@ StateConstraint ==
     /\ \A i \in Server : \A j \in Server : Len(log[i][j]) <= 2
     /\ Len(original_execution_cmds) <= 3
     /\ Len(execution_cmds) <= 4
+
+\* n = 5, two clients, two keys (see jetpack_raft_composition.tla).
+N5StateConstraint ==
+    /\ \A m \in DOMAIN messages : messages[m] <= 1
+    /\ Cardinality(DOMAIN messages) <= 30
+    /\ \A i \in Server : localIndex[i] <= B!SlotFor(i, 3)
+    /\ \A i \in Server : \A j \in Server : Len(log[i][j]) <= 3
+    /\ Len(original_execution_cmds) <= 6
+    /\ Len(execution_cmds) <= 6
 
 \* Tighter constraint for quick exhaustive checking.
 SmallStateConstraint ==
