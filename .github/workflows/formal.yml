@@ -1,0 +1,225 @@
+name: Formal checks
+
+# What is checked (tla/README.md, verus/README.md):
+#   tla     SANY on the four compositions, an exhaustive TLC run of the CI
+#           bound (tla/jetpack_raft_ci.cfg) and two reachability probes, whose
+#           invariants are EXPECTED to be violated (TLC exit code 12).
+#   verus   the Jetpack model and safety proofs, with --no-cheating.
+#   unit    the jetpack_rules gtest suite.
+#   nightly the long TLC configurations, one runner each.
+# Every job uploads the logs its run produced as an artifact.
+#
+# push and pull_request run the quick jobs (tla, verus, unit). A manual run
+# (workflow_dispatch) runs the set chosen in its input: "quick" (the same
+# three jobs) or "nightly" (the long configurations). GitHub fires `schedule`
+# only from the repository's default branch (copilot+), so the daily nightly
+# run takes effect once this file is on that branch; until then nightly runs
+# on workflow_dispatch with set=nightly.
+
+on:
+  push:
+    branches: [jetpack, jetpack-work]
+  pull_request:
+    branches: [jetpack, jetpack-work]
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+    inputs:
+      set:
+        description: "quick: tla, verus, unit; nightly: the long TLC configurations"
+        type: choice
+        options: [quick, nightly]
+        default: quick
+
+permissions:
+  contents: read
+
+env:
+  # v1.8.0 is a rolling tag (the jar changes under the same URL), so every TLC
+  # log starts with the build it ran on ("TLC2 Version ...").
+  TLA2TOOLS_URL: https://github.com/tlaplus/tlaplus/releases/download/v1.8.0/tla2tools.jar
+
+jobs:
+  tla:
+    if: github.event_name == 'push' || github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && inputs.set == 'quick')
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: tla
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: tla2tools.jar
+        run: |
+          curl -sSfL -o tla2tools.jar "$TLA2TOOLS_URL"
+          (java -cp tla2tools.jar tlc2.TLC 2>&1 || true) | head -n 1
+
+      # With this build SANY exits 255 on a parse problem but 0 on a semantic
+      # one, and the default shell has no pipefail, so a tee pipeline would
+      # report 0 either way: pipefail makes the exit status count, and the
+      # "*** Errors" report line is checked as well.
+      - name: SANY on the four compositions
+        run: |
+          set -o pipefail
+          mkdir -p log
+          for spec in jetpack_raft_composition jetpack_mongodb_composition jetpack_mencius_composition jetpack_copilot_composition; do
+            java -cp tla2tools.jar tla2sany.SANY "$spec.tla" 2>&1 | tee "log/sany_$spec.log"
+          done
+          if grep -l '\*\*\* Errors' log/sany_*.log; then exit 1; fi
+
+      # The fast path without an election (the cfg header says what it covers
+      # and what it prunes). Measured with 2 workers on the shared 64-core
+      # server: 34 s, 31,702 distinct states
+      # (log/20261031_191441_jetpack_raft_composition_jetpack_raft_ci.log).
+      - name: TLC, exhaustive, jetpack_raft_ci.cfg
+        run: TLC_MODE=local ./run-tlc.sh jetpack_raft_composition.tla jetpack_raft_ci.cfg -workers auto
+
+      # Reachability of the recovery (tla/README.md): each probe invariant is
+      # EXPECTED to be violated, so TLC's exit code 12 is the passing result.
+      # Measured with 2 workers on the same server: a complete recovery with
+      # the view installed, 28-state trace, 2 min 45 s
+      # (log/20261031_191310_jetpack_raft_composition_jetpack_raft_probe_recovery_NoViewInstalled.log);
+      # a Recovered(S) containing the fast-committed
+      # command submitted by the new leader, 33-state trace, 56 s
+      # (log/20261031_191445_jetpack_raft_composition_jetpack_raft_probe_ci_NoFastCommittedInRecovered.log).
+      - name: TLC probes (exit code 12 expected)
+        run: |
+          for cfg in jetpack_raft_probe_recovery_NoViewInstalled.cfg jetpack_raft_probe_ci_NoFastCommittedInRecovered.cfg; do
+            rc=0
+            TLC_MODE=local ./run-tlc.sh jetpack_raft_composition.tla "$cfg" -workers auto || rc=$?
+            echo "$cfg: TLC exit code $rc (12 = the probe invariant is violated, the expected result)"
+            test "$rc" -eq 12
+          done
+
+      # Only the logs this run produced (tla/log also holds the committed ones).
+      - name: Collect this run's logs
+        if: always()
+        run: |
+          mkdir -p ../run-logs
+          find log -name '*.log' -newer tla2tools.jar -exec cp {} ../run-logs/ \;
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: tla-logs
+          path: run-logs/
+
+  verus:
+    if: github.event_name == 'push' || github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && inputs.set == 'quick')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      VERUS_VERSION: 0.2026.08.02.b677dd5
+      VERUS_SHA256: 4c769256e888ee84bde85aae44d95c46bccbb8cf70e1d09f537b0d05fe965dee
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Rust toolchain required by this Verus release
+        run: rustup toolchain install 1.97.1-x86_64-unknown-linux-gnu --profile minimal
+
+      - name: Verus
+        run: |
+          curl -sSfL -o verus.zip "https://github.com/verus-lang/verus/releases/download/release/$VERUS_VERSION/verus-$VERUS_VERSION-x86-linux.zip"
+          echo "$VERUS_SHA256  verus.zip" | sha256sum -c
+          unzip -q verus.zip -d "$RUNNER_TEMP"
+          "$RUNNER_TEMP/verus-x86-linux/verus" --version
+
+      # pipefail: verus's own exit status counts; the results line must show
+      # at least one verified item and nothing unverified.
+      - name: Verify verus/jetpack/lib.rs
+        run: |
+          set -o pipefail
+          "$RUNNER_TEMP/verus-x86-linux/verus" --crate-type=lib --no-cheating verus/jetpack/lib.rs 2>&1 | tee verus.log
+          grep -E '^verification results:: [1-9][0-9]* verified, 0 errors' verus.log
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: verus-log
+          path: verus.log
+
+  unit:
+    if: github.event_name == 'push' || github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && inputs.set == 'quick')
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      # The suite lives under test/jetpack_rules/ as its own CMake project
+      # (googletest fetched by FetchContent); adjust
+      # the source directory here if it lands elsewhere. Until it lands the
+      # step reports that and passes.
+      - name: Build and run the jetpack_rules tests
+        run: |
+          if [ ! -d test/jetpack_rules ]; then
+            echo "test/jetpack_rules is not on this commit; nothing to build"
+            exit 0
+          fi
+          cmake -S test/jetpack_rules -B build/jp-test
+          cmake --build build/jp-test -j2
+          ctest --test-dir build/jp-test --output-on-failure
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: unit-logs
+          path: build/jp-test/Testing/
+          if-no-files-found: ignore
+
+  # The long configurations. Each one gets its own runner and the hosted
+  # runner's 6-hour limit; a run that does not finish in time still uploads
+  # its log, whose progress lines record how far TLC got.
+  nightly:
+    if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.set == 'nightly')
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - spec: jetpack_raft_composition.tla
+            cfg: jetpack_raft_small.cfg
+          - spec: jetpack_raft_composition.tla
+            cfg: jetpack_raft_recovery.cfg
+          - spec: jetpack_mongodb_composition.tla
+            cfg: jetpack_mongodb_small.cfg
+          - spec: jetpack_mencius_composition.tla
+            cfg: jetpack_mencius_small.cfg
+          - spec: jetpack_copilot_composition.tla
+            cfg: jetpack_copilot_small.cfg
+    defaults:
+      run:
+        working-directory: tla
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: tla2tools.jar
+        run: |
+          curl -sSfL -o tla2tools.jar "$TLA2TOOLS_URL"
+          (java -cp tla2tools.jar tlc2.TLC 2>&1 || true) | head -n 1
+
+      # run-tlc.sh caps TLC at a third of the machine's memory, the share for
+      # the shared server; the runner is dedicated, so the cap is the whole
+      # machine (TLC_MEMORY_FRACTION=1).
+      - name: TLC, exhaustive, ${{ matrix.cfg }}
+        timeout-minutes: 340
+        run: TLC_MODE=local TLC_MEMORY_FRACTION=1 ./run-tlc.sh ${{ matrix.spec }} ${{ matrix.cfg }} -workers auto
+
+      - name: Collect this run's logs
+        if: always()
+        run: |
+          mkdir -p ../run-logs
+          find log -name '*.log' -newer tla2tools.jar -exec cp {} ../run-logs/ \;
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: nightly-${{ matrix.cfg }}
+          path: run-logs/

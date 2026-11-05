@@ -18,7 +18,9 @@
 #   (default)        - Auto-detect: local if tla2tools.jar exists, else Docker
 #
 # Memory policy:
-#   The runner auto-detects total memory and caps TLC to at most 1/3 of that value.
+#   The runner auto-detects total memory and caps TLC to at most 1/3 of that value
+#   (the share for a shared host; TLC_MEMORY_FRACTION=<n> caps at 1/n instead,
+#   n = 1 for a dedicated host such as a CI runner).
 #   - local mode: applies a JVM heap cap with -Xmx
 #   - docker mode: applies --memory/--memory-swap plus the same JVM heap cap
 # CPU affinity policy:
@@ -26,6 +28,7 @@
 #   - TLC_CPUSET=<cpuset> : CPU set to pin the TLC process/container to
 #                           (example: "96-103" or "0,2,4,6")
 #   Optional overrides:
+#   - TLC_MEMORY_FRACTION=<n> : cap TLC at 1/n of total memory (default 3)
 #   - TLC_MEMORY_MB=<mb>  : lower or equal total TLC memory budget in MB
 #   - TLC_HEAP_MB=<mb>    : lower JVM heap cap in MB within that budget
 #
@@ -160,7 +163,8 @@ if [ -z "$SPEC" ]; then
     echo "Environment variables:"
     echo "  TLC_MODE=local   - Use local Java + tla2tools.jar"
     echo "  TLC_MODE=docker  - Use Docker container"
-    echo "  TLC_MEMORY_MB    - Lower/equal TLC memory budget in MB (default: auto 1/3 cap)"
+    echo "  TLC_MEMORY_FRACTION - Cap TLC at 1/n of total memory (default: 3; 1 on a dedicated host)"
+    echo "  TLC_MEMORY_MB    - Lower/equal TLC memory budget in MB (default: auto 1/n cap)"
     echo "  TLC_HEAP_MB      - Lower JVM heap cap in MB within the TLC memory budget"
     echo ""
     echo "All runs are logged to tla/log/ with timestamp prefix."
@@ -233,8 +237,16 @@ if [ -z "$TLC_MODE" ]; then
     fi
 fi
 
+TLC_MEMORY_FRACTION="${TLC_MEMORY_FRACTION:-3}"
+case "$TLC_MEMORY_FRACTION" in
+    ''|*[!0-9]*|0)
+        echo "TLC_MEMORY_FRACTION must be a positive integer (TLC is capped at 1/n of total memory)" >&2
+        exit 1
+        ;;
+esac
+
 TOTAL_MEM_MB=$(detect_total_memory_mb)
-AUTO_TLC_MEMORY_MB=$((TOTAL_MEM_MB / 3))
+AUTO_TLC_MEMORY_MB=$((TOTAL_MEM_MB / TLC_MEMORY_FRACTION))
 if [ "$AUTO_TLC_MEMORY_MB" -lt 256 ]; then
     AUTO_TLC_MEMORY_MB=256
 fi
@@ -242,7 +254,7 @@ fi
 TLC_MEMORY_MB="${TLC_MEMORY_MB:-$AUTO_TLC_MEMORY_MB}"
 require_positive_integer "TLC_MEMORY_MB" "$TLC_MEMORY_MB"
 if [ "$TLC_MEMORY_MB" -gt "$AUTO_TLC_MEMORY_MB" ]; then
-    echo "ERROR: TLC_MEMORY_MB=$TLC_MEMORY_MB exceeds the enforced 1/3 cap of ${AUTO_TLC_MEMORY_MB}MB" >&2
+    echo "ERROR: TLC_MEMORY_MB=$TLC_MEMORY_MB exceeds the enforced 1/${TLC_MEMORY_FRACTION} cap of ${AUTO_TLC_MEMORY_MB}MB" >&2
     exit 1
 fi
 
@@ -294,7 +306,7 @@ echo "Spec:      $SPEC" | tee -a "$LOGFILE"
 echo "Config:    ${CFG_DISPLAY:-none}" | tee -a "$LOGFILE"
 echo "Mode:      $TLC_MODE" | tee -a "$LOGFILE"
 echo "Detected total memory: ${TOTAL_MEM_MB}MB" | tee -a "$LOGFILE"
-echo "Auto 1/3 memory cap: ${AUTO_TLC_MEMORY_MB}MB" | tee -a "$LOGFILE"
+echo "Auto 1/${TLC_MEMORY_FRACTION} memory cap: ${AUTO_TLC_MEMORY_MB}MB" | tee -a "$LOGFILE"
 echo "Configured TLC memory cap: ${TLC_MEMORY_MB}MB" | tee -a "$LOGFILE"
 if [ -n "${TLC_CPUSET:-}" ]; then
     echo "Configured TLC cpuset: ${TLC_CPUSET}" | tee -a "$LOGFILE"

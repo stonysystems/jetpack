@@ -304,6 +304,59 @@ SmallStateConstraint ==
     /\ Len(execution_cmds) <= 2
 
 (****************************************************************************)
+(* CI bounds (.github/workflows/formal.yml)                                 *)
+(****************************************************************************)
+
+\* jetpack_raft_ci.cfg: SmallStateConstraint with the term bound lowered to 1
+\* and the log bound to 2 entries. Term 1 means no election, so no recovery
+\* (the probes below exercise it); the second log entry is the leader's one
+\* proposal of the command (N19-N20) or its original-path copy, not both.
+CiStateConstraint ==
+    /\ SmallStateConstraint
+    /\ \A i \in Server : currentTerm[i] <= 1
+    /\ \A i \in Server : Len(log[i]["sole"]) <= 2
+
+\* jetpack_raft_probe_ci_NoFastCommittedInRecovered.cfg: a bound under which
+\* TLC reaches in under a minute a recovery whose Recovered entry carries the
+\* fast-committed command. Each conjunct prunes interleavings, not the
+\* protocol; jetpack_raft_small.cfg covers what is pruned.
+\*   TwoEntryLogs: after the initial config entry there is room for the old
+\*     leader's proposal of the command or for the new leader's Recovered
+\*     entry, so a recovery completes only by overwriting that proposal.
+\*   AttemptBeforeElection: the client's attempt ends before the election.
+\*   LockStep: at most three Jetpack messages addressed to servers in flight,
+\*     so a broadcast is delivered before the next one is sent and a reply is
+\*     consumed before the following phase (every such message is receivable
+\*     in every state, so none is stranded).
+\*   NoCmdEntryAtCandidate: a candidate or paused leader holds no command
+\*     entry; under TwoEntryLogs its Recovered entry could not be appended,
+\*     so these states only lead to recoveries that never complete.
+TwoEntryLogs == \A i \in Server : Len(log[i]["sole"]) <= 2
+
+AttemptBeforeElection ==
+    \A c \in Client : client_pending[c] /= J!NilCmd => electionCtr = 0
+
+JetpackMsgsToServers ==
+    {m \in DOMAIN messages :
+        /\ messages[m] >= 1
+        /\ m.mdest \in Server
+        /\ m.mtype \in {J!FastCmd, J!BeginRecovery, J!BeginRecoveryOK,
+                        J!Prepare, J!PrepareOK, J!Accept, J!AcceptOK, J!Nack,
+                        J!FinishRecovery, J!FinishRecoveryOK}}
+LockStep == Cardinality(JetpackMsgsToServers) <= 3
+
+NoCmdEntryAtCandidate ==
+    \A i \in Server : ostate[i] \in {Candidate, ToBeLeader} =>
+        \A k \in 1..Len(log[i]["sole"]) : log[i]["sole"][k].command /= B!AppendCommand
+
+CiProbeConstraint ==
+    /\ SmallStateConstraint
+    /\ TwoEntryLogs
+    /\ AttemptBeforeElection
+    /\ LockStep
+    /\ NoCmdEntryAtCandidate
+
+(****************************************************************************)
 (* Properties / invariants                                                  *)
 (****************************************************************************)
 
@@ -423,5 +476,13 @@ Probe_NoSubmission == \A i \in Server : subm[i].epoch = 0
 Probe_NoResume == \A i \in Server : subm[i].epoch = 0 \/ ~subm[i].done
 Probe_NoFastCommitAfterRecovery ==
     \A fc \in fast_committed : fc.epoch = EpochOf(1, 1)
+\* No Recovered entry carries a fast-committed command. Its violation
+\* witnesses a Recovered(S) containing the fast-committed command submitted
+\* (L47) by the new leader while the old leader's proposal of it is still
+\* uncommitted; the commit of such an entry is what the recovery probes show.
+Probe_NoFastCommittedInRecovered ==
+    \A i \in Server : \A k \in 1..Len(log[i]["sole"]) :
+        log[i]["sole"][k].command = J!RecoveredCommand =>
+            \A fc \in fast_committed : fc.cmd \notin log[i]["sole"][k].value.set
 
 =============================================================================

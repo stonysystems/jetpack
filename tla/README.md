@@ -86,6 +86,17 @@ Configurations (Raft; the other compositions have the same `_small` / default pa
 | `jetpack_raft_recovery.cfg` | 3 servers, no clients, 1 election | `RecoveryStateConstraint` (≤ 12 messages) | the recovery protocol alone (Recovered(∅) marker, Nack/learn paths) |
 | `jetpack_raft.cfg` | 4 servers (3 initial), 2 commands, 1 election, 1 restart, 1 add + 1 remove | `StateConstraint` | reconfiguration |
 | `jetpack_raft_probe_*.cfg` | as small / recovery | | reachability traces |
+| `jetpack_raft_ci.cfg` | as small, but `MaxElections = 0` | `CiStateConstraint` (term ≤ 1, ≤ 10 messages, log ≤ 2) | the fast path without an election, exhaustive in under a minute (CI) |
+| `jetpack_raft_probe_ci_NoFastCommittedInRecovered.cfg` | as small | `CiProbeConstraint` (see the module) | a Recovered(S) containing the fast-committed command, submitted by the new leader while the old leader's proposal is uncommitted; reached in about a minute (CI) |
+
+`.github/workflows/formal.yml` runs, on every push and pull request, SANY on the four
+compositions and `jetpack_raft_ci.cfg` exhaustively: that run has no election, so it checks
+the fast path only. Recovery coverage on every push comes from the two probe steps
+(`jetpack_raft_probe_recovery_NoViewInstalled.cfg`: a complete recovery with the view
+installed; the CI probe above: the recovery set carrying the fast-committed command), whose
+invariants are expected to be violated (TLC exit code 12). The `_small` / recovery
+configurations run nightly (`workflow_dispatch` with `set=nightly` until the file is on the
+default branch), with the logs of each run as artifacts.
 
 The message bound matters: a recovery phase broadcasts to every replica, so below about 10
 messages in flight TLC prunes the states in which recovery completes. The probes show where
@@ -104,6 +115,9 @@ FinishRecovery → view installed; `log/20261031_104739_*_probe_recovery_NoViewI
 | Mencius, `jetpack_mencius_probe_NoFastCommit.cfg` | trace found (8 states): every server acks and proposes the command in its own slot |
 | Copilot, `jetpack_copilot_probe_NoViewInstalled_sim.cfg` | trace found (53 states, simulation mode): a pilot raises its ballot, both pilots pause, Recovered(∅) commits, the pilot resumes and installs the view |
 | Copilot, `jetpack_copilot_small.cfg` / `jetpack_copilot.cfg` | simulation sweeps (depth 100, 150 s each): 491,458 and 285,748 states, no violation; bounded BFS stopped after 10 min without violation |
+| Raft, `jetpack_raft_ci.cfg` (CI) | exhaustive, 31,702 distinct states (221,205 generated), no violation; 34 s with 2 workers on the shared 64-core server (`log/20261031_191441_*_jetpack_raft_ci.log`) |
+| Raft, `jetpack_raft_probe_ci_NoFastCommittedInRecovered.cfg` (CI) | trace found (33 states): fast commit, election, BeginRecovery/Prepare/Accept, Recovered(S) with the command submitted by the new leader; 56 s with 2 workers on the same server, 112,275 distinct states explored (`log/20261031_191445_*_probe_ci_NoFastCommittedInRecovered.log`) |
+| Raft, `jetpack_raft_probe_recovery_NoViewInstalled.cfg` (CI) | the 28-state trace above; 2 min 45 s with 2 workers on the same server, 627,427 distinct states explored (`log/20261031_191310_*_probe_recovery_NoViewInstalled.log`) |
 
 `LogOrderMatchesExecution` deduplicates a committed sequence before comparing it with the
 execution trace: a command may recur in a sequence (proposed at ack time and again inside a
